@@ -208,6 +208,7 @@ impl Cx<'_> {
                     crate::parse::Stmt::Let(Pat::Ident(false, false, tk.clone(), None), None, Some((**scrut).clone()), None, Default::default()),
                     crate::parse::Stmt::Expr(Expr::Match(Box::new(path_expr(&tk)), arms.clone()), false),
                 ],
+                spos: Default::default(),
             };
             let ne: &Expr = self.keep_expr(Expr::Block(None, false, blk));
             // (the move into the local is the rewrite's, not the program's: `match cap { None => .., Some(x) => cap =
@@ -244,7 +245,16 @@ impl Cx<'_> {
         let scrut_drop = self.bk.scrut_drop.take();
         // (E0004: the arms must cover the scrutinee's type; user code only)
         if self.user_code {
+            // (first E0170: such a binding is a catch-all arm in rustc, which zustc reads as the variant)
+            if let Some(e) = self.variant_binding(arms, place.ty()) {
+                return Err(e);
+            }
             if let Some(w) = self.non_exhaustive(arms, place.ty()) {
+                // (no arms at all: rustc names the type, `match () {}`)
+                if arms.is_empty() {
+                    let t = self.prog.tn(place.ty()).replace('#', "");
+                    return Err(self.at(expr_start(scrut), format!("non-exhaustive patterns: type `{t}` is non-empty (E0004)")));
+                }
                 return Err(self.at(expr_start(scrut), format!("non-exhaustive patterns: `{w}` not covered (E0004)")));
             }
             if self.prog.deny_unreachable {
@@ -961,7 +971,67 @@ impl Cx<'_> {
         }
     }
 
-    /// パターン列 (`V(a, .., z)`) とフィールド列の対応 (`..` は途中を飛ばす)
+    /// bindings_with_variant_name (E0170, deny by default): an arm whose pattern is only a binding by value (behind `&`s)
+    /// of a name the scrutinee's enum has a unit variant of, `Nil => ..` where `Stack::Nil` is not in scope, at the
+    /// arm (rustc 1.100's message)
+    #[cold]
+    #[inline(never)]
+    fn variant_binding(&self, arms: &[crate::parse::Arm], t: Ty) -> Option<String> {
+        let Ty::Struct(sid) = self.strip_refs(t) else { return None };
+        let sd = &self.prog.structs[sid as usize];
+        let base = self.prog.base_of(sid);
+        let name = &self.prog.structs[base as usize].name;
+        // (the program's own enums, whose variants no `use` may bring into scope: zustc resolves a variant's name
+        // alone as the variant, as if it were imported)
+        let prelude = self.prog.struct_item.get(base as usize).is_none_or(|&ii| ii >= self.prog.prelude_from);
+        if !sd.is_enum || prelude || self.prog.use_prefixes.iter().any(|u| u == name) {
+            return None;
+        }
+        for arm in arms {
+            let mut p = &arm.pat;
+            while let Pat::Ref(_, q) = p {
+                p = q;
+            }
+            let Pat::Ident(false, false, n, None) = p else { continue };
+            if !sd.variants.iter().any(|v| v.name == *n && v.kind == crate::types::VariantKind::Unit) {
+                continue;
+            }
+            // (a constant of the name is no binding)
+            if self.prog.const_index.contains_key(n.as_str()) {
+                continue;
+            }
+            return Some(self.at(arm.pos, format!("pattern binding `{n}` is named the same as one of the variants of the type `{name}` (E0170)")));
+        }
+        None
+    }
+
+    /// E0533: a path pattern of a tuple or struct variant, at the path
+    #[cold]
+    fn unit_pat_err(&self, path: &crate::parse::Path, k: crate::types::VariantKind) -> String {
+        let name = path.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::");
+        let kind = if k == crate::types::VariantKind::Tuple { "tuple variant" } else { "struct variant" };
+        self.at(path.pos, format!("expected unit struct, unit variant or constant, found {kind} `{name}` (E0533)"))
+    }
+
+    /// A tuple struct pattern (`V(..)`) of a unit variant (E0532) or a struct variant (E0164; E0532 by its name alone),
+    /// at its path, with rustc 1.100's message
+    fn tuple_pat_of_variant(&self, path: &crate::parse::Path, sid: u32, vi: usize) -> R<()> {
+        // (a type the program has no variants of, as an unresolved projection's: its own error comes later)
+        let (kind, code) = match self.prog.structs[sid as usize].variants.get(vi).map(|v| v.kind) {
+            Some(crate::types::VariantKind::Unit) => ("unit variant", "E0532"),
+            Some(crate::types::VariantKind::Struct) => ("struct variant", "E0164"),
+            _ => return Ok(()),
+        };
+        let name = path.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::");
+        // (a struct variant by its name alone (`use E::V;`) is none in the value namespace)
+        if code == "E0164" && path.segs.len() == 1 {
+            return Err(self.at(path.pos, format!("cannot find tuple struct or tuple variant `{name}` in this scope (E0532)")));
+        }
+        Err(self.at(path.pos, format!("expected tuple struct or tuple variant, found {kind} `{name}` ({code})")))
+    }
+
+    /// パターン列 (`V(a, .., z)`) とフィールド列の対応 (`..` は途中を飛ばす)。数が合わなければ "this pattern has N fields, but
+    /// the corresponding variant has M" (e0023 makes it rustc's where the pattern's path is known)
     pub(crate) fn tuple_fields<'e>(elems: impl Iterator<Item = &'e Pat>, nfields: usize, span: Sp) -> R<Vec<(usize, &'e Pat)>> {
         let elems: Vec<&Pat> = elems.collect();
         let rest = elems.iter().position(|p| matches!(p, Pat::Rest));
@@ -1336,19 +1406,28 @@ impl Cx<'_> {
                         let Some((sid, vi)) = self.variant_on(path, t) else {
                             return err(SP, self.no_variant_msg(path));
                         };
+                        // (E0533: `E::V` of a tuple or struct variant, which a path pattern cannot be)
+                        if self.user_code {
+                            let kind = self.prog.structs[sid as usize].variants.get(vi).map(|v| v.kind);
+                            if let Some(k @ (crate::types::VariantKind::Tuple | crate::types::VariantKind::Struct)) = kind {
+                                return Err(self.unit_pat_err(path, k));
+                            }
+                        }
                         self.variant_turbofish(path, sid)?;
                         self.test_variant(p, sid, vi, SP, fail)
                     }
                     Pat::TupleStruct(path, elems) => {
-                        let fields = match self.variant_on(path, t) {
+                        let on = self.variant_on(path, t);
+                        let fields = match on {
                             Some((sid, vi)) => {
+                                self.tuple_pat_of_variant(path, sid, vi)?;
                                 self.variant_turbofish(path, sid)?;
                                 self.test_variant(p, sid, vi, SP, fail)?;
                                 self.prog.structs[sid as usize].variants[vi].fields.clone()
                             }
                             None => self.tuple_struct_fields(path, t, SP)?,
                         };
-                        for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP).map_err(|m| self.at(path.pos, m))? {
+                        for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP).map_err(|m| self.at(path.pos, e0023(m, on.is_some())))? {
                             let (_, fty, off) = fields[fi];
                             let fp = self.field_place(p, fty, off)?;
                             self.pat_test(sub, fp, fail)?;
@@ -1404,7 +1483,8 @@ impl Cx<'_> {
         }
         match t {
             Ty::Struct(x) if self.prog.base_of(x) == self.prog.base_of(sid) => Ok(self.prog.structs[x as usize].fields.clone()),
-            _ => err(span, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(t), self.prog.structs[sid as usize].name)),
+            // (at the pattern's path: a sub-pattern `Tau { t: x }` on its own line is where rustc points)
+            _ => Err(self.at(path.pos, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(t), self.prog.structs[sid as usize].name))),
         }
     }
 
@@ -1456,24 +1536,29 @@ impl Cx<'_> {
             };
             out.push((fpat, self.field_place(p, fty, off)?));
         }
-        // (a union's pattern names one field, with no `..`. Matching the field is reading it, which needs `unsafe`
-        // (E0133), unless its pattern is `_` (or `_ | _`))
+        // (a union's pattern names exactly one field, without `..`; matching the field reads it, which needs `unsafe`
+        // (E0133), unless its pattern is `_` (or `_ | _`). The pattern's shape is the type check's, before E0133)
         let union = matches!(p.ty(), Ty::Struct(sid) if self.prog.unions.contains(&self.prog.structs[self.prog.base_of(sid) as usize].name));
-        fn wild(p: &Pat) -> bool {
-            match p {
-                Pat::Wild => true,
-                Pat::Or(ps) => ps.iter().all(wild),
-                _ => false,
+        if union {
+            if out.len() != 1 {
+                return Err(self.at(path.pos, "union patterns should have exactly one field".into()));
             }
+            if *has_rest {
+                return Err(self.at(path.pos, "`..` cannot be used in union patterns".into()));
+            }
+            fn wild(p: &Pat) -> bool {
+                match p {
+                    Pat::Wild => true,
+                    Pat::Or(ps) => ps.iter().all(wild),
+                    _ => false,
+                }
+            }
+            if self.unsafe_ok == 0 && self.user_code && !wild(out[0].0) {
+                return Err(self.at(path.pos, "access to union field is unsafe and requires unsafe function or block (E0133)".into()));
+            }
+            return Ok(out);
         }
-        if union && self.unsafe_ok == 0 && self.user_code && out.iter().any(|(q, _)| !wild(q)) {
-            return err(SP, "access to union field is unsafe and requires unsafe block (E0133)");
-        }
-        if union && *has_rest {
-            return err(SP, "`..` cannot be used in union patterns");
-        } else if union && out.len() != 1 {
-            return err(SP, "union patterns should have exactly one field");
-        } else if !union && !*has_rest && out.len() != fields.len() {
+        if !*has_rest && out.len() != fields.len() {
             return err(SP, "pattern does not mention all fields (add `..`)");
         }
         Ok(out)
@@ -1754,13 +1839,14 @@ impl Cx<'_> {
                 self.rg_pat_lifetimes(path);
                 let (fields, vname, rvi) = match self.variant_on(path, p.ty()) {
                     Some((sid, vi)) => {
+                        self.tuple_pat_of_variant(path, sid, vi)?;
                         let v = &self.prog.structs[sid as usize].variants[vi];
                         (v.fields.clone(), Some(v.name.clone()), Some(vi))
                     }
                     None => (self.tuple_struct_fields(path, p.ty(), SP)?, None, None),
                 };
                 let deref = matches!(mode, BindMode::Ref(_));
-                for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP).map_err(|m| self.at(path.pos, m))? {
+                for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP).map_err(|m| self.at(path.pos, e0023(m, rvi.is_some())))? {
                     let (fname, fty, off) = fields[fi].clone();
                     let saved = self.bk_pat_field(deref, vname.as_deref(), &fname);
                     let rs = self.rg_pat_field(p.ty(), rvi, fi);
@@ -3069,4 +3155,13 @@ pub(crate) fn holds_mut_ref(prog: &crate::program::Program, t: Ty, depth: u32) -
         }
         _ => false,
     }
+}
+
+/// rustc's E0023 of tuple_fields' "this pattern has N fields, but the corresponding variant has M": of a tuple variant
+/// or a tuple struct, "field" for one (rustc 1.100)
+fn e0023(m: String, variant: bool) -> String {
+    let Some((n, r)) = m.strip_prefix("this pattern has ").and_then(|r| r.split_once(" fields, but the corresponding variant has ")) else { return m };
+    let (Ok(a), Ok(b)) = (n.parse::<usize>(), r.parse::<usize>()) else { return m };
+    let f = |k: usize| if k == 1 { "field" } else { "fields" };
+    format!("this pattern has {a} {}, but the corresponding tuple {} has {b} {} (E0023)", f(a), if variant { "variant" } else { "struct" }, f(b))
 }

@@ -3,6 +3,7 @@
 //! driver.rs と同じ手順を、外部クレートに依存しないモジュールだけで行う (zustc 自身でもコンパイルできる)。
 //! キャッシュと並列化はまだない。
 
+use crate::cfg::{attr_entries, cfg_pred, lit_end, malformed_cfg, str_lit, str_value};
 use std::sync::Mutex;
 
 use crate::acg::{self, Blob, ItemFn};
@@ -21,6 +22,7 @@ pub type R<T> = Result<T, String>;
 #[cfg(feature = "build")]
 mod build;
 mod dead;
+mod dyncompat;
 #[cfg(feature = "build")]
 pub use build::*;
 
@@ -49,6 +51,8 @@ struct ChkEnt {
 
 /// 解析の結果
 pub struct Analysis {
+    /// An error the type check precedes: reported only where it finds none (E0451, rustc's privacy pass)
+    pub late_err: Option<String>,
     /// 宣言の指紋: fn アイテムは要約 (シグネチャ・クロージャ)、ほかのアイテムはテキストのハッシュを並べたもの。
     /// fn の本体だけを変えた編集では変わらない (check の記憶 ChkMemo を使ってよいかの印)
     pub iface_fp: u64,
@@ -763,6 +767,8 @@ pub struct Session2 {
     /// A crate of one file that the caller configured before it checks it: the `extern crate x;` items the configuring
     /// blanked (SrcMap::externs), whose names may be defined twice. Read by the next analyze
     pub externs: Vec<(usize, String)>,
+    /// The same crate's first `cfg` predicate rustc cannot read, found in the file as written (SrcMap::cfg_err)
+    pub cfg_err: Option<String>,
     /// In a `check`: its analysis adds const_check_item
     checking: bool,
     /// The lines of the constants that the check's const_check_item reads, in its order
@@ -773,7 +779,7 @@ pub struct Session2 {
 
 impl Session2 {
     pub fn new(opts: Options2) -> Session2 {
-        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], checking: false, const_lines: vec![], const_fn: String::new() }
+        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new() }
     }
 
     pub fn load_cache(&mut self, path: &std::path::Path) {
@@ -860,12 +866,19 @@ impl Session2 {
         // (closures' captures by edition: `let _ = s;` captures s before 2021 only (ast_closure::WILD_FAKE_READS))
         crate::ast_closure::WILD_FAKE_READS.with(|c| c.set(self.opts.edition >= 2021));
         let mut externs = std::mem::take(&mut self.externs);
+        // (a `cfg` predicate rustc cannot read, in the source as written: `#[cfg(..)]`, `#[cfg_attr(..)]` and `cfg!(..)`
+        // are taken away before the items are read; reported where the attributes are, after a parse error)
+        let mut cfg_err = self.cfg_err.take();
         // (ファイルから読んだもの (load_crate) は読むときに cfg を評価してある)
         let stripped;
         let src0 = if self.ctx.map.inputs.is_empty() {
             let cfg = self.opts.cfg_with(&self.opts.features);
             let mut ext = vec![];
-            match crate::cfg::strip_noting(src0, &cfg, &mut None, &mut ext) {
+            let configured = crate::cfg::strip_noting(src0, &cfg, &mut None, &mut ext);
+            if cfg_err.is_none() {
+                cfg_err = crate::cfg::fn_qualifier_order(src0).or_else(|| malformed_cfg(src0, configured.as_deref(), &cfg));
+            }
+            match configured {
                 Some(t) => {
                     // (the `extern crate` items it blanked, for the names they define)
                     if externs.is_empty() {
@@ -883,6 +896,12 @@ impl Session2 {
         crates.extend(self.ctx.lib.iter().cloned());
         let mut fix = vec![];
         let cfg = self.opts.cfg_of(self.ctx.features.as_ref().unwrap_or(&self.opts.features), &self.ctx.cfgs, &self.ctx.env);
+        crate::macros::BAD_FRAGMENT.with(|c| c.borrow_mut().take());
+        crate::macros::BAD_DEF.with(|c| c.set(false));
+        crate::macros::BAD_FOLLOW.with(|c| c.borrow_mut().take());
+        crate::macros::PAT_WITH_OR.with(|c| c.set(self.opts.edition >= 2021));
+        crate::macros::UNBOUND.with(|c| c.borrow_mut().take());
+        crate::macros::DUP_EXPORT.with(|c| c.borrow_mut().take());
         let (mut src, mut items, mut user, prelude_line0) = with_prelude_in(src0, &crates, &mut fix, Some(&cfg), &mut self.sel)?;
         self.ctx.map.colfix = fix;
         // (`zustc check`: each constant of the program is checked where it is defined, used or not, as rustc does: a
@@ -923,8 +942,22 @@ impl Session2 {
                 }
             }
         }
+        // (the configured text's tokens, for the scans of its modules (E0428, E0603, E0432, E0659): read once, where it
+        // has a module, a `use` of 2015, whose paths start at the crate root (`use main::bar;`), or a glob import)
+        let modules = src0.contains("mod ") || self.opts.edition < 2018 && src0.contains("use ") || src0.contains("::*");
+        let src0_toks = (self.ctx.map.inputs.is_empty() && modules && src0.contains("::")).then(|| crate::lexer::tokenize(src0.as_bytes()));
         // (E0432: a top-level `use` of a path whose first segment names nothing; the `use` items come from the item
         // split, the names they could mean from the original text)
+        let mut dyn_err: Option<String> = None;
+        // (E0201 / E0592: two items of one name and namespace in one impl block, before the program is built (which
+        // would report it as another error))
+        if let Some(e) = duplicate_impl_item(&src, &items[..user_src]) {
+            return Err(e);
+        }
+        // (E0116, E0118, E0091: an inherent impl's self type, a type alias's parameters)
+        if let Some(e) = item_decl_err(&src, &items[..user_src], self.ctx.deps.is_empty()) {
+            return Err(e);
+        }
         if self.ctx.map.inputs.is_empty() {
             if let Some(e) = unresolved_import(src0, &src, &items[..user_src], &self.ctx.deps) {
                 return Err(e);
@@ -934,11 +967,49 @@ impl Session2 {
             }
             // (E0428 of an inline module and an item: a whole-text pass, so not on each build of a crate loaded from
             // files, whose incremental builds would pay it every time)
-            if let Some(e) = duplicate_name(src0, &externs, self.opts.edition < 2018) {
+            if let Some(e) = duplicate_name(src0, src0_toks.as_deref(), &externs, self.opts.edition < 2018) {
                 return Err(e);
             }
-            if let Some(e) = malformed_attr(src0, &src, &items[..user_src], self.ctx.deps.is_empty() && self.ctx.lib.is_none()) {
+            // (E0038: a `dyn` of a trait of the program's that is not dyn compatible. rustc's well-formedness check
+            // reports it after the errors of resolution and the type check: as late_err below)
+            dyn_err = dyncompat::check(&src, &items[..user_src]);
+            if let Some(e) = cfg_err.take().or_else(|| malformed_attr(src0, &src, &items[..user_src], self.ctx.deps.is_empty() && self.ctx.lib.is_none(), self.opts.edition)) {
                 return Err(e);
+            }
+            // (a `macro_rules!` matcher's fragment specifier rustc does not know, used or not: the expansion notes one when
+            // it reads the definitions; its place is read from the text then)
+            // (E0428: two `#[macro_export]` macros of one name, at the second)
+            if let Some(n) = crate::macros::DUP_EXPORT.with(|c| c.borrow_mut().take()) {
+                let pat = format!("macro_rules! {n}");
+                if let Some((at, _)) = src0.match_indices(pat.as_str()).nth(1) {
+                    let line = 1 + src0[..at].matches('\n').count();
+                    return Err(format!("{line}:1: the name `{n}` is defined multiple times (E0428)"));
+                }
+            }
+            // (a rule's `$name` its matcher does not bind, left in the expansion: noted by the expansion, read from the
+            // text then)
+            if let Some((n, rep)) = crate::macros::UNBOUND.with(|c| c.borrow_mut().take()) {
+                if let Some(e) = crate::macros::unbound_err(&src, src0, &n, rep) {
+                    return Err(e);
+                }
+            }
+            // (a `macro_rules!` definition rustc rejects as it reads it: no rule, a matcher outside delimiters, a rule cut
+            // short; noted by the expansion, its place read from the text then)
+            if crate::macros::BAD_DEF.with(|c| c.replace(false)) {
+                if let Some(e) = crate::macros::macro_def_err(src0) {
+                    return Err(e);
+                }
+            }
+            // (a fragment followed by a token rustc does not allow after it, `$e:expr +`)
+            if let Some((frag, msg)) = crate::macros::BAD_FOLLOW.with(|c| c.borrow_mut().take()) {
+                if let Some(e) = crate::macros::follow_err(src0, &frag, &msg) {
+                    return Err(e);
+                }
+            }
+            if crate::macros::BAD_FRAGMENT.with(|c| c.borrow_mut().take()).is_some() {
+                if let Some(e) = bad_fragment(src0) {
+                    return Err(e);
+                }
             }
         }
         let mut tm = Timer { on: std::env::var_os("ZUSTC_PROF").is_some(), last: now_ns(), start: now_ns() };
@@ -1035,10 +1106,28 @@ impl Session2 {
                     Some(sm) => sm,
                     None => {
                         let ow = if pass == 1 { crate::ast_summary::owner_of(it, &sums) } else { None };
-                        crate::ast_summary::parse_and_summarize(&src, it, ow.as_ref()).map_err(|e| match (e.strip_prefix('\u{2}'), it.kind) {
-                            // (`\u{2}msg`: an impl member's error that is at its impl's header)
-                            (Some(m), ItemKind::ImplMember(h)) => format!("{}:1: {m}", items[h as usize].line),
-                            _ => relocate(e.trim_start_matches('\u{2}').to_string(), it),
+                        crate::ast_summary::parse_and_summarize(&src, it, ow.as_ref()).map_err(|e| {
+                            // (a validation error rustc reports after parsing: a later item's syntax error first)
+                            if let Some(d) = e.strip_prefix('\u{7}') {
+                                return deferred_after_parse(relocate(d.to_string(), it, &src), &src, &items[i + 1..user_src]);
+                            }
+                            let e = match (e.strip_prefix('\u{2}'), it.kind) {
+                                // (`\u{2}msg`: an impl member's error that is at its impl's header)
+                                (Some(m), ItemKind::ImplMember(h)) => format!("{}:1: {m}", items[h as usize].line),
+                                _ => relocate(e.trim_start_matches('\u{2}').to_string(), it, &src),
+                            };
+                            let e = ret_type_line(e, &src, it);
+                            // (an item moved out of a fn body that cannot see a name of the items around it: rustc's
+                            // E0401, where that is what it names)
+                            let line_start = src[..it.start.min(src.len())].rfind('\n').map_or(0, |p| p + 1);
+                            let hoisted = src[line_start..].starts_with(crate::prep::HOIST_MARK) || src[it.start.min(src.len())..].starts_with(crate::prep::HOIST_MARK);
+                            let unseen = hoisted || ["`Self` is only available in impls", "cannot find type `", "cannot find value `"].iter().any(|m| e.contains(m));
+                            if unseen && self.ctx.map.inputs.is_empty() && src.contains(crate::prep::HOIST_MARK) {
+                                if let Some(o) = outer_generics(src0, &crate::lexer::tokenize(src0.as_bytes())) {
+                                    return o;
+                                }
+                            }
+                            e
                         })?
                     }
                 };
@@ -1047,6 +1136,33 @@ impl Session2 {
                 sm.encode(&mut b);
                 sums[i] = sm;
                 self.put(k, b);
+            }
+        }
+        // (E0603: a path through the program's own modules to an item it may not see; resolved after the items parse,
+        // as rustc reports a syntax error first. And the fields modules may not read, for the type check's E0616)
+        let mut fpriv: Option<Box<crate::program::FieldPriv>> = None;
+        let mut late_err: Option<String> = None;
+        if let Some(toks) = &src0_toks {
+            if let Some(e) = private_path(src0, toks, &externs, self.opts.edition < 2018, &mut fpriv, &mut late_err) {
+                return Err(e);
+            }
+        }
+        if late_err.is_none() {
+            late_err = dyn_err;
+        }
+        // (E0401: an item in a fn body that names a generic parameter, or `Self`, of an item around it; read where an
+        // item was moved out of a fn body, after the items parse)
+        if self.ctx.map.inputs.is_empty() && src.contains(crate::prep::HOIST_MARK) {
+            let own;
+            let toks: &[(u8, usize, usize)] = match &src0_toks {
+                Some(t) => t,
+                None => {
+                    own = crate::lexer::tokenize(src0.as_bytes());
+                    &own
+                }
+            };
+            if let Some(e) = outer_generics(src0, toks) {
+                return Err(e);
             }
         }
         // 宣言の指紋 (要約の符号のハッシュはアイテムのハッシュで覚える)
@@ -1270,11 +1386,26 @@ impl Session2 {
         // (struct / enum / union definitions of the program: unused parameters, union fields ..)
         for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
             if let Some(e) = &sm.adt_err {
+                // (a union that derives `Clone` without deriving `Copy` may have an `impl Copy for U {}` of its own)
+                if e.ends_with("a union can derive `Clone` only with `Copy`")
+                    && sm.unions.iter().any(|u| sums[..user_src].iter().any(|s| s.impl_trait.as_deref() == Some("Copy") && s.impl_self.as_deref() == Some(u.as_str())))
+                {
+                    continue;
+                }
                 // (`\u{3}line\u{3}msg`: at that line of the item)
                 if let Some((l, m)) = e.strip_prefix('\u{3}').and_then(|r| r.split_once('\u{3}')) {
                     // (an item hoisted out of a fn body: at the line it was written on)
                     let line = it.line + l.parse::<usize>().unwrap_or(1) - 1;
                     let line = crate::prep::hoisted_at(&crate::prep::hoist_marks(&src), line).unwrap_or(line);
+                    return Err(format!("{line}:1: {m}"));
+                }
+                // (`\u{5}word\u{5}msg`: at the line of the first whole word `word` of the item's text)
+                if let Some((w, m)) = e.strip_prefix('\u{5}').and_then(|r| r.split_once('\u{5}')) {
+                    let text = src.get(it.start..it.end).unwrap_or("");
+                    let b = text.as_bytes();
+                    let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+                    let at = text.match_indices(w).map(|(i, _)| i).find(|&i| (i == 0 || !id(b[i - 1])) && b.get(i + w.len()).is_none_or(|&c| !id(c)));
+                    let line = at.map(|i| it.line + text[..i].matches('\n').count()).unwrap_or(it.line);
                     return Err(format!("{line}:1: {m}"));
                 }
                 // (`\u{1}field\u{1}msg`: at the line of the field `field:`)
@@ -1299,6 +1430,13 @@ impl Session2 {
                 // (an item's outer attributes, not its body; an extern block's items are read whole)
                 let end = if ext { Some(it.end) } else { gated_attrs_len(head.as_bytes()).map(|n| it.start + n) };
                 if let Some(e) = end.and_then(|end| gated_attr(&src, it.start, end, &mut feats)) {
+                    return Err(e);
+                }
+            }
+            // (E0433: an outer attribute's path whose first segment is no tool and no module of the crate's
+            // (`#[foo::bar]`), or a module's that has no such attribute (`#[existent::nonexistent]`))
+            if head.starts_with("#[") {
+                if let Some(e) = attr_path_error(&src, src0, it.start, leading_attrs(head).len(), it.line) {
                     return Err(e);
                 }
             }
@@ -1370,6 +1508,10 @@ impl Session2 {
         }
         // (E0434: a fn written inside another fn that uses one of its locals; only with hoisted items)
         if let Some(e) = first_env_capture(&src, src0, &items[..user_src]) {
+            return Err(e);
+        }
+        // (E0276: an impl's method whose own type parameter has a bound the trait's does not give)
+        if let Some(e) = stricter_impl_bound(&src, &items[..user_src]) {
             return Err(e);
         }
         // (E0119: two blanket impls of one trait for a bare parameter, `impl<T: A> Tr for T` and `impl<T: B> Tr for T`,
@@ -1454,6 +1596,7 @@ impl Session2 {
         // (`#![crate_type = "lib"]`: a library, no `main` needed)
         let mut deny_unreachable = false;
         let mut deny_unused_vars = false;
+        let mut forbid_unused_vars = false;
         let mut deny_dead_code = false;
         // (`deny(warnings)` / `forbid(warnings)` of the crate: a lint an item or field sets to warn is an error)
         let mut warn_denied = false;
@@ -1494,7 +1637,10 @@ impl Session2 {
                     }
                 }
             }
-            deny_unused_vars = levels.iter().any(|l| matches!(*l, "unused_variables" | "unused" | "warnings")) && !c.contains("#![allow(unused");
+            // (`#![forbid(unused_variables)]` is not undone by an `#![allow(unused)]`)
+            // (a group's `forbid(unused)` lets a member be allowed, with a warning)
+            forbid_unused_vars = c.match_indices("#![forbid(").any(|(k, _)| c[k + 10..].split(')').next().is_some_and(|l| l.split(',').any(|l| l == "unused_variables")));
+            deny_unused_vars = forbid_unused_vars || (levels.iter().any(|l| matches!(*l, "unused_variables" | "unused" | "warnings")) && !c.contains("#![allow(unused"));
             deny_dead_code = levels.iter().any(|l| matches!(*l, "dead_code" | "unused" | "warnings")) && !c.contains("#![allow(dead_code") && !c.contains("#![expect(dead_code") && !c.contains("#![allow(unused");
             deny_dead_pub = levels.contains(&"dead_code_pub_in_binary");
             deny_unused_imports = levels.iter().any(|l| matches!(*l, "unused_imports" | "unused" | "warnings")) && !c.contains("#![allow(unused");
@@ -1688,19 +1834,65 @@ impl Session2 {
                 return Err(e);
             }
         }
-        // (unused_variables: the first binding nothing reads, in the program's own fns)
-        if deny_unused_vars {
+        // (unused_variables: the first binding nothing reads, in the program's own fns, where the lint is denied: for
+        // the crate, or by an attribute of the fn (`#[deny(unused)] fn main`) or of the statement or arm the binding
+        // is in; an `allow` there covers it (`#[allow(unused_variables)] let x = 1;`), one of the crate's or the fn's
+        // all of the fn)
+        // (or an item of the program's whose own attributes deny it: an item starts with its attributes. A `deny` on a
+        // statement or an arm alone, with none on an item, is not seen: finding one would read all of the source)
+        let scoped_vars = !deny_unused_vars
+            && items[..user_src].iter().any(|it| {
+                src.as_bytes().get(it.start) == Some(&b'#') && src.get(it.start..it.end).is_some_and(|t| t.starts_with("#[")) && {
+                    let head = leading_attrs(&src[it.start..it.end]);
+                    (head.contains("deny") || head.contains("forbid")) && unused_var_attrs(head).iter().any(|a| a.2 > 0)
+                }
+            });
+        if deny_unused_vars || scoped_vars {
             for it in &items[..user_src] {
                 let text = src.get(it.start..it.end).unwrap_or("");
-                if !text.contains("fn ") || text.contains("allow(unused") || text.contains("#[cfg") {
+                if !text.contains("fn ") || text.contains("#[cfg") {
                     continue;
                 }
+                let attrs = if text.contains("unused") || text.contains("warnings") { unused_var_attrs(text) } else { vec![] };
+                if !deny_unused_vars && !attrs.iter().any(|a| a.2 > 0) {
+                    continue;
+                }
+                // (the level at a place of the item's text: the crate's, then each attribute that covers it, in order)
+                let denied = |o: usize| {
+                    let (mut on, mut forbid) = (deny_unused_vars, forbid_unused_vars);
+                    for &(_, _, l) in attrs.iter().filter(|a| a.0 <= o && o < a.1) {
+                        if l == 2 {
+                            on = true;
+                            forbid = true;
+                        } else if !forbid {
+                            on = l == 1;
+                        }
+                    }
+                    on
+                };
                 let Ok(Some(f)) = parse_fn(&src, it) else { continue };
-                let params: Vec<String> = f.sig.params.iter().filter_map(|(p, _)| match p {
-                    Pat::Ident(_, _, n, None) => Some(n.clone()),
-                    _ => None,
-                }).collect();
-                if let Some((pos, n)) = crate::ast_closure::first_unused_binding(&params, &f.block) {
+                let params: Vec<&Pat> = f.sig.params.iter().map(|(p, _)| p).collect();
+                let starts: Vec<usize> = std::iter::once(0).chain(text.match_indices('\n').map(|(i, _)| i + 1)).collect();
+                let sig_at = text.find("fn ").unwrap_or(0);
+                for (pos, n) in crate::ast_closure::unused_bindings(&params, &f.block) {
+                    let at = match pos {
+                        Some(p) if p.line > 0 => starts.get(p.line as usize - 1).map_or(sig_at, |&l| l + p.col as usize),
+                        _ => sig_at,
+                    };
+                    // (at the binding itself, the name's first whole word from there: a field of a pattern may have
+                    // an attribute of its own)
+                    let tb = text.as_bytes();
+                    let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+                    let own = text.get(at..).and_then(|r| r.match_indices(n.as_str()).map(|(i, _)| at + i).find(|&i| (i == 0 || !id(tb[i - 1])) && tb.get(i + n.len()).is_none_or(|&c| !id(c))));
+                    if !denied(own.unwrap_or(at)) {
+                        continue;
+                    }
+                    // (reported there when it is on the line of the binding's statement, arm or condition)
+                    if let Some(o) = own.filter(|&o| !text[at.min(o)..o].contains('\n')) {
+                        let abs = it.start + o;
+                        let col = abs - src[..abs].rfind('\n').map_or(0, |p| p + 1) + 1;
+                        return Err(format!("{}:{col}: unused variable: `{n}`", it.line + text[..o].matches('\n').count()));
+                    }
                     let (line, col) = match pos {
                         Some(p) if p.line > 0 => (it.line + p.line as usize - 1, p.col as usize + 1),
                         _ => (it.line, 1),
@@ -1716,6 +1908,13 @@ impl Session2 {
         if let Some(e) = cross_kind_duplicate(&prog, &src, &items, &sums, user) {
             return Err(e);
         }
+        // (E0405 / E0404: a fn's trait bound that names no trait in scope; a single file's, whose names are all its own
+        // or std's)
+        if self.ctx.map.inputs.is_empty() && self.ctx.deps.is_empty() {
+            if let Some(e) = unknown_trait_bound(&prog, &src, src0, &items, user) {
+                return Err(e);
+            }
+        }
         // (E0191 at a `dyn Tr` in a type that leaves one of the trait's associated types without a value; before
         // E0038, as rustc)
         // (one look at the program's own text for `dyn`, for this and E0038's check)
@@ -1725,12 +1924,19 @@ impl Session2 {
         }
         // (in a check (zustc check, the LSP): a build stays as fast as it was, and reports it when it makes the vtable)
         if let Some(e) = (self.checking && has_dyn).then(|| dyn_in_signature(&prog, &src, &items)).flatten() {
-            return Err(e);
+            // (the program's own `dyn` scan, when it found one: at the `dyn`, naming the trait rustc names)
+            return Err(late_err.take().filter(|l| l.ends_with("is not dyn compatible (E0038)")).unwrap_or(e));
         }
         // (E0277: a static is reachable from every thread, so its type must be Sync)
         if let Some((ci, tn)) = crate::acg::static_not_sync(&prog) {
             let line = items.get(prog.consts[ci].item as usize).map_or(0, |it| it.line);
             return Err(format!("{line}:1: `{tn}` cannot be shared between threads safely: the type of a `static` must be Sync (E0277)"));
+        }
+        // (E0080: a const's or a static's value that reads an extern static, `static X: u32 = symbol;`, which constant
+        // evaluation cannot; rustc's E0133 is on the same line)
+        if let Some((ci, n)) = extern_static_in_value(&prog) {
+            let line = items.get(prog.consts[ci].item as usize).map_or(0, |it| it.line);
+            return Err(format!("{line}:1: cannot access extern static `{n}` (E0080)"));
         }
         // (traits of one name in two modules: which one a method call means depends on where it is. Read from the
         // crate's source (its files joined, as the items' lines count); a build with dependency crates keeps the earlier
@@ -1753,6 +1959,7 @@ impl Session2 {
         prog.deny_unreachable = deny_unreachable;
         // (the program has modules: read from its source as written, before flattening blanks their headers)
         prog.has_mods = has_mod_word;
+        prog.field_priv = fpriv.take();
         prog.lower_consts = prog.consts.iter().any(|c| !c.name.contains("::") && c.name.trim_start_matches('_').starts_with(|ch: char| ch.is_lowercase()));
         prog.deny_must_use = deny_must_use;
         prog.edition = self.opts.edition;
@@ -1800,6 +2007,28 @@ impl Session2 {
             ["allow", "warn", "expect"].iter().any(|a| head.trim_start().strip_prefix(a).is_some_and(|rest| rest.trim_start().starts_with('('))) && !in_text(i)
         });
         prog.deny_trivial_casts = deny_trivial_casts;
+        // (`#![feature(fn_traits)]`, from the crate's attributes)
+        prog.fn_traits = items[..user].iter().any(|it| it.kind == crate::lexer::ItemKind::InnerAttr && src.get(it.start..it.end).is_some_and(|t| t.contains("fn_traits")));
+        // (bindings_with_variant_name (E0170): the names the program's `use`s go through, for which a variant of the
+        // name may be in scope)
+        for it in &items[..user] {
+            if !matches!(src.as_bytes().get(it.start), Some(b'u' | b'p')) {
+                continue;
+            }
+            let t = src.get(it.start..it.end).unwrap_or("");
+            let t = t.strip_prefix("pub ").unwrap_or(t).trim_start();
+            let Some(rest) = t.strip_prefix("use ") else { continue };
+            let b = rest.as_bytes();
+            let mut k = 0;
+            while let Some(d) = rest[k..].find("::") {
+                let end = k + d;
+                let start = rest[..end].rfind(|c: char| !(c.is_alphanumeric() || c == '_')).map_or(0, |i| i + 1);
+                if start < end && b[start].is_ascii_uppercase() {
+                    prog.use_prefixes.push(rest[start..end].to_string());
+                }
+                k = end + 2;
+            }
+        }
         if deny_must_use {
             for it in &items[..user] {
                 let text = src.get(it.start..it.end).unwrap_or("");
@@ -1871,6 +2100,9 @@ impl Session2 {
             if let Some(e) = wf_error(&prog, &sums, &src, &items, user) {
                 return Err(e);
             }
+        }
+        if let Some(e) = sized_error(&sums, &src, &items, user) {
+            return Err(e);
         }
         // (E0119: two impls of a trait of the program's that both apply to one goal, by the trait solver: their heads
         // unify and both impls' where clauses hold there (crate::traits::TraitDb::conflict))
@@ -2192,7 +2424,7 @@ impl Session2 {
             crefs.push(c);
         }
         tm.lap("refs", String::new());
-        let mut a = Analysis { iface_fp, src, items, prog, refs, srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()), assoc_keys: (0, vec![]) };
+        let mut a = Analysis { late_err, iface_fp, src, items, prog, refs, srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()), assoc_keys: (0, vec![]) };
         a.assoc_keys = a.assoc_keys();
         if self.opts.opt && std::env::var_os("ZUSTC_NO_INLINE").is_none() {
             a.inl = inline_bodies(&a);
@@ -2515,9 +2747,165 @@ fn opaque_bound_error(prog: &Program, src: &str, items: &[SrcItem]) -> R<Option<
 }
 
 /// アイテムの中の `行:桁:` のエラーを、ファイルの中の行にする (driver.rs の relocate_err と同じ)。位置がなければアイテムの先頭の行
-fn relocate(e: String, it: &SrcItem) -> String {
+/// rustc's fragment specifiers
+const FRAGS: &[&str] = &["block", "expr", "expr_2021", "ident", "item", "lifetime", "literal", "meta", "pat", "pat_param", "path", "stmt", "tt", "ty", "vis"];
+
+/// "invalid fragment specifier `id`": a `$x:id` in a `macro_rules!` matcher (not its transcriber) whose fragment is
+/// none of rustc's, at the fragment
+#[cold]
+fn bad_fragment(src0: &str) -> Option<String> {
+    let b = src0.as_bytes();
+    for (at, _) in src0.match_indices("macro_rules!") {
+        // (a definition at a line's start, past `#[..]` / whitespace: not one in a comment or a string)
+        let ls = src0[..at].rfind('\n').map_or(0, |k| k + 1);
+        if !src0[ls..at].trim().is_empty() && !src0[ls..at].trim_start().starts_with("#[") {
+            continue;
+        }
+        // (the body: the bracket after the name, to its match, past strings and comments)
+        let Some(open) = src0[at..].find(['{', '(', '[']).map(|k| at + k) else { continue };
+        let (mut d, mut k, mut end) = (0i32, open, None);
+        while k < b.len() {
+            if let Some(e) = lit_end(b, k) {
+                k = e;
+                continue;
+            }
+            match b[k] {
+                b'{' | b'(' | b'[' => d += 1,
+                b'}' | b')' | b']' => {
+                    d -= 1;
+                    if d == 0 {
+                        end = Some(k);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            k += 1;
+        }
+        let Some(end) = end else { continue };
+        let body = &src0[open + 1..end];
+        let toks = crate::lexer::tokenize(body.as_bytes());
+        let tk = |j: usize| &body[toks[j].1..toks[j].2];
+        // (the rules: a matcher group at depth 0, `=>`, a transcriber group, `;`)
+        let mut j = 0;
+        while j < toks.len() {
+            if !matches!(tk(j), "(" | "[" | "{") {
+                j += 1;
+                continue;
+            }
+            // (the matcher: to its close)
+            let (mut dd, mut m) = (0i32, j);
+            while m < toks.len() {
+                match tk(m) {
+                    "(" | "[" | "{" => dd += 1,
+                    ")" | "]" | "}" => {
+                        dd -= 1;
+                        if dd == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                m += 1;
+            }
+            for q in j..m.min(toks.len()) {
+                if tk(q) == "$" && q + 3 <= m && toks[q + 1].0 == 0 && tk(q + 2) == ":" && toks.get(q + 3).is_some_and(|t| t.0 == 0) {
+                    let f = tk(q + 3);
+                    // (`guard`: a fragment behind `macro_guard_matcher`)
+                    if f == "guard" && !src0.contains("macro_guard_matcher") {
+                        let pos = open + 1 + toks[q + 3].1;
+                        let line = 1 + src0[..pos].matches('\n').count();
+                        return Some(format!("{line}:1: `guard` fragments in macro are unstable (E0658)"));
+                    }
+                    if !FRAGS.contains(&f) && f != "guard" {
+                        let pos = open + 1 + toks[q + 3].1;
+                        let line = 1 + src0[..pos].matches('\n').count();
+                        let col = pos - src0[..pos].rfind('\n').map_or(0, |x| x + 1) + 1;
+                        return Some(format!("{line}:{col}: invalid fragment specifier `{f}`"));
+                    }
+                }
+            }
+            // (past the transcriber: `=>` then its group)
+            let mut t = m + 1;
+            while t < toks.len() && !matches!(tk(t), "(" | "[" | "{") {
+                t += 1;
+            }
+            let (mut dd, mut u) = (0i32, t);
+            while u < toks.len() {
+                match tk(u) {
+                    "(" | "[" | "{" => dd += 1,
+                    ")" | "]" | "}" => {
+                        dd -= 1;
+                        if dd == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                u += 1;
+            }
+            j = u + 1;
+        }
+    }
+    None
+}
+
+/// A validation error the parser deferred (`for<'a: 'b>`), unless a later item does not parse: rustc stops at that
+/// one first
+#[cold]
+fn deferred_after_parse(e: String, src: &str, later: &[SrcItem]) -> String {
+    use crate::lexer::ItemKind as K;
+    for it in later {
+        if matches!(it.kind, K::InnerAttr) {
+            continue;
+        }
+        let text = src.get(it.start..it.end).unwrap_or("");
+        let text = match it.kind {
+            K::ImplHeader | K::TraitHeader => format!("{text}}}"),
+            _ => text.to_string(),
+        };
+        if let Err(e2) = crate::parse::parse_file(&text) {
+            if !e2.starts_with('\u{7}') {
+                return relocate(e2, it, src);
+            }
+        }
+    }
+    e
+}
+
+/// E0746 at the fn's return type (rustc's span), not its first line: `fn f() ->\n    dyn Tr`
+#[cold]
+fn ret_type_err(e: String, src: &str, it: &SrcItem) -> String {
+    let text = src.get(it.start..it.end).unwrap_or("");
+    let Some(at) = sig_part(text, "r") else { return e };
+    let Some((_, msg)) = e.split_once(":1: ") else { return e };
+    let line = it.line + text[..at].matches('\n').count();
+    let col = at - text[..at].rfind('\n').map_or(0, |k| k + 1) + 1;
+    format!("{line}:{col}: {msg}")
+}
+
+fn ret_type_line(e: String, src: &str, it: &SrcItem) -> String {
+    if e.ends_with("return type cannot be a trait object without pointer indirection (E0746)") {
+        return ret_type_err(e, src, it);
+    }
+    e
+}
+
+/// An error of an item's own text at its place in src: its line, and on its first line its column too (an impl's member
+/// starts after its indentation)
+fn relocate(e: String, it: &SrcItem, src: &str) -> String {
     if let Some((l, rest)) = e.split_once(':') {
         if let Ok(l) = l.parse::<usize>() {
+            if l == 1 {
+                let head = &src[..it.start.min(src.len())];
+                let indent = head.len() - head.rfind('\n').map_or(0, |p| p + 1);
+                if let Some((c, msg)) = rest.split_once(':').filter(|_| indent > 0) {
+                    if let Ok(c) = c.parse::<usize>() {
+                        let indent = head[head.len() - indent..].chars().count();
+                        return format!("{}:{}:{msg}", it.line, c + indent);
+                    }
+                }
+            }
             return format!("{}:{rest}", l + it.line - 1);
         }
     }
@@ -2525,7 +2913,9 @@ fn relocate(e: String, it: &SrcItem) -> String {
 }
 
 /// E0434: a fn item written inside another fn (hoisted out of it) that uses a local of a fn it is in, or its `self`:
-/// `fn foo() { let y = 5; fn bar() -> u32 { y } }`. A name the program also has an item of is that item
+/// `fn foo() { let y = 5; fn bar() -> u32 { y } }`. A name the program also has an item of is that item.
+/// E0435 the same way for a value a constant holds: a `const` / `static` item's, an enum's discriminant, an impl's
+/// associated const, written in a fn (`let n = 1; static Y: usize = n + 1;`)
 fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String> {
     use crate::parse::Expr;
     // (hoisted items come last, each piece's first line starting with a mark: none when the last item's isn't)
@@ -2548,7 +2938,12 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
         let a = crate::prep::hoisted_at(&marks, it.line).unwrap_or(it.line);
         (a, a + text_of(it).matches('\n').count())
     };
-    let hoisted: Vec<usize> = (0..items.len()).filter(|&i| crate::prep::hoisted_at(&marks, items[i].line).is_some() && text_of(&items[i]).contains("fn ")).collect();
+    let hoisted: Vec<usize> = (0..items.len())
+        .filter(|&i| {
+            let t = text_of(&items[i]);
+            crate::prep::hoisted_at(&marks, items[i].line).is_some() && (t.contains("fn ") || t.contains("const ") || t.contains("static ") || (t.contains("enum ") && t.contains('=')))
+        })
+        .collect();
     if hoisted.is_empty() {
         return None;
     }
@@ -2687,9 +3082,27 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
         }
         Some(open.into_iter().flatten().collect())
     };
+    // (the values a constant item holds: a const's or static's, an enum's discriminants, or (an impl's member) an
+    // associated const's)
+    let const_values = |it: &SrcItem| -> Vec<Expr> {
+        let Ok(file) = crate::parse::parse_file(text_of(it)) else { return vec![] };
+        let Some(item) = file.items.into_iter().next() else { return vec![] };
+        match item.kind {
+            crate::parse::ItemKind::Const(_, _, Some(e)) | crate::parse::ItemKind::Static(_, _, _, e) => vec![e],
+            crate::parse::ItemKind::Enum(_, _, vs) => vs.into_iter().filter_map(|(_, _, d)| d).collect(),
+            _ => vec![],
+        }
+    };
     for &h in &hoisted {
         let it = &items[h];
-        let Ok(Some(f)) = parse_fn(src, it) else { continue };
+        let f = match parse_fn(src, it) {
+            Ok(Some(f)) => Some(f),
+            _ => None,
+        };
+        let values = if f.is_none() { const_values(it) } else { vec![] };
+        if f.is_none() && values.is_empty() {
+            continue;
+        }
         // (the locals of the fns it is written in)
         let line = range(it).0;
         let mut outer: Vec<String> = vec![];
@@ -2724,7 +3137,19 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
         if outer.is_empty() {
             continue;
         }
-        let Some((fname, name, at)) = capture(&f.sig, &f.block, &outer, &item_names) else { continue };
+        // (a constant's value: the first local it names, with `self` (which the walk does not give) where it is written)
+        let in_const = f.is_none();
+        let found_use = match &f {
+            Some(f) => capture(&f.sig, &f.block, &outer, &item_names),
+            None => values.iter().find_map(|e| {
+                let mut used = crate::ast_closure::used_vars_at(e);
+                if format!("{e:?}").contains("\"self\"") && !used.iter().any(|(n, _)| n == "self") {
+                    used.push(("self".to_string(), Default::default()));
+                }
+                used.into_iter().find(|(n, _)| !item_names.contains(n.as_str()) && outer.contains(n)).map(|(n, at)| (String::new(), n, at))
+            }),
+        };
+        let Some((fname, name, at)) = found_use else { continue };
         let text = text_of(it);
         // (rustc points at the use: the free one the walk found, at its line (from 1) and column (in characters, from
         // 0) in the item's text)
@@ -2752,8 +3177,9 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
                 let t = crate::lexer::tokenize(b);
                 let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
                 let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && b[t[k].1] == c;
+                // (in a fn's body; in a constant, after its `=`)
                 let from = (1..t.len()).find(|&k| w(k) == fname && w(k - 1) == "fn").unwrap_or(0);
-                let open = (from..t.len()).find(|&k| sym(k, b'{'))?;
+                let open = if in_const { (0..t.len()).find(|&k| sym(k, b'=') && !sym(k + 1, b'='))? } else { (from..t.len()).find(|&k| sym(k, b'{'))? };
                 let Some(k) = (open..t.len()).find(|&k| w(k) == name && !(k > 0 && (sym(k - 1, b'.') || sym(k - 1, b':'))) && !sym(k + 1, b':') && !sym(k + 1, b'!')) else {
                     continue;
                 };
@@ -2761,6 +3187,9 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
             }
         };
         let (line, col) = item_pos(src, orig, &marks, it, off);
+        if in_const {
+            return Some(format!("{line}:{col}: attempt to use a non-constant value in a constant (E0435)"));
+        }
         return Some(format!("{line}:{col}: can't capture dynamic environment in a fn item (E0434)"));
     }
     None
@@ -4028,14 +4457,54 @@ fn first_unreachable(b: &crate::parse::Block, user_process: bool) -> Option<(cra
 
 /// "malformed `X` attribute input" (E0539 / E0565): a built-in attribute of a fixed shape written in another one.
 /// Read are the file's inner attributes (its head) and the attributes in front of the items (no full-text scan)
-fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) -> Option<String> {
+/// E0454 / E0459 / E0648: the error of a link's or an export's name (`#[link(name = "")]`, `#[link_name = "a\0"]`,
+/// `#[export_name = ""]`), of an attribute's name and input
+#[cold]
+fn attr_name_msg(name: &str, input: &str) -> Option<String> {
+    match (name, input.strip_prefix('='), input.strip_prefix('(').and_then(|r| r.strip_suffix(')'))) {
+        ("link", _, Some(list)) if link_kinds_ok(list) => link_name_msg(list),
+        ("derive", _, Some(_)) => Some("expected path to a trait, found literal (E0777)".to_string()),
+        ("link_name" | "export_name", Some(v), _) => match str_value(v.trim()) {
+            Some(v) if v.is_empty() && name == "link_name" => Some("link name must not be empty (E0454)".to_string()),
+            Some(v) if v.is_empty() => Some("`export_name` may not be empty".to_string()),
+            Some(v) if v.contains('\0') && name == "link_name" => Some("link name may not contain null characters (E0648)".to_string()),
+            Some(v) if v.contains('\0') => Some("`export_name` may not contain null characters (E0648)".to_string()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Whether each `kind` of a `#[link(..)]` (its list's text) is one rustc knows
+fn link_kinds_ok(list: &str) -> bool {
+    attr_entries(list).iter().all(|e| match e.split_once('=') {
+        Some((k, x)) if k.trim() == "kind" => str_value(x).is_some_and(|v| matches!(v.as_str(), "static" | "dylib" | "framework" | "raw-dylib" | "link-arg")),
+        _ => true,
+    })
+}
+
+/// The error of a `#[link(..)]`'s name (its list's text): none (E0459, unless it names a wasm import module), empty
+/// (E0454), or with a NUL (E0648)
+fn link_name_msg(list: &str) -> Option<String> {
+    let entries = attr_entries(list);
+    let name = entries.iter().find_map(|e| e.split_once('=').filter(|(k, _)| k.trim() == "name").map(|(_, v)| v.trim()));
+    match name.map(str_value) {
+        None if entries.iter().any(|e| e.split_once('=').is_some_and(|(k, _)| k.trim() == "wasm_import_module")) => None,
+        None => Some("`#[link]` attribute requires a `name = \"string\"` argument (E0459)".to_string()),
+        Some(Some(v)) if v.is_empty() => Some("link name must not be empty (E0454)".to_string()),
+        Some(Some(v)) if v.contains('\0') => Some("link name may not contain null characters (E0648)".to_string()),
+        _ => None,
+    }
+}
+
+fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, edition: u16) -> Option<String> {
     // (a crate with no dependency (so no proc macro) knows only the built-in attributes and its tools' paths)
     // (both looked up only when such an attribute is there: not a search of every file)
     let unknown = |name: &str| {
         const BUILTIN: &[&str] = &[
             "cfg", "cfg_attr", "test", "ignore", "should_panic", "bench", "derive", "automatically_derived", "macro_export", "macro_use",
             "proc_macro", "proc_macro_derive", "proc_macro_attribute", "allow", "warn", "deny", "forbid", "expect", "deprecated", "must_use",
-            "diagnostic", "link", "link_name", "link_ordinal", "no_link", "repr", "export_name", "link_section", "no_mangle", "used", "crate_name",
+            "link", "link_name", "link_ordinal", "no_link", "repr", "export_name", "link_section", "no_mangle", "used", "crate_name",
             "crate_type", "no_builtins", "no_main", "no_std", "no_implicit_prelude", "recursion_limit", "type_length_limit", "windows_subsystem",
             "inline", "cold", "no_builtins", "target_feature", "track_caller", "instruction_set", "doc", "path", "non_exhaustive", "panic_handler",
             "global_allocator", "default_lib_allocator", "feature", "unsafe", "naked", "debugger_visualizer", "collapse_debuginfo", "coverage",
@@ -4061,6 +4530,8 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
     };
     // (an attribute's name and its input: None = a word, Some('(') = a list, Some('=') = `= value`)
     fn check(name: &str, input: &str) -> bool {
+        // (comments are whitespace: `#![windows_subsystem = /* why */ "console"]`)
+        let input = crate::cfg::blank_comments(input);
         let input = input.trim();
         let (form, inner) = if input.is_empty() {
             (' ', "")
@@ -4071,23 +4542,45 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
         } else {
             return true;
         };
-        let str_lit = |v: &str| v.starts_with('"') && v.ends_with('"') && v.len() >= 2;
         let idents = |v: &str| v.split(',').all(|x| {
             let x = x.trim();
             !x.is_empty() && x.chars().all(|c| c.is_alphanumeric() || c == '_')
         });
+        // (`key = "value"` entries of known keys, each at most once: `deprecated(since = "1.0", note = "..")`)
+        let keyed = |v: &str, keys: &[&str], value: &dyn Fn(&str, &str) -> bool| {
+            let mut seen: Vec<&str> = vec![];
+            attr_entries(v).iter().all(|e| match e.split_once('=') {
+                Some((k, x)) => {
+                    let k = k.trim();
+                    let ok = keys.contains(&k) && !seen.contains(&k) && value(k, x.trim());
+                    seen.push(k);
+                    ok
+                }
+                None => false,
+            })
+        };
         match name {
             "crate_type" | "recursion_limit" | "type_length_limit" | "crate_name" => form == '=' && str_lit(inner),
+            // (`link_name = "x"`, `export_name = "x"`, `link_section = ".x"`; `link_ordinal(N)`, an integer)
+            // (E0454 / E0648: a link name or export name that is empty or has a NUL)
+            "link_name" | "export_name" | "link_section" => form == '=' && str_lit(inner) && (name == "link_section" || str_value(inner).is_none_or(|v| !v.is_empty() && !v.contains('\0'))),
+            "link_ordinal" => form == '(' && inner.trim().starts_with(|c: char| c.is_ascii_digit()) && inner.trim().chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
             "inline" => form == ' ' || (form == '(' && matches!(inner, "always" | "never")),
             "must_use" => form == ' ' || (form == '=' && str_lit(inner)),
             "cold" | "track_caller" | "non_exhaustive" | "no_mangle" | "automatically_derived" | "no_implicit_prelude" => form == ' ',
-            "repr" => form == '(' && !inner.is_empty() && !inner.contains('='),
-            "deprecated" => form == ' ' || (form == '=' && str_lit(inner)) || form == '(',
-            "link" => form == '(' && !inner.is_empty() && !inner.contains("cfg()"),
+            // (each hint a name, or a name with its list: `repr(C, align(8))`, not `repr("C")`)
+            "repr" => form == '(' && !inner.is_empty() && !inner.contains('=') && attr_entries(inner).iter().all(|e| e.starts_with(|c: char| c.is_alphabetic() || c == '_')),
+            "deprecated" => form == ' ' || (form == '=' && str_lit(inner)) || (form == '(' && keyed(inner, &["since", "note", "suggestion"], &|_, x| str_lit(x))),
+            // (the value's text, not its spelling: `r"console"` is `"console"`)
+            "windows_subsystem" => form == '=' && str_value(inner).is_some_and(|v| matches!(v.as_str(), "console" | "windows")),
+            // (`link(name = "m", kind = "static")`: a kind rustc knows)
+            "link" => form == '(' && !inner.is_empty() && !inner.contains("cfg()") && link_kinds_ok(inner) && link_name_msg(inner).is_none(),
             "allow" | "warn" | "deny" | "forbid" | "expect" => form == '(',
+            // (E0777: `derive("Clone")`, a literal for a trait)
+            "derive" => form != '(' || !attr_entries(inner).iter().any(|e| e.trim_start().starts_with(['"', '\'']) || e.trim_start().starts_with(|c: char| c.is_ascii_digit())),
             "macro_use" => form == ' ' || (form == '(' && idents(inner)),
-            "cfg" => form == '(' && !inner.is_empty(),
-            "cfg_attr" => form == '(' && inner.contains(','),
+            "cfg" => form == '(' && attr_entries(inner).len() == 1 && cfg_pred(inner),
+            "cfg_attr" => form == '(' && inner.contains(',') && attr_entries(inner).first().is_some_and(|p| cfg_pred(p)),
             _ => true,
         }
     }
@@ -4099,6 +4592,16 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
             let rest = &t[i..];
             let ws = rest.len() - rest.trim_start().len();
             let r = &rest[ws..];
+            // (a comment between attributes: `#[inline]\n//~^ ERROR ..\n#[target_feature(..)]`)
+            if r.starts_with("//") {
+                i += ws + r.find('\n').map_or(r.len(), |n| n + 1);
+                continue;
+            }
+            if r.starts_with("/*") {
+                let Some(n) = r.find("*/") else { break };
+                i += ws + n + 2;
+                continue;
+            }
             let open = if r.starts_with("#![") { 3 } else if r.starts_with("#[") { 2 } else { break };
             // (the matching `]`, past nested brackets and string literals)
             let mut depth = 0i32;
@@ -4118,16 +4621,36 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
                 }
             }
             let Some(e) = end else { break };
-            let body = &r[open..e];
+            // (the name past whitespace and comments: `#[ inline]`)
+            let body = crate::cfg::trim_trivia(&r[open..e]);
             let n_end = body.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':')).unwrap_or(body.len());
             out.push((i + ws, &body[..n_end], &body[n_end..]));
             i += ws + e + 1;
         }
         out
     }
-    let report = |text: &str, base_line: usize, at: usize, name: &str| {
+    // (a `deprecated` value that is no literal (`note = test`, `note = concat!(..)`): rustc's parse message; any other
+    // wrong shape: malformed input)
+    let report = |text: &str, base_line: usize, at: usize, name: &str, input: &str| {
         let line = base_line + text[..at].matches('\n').count();
-        format!("{line}:1: malformed `{name}` attribute input")
+        let input = input.trim();
+        let found = (name == "deprecated").then(|| match input.strip_prefix('=') {
+            Some(v) => crate::cfg::attr_value(v).err(),
+            None => {
+                let list = input.strip_prefix('(').and_then(|r| r.strip_suffix(')')).unwrap_or("");
+                attr_entries(list).iter().find_map(|e| e.split_once('=').and_then(|(_, v)| crate::cfg::attr_value(v).err()))
+            }
+        });
+        // (E0454 / E0459 / E0648: a link's or an export's name)
+        if let Some(m) = attr_name_msg(name, input) {
+            return format!("{line}:1: {m}");
+        }
+        match found.flatten() {
+            Some(f) => format!("{line}:1: {}", crate::cfg::not_a_literal(&f)),
+            // (`#[inline = ".."]`: the deny-by-default `ill_formed_attribute_input`, with the forms it takes)
+            None if name == "inline" && input.starts_with('=') => format!("{line}:1: valid forms for the attribute are `inline`, `inline(always)`, and `inline(never)`"),
+            None => format!("{line}:1: malformed `{name}` attribute input"),
+        }
     };
     // (the file's inner attributes)
     let mut head_end = src0.len().min(8192);
@@ -4135,30 +4658,234 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
         head_end -= 1;
     }
     let head = &src0[..head_end];
-    // (comments between them: line by line, skipping `//` lines)
-    let mut off = 0;
-    for line in head.split_inclusive('\n') {
-        let t = line.trim_start();
-        if t.starts_with("#![") {
-            for (at, name, input) in leading(line) {
-                if !check(name, input) {
-                    return Some(report(head, 1, off + at, name));
+    // (the file's inner attributes, in order, with their offsets: past whitespace, comments and a shebang, each to its
+    // matching `]` across lines (`#![crate_type =\n "proc-macro"]`), up to the first item; not one in a comment)
+    let inner_at: Vec<(usize, &str, &str)> = {
+        let (hb, mut i, mut out) = (head.as_bytes(), 0, vec![]);
+        if head.starts_with("#!") && !head.starts_with("#![") {
+            i = head.find('\n').unwrap_or(head.len());
+        }
+        loop {
+            while i < hb.len() && hb[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if hb[i..].starts_with(b"//") || hb[i..].starts_with(b"/*") {
+                i = lit_end(hb, i).unwrap_or(hb.len());
+                continue;
+            }
+            if !hb[i..].starts_with(b"#![") {
+                break;
+            }
+            let (mut d, mut k, mut end) = (0i32, i + 2, None);
+            while k < hb.len() {
+                if let Some(e) = lit_end(hb, k) {
+                    k = e;
+                    continue;
+                }
+                match hb[k] {
+                    b'[' | b'(' | b'{' => d += 1,
+                    b']' | b')' | b'}' => {
+                        d -= 1;
+                        if d == 0 {
+                            end = Some(k);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                k += 1;
+            }
+            let Some(e) = end else { break };
+            // (the name past whitespace and comments: `#![ crate_type = "proc-macro"]`)
+            let body = crate::cfg::trim_trivia(&head[i + 3..e]);
+            let n_end = body.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':')).unwrap_or(body.len());
+            out.push((i, &body[..n_end], &body[n_end..]));
+            i = e + 1;
+        }
+        out
+    };
+    for &(at, name, input) in &inner_at {
+        // (the attribute macros an item takes, not a crate: `#![derive(Debug)]`)
+        if matches!(name, "derive" | "test" | "test_case" | "bench" | "global_allocator") {
+            let n = head[..at].matches('\n').count() + 1;
+            return Some(format!("{n}:1: `{name}` attribute cannot be used at crate level"));
+        }
+        if !check(name, input) {
+            return Some(report(head, 1, at, name, input));
+        }
+        // (a limit's value is read as a usize: `#![recursion_limit = "-100"]`, `""` and one too large are errors)
+        if matches!(name, "recursion_limit" | "type_length_limit" | "move_size_limit" | "pattern_complexity_limit") {
+            let v = input.trim_start().strip_prefix('=').map(str::trim).and_then(|v| v.strip_prefix('"')?.strip_suffix('"'));
+            if v.is_some_and(|v| v.parse::<usize>().is_err()) {
+                let n = head[..at].matches('\n').count() + 1;
+                return Some(format!("{n}:1: `limit` must be a non-negative integer"));
+            }
+        }
+        // (an inner attribute rustc does not know, `#![some_nonexistent_attribute]`; the crate-level ones of rustc's
+        // that the list of item attributes leaves out are known)
+        if standalone && unknown(name) && !matches!(name, "move_size_limit" | "pattern_complexity_limit" | "crate_id" | "no_start") {
+            let n = head[..at].matches('\n').count() + 1;
+            return Some(format!("{n}:1: cannot find attribute `{name}` in this scope"));
+        }
+    }
+    // (the unsafe attributes, which `#[unsafe(..)]` may wrap; `naked` needs it in every edition, the others in 2024, or
+    // where `unsafe_attr_outside_unsafe` is denied)
+    const UNSAFE: &[&str] = &["no_mangle", "export_name", "link_section", "naked", "ffi_pure", "ffi_const", "force_target_feature"];
+    let inner: Vec<(&str, &str)> = inner_at.iter().map(|&(_, n, inp)| (n, inp)).collect();
+    // (`#![crate_type = "proc-macro"]`)
+    let proc_macro_crate = inner.iter().any(|&(n, inp)| n == "crate_type" && crate::cfg::blank_comments(inp).trim().strip_prefix('=').and_then(str_value).is_some_and(|v| v == "proc-macro"));
+    // (a lint's level at the crate: the last of its inner attributes that names it, or a group of it)
+    let crate_level = |names: &[&str]| -> Option<&str> {
+        let mut level = None;
+        for &(n, inp) in &inner {
+            if matches!(n, "deny" | "forbid" | "warn" | "allow" | "expect") {
+                let list = inp.trim().strip_prefix('(').and_then(|r| r.strip_suffix(')')).unwrap_or("");
+                if attr_entries(list).iter().any(|e| names.contains(&e.trim())) {
+                    level = Some(n);
                 }
             }
-        } else if !(t.is_empty() || t.starts_with("//")) && !t.starts_with("#[") {
-            break;
         }
-        off += line.len();
+        level
+    };
+    // (before 2024 a lint: denied at the crate, and not allowed again on an item, `#[allow(unsafe_attr_outside_unsafe)]
+    // mod generated { .. }`)
+    // (any `allow(..)` / `expect(..)` list that names it, among other lints or not: `allow(dead_code,
+    // unsafe_attr_outside_unsafe)`)
+    let lowered = || {
+        ["allow(", "expect("].iter().any(|l| {
+            src0.match_indices(l).any(|(i, _)| {
+                let list = &src0[i + l.len()..];
+                let list = &list[..list.find(')').unwrap_or(list.len())];
+                attr_entries(list).iter().any(|e| matches!(*e, "unsafe_attr_outside_unsafe" | "rust_2024_compatibility"))
+            })
+        })
+    };
+    let outside_unsafe_denied = edition >= 2024 || matches!(crate_level(&["unsafe_attr_outside_unsafe", "rust_2024_compatibility"]), Some("deny" | "forbid")) && !lowered();
+    // (`unused_attributes` denied at the crate, by itself or a group)
+    let unused_attributes_denied = matches!(crate_level(&["unused_attributes", "unused", "warnings"]), Some("deny" | "forbid"));
+    // (a `macro_rules!`'s attributes, read from the file as written: expansion takes the definition out of the items.
+    // Those `unused_attributes` reports there, where the crate denies it)
+    if unused_attributes_denied && src0.contains("macro_rules!") {
+        let lines: Vec<&str> = src0.split('\n').collect();
+        for (k, l) in lines.iter().enumerate() {
+            if !l.trim_start().starts_with("macro_rules!") {
+                continue;
+            }
+            // (the attribute and comment lines right above it)
+            let mut a = k;
+            while a > 0 && { let p = lines[a - 1].trim_start(); p.starts_with("#[") || p.starts_with("//") } {
+                a -= 1;
+            }
+            let block = lines[a..k].join("\n");
+            for (at, name, _) in leading(&block) {
+                if matches!(name, "macro_use" | "path" | "cold" | "no_mangle") {
+                    let line = a + 1 + block[..at].matches('\n').count();
+                    return Some(format!("{line}:1: the `{name}` attribute cannot be used on macro defs"));
+                }
+            }
+        }
     }
+    // (whether the source has an attribute at all: the scans of attributes inside items and anywhere are not run
+    // otherwise)
+    let any_attr = has_byte(src0.as_bytes(), b'#');
     for it in items {
         let text = &split[it.start..it.end];
+        // (an attribute inside the item: a variant's, a parameter's; reported after the item's own)
+        // (read where it can be: an enum's body, by its first words, and a fn's signature with a `#` in it, not the fn's
+        // body)
+        let nested = any_attr.then(|| {
+            let word = |k: usize| it.idents.get(k).map_or("", |&(a, e)| split.get(a as usize..e as usize).unwrap_or(""));
+            // (an extern block's items' attributes, `extern "C" { #[link_ordinal(1)] fn f(); }`: those at each item's start)
+            if (0..6).any(|k| word(k) == "extern") && text.contains("#[") {
+                if let Some(b) = text.find('{') {
+                    let mut k = b + 1;
+                    loop {
+                        if let Some(&(at, name, _)) = leading(&text[k..]).iter().find(|&&(_, n, inp)| matches!(n, "link_name" | "link_ordinal") && !check(n, inp)) {
+                            let inp = leading(&text[k..]).iter().find(|&&(a, _, _)| a == at).map_or("", |x| x.2);
+                            return Some((k + at, attr_name_msg(name, inp.trim()).unwrap_or_else(|| format!("malformed `{name}` attribute input"))));
+                        }
+                        if let Some(&(at, _, _)) = leading(&text[k..]).iter().find(|&&(_, n, _)| n == "derive") {
+                            return Some((k + at, "`derive` may only be applied to `struct`s, `enum`s and `union`s (E0774)".to_string()));
+                        }
+                        match text[k..].find(';') {
+                            Some(e) => k += e + 1,
+                            None => break,
+                        }
+                    }
+                }
+            }
+            if (0..3).any(|k| word(k) == "enum") {
+                return text.contains("#[").then(|| nested_attr_misuse(text, &unknown, unused_attributes_denied)).flatten();
+            }
+            let (mut sig_end, mut hash) = (text.len(), false);
+            for (i, &c) in text.as_bytes().iter().enumerate() {
+                if c == b'{' {
+                    sig_end = i;
+                    break;
+                }
+                hash |= c == b'#';
+            }
+            hash.then(|| nested_attr_misuse(&text[..sig_end], &unknown, unused_attributes_denied)).flatten()
+        });
+        let nested = nested.flatten();
+        let nested = nested.map(|(at, msg)| format!("{}:1: {msg}", it.line + text[..at].matches('\n').count()));
         if !text.trim_start().starts_with("#[") {
+            if nested.is_some() {
+                return nested;
+            }
             continue;
         }
         let attrs = leading(text);
         for &(at, name, input) in &attrs {
+            let line = || it.line + text[..at].matches('\n').count();
+            // (`#[test]` on what is no free fn, `--test` or not, at the attribute: rustc's test macro; a macro call's is
+            // a warning)
+            if name == "test" && input.trim().is_empty() && !test_target(text, it.kind) {
+                let col = match text[..at].rfind('\n') {
+                    Some(p) => at - p,
+                    None => it.start - split[..it.start].rfind('\n').map_or(0, |p| p + 1) + at + 1,
+                };
+                return Some(format!("{}:{col}: the `test` attribute may only be used on a free function", line()));
+            }
+            // (`#[unsafe(name ..)]`: the attribute inside it, which must be an unsafe one)
+            let (name, input) = match input.trim().strip_prefix('(').filter(|_| name == "unsafe") {
+                Some(r) => {
+                    // (the name past whitespace and comments: `#[unsafe(/* safety */ no_mangle)]`)
+                    let inner = crate::cfg::trim_trivia(r.strip_suffix(')').unwrap_or(r));
+                    let n_end = inner.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':')).unwrap_or(inner.len());
+                    let (n, rest) = (&inner[..n_end], &inner[n_end..]);
+                    if n == "unsafe" {
+                        return Some(format!("{}:1: expected identifier, found keyword `unsafe`", line()));
+                    }
+                    // (a name the crate does not know: that first, as rustc)
+                    if unknown(n) && !standalone {
+                        continue;
+                    }
+                    if standalone && unknown(n) && !text.contains("<<<<<<<") {
+                        return Some(format!("{}:1: cannot find attribute `{n}` in this scope", line()));
+                    }
+                    if !UNSAFE.contains(&n) {
+                        return Some(format!("{}:1: `{n}` is not an unsafe attribute", line()));
+                    }
+                    (n, rest)
+                }
+                None => {
+                    if (name == "naked" || outside_unsafe_denied && matches!(name, "no_mangle" | "export_name" | "link_section")) && !text[at..].starts_with("#![") {
+                        return Some(format!("{}:1: unsafe attribute used without unsafe", line()));
+                    }
+                    // (`#[derive(unsafe(Debug))]`: a derive's entries are paths)
+                    if name == "derive" && input.contains("unsafe") {
+                        let list = input.trim().strip_prefix('(').and_then(|r| r.strip_suffix(')')).unwrap_or("");
+                        let keyword = |x: &&str| x.trim_start().strip_prefix("unsafe").is_some_and(|r| !r.starts_with(|c: char| c.is_alphanumeric() || c == '_'));
+                        if attr_entries(list).iter().any(keyword) {
+                            return Some(format!("{}:1: expected identifier, found keyword `unsafe`", line()));
+                        }
+                    }
+                    (name, input)
+                }
+            };
             if !check(name, input) {
-                return Some(report(text, it.line, at, name));
+                return Some(report(text, it.line, at, name, input));
             }
             // (a parse error, as a merge's diff marker, comes first in rustc)
             if standalone && unknown(name) && !text.contains("<<<<<<<") {
@@ -4177,7 +4904,12 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
             }
             r
         });
-        let Some(after) = after else { continue };
+        let Some(after) = after else {
+            if nested.is_some() {
+                return nested;
+            }
+            continue;
+        };
         let mut ws = after.split_whitespace().filter(|w| !matches!(*w, "pub" | "unsafe" | "async" | "const" | "extern" | "default") && !w.starts_with("pub(") && !w.starts_with('"'));
         let Some(kw) = ws.next() else { continue };
         let kw = if after.starts_with("const ") && !after.starts_with("const fn") { "const" } else { kw };
@@ -4194,22 +4926,287 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
             "type" => "type aliases",
             "use" => "use statements",
             "macro_rules!" => "macro defs",
-            _ => continue,
+            _ => {
+                if nested.is_some() {
+                    return nested;
+                }
+                continue;
+            }
         };
-        for &(at, name, _) in &attrs {
+        for &(at, name, input) in &attrs {
+            // (E0774: a derive is a struct's, an enum's or a union's)
+            if name == "derive" && !matches!(kw, "struct" | "enum" | "union") {
+                let line = it.line + text[..at].matches('\n').count();
+                return Some(format!("{line}:1: `derive` may only be applied to `struct`s, `enum`s and `union`s (E0774)"));
+            }
+            // (a proc macro: a fn of a `proc-macro` crate)
+            if matches!(name, "proc_macro" | "proc_macro_derive" | "proc_macro_attribute") && !proc_macro_crate {
+                let line = it.line + text[..at].matches('\n').count();
+                return Some(if kw == "fn" {
+                    format!("{line}:1: the `{name}` attribute is only usable with crates of the `proc-macro` crate type")
+                } else {
+                    format!("{line}:1: the `{name}` attribute cannot be used on {kind}")
+                });
+            }
+            let line = || it.line + text[..at].matches('\n').count();
+            // (`repr(packed)` is a struct's or a union's; rustc names a repr by its hint)
+            let hint = input.trim().strip_prefix('(').and_then(|r| r.strip_suffix(')')).map(str::trim).unwrap_or("");
+            // (an integer repr, `repr(u8)`, also one of a list, `repr(C, u8)`: an enum's only)
+            let int_hint = (name == "repr").then(|| attr_entries(hint).into_iter().find(|h| int_repr(h))).flatten();
+            let shown = match int_hint {
+                Some(h) => format!("repr({h})"),
+                None if name == "repr" && !hint.is_empty() && !hint.contains(',') => format!("repr({hint})"),
+                None => name.to_string(),
+            };
+            // (an error wherever it is: the attributes rustc rejects on an item of another kind)
             let ok = match name {
-                "inline" | "cold" | "track_caller" => kw == "fn",
+                "inline" | "track_caller" | "target_feature" => kw == "fn",
+                // (a foreign fn's or static's only: no item here is one)
+                "link_ordinal" => false,
+                "repr" if int_hint.is_some() => kw == "enum",
+                "repr" if hint.starts_with("packed") => matches!(kw, "struct" | "union"),
                 "repr" => matches!(kw, "struct" | "enum" | "union"),
                 "non_exhaustive" => matches!(kw, "struct" | "enum"),
-                "must_use" => matches!(kw, "fn" | "struct" | "enum" | "union" | "trait"),
-                "macro_use" => matches!(kw, "mod"),
-                "no_mangle" => matches!(kw, "fn" | "static"),
+                "used" => kw == "static",
+                "debugger_visualizer" => kw == "mod",
                 _ => true,
             };
             if !ok {
-                let line = it.line + text[..at].matches('\n').count();
-                return Some(format!("{line}:1: `#[{name}]` attribute cannot be used on {kind}"));
+                return Some(format!("{}:1: the `{shown}` attribute cannot be used on {kind}", line()));
             }
+            // (`#[inline]` on a trait's fn without a body: `unused_attributes`, an error where the crate denies it)
+            if name == "inline" && kw == "fn" && matches!(it.kind, ItemKind::TraitMember(_)) && text.trim_end().ends_with(';') && unused_attributes_denied {
+                return Some(format!("{}:1: the `inline` attribute cannot be used on required trait methods", line()));
+            }
+            // (`no_mangle` on a const: the deny-by-default `no_mangle_const_items`)
+            if name == "no_mangle" && kw == "const" {
+                return Some(format!("{}:1: const items should never be `#[no_mangle]`", line()));
+            }
+            // (only a warning (`unused_attributes`) elsewhere: an error where the crate denies it)
+            let warned = match name {
+                "cold" => kw != "fn",
+                "macro_use" => kw != "mod",
+                "no_mangle" => !matches!(kw, "fn" | "static"),
+                _ => false,
+            };
+            if warned && unused_attributes_denied {
+                return Some(format!("{}:1: the `{name}` attribute cannot be used on {kind}", line()));
+            }
+        }
+        if nested.is_some() {
+            return nested;
+        }
+    }
+    if standalone && any_attr { unknown_attr_anywhere(src0, &unknown) } else { None }
+}
+
+/// Whether a byte is in a text: 32 bytes at a time, as four words whose bytes are compared at once (a zero byte of
+/// `w ^ x..x`); for a text without the byte, a pass at a fraction of `memchr`'s cost per byte
+fn has_byte(b: &[u8], x: u8) -> bool {
+    const LO: u64 = 0x0101_0101_0101_0101;
+    const HI: u64 = 0x8080_8080_8080_8080;
+    let pat = LO * x as u64;
+    let zero = |w: u64| {
+        let v = w ^ pat;
+        v.wrapping_sub(LO) & !v & HI
+    };
+    let mut chunks = b.chunks_exact(32);
+    for c in &mut chunks {
+        let w = |i: usize| u64::from_le_bytes([c[i], c[i + 1], c[i + 2], c[i + 3], c[i + 4], c[i + 5], c[i + 6], c[i + 7]]);
+        if zero(w(0)) | zero(w(8)) | zero(w(16)) | zero(w(24)) != 0 {
+            return true;
+        }
+    }
+    chunks.remainder().contains(&x)
+}
+
+/// An integer type a `repr` may name: an enum's
+fn int_repr(h: &str) -> bool {
+    matches!(h, "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize")
+}
+
+/// An attribute inside an item that rustc rejects where it is (at its offset in the text, with rustc's message): on an
+/// enum's variant, one of a fn's (`the `inline` attribute cannot be used on enum variants`; one only `unused_attributes`
+/// warns of, where the crate denies it), or a built-in attribute on a fn's parameter other than the lint attributes
+/// and `cfg` / `cfg_attr`
+fn nested_attr_misuse(text: &str, unknown: &dyn Fn(&str) -> bool, unused_denied: bool) -> Option<(usize, String)> {
+    let b = text.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let n = toks.len();
+    let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
+    let matching = |o: usize| -> Option<usize> {
+        let mut d = 0i32;
+        for k in o..n {
+            match t(k) {
+                b"(" | b"[" | b"{" => d += 1,
+                b")" | b"]" | b"}" => {
+                    d -= 1;
+                    if d == 0 {
+                        return Some(k);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    };
+    // (past the item's own attributes)
+    let mut k = 0;
+    while t(k) == b"#" && t(k + 1) == b"[" {
+        k = matching(k + 1)? + 1;
+    }
+    // (the keyword: `enum` or `fn`, past visibility and qualifiers)
+    let kw = loop {
+        match t(k) {
+            b"pub" if t(k + 1) == b"(" => k = matching(k + 1)? + 1,
+            b"pub" | b"const" | b"async" | b"unsafe" | b"default" | b"safe" => k += 1,
+            b"extern" if toks.get(k + 1).is_some_and(|x| x.0 == 2) => k += 2,
+            b"extern" => k += 1,
+            b"enum" | b"fn" if is_id(k + 1) => break t(k),
+            _ => return None,
+        }
+    };
+    // (the body of an enum, the parameters of a fn: past the name and the generics)
+    let open = if kw == b"enum" { b"{".as_slice() } else { b"(".as_slice() };
+    let mut j = k + 2;
+    let mut angle = 0i32;
+    while j < n {
+        match t(j) {
+            b"<" => angle += 1,
+            b">" if t(j - 1) != b"-" => angle -= 1,
+            x if angle == 0 && x == open => break,
+            b"(" | b"[" | b"{" => j = matching(j)?,
+            b";" => return None,
+            _ => {}
+        }
+        j += 1;
+    }
+    let close = matching(j)?;
+    // (the attributes at the group's own level)
+    let mut k = j + 1;
+    while k < close {
+        if matches!(t(k), b"(" | b"[" | b"{") {
+            k = matching(k)? + 1;
+            continue;
+        }
+        if t(k) == b"#" && t(k + 1) == b"[" && is_id(k + 2) && t(k + 3) != b":" {
+            let e = matching(k + 1)?;
+            let name = String::from_utf8_lossy(t(k + 2)).into_owned();
+            let at = toks[k].1;
+            if kw == b"enum" {
+                let hint = (name == "repr" && t(k + 3) == b"(").then(|| matching(k + 3)).flatten();
+                let hint = hint.map(|c| (k + 4..c).map(|x| String::from_utf8_lossy(t(x)).into_owned()).collect::<String>());
+                let shown = match &hint {
+                    Some(h) => match attr_entries(h).into_iter().find(|h| int_repr(h)) {
+                        Some(i) => format!("repr({i})"),
+                        None => format!("repr({})", h.replace(',', ", ")),
+                    },
+                    None => name.clone(),
+                };
+                let error = matches!(name.as_str(), "inline" | "track_caller" | "target_feature" | "repr" | "used" | "link_ordinal" | "debugger_visualizer");
+                let warned = matches!(name.as_str(), "cold" | "no_mangle" | "macro_use" | "export_name" | "link_section" | "must_use");
+                if error || warned && unused_denied {
+                    return Some((at, format!("the `{shown}` attribute cannot be used on enum variants")));
+                }
+            // (not a `rustc_*` one: its feature gate first, `#[rustc_splat]`)
+            } else if !unknown(&name) && !name.starts_with("rustc_") && !matches!(name.as_str(), "allow" | "cfg" | "cfg_attr" | "deny" | "expect" | "forbid" | "warn") {
+                return Some((at, "allow, cfg, cfg_attr, deny, expect, forbid, and warn are the only allowed built-in attributes in function parameters".to_string()));
+            }
+            k = e + 1;
+            continue;
+        }
+        k += 1;
+    }
+    None
+}
+
+/// "cannot find attribute `x` in this scope" of an attribute anywhere in the code, not only on an item: on a field,
+/// a variant, a parameter, a statement, a `macro_rules!`, a module. Not one in a comment or a literal, in a macro's
+/// body or input (what the expansion reads), a name an import binds (`use derive as my_derive;`), nor any where the
+/// crate has a derive not std's, whose helpers it could be. Read only where an attribute's name is unknown at all
+fn unknown_attr_anywhere(src: &str, unknown: &dyn Fn(&str) -> bool) -> Option<String> {
+    // (the candidates: `#[name` / `# [name` whose name is no built-in attribute)
+    let cands: Vec<usize> = src
+        .match_indices('#')
+        .filter(|&(i, _)| {
+            let Some(r) = crate::cfg::trim_trivia(&src[i + 1..]).strip_prefix('[') else { return false };
+            let r = crate::cfg::trim_trivia(r);
+            let n = &r[..r.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':')).unwrap_or(r.len())];
+            unknown(n)
+        })
+        .map(|(i, _)| i)
+        .collect();
+    // (a parse error comes first in rustc: a merge's diff marker)
+    if cands.is_empty() || src.contains("<<<<<<<") {
+        return None;
+    }
+    let b = src.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let n = toks.len();
+    let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
+    let mut close = vec![usize::MAX; n];
+    let mut stack: Vec<usize> = vec![];
+    for k in 0..n {
+        if toks[k].0 == 1 {
+            match t(k) {
+                b"(" | b"[" | b"{" => stack.push(k),
+                b")" | b"]" | b"}" => {
+                    if let Some(o) = stack.pop() {
+                        close[o] = k;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    // (the macros' bodies and inputs: `m!(..)`, `macro_rules! m { .. }`; the names imports bind; a derive not std's)
+    let mut macros: Vec<(usize, usize)> = vec![];
+    let mut bound: FxSet<&[u8]> = FxSet::default();
+    for k in 0..n {
+        if is_id(k) && t(k + 1) == b"!" && t(k.wrapping_sub(1)) != b"$" {
+            let o = if is_id(k + 2) { k + 3 } else { k + 2 };
+            if matches!(t(o), b"(" | b"[" | b"{") && close[o] != usize::MAX {
+                macros.push((toks[o].1, toks[close[o]].2));
+            }
+        }
+        if t(k) == b"use" {
+            let mut j = k + 1;
+            while j < n && t(j) != b";" {
+                if is_id(j) {
+                    bound.insert(t(j));
+                }
+                j += 1;
+            }
+        }
+        if t(k) == b"derive" && t(k + 1) == b"(" && close[k + 1] != usize::MAX {
+            let std = |d: &[u8]| matches!(d, b"Debug" | b"Clone" | b"Copy" | b"PartialEq" | b"Eq" | b"PartialOrd" | b"Ord" | b"Hash" | b"Default");
+            // (the last segment of each path in the list: `std::fmt::Debug`)
+            if (k + 2..close[k + 1]).any(|j| is_id(j) && !matches!(t(j + 1), b":") && !matches!(t(j), b"std" | b"core") && !std(t(j))) {
+                return None;
+            }
+        }
+    }
+    for at in cands {
+        // (a token there: not in a comment or a literal; not in a macro)
+        let Ok(k) = toks.binary_search_by_key(&at, |x| x.1) else { continue };
+        if t(k) != b"#" || t(k.wrapping_sub(1)) == b"$" || macros.iter().any(|&(a, e)| a < at && at < e) {
+            continue;
+        }
+        let o = k + 1;
+        if t(o) != b"[" || !is_id(o + 1) {
+            continue;
+        }
+        let name = t(o + 1);
+        // (one with nothing after it, `{ #[foo] }`, is rustc's parse error first)
+        if t(o + 2) == b":" || bound.contains(name) || close[o] == usize::MAX || matches!(t(close[o] + 1), b"}" | b"") {
+            continue;
+        }
+        let name = String::from_utf8_lossy(name);
+        if unknown(&name) {
+            let line = src[..at].matches('\n').count() + 1;
+            return Some(format!("{line}:1: cannot find attribute `{name}` in this scope"));
         }
     }
     None
@@ -4357,6 +5354,2330 @@ enum Def {
     Crate,
     /// the `extern crate std;` (`core` under `#![no_std]`) the compiler puts in the crate root
     Injected,
+}
+
+/// The names the `extern crate` items the configuring blanked bind: `extern crate a as b;` binds a and b
+fn extern_names(externs: &[(usize, String)]) -> impl Iterator<Item = &str> {
+    externs.iter().flat_map(|(_, text)| {
+        let w: Vec<&str> = text.split(|c: char| !(c.is_alphanumeric() || c == '_')).filter(|w| !w.is_empty()).collect();
+        let from = w.iter().position(|&x| x == "crate").map_or(w.len(), |i| i + 1);
+        w.into_iter().skip(from).filter(|&x| x != "as" && x != "r")
+    })
+}
+
+/// A visibility as written: `pub` (or `pub(crate)`), none (or `pub(self)`), `pub(super)`, `pub(in path)`
+#[derive(Clone)]
+enum PVis<'a> {
+    Pub,
+    /// `pub(crate)`: as `pub` to a module of the crate; narrower for a re-export (E0364)
+    Crate,
+    Priv,
+    Super,
+    In(Vec<&'a [u8]>),
+}
+
+/// An item of a module, as `private_path` reads it
+struct PItem<'a> {
+    name: &'a [u8],
+    /// what rustc calls it: "module", "struct", "unit struct", "tuple struct", "enum", ...
+    kind: &'static str,
+    vis: PVis<'a>,
+    /// the module it is, for a `mod m { .. }`
+    child: usize,
+    /// the token of its name
+    at: usize,
+}
+
+/// The paths of a `use` tree that starts at token `k`, each as the tokens of its segments (`use a::{b, c::d}`: [a, b],
+/// [a, c, d]; a glob or a `self` gives the module's path, and `globs` which leaves those are: 1 a `self`, 2 a glob),
+/// and the token past the tree
+fn use_leaves(
+    b: &[u8],
+    toks: &[(u8, usize, usize)],
+    close: &[usize],
+    k: usize,
+    prefix: &mut Vec<usize>,
+    out: &mut Vec<Vec<usize>>,
+    globs: &mut Vec<u8>,
+) -> usize {
+    let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
+    let depth = prefix.len();
+    let mut k = k;
+    let end = loop {
+        if t(k) == b"{" {
+            let Some(&e) = close.get(k).filter(|&&e| e != usize::MAX) else { break k };
+            let mut j = k + 1;
+            while j < e {
+                j = use_leaves(b, toks, close, j, prefix, out, globs);
+                if t(j) != b"," {
+                    break;
+                }
+                j += 1;
+            }
+            break e + 1;
+        }
+        if t(k) == b"*" {
+            out.push(prefix.clone());
+            globs.push(2);
+            break k + 1;
+        }
+        if !is_id(k) {
+            break k;
+        }
+        let s = if t(k) == b"r" && t(k + 1) == b"#" && is_id(k + 2) { k + 2 } else { k };
+        if t(s + 1) == b":" && t(s + 2) == b":" {
+            prefix.push(s);
+            k = s + 3;
+            continue;
+        }
+        if t(s) == b"self" {
+            out.push(prefix.clone());
+            globs.push(1);
+        } else {
+            let mut p = prefix.clone();
+            p.push(s);
+            out.push(p);
+            globs.push(0);
+        }
+        break if t(s + 1) == b"as" { s + 3 } else { s + 1 };
+    };
+    prefix.truncate(depth);
+    end
+}
+
+/// E0603: a path through the program's own inline modules (`a::b::f()`, `use crate::a::f;`, `super::m::C`) to a
+/// module or item that is not visible where the path is written: "function `f` is private", at that segment, the
+/// first in the text. A path is read only as far as it names the program's own modules and items: one that starts at
+/// another crate, an import, a module of a fn body or a name some import binds, or that reaches a name only an import
+/// or a macro defines, is left alone. Not a path in an attribute or a macro's definition (resolved where it expands).
+/// E0432 too: a `use` path through the program's modules to a name its module does not define ("unresolved import
+/// `a::b`", the path to that segment), or on through an item that is no module (`use m::S::C`, `use m::f::{self}`,
+/// `use m::A::*` of a type alias), where nothing else could bind the name there: no glob import, no `use` or
+/// `extern crate` of it, no item-level macro call or definition, no `extern` block, no module of another file
+/// `fpriv` gets the fields a module may not read, for the type check's E0616 (`s.x` of a struct of another module);
+/// `late` an error to report only where the type check finds none (E0451)
+fn private_path(
+    src: &str,
+    toks: &[(u8, usize, usize)],
+    externs: &[(usize, String)],
+    injected: bool,
+    fpriv: &mut Option<Box<crate::program::FieldPriv>>,
+    late: &mut Option<String>,
+) -> Option<String> {
+    let b = src.as_bytes();
+    let n = toks.len();
+    let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
+    let raw = |k: usize| if t(k) == b"r" && t(k + 1) == b"#" && is_id(k + 2) { k + 2 } else { k };
+    let mut close = vec![usize::MAX; n];
+    let mut stack: Vec<usize> = vec![];
+    for k in 0..n {
+        if toks[k].0 == 1 {
+            match b[toks[k].1] {
+                b'(' | b'[' | b'{' => stack.push(k),
+                b')' | b']' | b'}' => {
+                    if let Some(o) = stack.pop() {
+                        close[o] = k;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    // (modules: the tokens of the body, the parent; the crate root first)
+    let mut mods: Vec<(usize, usize, usize)> = vec![(0, n, usize::MAX)];
+    let mut items: Vec<Vec<PItem>> = vec![];
+    // (in each module, the item-level ranges a path is not read in: a `macro_rules!` and a macro call)
+    let mut skips: Vec<Vec<(usize, usize)>> = vec![];
+    // (the names `use` binds anywhere, and the names of more than one `mod`: a path that starts there is left alone)
+    let mut bound: FxSet<&[u8]> = FxSet::default();
+    // (in each module, the names its imports and `extern crate`s bind (`as` names too), and whether something else
+    // could define a name there: a glob import, an item-level macro, an `extern` block, a `macro`)
+    let mut binds: Vec<FxSet<&[u8]>> = vec![];
+    let mut open_ended: Vec<bool> = vec![];
+    // (for E0659: each module's imports, whether a macro or an `extern` block may define names in it, and where a
+    // module-level `use` item's imports start in its module's list: by the `use` token)
+    let mut imps: Vec<Vec<PImport>> = vec![];
+    let mut opaque: Vec<bool> = vec![];
+    let mut imp_at: FxMap<usize, usize> = FxMap::default();
+    // (a module of another file, `mod m;`, or a macro exported to the crate root: E0432 is not reported)
+    let unknown_mods = (0..n.saturating_sub(2)).any(|k| t(k) == b"mod" && is_id(k + 1) && t(k + 2) == b";" && !matches!(t(k.wrapping_sub(1)), b"." | b"$"))
+        || src.contains("macro_export");
+    let mut mod_names: FxMap<&[u8], u32> = FxMap::default();
+    for k in 0..n.saturating_sub(1) {
+        if t(k) == b"mod" && is_id(k + 1) {
+            *mod_names.entry(t(raw(k + 1))).or_insert(0) += 1;
+        }
+    }
+    while items.len() < mods.len() {
+        let m = items.len();
+        let (lo, hi, _) = mods[m];
+        let (mut its, mut sk): (Vec<PItem>, Vec<(usize, usize)>) = (vec![], vec![]);
+        let (mut bn, mut ended): (FxSet<&[u8]>, bool) = (FxSet::default(), false);
+        let (mut im, mut opq): (Vec<PImport>, bool) = (vec![], false);
+        // (the crate root of 2015 has the injected `std` / `core`; the `extern crate` items the configuring blanked
+        // bind their names, here taken as bound in every module)
+        if m == 0 && injected {
+            bn.extend([&b"std"[..], b"core"]);
+        }
+        bn.extend(extern_names(externs).map(str::as_bytes));
+        let mut k = lo;
+        let mut vis = PVis::Priv;
+        while k < hi {
+            if t(k) == b"#" && (t(k + 1) == b"[" || (t(k + 1) == b"!" && t(k + 2) == b"[")) {
+                let o = if t(k + 1) == b"[" { k + 1 } else { k + 2 };
+                k = close[o].saturating_add(1);
+                continue;
+            }
+            if t(k) == b"pub" {
+                vis = PVis::Pub;
+                k += 1;
+                if t(k) == b"(" && close[k] != usize::MAX {
+                    let e = close[k];
+                    vis = match t(k + 1) {
+                        b"self" => PVis::Priv,
+                        b"super" => PVis::Super,
+                        b"in" => PVis::In((k + 2..e).filter(|&j| is_id(j)).map(t).collect()),
+                        b"crate" => PVis::Crate,
+                        _ => PVis::Pub,
+                    };
+                    k = e + 1;
+                }
+                continue;
+            }
+            if matches!(t(k), b"unsafe" | b"async" | b"default") || t(k) == b"auto" && t(k + 1) == b"trait" || t(k) == b"const" && matches!(t(k + 1), b"fn" | b"unsafe" | b"extern" | b"async") {
+                k += 1;
+                continue;
+            }
+            if t(k) == b"extern" && toks.get(k + 1).is_some_and(|x| x.0 == 2) && matches!(t(k + 2), b"fn" | b"unsafe") {
+                k += 2;
+                continue;
+            }
+            let mut item: Option<(usize, &'static str)> = None;
+            match t(k) {
+                b"mod" if is_id(k + 1) && t(k + 2) == b"{" && close[k + 2] < hi => {
+                    its.push(PItem { name: t(raw(k + 1)), kind: "module", vis: vis.clone(), child: mods.len(), at: raw(k + 1) });
+                    mods.push((k + 3, close[k + 2], m));
+                }
+                b"struct" if is_id(k + 1) => {
+                    let mut j = k + 2;
+                    if t(j) == b"<" {
+                        let mut d = 0i32;
+                        while j < hi {
+                            match t(j) {
+                                b"<" => d += 1,
+                                b">" => {
+                                    d -= 1;
+                                    if d == 0 {
+                                        break;
+                                    }
+                                }
+                                _ => {}
+                            }
+                            j += 1;
+                        }
+                        j += 1;
+                    }
+                    item = Some((k + 1, match t(j) { b";" => "unit struct", b"(" => "tuple struct", _ => "struct" }));
+                }
+                b"enum" if is_id(k + 1) => item = Some((k + 1, "enum")),
+                b"trait" if is_id(k + 1) => item = Some((k + 1, "trait")),
+                b"type" if is_id(k + 1) => item = Some((k + 1, "type alias")),
+                b"union" if is_id(k + 1) && t(k + 1) != b"union" => item = Some((k + 1, "union")),
+                b"fn" if is_id(k + 1) => item = Some((k + 1, "function")),
+                b"const" if is_id(k + 1) && t(k + 1) != b"_" => item = Some((k + 1, "constant")),
+                b"static" if is_id(k + 1) => item = Some((if t(k + 1) == b"mut" { k + 2 } else { k + 1 }, "static")),
+                b"use" => {
+                    let (mut prefix, mut leaves, mut kinds) = (vec![], vec![], vec![]);
+                    let mut j = k + 1;
+                    if t(j) == b":" && t(j + 1) == b":" {
+                        j += 2;
+                    }
+                    let end = use_leaves(b, &toks, &close, j, &mut prefix, &mut leaves, &mut kinds);
+                    imp_at.insert(k, im.len());
+                    for (l, &g) in leaves.iter().zip(&kinds) {
+                        let name = match (g, l.last()) {
+                            (2, _) | (_, None) => &b""[..],
+                            (_, Some(&x)) if t(x + 1) == b"as" => t(raw(x + 2)),
+                            (_, Some(&x)) => t(x),
+                        };
+                        im.push(PImport { name, segs: l.clone(), glob: g, vis: vis.clone(), root: injected || j != k + 1 });
+                        if let Some(&last) = l.last() {
+                            bound.insert(t(last));
+                            if g != 2 {
+                                bn.insert(t(last));
+                            }
+                        }
+                        ended |= g == 2;
+                    }
+                    // (`use a::b as c;`: c)
+                    for x in k..end.min(hi) {
+                        if t(x) == b"as" && is_id(x + 1) {
+                            bn.insert(t(raw(x + 1)));
+                        }
+                    }
+                }
+                // (`extern crate a;` / `extern crate a as b;`)
+                b"extern" if t(k + 1) == b"crate" && is_id(k + 2) => {
+                    bn.insert(t(raw(k + 2)));
+                    if t(k + 3) == b"as" && is_id(k + 4) {
+                        bn.insert(t(raw(k + 4)));
+                    }
+                }
+                // (an `extern` block's items, a `macro`: not read)
+                b"extern" if t(k + 1) == b"{" || toks.get(k + 1).is_some_and(|x| x.0 == 2) && t(k + 2) == b"{" => {
+                    ended = true;
+                    opq = true;
+                }
+                b"macro" if is_id(k + 1) => {
+                    ended = true;
+                    opq = true;
+                }
+                // (`macro_rules! m { .. }` / `m! { .. }` / `m!(..);`: not read)
+                _ if is_id(k) && t(k + 1) == b"!" => {
+                    let o = if is_id(k + 2) { k + 3 } else { k + 2 };
+                    opq |= t(k) != b"macro_rules";
+                    if close.get(o).is_some_and(|&e| e != usize::MAX) {
+                        sk.push((k, close[o]));
+                    }
+                    ended = true;
+                }
+                _ => {}
+            }
+            if let Some((at, kind)) = item {
+                its.push(PItem { name: t(raw(at)), kind, vis: vis.clone(), child: usize::MAX, at: raw(at) });
+            }
+            vis = PVis::Priv;
+            // to the item's end: a `;` or a body `{ .. }`
+            let mut j = if item.is_some() || t(k) == b"mod" { k + 1 } else { k };
+            loop {
+                if j >= hi {
+                    break;
+                }
+                match t(j) {
+                    b";" => break,
+                    b"{" => {
+                        j = close[j];
+                        if t(j + 1) != b";" && !matches!(t(j + 1), b"." | b"?" | b"+" | b"-" | b"*" | b"/") {
+                            break;
+                        }
+                    }
+                    b"(" | b"[" => j = close[j],
+                    _ => {}
+                }
+                if j == usize::MAX {
+                    return None;
+                }
+                j += 1;
+            }
+            k = j.saturating_add(1);
+        }
+        items.push(its);
+        skips.push(sk);
+        binds.push(bn);
+        open_ended.push(ended);
+        imps.push(im);
+        opaque.push(opq);
+    }
+    let parent = |m: usize| mods[m].2;
+    let within = |mut a: usize, b: usize| loop {
+        if a == b {
+            break true;
+        }
+        if a == usize::MAX || a == 0 {
+            break false;
+        }
+        a = parent(a);
+    };
+    // (the module a path of segments names, from the crate root; None if it names none)
+    let module_at = |segs: &[&[u8]], from: usize| -> Option<usize> {
+        let (mut cur, mut s) = match segs.first() {
+            Some(&b"crate") => (0, 1),
+            Some(&b"self") => (from, 1),
+            _ => (from, 0),
+        };
+        while segs.get(s) == Some(&&b"super"[..]) {
+            cur = parent(cur);
+            if cur == usize::MAX {
+                return None;
+            }
+            s += 1;
+        }
+        for seg in &segs[s..] {
+            cur = items[cur].iter().find(|x| x.name == *seg && x.child != usize::MAX)?.child;
+        }
+        Some(cur)
+    };
+    let visible = |def: usize, vis: &PVis, from: usize| match vis {
+        PVis::Pub | PVis::Crate => true,
+        PVis::Priv => within(from, def),
+        PVis::Super => match parent(def) {
+            usize::MAX => within(from, def),
+            p => within(from, p),
+        },
+        // (`pub(in path)`: from the crate root in 2015, from the module later; one that names no module is taken as
+        // `pub`)
+        PVis::In(p) => match module_at(p, if injected { 0 } else { def }) {
+            Some(x) => within(from, x),
+            None => true,
+        },
+    };
+    // (the first segment a path cannot reach: its token and rustc's word for it)
+    // (E0432 at segment i: the path to it)
+    let unresolved = |segs: &[usize], i: usize| -> (usize, String) {
+        let p: Vec<String> = segs[..=i].iter().map(|&x| String::from_utf8_lossy(t(x)).into_owned()).collect();
+        (segs[i], format!("unresolved import `{}` (E0432)", p.join("::")))
+    };
+    // (whether only the module's own items define its names)
+    let closed = |cur: usize, name: &[u8]| !unknown_mods && !open_ended[cur] && !binds[cur].contains(name);
+    let check = |m: usize, segs: &[usize], from_root: bool, in_use: bool, glob: u8| -> Option<(usize, String)> {
+        let first = t(segs[0]);
+        let (mut cur, mut s) = match first {
+            b"crate" => (0, 1),
+            b"self" => (m, 1),
+            b"super" => (m, 0),
+            _ if from_root => (0, 0),
+            _ => (m, 0),
+        };
+        while s < segs.len() && t(segs[s]) == b"super" {
+            cur = parent(cur);
+            if cur == usize::MAX {
+                return None;
+            }
+            s += 1;
+        }
+        if s >= segs.len() || s == 0 && (bound.contains(first) || mod_names.get(first).is_some_and(|&c| c > 1)) {
+            return None;
+        }
+        for i in s..segs.len() {
+            let name = t(segs[i]);
+            // (E0433: `super` / `crate` past the start, `self` past the start and before the end: `crate::x::super::f`)
+            if matches!(name, b"super" | b"crate") || name == b"self" && i + 1 < segs.len() {
+                let tail = if name == b"self" { " or last position" } else { "" };
+                return Some((segs[i], format!("`{}` in paths can only be used in start position{tail} (E0433)", String::from_utf8_lossy(name))));
+            }
+            // (a glob's or a `self`'s module, `use m::f::{self}`, is no item: it must be a module, as the segments
+            // before it)
+            let last = i + 1 == segs.len() && glob == 0;
+            let defs: Vec<&PItem> = items[cur].iter().filter(|x| x.name == name).collect();
+            // (a `use` path from a module of the program: past the first segment of a relative path, which may name
+            // another crate)
+            let anchored = in_use && (i > 0 || from_root);
+            if defs.is_empty() && anchored && closed(cur, name) {
+                return Some(unresolved(segs, i));
+            }
+            // (a name defined here or nowhere: what an import or a macro brings is not followed)
+            if defs.is_empty() || i == s && s == 0 && !from_root && !defs.iter().any(|x| x.child != usize::MAX) {
+                return None;
+            }
+            // (on through an item that has no names of its own to import: a fn, a struct, a type alias, ..; not an
+            // enum's variants nor a trait's items)
+            if !last
+                && anchored
+                && !defs.iter().any(|x| x.child != usize::MAX || matches!(x.kind, "enum" | "trait"))
+                && closed(cur, name)
+            {
+                return Some(unresolved(segs, i));
+            }
+            if i == s && s == 0 && !defs.iter().any(|x| x.child != usize::MAX) {
+                return None;
+            }
+            if !last {
+                // (a module goes on; a type ends the path, its associated items are not read: a struct there is the type,
+                // `a::Foo::new`)
+                let d = defs.iter().find(|x| x.child != usize::MAX).or_else(|| defs.iter().find(|x| matches!(x.kind, "struct" | "unit struct" | "tuple struct" | "enum" | "trait" | "type alias" | "union")))?;
+                if !visible(cur, &d.vis, m) {
+                    return Some((segs[i], format!("{} `{}` is private (E0603)", if d.kind.ends_with(" struct") { "struct" } else { d.kind }, String::from_utf8_lossy(name))));
+                }
+                if d.child == usize::MAX {
+                    return None;
+                }
+                cur = d.child;
+                continue;
+            }
+            if defs.iter().any(|d| visible(cur, &d.vis, m)) {
+                return None;
+            }
+            let d = defs[0];
+            // (what rustc calls a struct where the path is written: a value, a constructor, or the type)
+            let mut word = d.kind;
+            if word.ends_with(" struct") {
+                // (the token before the path, past a leading `::` and any `&` / `mut`)
+                let mut j = segs[0] as isize - if t(segs[0].wrapping_sub(1)) == b":" && t(segs[0].wrapping_sub(2)) == b":" { 3 } else { 1 };
+                let tk = |j: isize| if j < 0 { &b""[..] } else { t(j as usize) };
+                while matches!(tk(j), b"&" | b"mut") {
+                    j -= 1;
+                }
+                let (p, pp) = (tk(j), tk(j - 1));
+                // (`S { field: m::U }`: a struct literal's field takes a value; not a struct's or a variant's field)
+                let enclosing = |mut j: isize| -> isize {
+                    let mut d = 0i32;
+                    while j >= 0 {
+                        match tk(j) {
+                            b")" | b"]" | b"}" => d += 1,
+                            b"(" | b"[" | b"{" if d == 0 => return j,
+                            b"(" | b"[" | b"{" => d -= 1,
+                            _ => {}
+                        }
+                        j -= 1;
+                    }
+                    -1
+                };
+                let defines = |o: isize| o >= 1 && (matches!(tk(o - 2), b"struct" | b"union" | b"enum") || tk(o - 1) == b">");
+                let field_value = p == b":" && pp != b":" && is_id((j - 1) as usize) && matches!(tk(j - 2), b"{" | b",") && {
+                    let o = enclosing(j - 1);
+                    o >= 1 && tk(o) == b"{" && is_id((o - 1) as usize) && !defines(o) && !matches!(tk(o - 2), b"{" | b",") || {
+                        // (a variant's fields: `enum E { V { a: m::U } }`)
+                        o >= 2 && tk(o) == b"{" && is_id((o - 1) as usize) && matches!(tk(o - 2), b"{" | b",") && {
+                            let e = enclosing(o - 1);
+                            !(e >= 2 && tk(e) == b"{" && tk(e - 2) == b"enum")
+                        }
+                    }
+                };
+                let typed = !field_value && (matches!(p, b"<" | b"as" | b"impl" | b"for" | b"dyn") || p == b":" && pp != b":" || p == b">" && pp == b"-");
+                word = if in_use || typed {
+                    "struct"
+                } else if word == "tuple struct" {
+                    "tuple struct constructor"
+                } else {
+                    word
+                };
+            }
+            return Some((segs[i], format!("{word} `{}` is private (E0603)", String::from_utf8_lossy(name))));
+        }
+        None
+    };
+    // (E0659: read where some module has more than one glob import, and every module is in this text)
+    let globs = imps.iter().flatten().filter(|x| x.glob == 2).count();
+    let amb_on = globs >= 2 && !unknown_mods && !src.contains("ambiguous_glob_imports");
+    // (E0451: read where a struct or union of a module other than the crate root has a field that is not `pub`; the
+    // names of those)
+    let mut hidden_structs: FxSet<&[u8]> = FxSet::default();
+    if !unknown_mods {
+        for (m, its) in items.iter().enumerate().skip(1) {
+            for it in its {
+                if matches!(it.kind, "struct" | "union") && struct_fields(b, toks, &close, it.at, mods[m].1).iter().any(|f| !matches!(f.1, PVis::Pub | PVis::Crate)) {
+                    hidden_structs.insert(it.name);
+                }
+            }
+        }
+    }
+    let priv_on = !hidden_structs.is_empty();
+    // (E0624: the inherent impls of modules other than the crate root that have a member that is not `pub`; the names
+    // trait fns have, whose calls may be the trait's)
+    let (impls, trait_fns) = if mods.len() > 1 && !unknown_mods && src.contains("impl") { impl_members(b, toks, &close, &mods) } else { (vec![], FxSet::default()) };
+    let assoc_on = impls.iter().any(|r| r.m != 0 && r.members.iter().any(|x| !matches!(x.2, PVis::Pub | PVis::Crate)));
+    // (E0603 of an import: the names imports of modules other than the crate root bind that are not seen everywhere in
+    // the crate; E0364 / E0365: whether any import re-exports)
+    let imp_priv_names: FxSet<&[u8]> = if unknown_mods {
+        FxSet::default()
+    } else {
+        imps.iter().skip(1).flatten().filter(|x| x.glob != 2 && !x.name.is_empty() && !matches!(x.vis, PVis::Pub | PVis::Crate)).map(|x| x.name).collect()
+    };
+    let reexp_on = !unknown_mods && mods.len() > 1 && imps.iter().flatten().any(|x| x.glob == 0 && !matches!(x.vis, PVis::Priv));
+    // (E0603 / E0423 / E0532: the tuple structs of modules other than the crate root with a field that is not `pub`,
+    // whose constructor is as visible as that field)
+    let ctor_names: FxSet<&[u8]> = if unknown_mods {
+        FxSet::default()
+    } else {
+        items
+            .iter()
+            .skip(1)
+            .flatten()
+            .filter(|it| it.kind == "tuple struct" && tuple_fields(b, toks, &close, it.at).is_some_and(|v| v.iter().any(|x| !matches!(x, PVis::Pub | PVis::Crate))))
+            .map(|it| it.name)
+            .collect()
+    };
+    // (E0432 of an import cycle or a glob of a module into itself: a `pub use` of a path through the program's modules,
+    // or a glob of `self` / `super` / `crate`)
+    let cycle_on = !unknown_mods && imps.iter().flatten().any(|x| x.glob == 0 && x.segs.len() >= 2 && !matches!(x.vis, PVis::Priv))
+        || !unknown_mods && imps.iter().flatten().any(|x| x.glob == 2 && x.segs.first().is_some_and(|&f| matches!(t(f), b"self" | b"super" | b"crate")));
+    let mut amb = (amb_on || priv_on || assoc_on || !imp_priv_names.is_empty() || reexp_on || cycle_on || !ctor_names.is_empty()).then(|| Ambiguity {
+        b,
+        toks,
+        close: &close,
+        mods: &mods,
+        items: &items,
+        imps: &imps,
+        opaque: &opaque,
+        injected,
+        busy: vec![],
+        busy_imp: vec![],
+        steps: 0,
+        targets: FxMap::default(),
+        named: items
+            .iter()
+            .map(|its| {
+                let mut ix: FxMap<&[u8], Vec<u32>> = FxMap::default();
+                for (i, it) in its.iter().enumerate() {
+                    ix.entry(it.name).or_default().push(i as u32);
+                }
+                ix
+            })
+            .collect(),
+        cycles: vec![],
+        unknown: false,
+    });
+    // (the names a glob may bring: the program's items, enum variants and import names; for E0451 alone, the names a
+    // literal's path starts with: those structs' and the modules')
+    let mut amb_names: FxSet<&[u8]> = FxSet::default();
+    if !amb_on {
+        amb_names.extend(hidden_structs.iter().copied());
+        amb_names.extend(items.iter().flatten().filter(|x| x.child != usize::MAX).map(|x| x.name));
+    } else if let Some(a) = &amb {
+        for (m, its) in items.iter().enumerate() {
+            for it in its {
+                amb_names.insert(it.name);
+                if it.kind == "enum" {
+                    amb_names.extend(a.variants_at(it.at, mods[m].1).into_iter().map(|k| t(k)));
+                }
+            }
+        }
+        amb_names.extend(imps.iter().flatten().map(|x| x.name).filter(|x| !x.is_empty()));
+    }
+    // (E0624: each private member of an inherent impl, by its type and name: what it is and the module it is visible
+    // within; a member two impls give different visibilities is left out. The type check's share: by the type's name,
+    // where no other item has it, the fns, not of a name a trait fn has)
+    let mut assoc: FxMap<(u32, u32, &[u8]), Option<(&'static str, usize)>> = FxMap::default();
+    let mut methods: FxMap<String, Vec<(String, u32)>> = FxMap::default();
+    if let (true, Some(a)) = (assoc_on, amb.as_mut()) {
+        let mut count: FxMap<&[u8], u32> = FxMap::default();
+        for it in items.iter().flatten() {
+            *count.entry(it.name).or_insert(0) += 1;
+        }
+        for r in &impls {
+            if r.self_path.is_empty() {
+                continue;
+            }
+            let APath::Defs(d) = a.path(r.m, &r.self_path, false, 1) else { continue };
+            let types: Vec<ADef> = d.iter().filter(|x| x.0 & 1 != 0).map(|x| x.1).collect();
+            let &[x] = &types[..] else { continue };
+            let it = &items[x.m as usize][x.i as usize];
+            if x.v != u32::MAX || !matches!(it.kind, "struct" | "unit struct" | "tuple struct" | "enum" | "union") {
+                continue;
+            }
+            for &(nt, kind, ref vis) in &r.members {
+                let scope = match vis {
+                    PVis::Pub | PVis::Crate => None,
+                    PVis::Priv => Some(r.m),
+                    PVis::Super => Some(if r.m == 0 { 0 } else { mods[r.m].2 }),
+                    PVis::In(p) => a.module_at(p, if injected { 0 } else { r.m }),
+                };
+                let key = (x.m, x.i, t(nt));
+                let v = scope.map(|sc| (kind, sc));
+                match assoc.get(&key) {
+                    Some(old) if *old != v => {
+                        assoc.insert(key, None);
+                    }
+                    _ => {
+                        assoc.entry(key).or_insert(v);
+                    }
+                }
+            }
+        }
+        for (&(m, i, name), v) in &assoc {
+            let it = &items[m as usize][i as usize];
+            if let Some(("associated function", sc)) = v {
+                if count.get(it.name) == Some(&1) && !trait_fns.contains(name) && *sc != 0 {
+                    methods.entry(String::from_utf8_lossy(it.name).into_owned()).or_default().push((String::from_utf8_lossy(name).into_owned(), *sc as u32));
+                }
+            }
+        }
+    }
+    let assoc_names: FxSet<&[u8]> = assoc.keys().map(|k| k.2).collect();
+    if priv_on || !methods.is_empty() {
+        let mut fp = field_priv(b, toks, &close, &mods, &items, injected);
+        fp.methods = methods;
+        *fpriv = Some(Box::new(fp));
+    }
+    let amb_msg = |k: usize| Some((k, format!("`{}` is ambiguous (E0659)", String::from_utf8_lossy(t(k)))));
+    // (E0433: a path with more leading `super`s than its module has parents: "too many leading `super` keywords within
+    // `crate::outer::inner`", at the first one past the crate root)
+    let mod_path = |m: usize| -> String {
+        let mut names: Vec<String> = vec![];
+        let mut cur = m;
+        while cur != 0 && cur != usize::MAX {
+            let p = mods[cur].2;
+            match items.get(p).and_then(|its| its.iter().find(|x| x.child == cur)) {
+                Some(it) => names.push(String::from_utf8_lossy(it.name).into_owned()),
+                None => break,
+            }
+            cur = p;
+        }
+        names.push("crate".to_string());
+        names.reverse();
+        names.join("::")
+    };
+    let super_depth = |m: usize, segs: &[usize]| -> Option<(usize, String)> {
+        let mut i = usize::from(segs.first().is_some_and(|&x| t(x) == b"self"));
+        let mut cur = m;
+        while i < segs.len() && t(segs[i]) == b"super" {
+            if cur == 0 {
+                return Some((segs[i], format!("too many leading `super` keywords within `{}` (E0433)", mod_path(m))));
+            }
+            cur = mods[cur].2;
+            i += 1;
+        }
+        None
+    };
+    // (each module's own tokens, past its child modules and its item-level macros, for the paths in them)
+    let mut found: Option<(usize, String)> = None;
+    let mut found_late: Option<(usize, String)> = None;
+    let mut keep_late = |at: usize, msg: String| {
+        if found_late.as_ref().is_none_or(|f| at < f.0) {
+            found_late = Some((at, msg));
+        }
+    };
+    let mut keep = |e: Option<(usize, String)>| {
+        if let Some(e) = e {
+            if found.as_ref().is_none_or(|f| e.0 < f.0) {
+                found = Some(e);
+            }
+        }
+    };
+    for m in 0..mods.len() {
+        let (lo, hi, _) = mods[m];
+        let mut jumps: Vec<(usize, usize)> = skips[m].clone();
+        jumps.extend(mods.iter().filter(|x| x.2 == m).map(|x| (x.0, x.1)));
+        jumps.sort_unstable();
+        // (the module's scope facts, read at its first site)
+        let sc: std::cell::OnceCell<AScope> = std::cell::OnceCell::new();
+        let has_glob = amb_on && imps[m].iter().any(|x| x.glob == 2);
+        // (whether token k is a name a path may start with here, for E0659 and E0451: not a binding, a definition, or
+        // in a macro's arguments)
+        macro_rules! free {
+            ($a:expr, $k:expr) => {{
+                let k: usize = $k;
+                let sc = sc.get_or_init(|| $a.scope(lo, hi, &jumps, &amb_names));
+                let name = t(k);
+                !sc.defs.contains(&k) && !sc.skip.iter().any(|&(a, e)| a < k && k < e) && !sc.covers.iter().any(|&(nm, a, e)| (nm == name || nm.is_empty()) && a <= k && k <= e)
+            }};
+        }
+        let after_colons = |k: usize| t(k.wrapping_sub(1)) == b":" && t(k.wrapping_sub(2)) == b":";
+        // (whether a path from token k followed by `{` may be a struct literal or pattern: not a definition's name, an
+        // impl's or a fn's return type, nor the expression of an `if` / `while` / `match` / `for`)
+        let literal_at = |k: usize| {
+            let j = if after_colons(k) { k.wrapping_sub(3) } else { k.wrapping_sub(1) };
+            let p = t(j);
+            !(matches!(p, b"struct" | b"enum" | b"union" | b"trait" | b"impl" | b"for" | b"mod" | b"fn" | b"if" | b"while" | b"match" | b"in" | b"dyn" | b"where" | b"type")
+                || p == b">" && t(j.wrapping_sub(1)) == b"-")
+        };
+        let mut cache: FxMap<&[u8], ADefs> = FxMap::default();
+        let mut ji = 0;
+        let mut k = lo;
+        while k < hi {
+            while ji < jumps.len() && jumps[ji].1 < k {
+                ji += 1;
+            }
+            if ji < jumps.len() && jumps[ji].0 <= k {
+                k = jumps[ji].1 + 1;
+                continue;
+            }
+            // (an attribute; a module of a fn body, whose paths start there)
+            if t(k) == b"#" && (t(k + 1) == b"[" || t(k + 1) == b"!" && t(k + 2) == b"[") {
+                let o = if t(k + 1) == b"[" { k + 1 } else { k + 2 };
+                k = close[o].saturating_add(1);
+                continue;
+            }
+            if t(k) == b"mod" && is_id(k + 1) && t(k + 2) == b"{" && close[k + 2] != usize::MAX {
+                k = close[k + 2] + 1;
+                continue;
+            }
+            if t(k) == b"use" && !(t(k.wrapping_sub(1)) == b":" || t(k.wrapping_sub(1)) == b".") {
+                let mut j = k + 1;
+                let lead = t(j) == b":" && t(j + 1) == b":";
+                if lead {
+                    j += 2;
+                }
+                let (mut prefix, mut leaves, mut kinds) = (vec![], vec![], vec![]);
+                let end = use_leaves(b, &toks, &close, j, &mut prefix, &mut leaves, &mut kinds);
+                if !lead || injected {
+                    for (l, &g) in leaves.iter().zip(&kinds).filter(|(l, _)| !l.is_empty()) {
+                        keep(check(m, l, injected, true, g));
+                        keep(super_depth(m, l));
+                    }
+                }
+                // (E0603 of a private import on the path; E0364 / E0365: a re-export wider than what it names)
+                if let (Some(a), Some(&j0)) = (amb.as_mut(), imp_at.get(&k)) {
+                    for (li, (l, &g)) in leaves.iter().zip(&kinds).enumerate() {
+                        let Some(imp) = imps[m].get(j0 + li) else { continue };
+                        if l.is_empty() {
+                            continue;
+                        }
+                        a.busy_imp.push((m, j0 + li));
+                        if l.iter().any(|&x| imp_priv_names.contains(t(x))) {
+                            keep(a.import_privacy(m, l, imp.root, false));
+                        }
+                        if reexp_on && g == 0 && !matches!(imp.vis, PVis::Priv) {
+                            keep(a.reexport(m, l, imp.root, &imp.vis));
+                        }
+                        if cycle_on && g == 0 && !matches!(imp.vis, PVis::Priv) {
+                            keep(a.import_cycle(m, j0 + li, l, imp.root));
+                        }
+                        // (a glob of the module into itself: `use self::*;`)
+                        if g == 2 && a.glob_target(m, j0 + li) == Some((m, None)) {
+                            let p: Vec<String> = l.iter().map(|&x| String::from_utf8_lossy(t(x)).into_owned()).collect();
+                            keep(Some((l[0], format!("unresolved import `{}::*` (E0432)", p.join("::")))));
+                        }
+                        a.busy_imp.pop();
+                    }
+                }
+                // (E0659: an import of the module, resolved without itself)
+                if let (Some(a), Some(&j0), true) = (amb.as_mut(), imp_at.get(&k), amb_on) {
+                    for (li, (l, &g)) in leaves.iter().zip(&kinds).enumerate() {
+                        if l.is_empty() || imps[m].len() <= j0 + li {
+                            continue;
+                        }
+                        a.busy_imp.push((m, j0 + li));
+                        let r = a.path(m, l, imps[m][j0 + li].root, if g == 0 { 3 } else { 1 });
+                        a.busy_imp.pop();
+                        match r {
+                            APath::Amb(i) => keep(amb_msg(l[i])),
+                            APath::Defs(d) if ambiguous_in(&d, if g == 0 { 0 } else { 1 }) => keep(amb_msg(*l.last().unwrap())),
+                            _ => {}
+                        }
+                    }
+                }
+                k = end.max(k + 1);
+                continue;
+            }
+            // (a path's first segment: not after `::`, `.` or a macro's `$`)
+            let after_colons = |k: usize| t(k.wrapping_sub(1)) == b":" && t(k.wrapping_sub(2)) == b":";
+            if is_id(k) && t(k + 1) == b":" && t(k + 2) == b":" && is_id(k + 3) && !(after_colons(k) || matches!(t(k.wrapping_sub(1)), b"." | b"$" | b"'")) {
+                // (a path can reach a module of the program only from one of their names, `crate`, `self` or `super`)
+                let first = t(raw(k));
+                let reads = matches!(first, b"crate" | b"self" | b"super") || mod_names.contains_key(first);
+                let mut segs = if reads { vec![raw(k)] } else { vec![] };
+                let mut j = k;
+                while t(j + 1) == b":" && t(j + 2) == b":" && is_id(j + 3) {
+                    j = raw(j + 3);
+                    if reads {
+                        segs.push(j);
+                    }
+                }
+                if reads {
+                    keep(check(m, &segs, false, false, 0));
+                    keep(super_depth(m, &segs));
+                }
+                // (E0659: a segment of the path; E0451: a struct literal's or pattern's fields, where its last segment
+                // names a struct with such a field; the scope facts last, as they are read only then)
+                let x = j;
+                let lit = priv_on && t(x + 1) == b"{" && hidden_structs.contains(t(x));
+                let member = assoc_on && assoc_names.contains(t(x));
+                let ctor = !ctor_names.is_empty() && ctor_names.contains(t(x)) && t(x + 1) == b"(";
+                let via_import = !imp_priv_names.is_empty() && {
+                    let mut y = raw(k);
+                    let mut any = false;
+                    while t(y + 1) == b":" && t(y + 2) == b":" && is_id(y + 3) {
+                        y = raw(y + 3);
+                        any |= imp_priv_names.contains(t(y));
+                    }
+                    any
+                };
+                if amb.is_some() && (amb_on || lit || member || via_import || ctor) {
+                    let mut all = vec![raw(k)];
+                    let mut y = raw(k);
+                    while t(y + 1) == b":" && t(y + 2) == b":" && is_id(y + 3) {
+                        y = raw(y + 3);
+                        all.push(y);
+                    }
+                    if amb_on && amb.as_ref().is_some_and(|a| free!(a, raw(k))) {
+                        let a = amb.as_mut().unwrap();
+                        match a.path(m, &all, false, 3) {
+                            APath::Amb(i) => keep(amb_msg(all[i])),
+                            APath::Defs(d) if ambiguous_in(&d, a.site_ns(raw(k), x)) => keep(amb_msg(x)),
+                            _ => {}
+                        }
+                    }
+                    // (E0603: a private import on the path, `a::b::S` with `use x::S;` in b)
+                    if via_import && amb.as_ref().is_some_and(|a| free!(a, raw(k))) {
+                        let a = amb.as_mut().unwrap();
+                        let value = !matches!(a.site_ns(raw(k), x), 1);
+                        keep(a.import_privacy(m, &all, false, value));
+                    }
+                    // (E0603: `a::S(1)` of a tuple struct with a field the module may not see)
+                    if ctor && amb.as_ref().is_some_and(|a| free!(a, raw(k))) {
+                        let a = amb.as_mut().unwrap();
+                        if let Some(name) = a.ctor_hidden(m, &all) {
+                            keep(Some((x, format!("tuple struct constructor `{}` is private (E0603)", String::from_utf8_lossy(name)))));
+                        }
+                    }
+                    // (E0624: `a::S::new()`, `Foo::ID`: a private member of the type's inherent impl)
+                    if member && all.len() >= 2 {
+                        let a = amb.as_mut().unwrap();
+                        if let APath::Defs(d) = a.path(m, &all[..all.len() - 1], false, 1) {
+                            let types: Vec<ADef> = d.iter().filter(|x| x.0 & 1 != 0).map(|x| x.1).collect();
+                            if let &[ty] = &types[..] {
+                                if let Some(&Some((kind, sc))) = assoc.get(&(ty.m, ty.i, t(x))) {
+                                    if !a.within(m, sc) && free!(a, raw(k)) {
+                                        keep(Some((x, format!("{kind} `{}` is private (E0624)", String::from_utf8_lossy(t(x))))));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if lit && literal_at(raw(k)) {
+                        let r = amb.as_mut().and_then(|a| a.literal_privacy(m, &all, x + 1));
+                        if r.is_some() && amb.as_ref().is_some_and(|a| free!(a, raw(k))) {
+                            match r {
+                                Some((at, msg, true)) => keep_late(at, msg),
+                                Some((at, msg, false)) => keep(Some((at, msg))),
+                                None => {}
+                            }
+                        }
+                    }
+                }
+                k = j + 1;
+                continue;
+            }
+            // (`::a::b`: from the crate root in 2015)
+            if t(k) == b":" && t(k + 1) == b":" && is_id(k + 2) && !(is_id(k.wrapping_sub(1)) || matches!(t(k.wrapping_sub(1)), b">" | b"$" | b":")) {
+                let mut segs = vec![raw(k + 2)];
+                let mut j = segs[0];
+                while t(j + 1) == b":" && t(j + 2) == b":" && is_id(j + 3) {
+                    j = raw(j + 3);
+                    segs.push(j);
+                }
+                if injected && segs.len() > 1 {
+                    keep(check(m, &segs, true, false, 0));
+                }
+                if amb.as_ref().is_some_and(|a| amb_on && injected && free!(a, segs[0])) {
+                    let a = amb.as_mut().unwrap();
+                    match a.path(m, &segs, true, 3) {
+                        APath::Amb(i) => keep(amb_msg(segs[i])),
+                        APath::Defs(d) if ambiguous_in(&d, a.site_ns(k, j)) => keep(amb_msg(j)),
+                        _ => {}
+                    }
+                }
+                k = j + 1;
+                continue;
+            }
+            // (E0423 / E0532: `S(1)` / `S(x) =>` of a tuple struct with a field the module may not see)
+            if !ctor_names.is_empty()
+                && is_id(k)
+                && t(k + 1) == b"("
+                && ctor_names.contains(t(k))
+                && !after_colons(k)
+                && !matches!(t(k.wrapping_sub(1)), b"." | b"$" | b"'" | b"#" | b"fn" | b"struct" | b"enum" | b"union" | b"impl" | b"for" | b"dyn" | b"->" | b"<")
+                && amb.as_ref().is_some_and(|a| free!(a, k))
+            {
+                let a = amb.as_mut().unwrap();
+                if a.ctor_hidden(m, &[k]).is_some() {
+                    // (a pattern: `let S(x) =`, `S(x) =>`, a parameter's `S(x): S`, an or-pattern)
+                    let e = close[k + 1];
+                    let after = t(e.wrapping_add(1));
+                    let pattern = t(k.wrapping_sub(1)) == b"let" || matches!(after, b"|" | b"if" | b"in") || after == b":" && t(e + 2) != b":" || after == b"=" && t(e + 2) != b"=";
+                    let msg = if pattern { "cannot match against a tuple struct which contains private fields (E0532)" } else { "cannot initialize a tuple struct which contains private fields (E0423)" };
+                    keep(Some((k, msg.to_string())));
+                }
+            }
+            // (E0451: a struct literal or pattern of one segment, `Foo { x: 1 }`)
+            if priv_on
+                && is_id(k)
+                && t(k + 1) == b"{"
+                && hidden_structs.contains(t(k))
+                && !after_colons(k)
+                && !matches!(t(k.wrapping_sub(1)), b"." | b"$" | b"'" | b"#")
+                && literal_at(k)
+            {
+                let r = amb.as_mut().and_then(|a| a.literal_privacy(m, &[k], k + 1));
+                if r.is_some() && amb.as_ref().is_some_and(|a| free!(a, k)) {
+                    match r {
+                        Some((at, msg, true)) => keep_late(at, msg),
+                        Some((at, msg, false)) => keep(Some((at, msg))),
+                        None => {}
+                    }
+                }
+            }
+            // (E0659: a name a glob of the module brings, where a path of one segment names it)
+            if has_glob && is_id(k) && amb_names.contains(t(k)) && amb.as_ref().is_some_and(|a| free!(a, k)) {
+                let (p, pp, nx) = (t(k.wrapping_sub(1)), t(k.wrapping_sub(2)), t(k + 1));
+                let defines = matches!(p, b"fn" | b"struct" | b"enum" | b"trait" | b"type" | b"union" | b"mod" | b"const" | b"static" | b"crate" | b"macro_rules" | b"macro")
+                    || p == b"mut" && pp != b"&"
+                    || p == b"ref"
+                    || p == b"!" && pp == b"macro_rules";
+                // (nor a field's name, a macro's named argument (`format!("{x}", x = 1)`))
+                let not_path = matches!(p, b"." | b"$" | b"'" | b"#")
+                    || after_colons(k)
+                    || matches!(nx, b"!" | b"@")
+                    || nx == b":" && t(k + 2) != b":"
+                    || p == b"," && nx == b"=" && !matches!(t(k + 2), b"=" | b">");
+                if !defines && !not_path {
+                    if let Some(a) = amb.as_mut() {
+                        let name = t(k);
+                        let d = match cache.get(name) {
+                            Some(d) => d.clone(),
+                            None => {
+                                let d = a.lookup(m, name, m, 3);
+                                cache.insert(name, d.clone());
+                                d
+                            }
+                        };
+                        if d.is_some_and(|d| ambiguous_in(&d, a.site_ns(k, k))) {
+                            keep(amb_msg(k));
+                        }
+                    }
+                }
+            }
+            k += 1;
+        }
+    }
+    let place = |(at, msg): (usize, String)| {
+        let off = toks[at].1;
+        let line = b[..off].iter().filter(|&&c| c == b'\n').count() + 1;
+        let col = off - src[..off].rfind('\n').map_or(0, |p| p + 1) + 1;
+        format!("{line}:{col}: {msg}")
+    };
+    *late = found_late.map(place);
+    found.map(place)
+}
+
+
+/// An inherent impl, as impl_members reads it: its module, its self type's path, and its fns and consts (the name's
+/// token, rustc's word for it, its visibility)
+struct ImplRec<'a> {
+    m: usize,
+    self_path: Vec<usize>,
+    members: Vec<(usize, &'static str, PVis<'a>)>,
+}
+
+/// The inherent impls in each module's own text (in its fn bodies too: a block is no module), and the names of the fns
+/// of traits and trait impls
+fn impl_members<'a>(b: &'a [u8], toks: &[(u8, usize, usize)], close: &[usize], mods: &[(usize, usize, usize)]) -> (Vec<ImplRec<'a>>, FxSet<&'a [u8]>) {
+    let t = |k: usize| -> &'a [u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
+    let (mut out, mut trait_fns): (Vec<ImplRec<'a>>, FxSet<&'a [u8]>) = (vec![], FxSet::default());
+    for (m, &(lo, hi, _)) in mods.iter().enumerate() {
+        let mut kids: Vec<(usize, usize)> = mods.iter().filter(|x| x.2 == m && x.0 > 0).map(|x| (x.0, x.1)).collect();
+        kids.sort_unstable();
+        let mut ki = 0;
+        let mut k = lo;
+        while k < hi {
+            while ki < kids.len() && kids[ki].1 < k {
+                ki += 1;
+            }
+            if ki < kids.len() && kids[ki].0 <= k {
+                k = kids[ki].1 + 1;
+                continue;
+            }
+            let is_trait = t(k) == b"trait" && is_id(k + 1);
+            let is_impl = t(k) == b"impl" && (k == lo || matches!(t(k - 1), b"}" | b";" | b"{" | b"]" | b"unsafe" | b"default"));
+            if !is_trait && !is_impl {
+                k += 1;
+                continue;
+            }
+            // (the header, to the body's `{`: generics skipped; `for` makes it a trait impl)
+            let mut j = k + 1;
+            let mut d = 0i32;
+            let mut path: Vec<usize> = vec![];
+            let mut for_ = false;
+            let mut done_path = false;
+            if t(j) == b"<" && is_impl {
+                while j < hi {
+                    match t(j) {
+                        b"<" => d += 1,
+                        b">" if t(j - 1) != b"-" => {
+                            d -= 1;
+                            if d == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                j += 1;
+                d = 0;
+            }
+            while j < hi && !(t(j) == b"{" && d == 0) {
+                match t(j) {
+                    b"<" => d += 1,
+                    b">" if t(j - 1) != b"-" => d -= 1,
+                    b"(" | b"[" if close[j] != usize::MAX => {
+                        j = close[j];
+                        done_path = true;
+                    }
+                    b"for" if d == 0 => for_ = true,
+                    b"where" if d == 0 => done_path = true,
+                    b";" if d == 0 => break,
+                    _ => {}
+                }
+                if d == 0 && !done_path && !for_ && is_id(j) && (path.is_empty() || t(j - 1) == b":") {
+                    path.push(j);
+                } else if d == 0 && !matches!(t(j), b":" | b"<" | b">") && !is_id(j) {
+                    done_path = true;
+                }
+                if d > 0 {
+                    done_path = true;
+                }
+                j += 1;
+            }
+            let Some(&e) = close.get(j).filter(|&&e| t(j) == b"{" && e != usize::MAX) else {
+                k = j + 1;
+                continue;
+            };
+            let mut rec = ImplRec { m, self_path: path, members: vec![] };
+            let mut x = j + 1;
+            while x < e {
+                while t(x) == b"#" && t(x + 1) == b"[" && close[x + 1] != usize::MAX {
+                    x = close[x + 1] + 1;
+                }
+                let mut vis = PVis::Priv;
+                if t(x) == b"pub" {
+                    vis = PVis::Pub;
+                    x += 1;
+                    if t(x) == b"(" && close[x] != usize::MAX {
+                        let c = close[x];
+                        vis = match t(x + 1) {
+                            b"self" => PVis::Priv,
+                            b"super" => PVis::Super,
+                            b"in" => PVis::In((x + 2..c).filter(|&q| is_id(q)).map(t).collect()),
+                            b"crate" => PVis::Crate,
+                        _ => PVis::Pub,
+                        };
+                        x = c + 1;
+                    }
+                }
+                while matches!(t(x), b"default" | b"async" | b"unsafe" | b"safe") || t(x) == b"const" && matches!(t(x + 1), b"fn" | b"unsafe" | b"async" | b"extern") || t(x) == b"extern" && toks.get(x + 1).is_some_and(|q| q.0 == 2) {
+                    x += if t(x) == b"extern" { 2 } else { 1 };
+                }
+                let item = match t(x) {
+                    b"fn" if is_id(x + 1) => Some((x + 1, "associated function")),
+                    b"const" if is_id(x + 1) && t(x + 2) == b":" => Some((x + 1, "associated constant")),
+                    _ => None,
+                };
+                if let Some((nt, kind)) = item {
+                    if is_trait || for_ {
+                        if kind == "associated function" {
+                            trait_fns.insert(t(nt));
+                        }
+                    } else {
+                        rec.members.push((nt, kind, vis));
+                    }
+                }
+                // (to the member's end: its `;` or its body)
+                while x < e && t(x) != b";" {
+                    if t(x) == b"{" && close[x] != usize::MAX {
+                        x = close[x];
+                        break;
+                    }
+                    if matches!(t(x), b"(" | b"[") && close[x] != usize::MAX {
+                        x = close[x];
+                    }
+                    x += 1;
+                }
+                x += 1;
+            }
+            if is_impl && !for_ && !rec.members.is_empty() {
+                out.push(rec);
+            }
+            k = e + 1;
+        }
+    }
+    (out, trait_fns)
+}
+
+/// For E0616: the modules by their lines, and the fields of the structs and unions of modules other than the crate
+/// root that are not `pub`, with the module each is visible within. Only a name no other item of the program has: the
+/// type check knows a struct by its name, which the flattening of modules keeps where it is the only one
+fn field_priv(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], mods: &[(usize, usize, usize)], items: &[Vec<PItem>], injected: bool) -> crate::program::FieldPriv {
+    // (the lines of the modules' braces, counted in one pass over the text up to the last)
+    let mut offs: Vec<usize> = mods.iter().skip(1).flat_map(|&(lo, hi, _)| [lo.saturating_sub(1), hi]).map(|k| toks.get(k).map_or(b.len(), |x| x.1)).collect();
+    offs.sort_unstable();
+    offs.dedup();
+    let mut lines: FxMap<usize, u32> = FxMap::default();
+    let (mut at, mut n) = (0usize, 1u32);
+    for &o in &offs {
+        n += b[at..o].iter().filter(|&&c| c == b'\n').count() as u32;
+        at = o;
+        lines.insert(o, n);
+    }
+    let line = |k: usize| -> u32 { lines[&toks.get(k).map_or(b.len(), |x| x.1)] };
+    let mut fp = crate::program::FieldPriv::default();
+    for (m, &(lo, hi, parent)) in mods.iter().enumerate() {
+        fp.mods.push(if m == 0 { (0, u32::MAX, 0) } else { (line(lo.saturating_sub(1)), line(hi), parent as u32) });
+    }
+    let mut count: FxMap<&[u8], u32> = FxMap::default();
+    for it in items.iter().flatten() {
+        *count.entry(it.name).or_insert(0) += 1;
+    }
+    let parent = |m: usize| mods[m].2;
+    for (m, its) in items.iter().enumerate().skip(1) {
+        for it in its {
+            if !matches!(it.kind, "struct" | "union") || count.get(it.name) != Some(&1) {
+                continue;
+            }
+            let mut hidden = vec![];
+            for (f, vis) in struct_fields(b, toks, close, it.at, mods[m].1) {
+                let scope = match vis {
+                    PVis::Pub | PVis::Crate => continue,
+                    PVis::Priv => m,
+                    PVis::Super => parent(m),
+                    // (`pub(in path)`: the module it names, from the crate root in 2015)
+                    PVis::In(p) => {
+                        let (mut cur, mut s) = match p.first() {
+                            Some(&b"crate") => (0, 1),
+                            Some(&b"self") => (m, 1),
+                            _ if injected => (0, 0),
+                            _ => (m, 0),
+                        };
+                        while p.get(s) == Some(&&b"super"[..]) && cur != 0 {
+                            cur = parent(cur);
+                            s += 1;
+                        }
+                        let found = p[s..].iter().try_fold(cur, |c, seg| items[c].iter().find(|x| x.name == *seg && x.child != usize::MAX).map(|x| x.child));
+                        match found {
+                            Some(x) => x,
+                            None => continue,
+                        }
+                    }
+                };
+                hidden.push((String::from_utf8_lossy(f).into_owned(), scope as u32));
+            }
+            if !hidden.is_empty() {
+                fp.fields.insert(String::from_utf8_lossy(it.name).into_owned(), (if it.kind == "union" { "union" } else { "struct" }, hidden));
+            }
+        }
+    }
+    fp
+}
+
+/// The named fields of the struct or union whose name is token `at`, each with its visibility as written (none for a
+/// tuple or unit struct)
+fn struct_fields<'a>(b: &'a [u8], toks: &[(u8, usize, usize)], close: &[usize], at: usize, hi: usize) -> Vec<(&'a [u8], PVis<'a>)> {
+    let t = |k: usize| -> &'a [u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
+    let mut out = vec![];
+    // (past the generics and a `where` clause, to the body)
+    let mut k = at + 1;
+    let mut d = 0i32;
+    while k < hi {
+        match t(k) {
+            b"<" => d += 1,
+            b">" if t(k - 1) != b"-" => d -= 1,
+            b"{" if d == 0 => break,
+            b"(" | b";" if d == 0 => return out,
+            b"(" | b"[" if close[k] != usize::MAX => k = close[k],
+            _ => {}
+        }
+        k += 1;
+    }
+    let Some(&e) = close.get(k).filter(|&&e| e != usize::MAX && k < hi) else { return out };
+    k += 1;
+    while k < e {
+        while t(k) == b"#" && t(k + 1) == b"[" && close[k + 1] != usize::MAX {
+            k = close[k + 1] + 1;
+        }
+        let mut vis = PVis::Priv;
+        if t(k) == b"pub" {
+            vis = PVis::Pub;
+            k += 1;
+            if t(k) == b"(" && close[k] != usize::MAX {
+                let c = close[k];
+                vis = match t(k + 1) {
+                    b"self" => PVis::Priv,
+                    b"super" => PVis::Super,
+                    b"in" => PVis::In((k + 2..c).filter(|&j| is_id(j)).map(t).collect()),
+                    b"crate" => PVis::Crate,
+                        _ => PVis::Pub,
+                };
+                k = c + 1;
+            }
+        }
+        let s = if t(k) == b"r" && t(k + 1) == b"#" && is_id(k + 2) { k + 2 } else { k };
+        if is_id(s) && t(s + 1) == b":" {
+            out.push((t(s), vis));
+        }
+        while k < e && t(k) != b"," {
+            if matches!(t(k), b"(" | b"[" | b"{") && close[k] != usize::MAX {
+                k = close[k];
+            }
+            k += 1;
+        }
+        k += 1;
+    }
+    out
+}
+
+/// The visibilities of the fields of the tuple struct whose name is token `at` (None for another struct)
+fn tuple_fields<'a>(b: &'a [u8], toks: &[(u8, usize, usize)], close: &[usize], at: usize) -> Option<Vec<PVis<'a>>> {
+    let t = |k: usize| -> &'a [u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
+    let mut k = at + 1;
+    if t(k) == b"<" {
+        let mut d = 0i32;
+        while k < toks.len() {
+            match t(k) {
+                b"<" => d += 1,
+                b">" if t(k - 1) != b"-" => {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            k += 1;
+        }
+        k += 1;
+    }
+    let e = *close.get(k).filter(|&&e| t(k) == b"(" && e != usize::MAX)?;
+    let mut out = vec![];
+    k += 1;
+    while k < e {
+        while t(k) == b"#" && t(k + 1) == b"[" && close[k + 1] != usize::MAX {
+            k = close[k + 1] + 1;
+        }
+        let mut vis = PVis::Priv;
+        if t(k) == b"pub" {
+            vis = PVis::Pub;
+            if t(k + 1) == b"(" && close[k + 1] != usize::MAX && matches!(t(k + 2), b"crate" | b"self" | b"super" | b"in") {
+                let c = close[k + 1];
+                vis = match t(k + 2) {
+                    b"self" => PVis::Priv,
+                    b"super" => PVis::Super,
+                    b"in" => PVis::In((k + 3..c).filter(|&j| is_id(j)).map(t).collect()),
+                    _ => PVis::Crate,
+                };
+                k = c;
+            }
+        }
+        if k < e {
+            out.push(vis);
+        }
+        while k < e && t(k) != b"," {
+            if matches!(t(k), b"(" | b"[" | b"{") && close[k] != usize::MAX {
+                k = close[k];
+            }
+            k += 1;
+        }
+        k += 1;
+    }
+    Some(out)
+}
+
+/// An import of a module, as `private_path` reads it: `use a::b as c;` is (c, [a, b], 0), `use a::*;` (``, [a], 2),
+/// `use a::{self};` (a, [a], 1)
+struct PImport<'a> {
+    name: &'a [u8],
+    segs: Vec<usize>,
+    glob: u8,
+    vis: PVis<'a>,
+    /// whether the path starts at the crate root (edition 2015, or a leading `::`)
+    root: bool,
+}
+
+/// What a name means: the item of a module (`v` u32::MAX), or a variant of an enum item
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ADef {
+    m: u32,
+    i: u32,
+    v: u32,
+}
+
+/// The definitions a name has in a module, each with its namespaces (1 types, 2 values); None: what it means is not
+/// known (an import of another crate, a module a macro may add items to)
+type ADefs = Option<Vec<(u8, ADef)>>;
+
+/// What a path names: its last segment's definitions, or the segment that is ambiguous (E0659), or nothing known
+enum APath {
+    Defs(Vec<(u8, ADef)>),
+    Amb(usize),
+    Unknown,
+}
+
+/// E0659 for `private_path`: a name two glob imports of a module bring with different definitions (`use a::*; use
+/// b::*;` of two `struct S`), where a path names it. A module's own items and its other imports take the name before
+/// a glob does; the definitions are followed through imports and globs of the program's own modules and enums, and a
+/// name of another crate or of a module with macro-made items is left alone
+struct Ambiguity<'a, 'b> {
+    b: &'a [u8],
+    toks: &'b [(u8, usize, usize)],
+    close: &'b [usize],
+    mods: &'b [(usize, usize, usize)],
+    items: &'b [Vec<PItem<'a>>],
+    imps: &'b [Vec<PImport<'a>>],
+    /// (a module with an item-level macro call, an `extern` block or a `macro`: its names are not all known)
+    opaque: &'b [bool],
+    injected: bool,
+    /// (the lookups and imports being resolved: a cycle of globs finds nothing more)
+    busy: Vec<(usize, &'a [u8], usize)>,
+    busy_imp: Vec<(usize, usize)>,
+    steps: u32,
+    /// (what each glob import reads, once found)
+    targets: FxMap<(usize, usize), Option<(usize, Option<usize>)>>,
+    /// (each module's items by name)
+    named: Vec<FxMap<&'a [u8], Vec<u32>>>,
+    /// (the imports a lookup passed over as being resolved: a cycle; and whether a lookup met something it does not
+    /// know (a glob of another crate's module, a module with macro-made items), for E0432 of a cycle)
+    cycles: Vec<(usize, usize)>,
+    unknown: bool,
+}
+
+/// what the namespaces of an item `private_path` reads are (1 types, 2 values)
+fn kind_ns(kind: &str) -> u8 {
+    match kind {
+        "unit struct" | "tuple struct" => 3,
+        "function" | "constant" | "static" => 2,
+        _ => 1,
+    }
+}
+
+impl<'a, 'b> Ambiguity<'a, 'b> {
+    fn t(&self, k: usize) -> &'a [u8] {
+        let b: &'a [u8] = self.b;
+        self.toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e])
+    }
+    fn parent(&self, m: usize) -> usize {
+        self.mods[m].2
+    }
+    fn within(&self, mut a: usize, b: usize) -> bool {
+        loop {
+            if a == b {
+                return true;
+            }
+            if a == usize::MAX || a == 0 {
+                return false;
+            }
+            a = self.parent(a);
+        }
+    }
+    fn module_at(&self, segs: &[&[u8]], from: usize) -> Option<usize> {
+        let (mut cur, mut s) = match segs.first() {
+            Some(&b"crate") => (0, 1),
+            Some(&b"self") => (from, 1),
+            _ => (from, 0),
+        };
+        while segs.get(s) == Some(&&b"super"[..]) {
+            cur = self.parent(cur);
+            if cur == usize::MAX {
+                return None;
+            }
+            s += 1;
+        }
+        for seg in &segs[s..] {
+            cur = self.items[cur].iter().find(|x| x.name == *seg && x.child != usize::MAX)?.child;
+        }
+        Some(cur)
+    }
+    fn visible(&self, def: usize, vis: &PVis, from: usize) -> bool {
+        match vis {
+            PVis::Pub | PVis::Crate => true,
+            PVis::Priv => self.within(from, def),
+            PVis::Super => match self.parent(def) {
+                usize::MAX => self.within(from, def),
+                p => self.within(from, p),
+            },
+            PVis::In(p) => match self.module_at(p, if self.injected { 0 } else { def }) {
+                Some(x) => self.within(from, x),
+                None => true,
+            },
+        }
+    }
+    /// (a definition's own visibility: an item's, an enum's for its variants)
+    fn def_visible(&self, d: ADef, from: usize) -> bool {
+        self.visible(d.m as usize, &self.items[d.m as usize][d.i as usize].vis, from)
+    }
+    /// the definitions of `name` in module `cur` that module `viewer` may see, in the namespaces `want` (1 types, 2
+    /// values)
+    fn lookup(&mut self, cur: usize, name: &'a [u8], viewer: usize, want: u8) -> ADefs {
+        self.steps += 1;
+        if self.steps > 20_000 {
+            return None;
+        }
+        if self.busy.contains(&(cur, name, viewer)) {
+            return Some(vec![]);
+        }
+        let mut out: Vec<(u8, ADef)> = vec![];
+        // (the namespaces not looked for count as taken)
+        let mut shadow = !want & 3;
+        let own: &[u32] = self.named[cur].get(name).map_or(&[], |v| &v[..]);
+        for &i in own {
+            let it = &self.items[cur][i as usize];
+            if kind_ns(it.kind) & want != 0 {
+                let ns = kind_ns(it.kind) & want;
+                shadow |= ns;
+                if self.visible(cur, &it.vis, viewer) {
+                    out.push((ns, ADef { m: cur as u32, i, v: u32::MAX }));
+                }
+            }
+        }
+        if shadow == 3 {
+            return Some(out);
+        }
+        self.busy.push((cur, name, viewer));
+        let r = self.lookup_imports(cur, name, viewer, shadow, &mut out);
+        self.busy.pop();
+        r?;
+        let mut merged: Vec<(u8, ADef)> = vec![];
+        for (ns, d) in out {
+            match merged.iter_mut().find(|x| x.1 == d) {
+                Some(x) => x.0 |= ns,
+                None => merged.push((ns, d)),
+            }
+        }
+        Some(merged)
+    }
+    fn lookup_imports(&mut self, cur: usize, name: &'a [u8], viewer: usize, mut shadow: u8, out: &mut Vec<(u8, ADef)>) -> Option<()> {
+        // (an import of the name: it takes the name before a glob does, in the namespaces it binds)
+        let mut bound = 0u8;
+        for j in 0..self.imps[cur].len() {
+            if self.imps[cur][j].glob == 2 || self.imps[cur][j].name != name {
+                continue;
+            }
+            if self.busy_imp.contains(&(cur, j)) {
+                self.cycles.push((cur, j));
+                continue;
+            }
+            let seen = self.visible(cur, &self.imps[cur][j].vis, viewer);
+            for (ns, d) in self.resolve_import(cur, j)? {
+                let ns = ns & !shadow;
+                bound |= ns;
+                if ns != 0 && seen {
+                    out.push((ns, d));
+                }
+            }
+        }
+        shadow |= bound;
+        // (a module a macro or an `extern` block may define names in: what its globs bring may be its own)
+        if shadow == 3 {
+            return Some(());
+        }
+        if self.opaque[cur] {
+            self.unknown = true;
+            return None;
+        }
+        for j in 0..self.imps[cur].len() {
+            if self.imps[cur][j].glob != 2 || !self.visible(cur, &self.imps[cur][j].vis, viewer) || self.busy_imp.contains(&(cur, j)) {
+                continue;
+            }
+            let target = match self.targets.get(&(cur, j)) {
+                Some(&t) => t,
+                None => {
+                    self.busy_imp.push((cur, j));
+                    let t = self.glob_target(cur, j);
+                    self.busy_imp.pop();
+                    self.targets.insert((cur, j), t);
+                    t
+                }
+            };
+            match target {
+                Some((m, None)) => {
+                    let Some(defs) = self.lookup(m, name, cur, 3 & !shadow) else { continue };
+                    for (ns, d) in defs {
+                        let ns = ns & !shadow;
+                        if ns != 0 && self.def_visible(d, viewer) {
+                            out.push((ns, d));
+                        }
+                    }
+                }
+                Some((m, Some(i))) => {
+                    let hi = self.mods[m].1;
+                    for (v, k) in self.variants_at(self.items[m][i].at, hi).into_iter().enumerate() {
+                        if self.t(k) == name && 3 & !shadow != 0 {
+                            out.push((3 & !shadow, ADef { m: m as u32, i: i as u32, v: v as u32 }));
+                        }
+                    }
+                }
+                None => self.unknown = true,
+            }
+        }
+        Some(())
+    }
+    /// what import j of module `cur` binds its name to
+    fn resolve_import(&mut self, cur: usize, j: usize) -> ADefs {
+        self.busy_imp.push((cur, j));
+        let segs = self.imps[cur][j].segs.clone();
+        let (root, glob) = (self.imps[cur][j].root, self.imps[cur][j].glob);
+        let r = self.path(cur, &segs, root, if glob == 1 { 1 } else { 3 });
+        self.busy_imp.pop();
+        match r {
+            APath::Defs(d) if glob == 1 => Some(d.into_iter().filter(|x| self.items[x.1.m as usize][x.1.i as usize].child != usize::MAX && x.1.v == u32::MAX).map(|x| (1, x.1)).collect()),
+            APath::Defs(d) => Some(d),
+            _ => None,
+        }
+    }
+    /// the module (or the enum, as its module and item) a glob import of module `cur` reads
+    fn glob_target(&mut self, cur: usize, j: usize) -> Option<(usize, Option<usize>)> {
+        let segs = self.imps[cur][j].segs.clone();
+        let root = self.imps[cur][j].root;
+        if segs.is_empty() {
+            return root.then_some((0, None));
+        }
+        if segs.len() == 1 {
+            match self.t(segs[0]) {
+                b"crate" => return Some((0, None)),
+                b"self" => return Some((cur, None)),
+                b"super" => return (self.parent(cur) != usize::MAX).then(|| (self.parent(cur), None)),
+                _ => {}
+            }
+        }
+        if self.t(*segs.last()?) == b"super" || self.t(*segs.last()?) == b"self" {
+            return None;
+        }
+        let APath::Defs(d) = self.path(cur, &segs, root, 1) else { return None };
+        let types: Vec<ADef> = d.iter().filter(|x| x.0 & 1 != 0).map(|x| x.1).collect();
+        let &[x] = &types[..] else { return None };
+        let it = &self.items[x.m as usize][x.i as usize];
+        if x.v != u32::MAX {
+            return None;
+        }
+        if it.child != usize::MAX {
+            Some((it.child, None))
+        } else if it.kind == "enum" {
+            Some((x.m as usize, Some(x.i as usize)))
+        } else {
+            None
+        }
+    }
+    /// what the path of segment tokens `segs` written in module `cur` names (`root`: from the crate root), its last
+    /// segment in the namespaces `want`
+    fn path(&mut self, cur: usize, segs: &[usize], root: bool, want: u8) -> APath {
+        let first = self.t(segs[0]);
+        let (mut m, mut s) = match first {
+            b"crate" => (0, 1),
+            b"self" => (cur, 1),
+            b"super" => (cur, 0),
+            _ if root => (0, 0),
+            _ => (cur, 0),
+        };
+        while s < segs.len() && self.t(segs[s]) == b"super" {
+            m = self.parent(m);
+            if m == usize::MAX {
+                return APath::Unknown;
+            }
+            s += 1;
+        }
+        if s >= segs.len() {
+            return APath::Unknown;
+        }
+        let mut i = s;
+        loop {
+            let name = self.t(segs[i]);
+            if matches!(name, b"self" | b"super" | b"crate") {
+                return APath::Unknown;
+            }
+            let Some(defs) = self.lookup(m, name, cur, if i + 1 == segs.len() { want } else { 1 }) else { return APath::Unknown };
+            if i + 1 == segs.len() {
+                return APath::Defs(defs);
+            }
+            let types: Vec<ADef> = defs.iter().filter(|x| x.0 & 1 != 0).map(|x| x.1).collect();
+            match &types[..] {
+                [] => return APath::Unknown,
+                [x] => {
+                    let it = &self.items[x.m as usize][x.i as usize];
+                    if x.v != u32::MAX {
+                        return APath::Unknown;
+                    }
+                    if it.child != usize::MAX {
+                        m = it.child;
+                        i += 1;
+                        continue;
+                    }
+                    // (an enum's variant ends the path)
+                    if it.kind == "enum" && i + 2 == segs.len() {
+                        let last = self.t(segs[i + 1]);
+                        let (em, ei) = (x.m as usize, x.i as usize);
+                        return match self.variants_at(self.items[em][ei].at, self.mods[em].1).into_iter().position(|k| self.t(k) == last) {
+                            Some(v) => APath::Defs(vec![(3, ADef { m: em as u32, i: ei as u32, v: v as u32 })]),
+                            None => APath::Unknown,
+                        };
+                    }
+                    return APath::Unknown;
+                }
+                _ => return APath::Amb(i),
+            }
+        }
+    }
+}
+
+/// (of the definitions of a name: whether those of namespace `ns` are more than one, for E0659; `ns` 3: where the
+/// path does not tell, each namespace that has one has more than one; 0: any, as an import binds each)
+fn ambiguous_in(defs: &[(u8, ADef)], ns: u8) -> bool {
+    let count = |bit: u8| defs.iter().filter(|x| x.0 & bit != 0).count();
+    let (ty, val) = (count(1), count(2));
+    match ns {
+        0 => ty > 1 || val > 1,
+        1 => ty > 1,
+        2 => val > 1,
+        _ => (ty > 1 || val > 1) && (ty != 1 && val != 1),
+    }
+}
+
+/// What the tokens of a module's own text bind, for its E0659 sites: (a name, the tokens where it means something of
+/// a block or a binding: an item or a `use` of a block (an empty name: a glob, any name), a generic parameter, a `mut`
+/// / `ref` / `@` binding), the tokens that are no path (the variants an enum defines), and the ranges not read (the
+/// arguments of a macro other than std's)
+struct AScope<'a> {
+    covers: Vec<(&'a [u8], usize, usize)>,
+    defs: FxSet<usize>,
+    skip: Vec<(usize, usize)>,
+}
+
+/// std's macros whose arguments are expressions (or patterns) of the caller
+const EXPR_MACROS: &[&[u8]] = &[
+    b"println", b"print", b"eprintln", b"eprint", b"format", b"format_args", b"write", b"writeln", b"panic", b"assert",
+    b"assert_eq", b"assert_ne", b"debug_assert", b"debug_assert_eq", b"debug_assert_ne", b"vec", b"dbg", b"matches",
+    b"unreachable", b"todo", b"unimplemented",
+];
+
+/// rustc's word for what an import names, in "struct import `S` is private" (`value`: where a path takes a value, a
+/// unit struct is one)
+fn import_word(kind: &str, variant: bool, value: bool) -> &'static str {
+    match kind {
+        _ if variant => "variant",
+        "unit struct" if value => "unit struct",
+        "module" => "module",
+        "struct" | "unit struct" | "tuple struct" => "struct",
+        "enum" => "enum",
+        "trait" => "trait",
+        "type alias" => "type alias",
+        "union" => "union",
+        "function" => "function",
+        "constant" => "constant",
+        "static" => "static",
+        _ => "item",
+    }
+}
+
+impl<'a, 'b> Ambiguity<'a, 'b> {
+    /// E0603: a path written in module m that reaches a name through an import of another module it may not see
+    /// (`use crate::b::One;` with a private `use crate::a::One;` in b): "struct import `One` is private", at that
+    /// segment. An item the path reaches it may not see is the E0603 check's of items (private_path)
+    fn import_privacy(&mut self, m: usize, segs: &[usize], root: bool, value: bool) -> Option<(usize, String)> {
+        let first = self.t(segs[0]);
+        let (mut cur, mut s) = match first {
+            b"crate" => (0, 1),
+            b"self" => (m, 1),
+            b"super" => (m, 0),
+            _ if root => (0, 0),
+            _ => (m, 0),
+        };
+        while s < segs.len() && self.t(segs[s]) == b"super" {
+            cur = self.parent(cur);
+            if cur == usize::MAX {
+                return None;
+            }
+            s += 1;
+        }
+        for i in s..segs.len() {
+            let name = self.t(segs[i]);
+            if matches!(name, b"self" | b"super" | b"crate") {
+                return None;
+            }
+            let own = self.named[cur].contains_key(name);
+            let js: Vec<usize> = (0..self.imps[cur].len()).filter(|&j| self.imps[cur][j].glob != 2 && self.imps[cur][j].name == name).collect();
+            if !own && !js.is_empty() && !js.iter().any(|&j| self.visible(cur, &self.imps[cur][j].vis, m)) {
+                let j = js[0];
+                if self.busy_imp.contains(&(cur, j)) {
+                    return None;
+                }
+                let defs = self.resolve_import(cur, j)?;
+                let d = defs.iter().find(|x| x.0 & 1 != 0).or(defs.first())?.1;
+                let word = import_word(self.items[d.m as usize][d.i as usize].kind, d.v != u32::MAX, value && i + 1 == segs.len());
+                return Some((segs[i], format!("{word} import `{}` is private (E0603)", String::from_utf8_lossy(name))));
+            }
+            if i + 1 == segs.len() {
+                return None;
+            }
+            // (on through the one module the name is here)
+            let defs = self.lookup(cur, name, m, 1)?;
+            let mods: Vec<usize> = defs.iter().filter(|x| x.1.v == u32::MAX).map(|x| self.items[x.1.m as usize][x.1.i as usize].child).filter(|&c| c != usize::MAX).collect();
+            let &[c] = &mods[..] else { return None };
+            cur = c;
+        }
+        None
+    }
+    /// Whether the tuple struct a path of module m names (its value) has a field m may not see: its constructor is as
+    /// visible as that field. Its name, if so
+    fn ctor_hidden(&mut self, m: usize, segs: &[usize]) -> Option<&'a [u8]> {
+        let APath::Defs(d) = self.path(m, segs, false, 2) else { return None };
+        let vals: Vec<ADef> = d.iter().filter(|x| x.0 & 2 != 0 && x.1.v == u32::MAX).map(|x| x.1).collect();
+        let &[x] = &vals[..] else { return None };
+        let it = &self.items[x.m as usize][x.i as usize];
+        if it.kind != "tuple struct" {
+            return None;
+        }
+        let fields = tuple_fields(self.b, self.toks, self.close, it.at)?;
+        fields.iter().any(|v| !self.visible(x.m as usize, v, m)).then_some(it.name)
+    }
+    /// E0432 of an import of module m (import j) that names itself through other imports and nothing else
+    /// (`pub use crate::y::x;` in y, `mod a { pub use crate::b::foo; } mod b { pub use crate::a::foo; }`): its path, as
+    /// written, is unresolved. Only a path through the program's own modules, where nothing it meets is unknown
+    fn import_cycle(&mut self, m: usize, j: usize, segs: &[usize], root: bool) -> Option<(usize, String)> {
+        if segs.len() < 2 {
+            return None;
+        }
+        self.cycles.clear();
+        self.unknown = false;
+        let r = self.path(m, segs, root, 3);
+        let APath::Defs(d) = r else { return None };
+        if !d.is_empty() || self.unknown || !self.cycles.contains(&(m, j)) {
+            return None;
+        }
+        let p: Vec<String> = segs.iter().map(|&x| String::from_utf8_lossy(self.t(x)).into_owned()).collect();
+        Some((segs[0], format!("unresolved import `{}` (E0432)", p.join("::"))))
+    }
+    /// E0364 / E0365: an import of module m that re-exports (vis wider than private) what it names, the module's own
+    /// item (or an enum's variant), where every item of that name is seen in less than the import makes it:
+    /// "`f` is only public within the crate, and cannot be re-exported outside" (the item is the crate's), or "`f` is
+    /// private, and cannot be re-exported"
+    fn reexport(&mut self, m: usize, segs: &[usize], root: bool, vis: &PVis) -> Option<(usize, String)> {
+        let last = *segs.last()?;
+        let name = self.t(last);
+        if matches!(name, b"self" | b"super" | b"crate") {
+            return None;
+        }
+        // (the module of the item, or the enum of the variant)
+        let prefix = &segs[..segs.len() - 1];
+        let (owner, enum_item) = if segs.len() == 1 {
+            (if root { 0 } else { m }, None)
+        } else if prefix.iter().all(|&x| matches!(self.t(x), b"crate" | b"self" | b"super")) {
+            // (`crate::f`, `super::f`, `self::f`: the module those name)
+            let mut cur = if self.t(prefix[0]) == b"crate" { 0 } else { m };
+            for &x in prefix {
+                match self.t(x) {
+                    b"super" => {
+                        cur = self.parent(cur);
+                        if cur == usize::MAX {
+                            return None;
+                        }
+                    }
+                    b"crate" if x != prefix[0] => return None,
+                    _ => {}
+                }
+            }
+            (cur, None)
+        } else {
+            let APath::Defs(d) = self.path(m, &segs[..segs.len() - 1], root, 1) else { return None };
+            let types: Vec<ADef> = d.iter().filter(|x| x.0 & 1 != 0 && x.1.v == u32::MAX).map(|x| x.1).collect();
+            let &[x] = &types[..] else { return None };
+            let it = &self.items[x.m as usize][x.i as usize];
+            if it.child != usize::MAX {
+                (it.child, None)
+            } else if it.kind == "enum" {
+                (x.m as usize, Some(x.i as usize))
+            } else {
+                return None;
+            }
+        };
+        // (the modules each is seen within: None for everywhere, the crate root for the crate)
+        let scope = |v: &PVis, at: usize| -> Option<Option<usize>> {
+            Some(match v {
+                PVis::Pub => None,
+                PVis::Crate => Some(0),
+                PVis::Priv => Some(at),
+                PVis::Super => Some(if at == 0 { 0 } else { self.parent(at) }),
+                PVis::In(p) => Some(self.module_at(p, if self.injected { 0 } else { at })?),
+            })
+        };
+        let imp = scope(vis, m)?;
+        let mut defs: Vec<(Option<usize>, bool)> = vec![];
+        match enum_item {
+            Some(ei) => {
+                if !self.variants_at(self.items[owner][ei].at, self.mods[owner].1).into_iter().any(|k| self.t(k) == name) {
+                    return None;
+                }
+                defs.push((scope(&self.items[owner][ei].vis, owner)?, false));
+            }
+            None => {
+                for &i in self.named[owner].get(name)? {
+                    let it = &self.items[owner][i as usize];
+                    defs.push((scope(&it.vis, owner)?, it.child != usize::MAX));
+                }
+            }
+        }
+        // (an item seen where the import is: within an import's module, as wide as it)
+        let wide_enough = |d: Option<usize>| match (d, imp) {
+            (None, _) => true,
+            (Some(_), None) => false,
+            (Some(b), Some(a)) => self.within(a, b),
+        };
+        if defs.is_empty() || defs.iter().any(|d| wide_enough(d.0)) {
+            return None;
+        }
+        let code = if defs.iter().all(|d| d.1) { "E0365" } else { "E0364" };
+        let n = String::from_utf8_lossy(name);
+        // (at the leaf's own use tree, as rustc: `crate::f` of `pub use crate::f;`, `V` of `pub use E::{V};`)
+        let mut at = last;
+        while self.t(at.wrapping_sub(1)) == b":" && self.t(at.wrapping_sub(2)) == b":" && self.is_id(at.wrapping_sub(3)) {
+            at -= 3;
+        }
+        Some((at, if defs.iter().all(|d| d.0 == Some(0)) {
+            format!("`{n}` is only public within the crate, and cannot be re-exported outside ({code})")
+        } else {
+            format!("`{n}` is private, and cannot be re-exported ({code})")
+        }))
+    }
+    /// E0451: a struct literal or pattern written in module m, of the path `segs` and the brace at token `open`, that
+    /// names a field it may not see (`a::Foo { x: 1 }`), or takes one by `..base`: "field `x` of struct `Foo` is private"
+    /// (`late`: rustc's privacy pass, after the type check, reports it only where that finds no error). A literal
+    /// that leaves out such a field and has no `..base` cannot be written at all, as the type check says
+    fn literal_privacy(&mut self, m: usize, segs: &[usize], open: usize) -> Option<(usize, String, bool)> {
+        let e = *self.close.get(open).filter(|&&e| e != usize::MAX)?;
+        let APath::Defs(d) = self.path(m, segs, false, 1) else { return None };
+        let types: Vec<ADef> = d.iter().filter(|x| x.0 & 1 != 0).map(|x| x.1).collect();
+        let &[x] = &types[..] else { return None };
+        if x.v != u32::MAX {
+            return None;
+        }
+        let sm = x.m as usize;
+        let it = &self.items[sm][x.i as usize];
+        let what = match it.kind {
+            "struct" => "struct",
+            "union" => "union",
+            _ => return None,
+        };
+        let fields = struct_fields(self.b, self.toks, self.close, it.at, self.mods[sm].1);
+        let hidden: Vec<&[u8]> = fields.iter().filter(|f| !self.visible(sm, &f.1, m)).map(|f| f.0).collect();
+        if hidden.is_empty() {
+            return None;
+        }
+        let msg = |f: &[u8]| format!("field `{}` of {what} `{}` is private (E0451)", String::from_utf8_lossy(f), String::from_utf8_lossy(it.name));
+        let name = it.name;
+        // (a pattern: the brace is followed by `=>` or `=` (one token each of `=` and `>`; not `==`), `|`, a guard's
+        // `if`, `in` or a parameter's `:`)
+        let after = self.t(e + 1);
+        let pattern = matches!(after, b"|" | b"if" | b"in" | b":") || after == b"=" && self.t(e + 2) != b"=";
+        let mut named: Vec<&[u8]> = vec![];
+        let mut first: Option<(usize, String, bool)> = None;
+        let mut rest = false;
+        let mut k = open + 1;
+        while k < e {
+            while self.t(k) == b"#" && self.t(k + 1) == b"[" && self.close[k + 1] != usize::MAX {
+                k = self.close[k + 1] + 1;
+            }
+            let s = if self.t(k) == b"r" && self.t(k + 1) == b"#" && self.is_id(k + 2) { k + 2 } else { k };
+            if self.is_id(s) && (self.t(s + 1) == b":" && self.t(s + 2) != b":" || matches!(self.t(s + 1), b"," | b"}")) {
+                let f = self.t(s);
+                named.push(f);
+                if hidden.contains(&f) && first.is_none() {
+                    first = Some((s, msg(f), true));
+                }
+            } else if self.t(k) == b"." && self.t(k + 1) == b"." {
+                rest = true;
+                // (`..base` of a literal takes the fields not named; a pattern's `..` reads none)
+                if self.t(k + 2) != b"}" && k + 2 < e && first.is_none() {
+                    if let Some(f) = hidden.iter().find(|f| !named.contains(f)) {
+                        first = Some((k + 2, msg(f), true));
+                    }
+                }
+                break;
+            }
+            while k < e && self.t(k) != b"," {
+                if matches!(self.t(k), b"(" | b"[" | b"{") && self.close[k] != usize::MAX {
+                    k = self.close[k];
+                }
+                k += 1;
+            }
+            k += 1;
+        }
+        // (a literal without `..base` that leaves out a field it may not see; not a union's, which names one)
+        if !pattern && !rest && what == "struct" && hidden.iter().any(|f| !named.contains(f)) {
+            return Some((segs[0], format!("cannot construct `{}` with struct literal syntax due to private fields", String::from_utf8_lossy(name)), false));
+        }
+        first
+    }
+    fn is_id(&self, k: usize) -> bool {
+        self.toks.get(k).is_some_and(|x| x.0 == 0)
+    }
+    /// the tokens of the variant names of the enum whose name is token `at`
+    fn variants_at(&self, at: usize, hi: usize) -> Vec<usize> {
+        let mut out = vec![];
+        let mut k = at + 1;
+        while k < hi && self.t(k) != b"{" {
+            if matches!(self.t(k), b"(" | b"[" | b";") {
+                return out;
+            }
+            k += 1;
+        }
+        let Some(&e) = self.close.get(k).filter(|&&e| e != usize::MAX) else { return out };
+        k += 1;
+        while k < e {
+            while self.t(k) == b"#" && self.t(k + 1) == b"[" && self.close[k + 1] != usize::MAX {
+                k = self.close[k + 1] + 1;
+            }
+            if self.is_id(k) {
+                out.push(k);
+            }
+            while k < e && self.t(k) != b"," {
+                if matches!(self.t(k), b"(" | b"[" | b"{") && self.close[k] != usize::MAX {
+                    k = self.close[k];
+                }
+                k += 1;
+            }
+            k += 1;
+        }
+        out
+    }
+    /// the end of the item whose generics open at token `lt`: its body's `}` or its `;`
+    fn item_end(&self, lt: usize, hi: usize) -> usize {
+        let mut d = 0i32;
+        let mut k = lt;
+        while k < hi {
+            match self.t(k) {
+                b"<" => d += 1,
+                b">" if self.t(k.wrapping_sub(1)) != b"-" => {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                b"(" | b"[" if self.close[k] != usize::MAX => k = self.close[k],
+                _ => {}
+            }
+            k += 1;
+        }
+        while k < hi {
+            match self.t(k) {
+                b"{" => return if self.close[k] == usize::MAX { hi } else { self.close[k] },
+                b";" => return k,
+                b"(" | b"[" if self.close[k] != usize::MAX => k = self.close[k],
+                _ => {}
+            }
+            k += 1;
+        }
+        hi
+    }
+    /// the scope facts of module m's own tokens lo..hi, past `jumps` (its child modules and item-level macros)
+    fn scope(&self, lo: usize, hi: usize, jumps: &[(usize, usize)], names: &FxSet<&[u8]>) -> AScope<'a> {
+        let mut sc = AScope { covers: vec![], defs: FxSet::default(), skip: vec![] };
+        let mut braces: Vec<usize> = vec![];
+        let mut ji = 0;
+        let mut k = lo;
+        while k < hi {
+            while ji < jumps.len() && jumps[ji].1 < k {
+                ji += 1;
+            }
+            if ji < jumps.len() && jumps[ji].0 <= k {
+                k = jumps[ji].1 + 1;
+                continue;
+            }
+            let block_end = |braces: &Vec<usize>| braces.last().map_or(hi, |&o| self.close[o].min(hi));
+            let tk = self.t(k);
+            match tk {
+                b"#" if self.t(k + 1) == b"[" || self.t(k + 1) == b"!" && self.t(k + 2) == b"[" => {
+                    let o = if self.t(k + 1) == b"[" { k + 1 } else { k + 2 };
+                    k = self.close[o].saturating_add(1);
+                    continue;
+                }
+                b"{" => braces.push(k),
+                b"}" => {
+                    braces.pop();
+                }
+                b"fn" | b"struct" | b"enum" | b"trait" | b"type" | b"union" | b"const" | b"static" | b"mod" if !braces.is_empty() => {
+                    let at = if self.t(k + 1) == b"mut" { k + 2 } else { k + 1 };
+                    if self.is_id(at) && names.contains(self.t(at)) {
+                        let o = *braces.last().unwrap();
+                        sc.covers.push((self.t(at), o, block_end(&braces)));
+                    }
+                    if tk == b"enum" && self.is_id(at) {
+                        sc.defs.extend(self.variants_at(at, hi));
+                    }
+                }
+                b"use" if !braces.is_empty() && !matches!(self.t(k.wrapping_sub(1)), b":" | b".") => {
+                    let o = *braces.last().unwrap();
+                    let (mut prefix, mut leaves, mut kinds) = (vec![], vec![], vec![]);
+                    let j = if self.t(k + 1) == b":" && self.t(k + 2) == b":" { k + 3 } else { k + 1 };
+                    use_leaves(self.b, self.toks, self.close, j, &mut prefix, &mut leaves, &mut kinds);
+                    for (l, &g) in leaves.iter().zip(&kinds) {
+                        let name = match (g, l.last()) {
+                            (2, _) => &b""[..],
+                            (_, Some(&x)) if self.t(x + 1) == b"as" => self.t(x + 2),
+                            (_, Some(&x)) => self.t(x),
+                            _ => continue,
+                        };
+                        sc.covers.push((name, o, block_end(&braces)));
+                    }
+                }
+                b"mut" | b"ref" if self.is_id(k + 1) && !matches!(self.t(k.wrapping_sub(1)), b"&" | b"*") => {
+                    let at = if self.t(k + 1) == b"mut" { k + 2 } else { k + 1 };
+                    if names.contains(self.t(at)) {
+                        sc.covers.push((self.t(at), k, block_end(&braces)));
+                    }
+                }
+                b"@" if self.is_id(k.wrapping_sub(1)) && names.contains(self.t(k - 1)) => {
+                    sc.covers.push((self.t(k - 1), k - 1, block_end(&braces)));
+                }
+                b"<" if self.t(k.wrapping_sub(1)) == b"impl"
+                    || self.is_id(k.wrapping_sub(1)) && matches!(self.t(k.wrapping_sub(2)), b"fn" | b"struct" | b"enum" | b"trait" | b"type" | b"union") =>
+                {
+                    let end = self.item_end(k, hi);
+                    let mut j = k + 1;
+                    let mut d = 0i32;
+                    let mut start = true;
+                    while j < hi {
+                        match self.t(j) {
+                            b"<" | b"(" | b"[" => d += 1,
+                            b">" if self.t(j - 1) != b"-" => {
+                                if d == 0 {
+                                    break;
+                                }
+                                d -= 1;
+                            }
+                            b")" | b"]" => d -= 1,
+                            b"," if d == 0 => {
+                                start = true;
+                                j += 1;
+                                continue;
+                            }
+                            b"const" if start => {
+                                j += 1;
+                                continue;
+                            }
+                            x if start && self.is_id(j) && names.contains(x) => sc.covers.push((x, k, end)),
+                            _ => {}
+                        }
+                        start = false;
+                        j += 1;
+                    }
+                }
+                b"enum" if self.is_id(k + 1) => sc.defs.extend(self.variants_at(k + 1, hi)),
+                _ if self.is_id(k) && self.t(k + 1) == b"!" && !EXPR_MACROS.contains(&tk) => {
+                    let o = if self.is_id(k + 2) { k + 3 } else { k + 2 };
+                    if self.close.get(o).is_some_and(|&e| e != usize::MAX) {
+                        sc.skip.push((o, self.close[o]));
+                        k = self.close[o] + 1;
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+            k += 1;
+        }
+        sc
+    }
+    /// the namespaces the path whose first token is `first` and last `last` is read in where it is written (1 types,
+    /// 2 values, 3 where this does not tell)
+    fn site_ns(&self, first: usize, last: usize) -> u8 {
+        let after = self.t(last + 1);
+        let upper = self.t(last).first().is_some_and(u8::is_ascii_uppercase);
+        if after == b"(" {
+            return 2;
+        }
+        if after == b"{" && upper || after == b"<" && upper {
+            return 1;
+        }
+        let mut j = first.wrapping_sub(1);
+        if self.t(j) == b":" && self.t(j.wrapping_sub(1)) == b":" {
+            j = j.wrapping_sub(2);
+        }
+        let p = self.t(j);
+        let pp = self.t(j.wrapping_sub(1));
+        match p {
+            b"dyn" | b"impl" | b"as" => 1,
+            b">" if pp == b"-" => 1,
+            b"<" if upper => 1,
+            b"for" if self.t(last + 1) != b"in" => 1,
+            b":" if pp != b":" => {
+                // (a struct literal's field takes a value: the brace that holds it follows a path, not a definition's
+                // name)
+                let mut d = 0i32;
+                let mut o = j;
+                while o != usize::MAX {
+                    match self.t(o) {
+                        b")" | b"]" | b"}" => d += 1,
+                        b"(" | b"[" | b"{" if d == 0 => break,
+                        b"(" | b"[" | b"{" => d -= 1,
+                        _ => {}
+                    }
+                    o = o.wrapping_sub(1);
+                }
+                if o != usize::MAX && self.t(o) == b"{" && self.is_id(o.wrapping_sub(1)) && !matches!(self.t(o.wrapping_sub(2)), b"struct" | b"union" | b"enum" | b"{" | b",") {
+                    2
+                } else {
+                    1
+                }
+            }
+            _ => 3,
+        }
+    }
+}
+
+/// E0401: an item written in a fn body (a fn, struct, enum, union, type alias, const, static, trait, impl, module)
+/// that names a generic parameter of an item around that fn, or its `Self`: "can't use generic parameters from outer
+/// item", "can't use `Self` from outer item", at the first such name. The names the nested item's own generics give
+/// are its own. Not in attributes or macro definitions
+fn outer_generics(src: &str, toks: &[(u8, usize, usize)]) -> Option<String> {
+    let b = src.as_bytes();
+    let n = toks.len();
+    let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    // (an identifier; not a lifetime, whose `'` the tokens leave out)
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0 && (x.1 == 0 || b[x.1 - 1] != b'\''));
+    let mut close = vec![usize::MAX; n];
+    let mut stack: Vec<usize> = vec![];
+    for k in 0..n {
+        if toks[k].0 == 1 {
+            match b[toks[k].1] {
+                b'(' | b'[' | b'{' => stack.push(k),
+                b')' | b']' | b'}' => {
+                    if let Some(o) = stack.pop() {
+                        close[o] = k;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    // (the names a `<..>` of generics from token lt declares, and the token past its `>`)
+    let generics = |lt: usize| -> (Vec<&[u8]>, usize) {
+        let mut out = vec![];
+        let (mut k, mut d, mut start) = (lt + 1, 0i32, true);
+        while k < n {
+            match t(k) {
+                b"<" | b"(" | b"[" => d += 1,
+                b">" if t(k - 1) != b"-" => {
+                    if d == 0 {
+                        return (out, k + 1);
+                    }
+                    d -= 1;
+                }
+                b")" | b"]" => d -= 1,
+                b"," if d == 0 => {
+                    start = true;
+                    k += 1;
+                    continue;
+                }
+                b"const" if start => {
+                    k += 1;
+                    continue;
+                }
+                x if start && is_id(k) && t(k.wrapping_sub(1)) != b"'" => out.push(x),
+                _ => {}
+            }
+            start = false;
+            k += 1;
+        }
+        (out, n)
+    };
+    struct Ctx<'s> {
+        visible: Vec<&'s [u8]>,
+        beyond: Vec<&'s [u8]>,
+        self_ok: bool,
+        self_beyond: bool,
+        /// (the `Self` beyond is a generic impl's or a trait's: its constructor is an error too, not a warning)
+        self_generic: bool,
+    }
+    // (what context a range of tokens is: an item's header or a type's body (0), a fn body (1), an impl's or trait's
+    // body (2))
+    fn walk<'s>(
+        lo: usize,
+        hi: usize,
+        cx: &Ctx<'s>,
+        body: u8,
+        t: &dyn Fn(usize) -> &'s [u8],
+        is_id: &dyn Fn(usize) -> bool,
+        close: &[usize],
+        generics: &dyn Fn(usize) -> (Vec<&'s [u8]>, usize),
+    ) -> Option<(usize, &'static str)> {
+        let mut k = lo;
+        while k < hi {
+            let tk = t(k);
+            if tk == b"#" && (t(k + 1) == b"[" || t(k + 1) == b"!" && t(k + 2) == b"[") {
+                let o = if t(k + 1) == b"[" { k + 1 } else { k + 2 };
+                k = close[o].saturating_add(1);
+                continue;
+            }
+            if tk == b"macro_rules" && t(k + 1) == b"!" {
+                let o = if is_id(k + 2) { k + 3 } else { k + 2 };
+                k = close.get(o).map_or(hi, |&e| e.saturating_add(1));
+                continue;
+            }
+            // (an item: its kind, the token of its generics' `<`)
+            let prev = t(k.wrapping_sub(1));
+            let item = match tk {
+                b"fn" if is_id(k + 1) => Some("fn"),
+                b"struct" | b"enum" | b"union" | b"trait" if is_id(k + 1) => Some("adt"),
+                b"impl" if matches!(prev, b"}" | b";" | b"{" | b"]" | b"unsafe" | b"") => Some("impl"),
+                b"type" if is_id(k + 1) && body != 2 => Some("adt"),
+                b"const" | b"static" if body == 1 && is_id(k + 1) && t(k + 2) == b":" || body == 1 && tk == b"static" && t(k + 1) == b"mut" => Some("value"),
+                b"mod" if is_id(k + 1) && t(k + 2) == b"{" => Some("mod"),
+                _ => None,
+            };
+            if let Some(kind) = item {
+                let lt = if kind == "impl" { k + 1 } else { k + 2 };
+                let (own, mut j) = if t(lt) == b"<" { generics(lt) } else { (vec![], lt) };
+                // (the item's extent: its body's brace, or its `;`)
+                let mut open = usize::MAX;
+                while j < hi {
+                    match t(j) {
+                        b"{" => {
+                            open = j;
+                            break;
+                        }
+                        b";" => break,
+                        b"(" | b"[" if close[j] != usize::MAX => j = close[j],
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                let end = if open != usize::MAX { close[open].min(hi) } else { j.min(hi) };
+                // (a barrier where the item is in a fn body: what was visible is beyond it)
+                let generic_self = tk == b"trait" || kind == "impl" && !own.is_empty();
+                let ncx = if body == 1 {
+                    let mut beyond = cx.beyond.clone();
+                    beyond.extend(cx.visible.iter().copied());
+                    let self_ok = kind == "impl" || tk == b"trait";
+                    Ctx { visible: own.clone(), beyond, self_ok, self_beyond: cx.self_beyond || cx.self_ok, self_generic: if self_ok { generic_self } else { cx.self_generic } }
+                } else {
+                    let mut visible = cx.visible.clone();
+                    visible.extend(own.iter().copied());
+                    let opens = kind == "impl" || tk == b"trait";
+                    Ctx { visible, beyond: cx.beyond.clone(), self_ok: cx.self_ok || opens, self_beyond: cx.self_beyond, self_generic: if opens { generic_self } else { cx.self_generic } }
+                };
+                // (the header, then the body)
+                let head_end = if open != usize::MAX { open } else { end };
+                if let Some(e) = walk(k + 1, head_end, &ncx, 0, t, is_id, close, generics) {
+                    return Some(e);
+                }
+                if open != usize::MAX {
+                    let inner = match kind {
+                        "fn" => 1,
+                        "impl" => 2,
+                        _ if tk == b"trait" => 2,
+                        "mod" => 3,
+                        _ => 0,
+                    };
+                    let mcx;
+                    let bcx = if inner == 3 {
+                        mcx = Ctx { visible: vec![], beyond: vec![], self_ok: false, self_beyond: false, self_generic: false };
+                        &mcx
+                    } else {
+                        &ncx
+                    };
+                    if let Some(e) = walk(open + 1, end, bcx, if inner == 3 { 0 } else { inner }, t, is_id, close, generics) {
+                        return Some(e);
+                    }
+                }
+                k = end + 1;
+                continue;
+            }
+            if is_id(k) && !matches!(prev, b"." | b"'") && !(prev == b":" && t(k.wrapping_sub(2)) == b":") {
+                if tk == b"Self" && cx.self_beyond && !cx.self_ok {
+                    // (`Self(0)` / `Self` as a value: the constructor, which a non-generic impl's only warns of)
+                    let value = t(k + 1) == b"(" || matches!(prev, b"=" | b"(" | b"," | b"return" | b"{" | b";" | b">") && t(k + 1) != b"::" && t(k + 1) != b"{" && prev != b">";
+                    if !value {
+                        return Some((k, "can't use `Self` from outer item (E0401)"));
+                    }
+                    if cx.self_generic {
+                        return Some((k, "can't reference `Self` constructor from outer item (E0401)"));
+                    }
+                }
+                if cx.beyond.contains(&tk) && !cx.visible.contains(&tk) {
+                    return Some((k, "can't use generic parameters from outer item (E0401)"));
+                }
+            }
+            k += 1;
+        }
+        None
+    }
+    let cx = Ctx { visible: vec![], beyond: vec![], self_ok: false, self_beyond: false, self_generic: false };
+    let (at, msg) = walk(0, n, &cx, 0, &t, &is_id, &close, &generics)?;
+    let off = toks[at].1;
+    let line = b[..off].iter().filter(|&&c| c == b'\n').count() + 1;
+    let col = off - src[..off].rfind('\n').map_or(0, |p| p + 1) + 1;
+    Some(format!("{line}:{col}: {msg}"))
 }
 
 /// A name a module defines, for duplicate_name
@@ -4628,7 +7949,18 @@ fn first_cstr_in_extern(src: &str, items: &[SrcItem], (blocks, defs): (bool, boo
     None
 }
 
-fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Option<String> {
+/// A reserved word, which no item may be named (`mod break`, `struct for`)
+fn reserved_word(w: &[u8]) -> bool {
+    matches!(
+        w,
+        b"as" | b"break" | b"const" | b"continue" | b"crate" | b"else" | b"enum" | b"extern" | b"false" | b"fn" | b"for" | b"if" | b"impl" | b"in"
+            | b"let" | b"loop" | b"match" | b"mod" | b"move" | b"mut" | b"pub" | b"ref" | b"return" | b"self" | b"Self" | b"static" | b"struct"
+            | b"super" | b"trait" | b"true" | b"type" | b"unsafe" | b"use" | b"where" | b"while" | b"abstract" | b"become" | b"box" | b"do"
+            | b"final" | b"macro" | b"override" | b"priv" | b"typeof" | b"unsized" | b"virtual" | b"yield"
+    )
+}
+
+fn duplicate_name(src: &str, src_toks: Option<&[(u8, usize, usize)]>, externs: &[(usize, String)], injected: bool) -> Option<String> {
     // (a few scans: a program without these has its other duplicates found when its items are collected)
     // (2015's injected `std` meets an item or import of that name: `struct std;`, `use x as std;`, `enum std {`)
     let names_std = || {
@@ -4654,7 +7986,15 @@ fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Opt
         restored.as_str()
     };
     let b = src.as_bytes();
-    let toks = crate::lexer::tokenize(b);
+    // (the configured text's tokens where the caller has them and no `extern crate` was put back)
+    let own;
+    let toks: &[(u8, usize, usize)] = match src_toks {
+        Some(t) if externs.is_empty() => t,
+        _ => {
+            own = crate::lexer::tokenize(b);
+            &own
+        }
+    };
     let n = toks.len();
     let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
     // (each open bracket's match)
@@ -4741,6 +8081,10 @@ fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Opt
                 // (an inline module; a `mod m;` file may be configured away by its own `#![cfg(..)]`)
                 // (nor one whose body starts with an inner `#![cfg(..)]`, nor an empty one over several lines: a file module
                 // the loader brought in, configured away by its own `#![cfg(..)]`)
+                // (`mod break {`: a keyword where the module's name goes, rustc's parse error)
+                b"mod" if is_id(k + 1) && reserved_word(t(k + 1)) => {
+                    return Some(format!("{}:{}: expected identifier, found keyword `{}`", line_of(k + 1), toks[k + 1].1 - b[..toks[k + 1].1].iter().rposition(|&c| c == b'\n').map_or(0, |p| p + 1) + 1, String::from_utf8_lossy(t(k + 1))));
+                }
                 b"mod" if is_id(k + 1)
                     && t(k + 2) == b"{"
                     && !(t(k + 3) == b"#" && t(k + 4) == b"!" && t(k + 5) == b"[" && t(k + 6).starts_with(b"cfg"))
@@ -5046,6 +8390,17 @@ fn unresolved_import(src: &str, split: &str, items: &[SrcItem], deps: &[String])
             continue;
         }
         let text = &split[it.start..it.end];
+        // (E0658: an unstable item of std's, `use std::intrinsics;`, after the item's attributes too)
+        {
+            let t = text.trim_start();
+            let t = if t.starts_with("#[") { t[leading_attrs(t).len()..].trim_start() } else { t };
+            let t = t.strip_prefix("pub ").unwrap_or(t);
+            if let Some(rest) = t.strip_prefix("use ").filter(|r| r.starts_with("std::") || r.starts_with("core::")) {
+                if let Some(e) = unstable_std_use(split, text, rest, it.line) {
+                    return Some(e);
+                }
+            }
+        }
         let t = text.trim_start();
         let t = t.strip_prefix("pub ").unwrap_or(t);
         let Some(rest) = t.strip_prefix("use ") else { continue };
@@ -5103,7 +8458,29 @@ fn unresolved_import(src: &str, split: &str, items: &[SrcItem], deps: &[String])
     if src.contains("macro_rules!") && firsts.iter().any(|(_, f)| !defined.contains(f)) && src.contains("$") {
         return None;
     }
-    if let Some((line, f)) = firsts.into_iter().find(|(_, f)| !defined.contains(f)) {
+    // (a top-level glob import may bring the name, an enum's variant for one (`use self::A::*; use V;`): a name the
+    // text has elsewhere too is left to the module resolution)
+    // (a glob of a path that starts at a name the program has: not one of the unresolved names)
+    let globbed = items.iter().any(|it| matches!(it.kind, ItemKind::Normal) && {
+        let t = split[it.start..it.end].trim();
+        let t = t.strip_prefix("pub ").unwrap_or(t);
+        t.trim_end_matches(';').trim_end().ends_with('*') && t.strip_prefix("use ").is_some_and(|r| {
+            let r = r.trim_start().trim_start_matches("::");
+            let first: String = r.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+            matches!(first.as_str(), "crate" | "self" | "super") || defined.contains(&first) || defines(&first)
+        })
+    });
+    // (the name as a word outside `//` comments, more than once: in the `use` and elsewhere)
+    let elsewhere = |f: &str| {
+        src.match_indices(f)
+            .filter(|&(i, _)| {
+                let ls = src[..i].rfind('\n').map_or(0, |k| k + 1);
+                (i == 0 || !is_id(b[i - 1])) && b.get(i + f.len()).is_none_or(|&c| !is_id(c)) && !src[ls..i].contains("//")
+            })
+            .nth(1)
+            .is_some()
+    };
+    if let Some((line, f)) = firsts.into_iter().find(|(_, f)| !defined.contains(f) && !(globbed && elsewhere(f))) {
         return Some(format!("{line}:1: unresolved import `{f}` (E0432)"));
     }
     // (`use m::f` with an inline `mod m { .. }` that defines no `f`)
@@ -5142,6 +8519,70 @@ fn unresolved_import(src: &str, split: &str, items: &[SrcItem], deps: &[String])
         }
     }
     None
+}
+
+/// std's items behind a library feature (rustc 1.100): the path as `std::..` (`core::..` reads the same), the feature, and
+/// the reason rustc gives
+const UNSTABLE_STD: &[(&str, &str, &str)] = &[
+    ("std::intrinsics", "core_intrinsics", ": intrinsics are unlikely to ever be stabilized, instead they should be used through stabilized interfaces in the rest of the standard library"),
+    ("std::ops::FnPtr", "fn_static", ""),
+    ("std::field::FieldRepresentingType", "field_representing_type_raw", ""),
+    ("std::marker::ConstParamTy_", "const_param_ty_trait", ""),
+    ("std::marker::CoercePointee", "derive_coerce_pointee", ""),
+    ("std::marker::CoerceShared", "reborrow", ""),
+    ("std::marker::Reborrow", "reborrow", ""),
+    ("std::ptr::Unique", "ptr_internals", ": use `NonNull` instead and consider `PhantomData<T>` (if you also use `#[may_dangle]`), `Send`, and/or `Sync`"),
+    ("std::unicode::UNICODE_VERSION", "unicode_internals", ""),
+    ("std::mem::TransmuteFrom", "transmutability", ""),
+    ("std::mem::Assume", "transmutability", ""),
+];
+
+/// E0658 "use of unstable library feature `x`" of a `use` of one of UNSTABLE_STD (or of `core::io`'s items, at `io`),
+/// the crate not enabling the feature: at the path, or at the name in a braced list (`use std::marker::{Copy, Reborrow};`)
+#[cold]
+#[inline(never)]
+fn unstable_std_use(src: &str, text: &str, rest: &str, line: usize) -> Option<String> {
+    let rest = &rest[..rest.find(';').unwrap_or(rest.len())];
+    // (the column of rest's byte k on the item's line)
+    let col = |k: usize| {
+        let off = rest.as_ptr() as usize - text.as_ptr() as usize + k;
+        let before = &text[..off];
+        (line + before.matches('\n').count(), before.len() - before.rfind('\n').map_or(0, |i| i + 1) + 1)
+    };
+    let mut found: Option<((usize, usize), &str, &str)> = None;
+    let mut look = |path: &str, at: usize| {
+        let p = path.split(" as ").next().unwrap_or("").trim();
+        let std = p.strip_prefix("core::").map(|r| format!("std::{r}")).unwrap_or_else(|| p.to_string());
+        if found.is_some() {
+            return;
+        }
+        if let Some(&(_, feat, why)) = UNSTABLE_STD.iter().find(|u| u.0 == std) {
+            found = Some((col(at), feat, why));
+        } else if p.starts_with("core::io::") || p == "core::io" {
+            found = Some((col(at + 6), "core_io", ""));
+        }
+    };
+    match rest.find('{') {
+        Some(b) => {
+            let prefix = &rest[..b];
+            let inner = &rest[b + 1..rest.rfind('}').unwrap_or(rest.len())];
+            if inner.contains('{') {
+                return None;
+            }
+            let mut k = b + 1;
+            for part in inner.split(',') {
+                let lead = part.len() - part.trim_start().len();
+                look(&format!("{prefix}{}", part.trim()), k + lead);
+                k += part.len() + 1;
+            }
+        }
+        None => look(rest, 0),
+    }
+    let ((l, c), feat, why) = found?;
+    if enabled_features(src).iter().any(|f| f == feat) {
+        return None;
+    }
+    Some(format!("{l}:{c}: use of unstable library feature `{feat}`{why} (E0658)"))
 }
 
 /// The naming lints (`deny` = [non_snake_case, non_camel_case_types, non_upper_case_globals]): the first fn / method,
@@ -5738,7 +9179,7 @@ fn elidable_use(t: &crate::parse::Ty, l: &str) -> bool {
 
 pub fn parse_fn(src: &str, it: &SrcItem) -> R<Option<ItemFn>> {
     let text = &src[it.start..it.end];
-    let f = crate::parse::parse_file(text).map_err(|e| relocate(e, it))?;
+    let f = crate::parse::parse_file(text).map_err(|e| relocate(e, it, src))?;
     let Some(item) = f.items.into_iter().next() else { return Ok(None) };
     let crate::parse::ItemKind::Fn(mut sig, Some(mut block)) = item.kind else { return Ok(None) };
     let mut lets = vec![];
@@ -5748,9 +9189,13 @@ pub fn parse_fn(src: &str, it: &SrcItem) -> R<Option<ItemFn>> {
         }
         let name = format!("__exr_arg{k}");
         let pat = std::mem::replace(p, Pat::Ident(false, false, name.clone(), None));
-        lets.push(Stmt::Let(pat, None, Some(acg::path_expr(&name)), None, Default::default()));
+        let at = crate::parse::pat_pos(&pat);
+        lets.push(Stmt::Let(pat, None, Some(acg::path_expr(&name)), None, at));
     }
     if !lets.is_empty() {
+        // (the statements' starts with them: each let at its pattern)
+        // (the body's statements move by the lets; a let has its own position)
+        block.spos = block.spos.shifted(0, lets.len() as isize);
         lets.append(&mut block.stmts);
         block.stmts = lets;
     }
@@ -5770,17 +9215,23 @@ pub fn synth_closure(c: &Expr, in_unsafe: bool) -> ItemFn {
             p.clone()
         } else {
             let id = format!("__p{i}");
-            stmts.push(Stmt::Let(p.clone(), None, Some(acg::path_expr(&id)), None, Default::default()));
+            stmts.push(Stmt::Let(p.clone(), None, Some(acg::path_expr(&id)), None, crate::parse::pat_pos(p)));
             Pat::Ident(false, false, id, None)
         };
         params.push((pin, unit.clone()));
     }
+    // (the body's statements' starts, after the parameters' lets, each at its pattern)
+    let mut spos = crate::parse::Spos::default();
     match &**body {
-        Expr::Block(None, false, b) => stmts.extend(b.stmts.iter().cloned()),
+        Expr::Block(None, false, b) => {
+            spos = b.spos.shifted(0, stmts.len() as isize);
+            stmts.extend(b.stmts.iter().cloned());
+        }
         e => stmts.push(Stmt::Expr(e.clone(), false)),
     }
     if in_unsafe {
-        stmts = vec![Stmt::Expr(Expr::Block(None, true, Block { stmts }), false)];
+        stmts = vec![Stmt::Expr(Expr::Block(None, true, Block { stmts, spos }), false)];
+        spos = crate::parse::Spos::default();
     }
     let sig = crate::parse::FnSig {
         name: "call".into(),
@@ -5791,7 +9242,7 @@ pub fn synth_closure(c: &Expr, in_unsafe: bool) -> ItemFn {
         ret: None,
         quals: vec![],
     };
-    ItemFn { attrs: vec![], sig, block: Block { stmts } }
+    ItemFn { attrs: vec![], sig, block: Block { stmts, spos } }
 }
 
 /// The text of an item after its attributes and comments, and the number of lines skipped to get there
@@ -6244,7 +9695,31 @@ impl Session2 {
 fn name_line(e: &str, src: &str, items: &[SrcItem]) -> String {
     let Some((l, rest)) = e.split_once(":1: ") else { return e.to_string() };
     let Ok(line) = l.parse::<usize>() else { return e.to_string() };
-    let name = ["cannot find type `", "cannot find trait `", "cannot find value `", "cannot find struct `", "trait objects without an explicit `dyn` are deprecated: `dyn "]
+    // (`\u{5}word\u{5}msg`: at the first whole word `word` of the item, after its attributes; an empty word: at the item's
+    // first token after them)
+    if let Some((w, m)) = rest.strip_prefix('\u{5}').and_then(|r| r.split_once('\u{5}')) {
+        let at = items.iter().find(|it| it.line == line).and_then(|it| {
+            let text = src.get(it.start..it.end.min(src.len()))?;
+            let from = sig_part(text, "f")?;
+            if w.is_empty() {
+                return Some(it.start + from);
+            }
+            let b = text.as_bytes();
+            let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+            text[from..].match_indices(w).map(|(i, _)| it.start + from + i).find(|&i| !id(src.as_bytes()[i - 1]) && src.as_bytes().get(i + w.len()).is_none_or(|&c| !id(c))).filter(|_| !b.is_empty())
+        });
+        let Some(at) = at else { return format!("{line}:1: {m}") };
+        let col = at - src[..at].rfind('\n').map_or(0, |p| p + 1) + 1;
+        return format!("{}:{col}: {m}", src[..at].matches('\n').count() + 1);
+    }
+    // (`\u{6}part\u{6}msg`: at that part of the method's signature, as sig_part reads it)
+    if let Some((part, m)) = rest.strip_prefix('\u{6}').and_then(|r| r.split_once('\u{6}')) {
+        let at = items.iter().find(|it| it.line == line).and_then(|it| Some(it.start + sig_part(src.get(it.start..it.end.min(src.len()))?, part)?));
+        let Some(at) = at else { return format!("{line}:1: {m}") };
+        let col = at - src[..at].rfind('\n').map_or(0, |p| p + 1) + 1;
+        return format!("{}:{col}: {m}", src[..at].matches('\n').count() + 1);
+    }
+    let name = ["cannot find type `", "cannot find trait `", "cannot find value `", "cannot find struct `", "the name `", "enum discriminant overflowed (E0370): `", "trait objects without an explicit `dyn` are deprecated: `dyn "]
         .iter()
         .find_map(|p| rest.strip_prefix(p))
         .and_then(|r| r.split('`').next());
@@ -6259,6 +9734,226 @@ fn name_line(e: &str, src: &str, items: &[SrcItem]) -> String {
         Some(i) => format!("{}:1: {rest}", line + text[..i].matches('\n').count()),
         None => e.to_string(),
     }
+}
+
+/// E0433 of an attribute written as a path, in src[start..start + len] (an item's outer attributes): "cannot find
+/// module or crate `foo` in this scope" at its first segment when that is no tool (rustfmt, clippy, diagnostic, ..,
+/// or one `register_tool` names) and no module of the crate's (in `src0`, the source as written); "cannot find `bar`
+/// in `m`" at its second when the first is a module (which shadows a tool of its name). Not a path from `std` /
+/// `core` / `crate` and the like
+fn attr_path_error(src: &str, src0: &str, start: usize, len: usize, line: usize) -> Option<String> {
+    let text = src.get(start..start + len)?;
+    if !text.contains("::") {
+        return None;
+    }
+    let toks = crate::lexer::tokenize(text.as_bytes());
+    let tk = |k: usize| toks.get(k).map_or("", |t| &text[t.1..t.2]);
+    let id = |k: usize| toks.get(k).is_some_and(|t| t.0 == 0);
+    let word_in = |hay: &str, w: &str| {
+        let b = hay.as_bytes();
+        let ok = |c: Option<&u8>| c.is_none_or(|&c| !(c == b'_' || c.is_ascii_alphanumeric()));
+        hay.match_indices(w).any(|(i, _)| ok(i.checked_sub(1).and_then(|j| b.get(j))) && ok(b.get(i + w.len())))
+    };
+    let module = |m: &str| src0.match_indices("mod").any(|(i, _)| {
+        let b = src0.as_bytes();
+        (i == 0 || !(b[i - 1] == b'_' || b[i - 1].is_ascii_alphanumeric())) && src0[i + 3..].starts_with(char::is_whitespace) && {
+            let r = src0[i + 3..].trim_start();
+            r.starts_with(m) && !r[m.len()..].starts_with(|c: char| c == '_' || c.is_alphanumeric())
+        }
+    });
+    for k in 0..toks.len() {
+        if !(tk(k) == "#" && tk(k + 1) == "[" && id(k + 2) && tk(k + 3) == ":" && tk(k + 4) == ":" && id(k + 5)) {
+            continue;
+        }
+        let (first, second) = (tk(k + 2), tk(k + 5));
+        if matches!(first, "std" | "core" | "alloc" | "crate" | "self" | "super" | "unsafe") {
+            continue;
+        }
+        let tool = matches!(first, "rustfmt" | "clippy" | "rustdoc" | "rust_analyzer" | "diagnostic" | "miri") || (src0.contains("register_tool") && word_in(src0, first) && src0.contains(&format!("register_tool({first}")));
+        let at = |j: usize| {
+            let i = start + toks[j].1;
+            (line + text[..toks[j].1].matches('\n').count(), i - src[..i].rfind('\n').map_or(0, |p| p + 1) + 1)
+        };
+        if module(first) {
+            let (l, c) = at(k + 5);
+            return Some(format!("{l}:{c}: cannot find `{second}` in `{first}` (E0433)"));
+        }
+        if !tool {
+            let (l, c) = at(k + 2);
+            return Some(format!("{l}:{c}: cannot find module or crate `{first}` in this scope (E0433)"));
+        }
+    }
+    None
+}
+
+/// The outer attributes an item's text starts with (`#[..]` groups, with the space between them)
+fn leading_attrs(t: &str) -> &str {
+    let b = t.as_bytes();
+    let mut i = 0;
+    while b.get(i) == Some(&b'#') && b.get(i + 1) == Some(&b'[') {
+        let mut d = 0;
+        while i < b.len() {
+            match b[i] {
+                b'[' => d += 1,
+                b']' => d -= 1,
+                _ => {}
+            }
+            i += 1;
+            if d == 0 && b[i - 1] == b']' {
+                break;
+            }
+        }
+        // (the space and the comments after it: `#[deny(x)] // note`)
+        loop {
+            while i < b.len() && b[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if b[i..].starts_with(b"//") {
+                i += b[i..].iter().position(|&c| c == b'\n').unwrap_or(b.len() - i);
+            } else if b[i..].starts_with(b"/*") {
+                i += t[i + 2..].find("*/").map_or(b.len() - i, |k| k + 4);
+            } else {
+                break;
+            }
+        }
+    }
+    &t[..i]
+}
+
+/// The lint attributes of an item's text that name `unused_variables` (or `unused`, `warnings`), in order: where each
+/// starts, the end of what it covers (all of the item for one of the item's own, before its first other token; the
+/// statement, arm or field for one inside), and its level: 0 allow / expect / warn, 1 deny, 2 forbid
+fn unused_var_attrs(text: &str) -> Vec<(usize, usize, u8)> {
+    let b = text.as_bytes();
+    let mut out = vec![];
+    let (mut from, mut outer) = (0, true);
+    while let Some(k) = text[from..].find("#[") {
+        let at = from + k;
+        outer = outer && text[from..at].trim().is_empty();
+        let Some(close) = (at + 1..b.len()).scan(0i32, |d, j| {
+            *d += match b[j] { b'[' => 1, b']' => -1, _ => 0 };
+            Some((j, *d))
+        }).find(|&(_, d)| d == 0).map(|(j, _)| j) else { break };
+        from = close + 1;
+        let attr: String = text[at + 2..close].chars().filter(|c| !c.is_whitespace()).collect();
+        let Some((name, rest)) = attr.split_once('(') else { continue };
+        let lints: Vec<&str> = rest.trim_end_matches(')').split(',').filter(|l| matches!(*l, "unused_variables" | "unused" | "warnings")).collect();
+        // (only a `forbid` of the lint itself is not undone by an `allow`: a group's lets a member be allowed)
+        let level = match name {
+            _ if lints.is_empty() => continue,
+            "allow" | "expect" | "warn" => 0,
+            "deny" => 1,
+            "forbid" if lints.contains(&"unused_variables") => 2,
+            "forbid" => 1,
+            _ => continue,
+        };
+        out.push((at, if outer { b.len() } else { scope_end(b, from) }, level));
+    }
+    out
+}
+
+/// The end of the statement, arm or field that starts at `i`: its `;` or `,`, the end of the block it ends with
+/// (unless `else`, `.`, `?` or an operator goes on after it), or the end of the block around it
+fn scope_end(b: &[u8], mut i: usize) -> usize {
+    let mut d = 0i32;
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b'\'' if b.get(i + 2) == Some(&b'\'') => i += 2,
+            b'/' if b.get(i + 1) == Some(&b'/') => {
+                while i < b.len() && b[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'(' | b'[' | b'{' => d += 1,
+            b')' | b']' | b'}' => {
+                d -= 1;
+                if d < 0 {
+                    return i;
+                }
+                if d == 0 && b[i] == b'}' {
+                    let j = (i + 1..b.len()).find(|&j| !b[j].is_ascii_whitespace()).unwrap_or(b.len());
+                    let goes_on = matches!(b.get(j), Some(b';' | b',' | b'.' | b'?' | b'+' | b'-' | b'*' | b'/' | b'%' | b'=' | b'<' | b'>' | b'!' | b'&' | b'^'))
+                        || b[j..].starts_with(b"else")
+                        || b[j..].starts_with(b"as ");
+                    if !goes_on {
+                        return i + 1;
+                    }
+                }
+            }
+            b';' | b',' if d == 0 => return i + 1,
+            _ => {}
+        }
+        i += 1;
+    }
+    b.len()
+}
+
+/// Where a part of a fn's signature starts in its item's text, as rustc points at it: `f` the signature (after the
+/// attributes), `p{i}` the `i`th parameter (a receiver itself, another parameter's type), `r` the result's type
+fn sig_part(text: &str, part: &str) -> Option<usize> {
+    let toks = crate::lexer::tokenize(text.as_bytes());
+    let tk = |k: usize| &text[toks[k].1..toks[k].2];
+    // (the attributes: `#` and its bracketed group)
+    let mut k = 0;
+    while k + 1 < toks.len() && tk(k) == "#" && tk(k + 1) == "[" {
+        let mut d = 0;
+        k += 1;
+        while k < toks.len() {
+            match tk(k) {
+                "[" => d += 1,
+                "]" => d -= 1,
+                _ => {}
+            }
+            k += 1;
+            if d == 0 {
+                break;
+            }
+        }
+    }
+    if part == "f" {
+        return toks.get(k).map(|t| t.1);
+    }
+    let open = (k..toks.len()).find(|&j| tk(j) == "(")?;
+    // (the parameters: split at the commas outside brackets, `->` not closing one)
+    let (mut d, mut start, mut params, mut close) = (0i32, open + 1, vec![], None);
+    let mut j = open;
+    while j < toks.len() {
+        match tk(j) {
+            "(" | "[" | "<" | "{" => d += 1,
+            ">" if j > 0 && tk(j - 1) == "-" && toks[j - 1].2 == toks[j].1 => {}
+            ")" | "]" | ">" | "}" => {
+                d -= 1;
+                if d == 0 {
+                    if start < j {
+                        params.push((start, j));
+                    }
+                    close = Some(j);
+                    break;
+                }
+            }
+            "," if d == 1 => {
+                params.push((start, j));
+                start = j + 1;
+            }
+            _ => {}
+        }
+        j += 1;
+    }
+    let close = close?;
+    if part == "r" {
+        let a = (close + 2 < toks.len() && tk(close + 1) == "-" && tk(close + 2) == ">").then_some(close + 3)?;
+        return toks.get(a).map(|t| t.1);
+    }
+    let (a, b) = *params.get(part.strip_prefix('p')?.parse::<usize>().ok()?)?;
+    // (the type after the pattern's `:`, not a path's `::`; a receiver without one (`&self`), itself)
+    let colon = (a..b).find(|&c| tk(c) == ":" && (c + 1 >= b || tk(c + 1) != ":") && (c == a || tk(c - 1) != ":"));
+    Some(toks[colon.filter(|&c| c + 1 < b).map_or(a, |c| c + 1)].1)
 }
 
 /// compile_id と、コード生成が要求した (総称関数の) インスタンス
@@ -6577,15 +10272,985 @@ impl Session2 {
 /// `Self` of the fn or impl around it, a local), an import, `_` in a signature, an item never used. Not what zustc
 /// does not read (`unsupported ..`, a parse error of syntax it does not know), nor a name the hoisting made (`X__h0`)
 fn hoisted_err_holds(msg: &str) -> bool {
-    let named = ["cannot find type `", "cannot find value `", "`Self` is only available in impls", "`self` is only allowed in impls", "unresolved import `", "the placeholder `_` is not allowed", "expected identifier, found keyword"];
-    let unused = msg.starts_with("function `") && msg.contains("is never used");
+    let named = ["cannot find type `", "cannot find value `", "`Self` is only available in impls", "`self` is only allowed in impls", "unresolved import `", "the placeholder `_` is not allowed", "expected identifier, found keyword",
+        // (an item's own definition: a discriminant past its repr, a union's fields and derives)
+        "enum discriminant overflowed (E0370)", "field must implement `Copy`", "this trait cannot be derived for unions", "cannot find derive macro `",
+        // (an item's own syntax: `struct Test { Very\n Bad }` in a fn body)
+        "expected `:` (found `", "expected `,` (found `", "free static item without body",
+        // (`#[test]` on an item in a fn body)
+        "the `test` attribute may only be used on a free function",
+        // (`const FOO = 1;` in a fn body)
+        "missing type for `",
+        // (an item's written types: an unsized type where a Sized one is needed, sized_error)
+        "the size for values of type `"];
+    let unused = msg.starts_with("function `") && msg.contains("is never used") || msg.starts_with("type parameter `") && msg.ends_with("is never used (E0091)")
+        // (two variants or foreign items of one name, in the item itself)
+        || msg.starts_with("the name `") && msg.ends_with("is defined multiple times (E0428)");
     // (an impl's associated type against its trait's bound (E0477): an impl in a fn body is hoisted)
     let unmet = msg.starts_with("the type `") && msg.contains("does not fulfill the required lifetime");
     // (a derive's field or a field's type without the bound it needs (derive_field_error, wf_error): a local
     // `#[derive(Eq)] struct S(f64);` too)
     let bounds = ["the trait bound `", "binary operation `==` cannot be applied to type `", "can't compare `"].iter().any(|n| msg.starts_with(n))
         || (msg.starts_with('`') && (msg.contains("` doesn't implement `Debug`") || msg.contains("` is not an iterator")));
-    !msg.contains("__h") && !msg.contains("unsupported") && (named.iter().any(|n| msg.starts_with(n)) || (msg.starts_with("cannot find constant `") && !msg.starts_with("cannot find constant `_`")) || unused || bounds || unmet)
+    !msg.contains("__h") && !msg.contains("unsupported") && (named.iter().any(|n| msg.starts_with(n)) || msg.ends_with("is not dyn compatible (E0038)") || (msg.starts_with("cannot find constant `") && !msg.starts_with("cannot find constant `_`")) || unused || bounds || unmet)
+}
+
+/// A type check's error in an item hoisted out of a fn body that holds wherever the item is: a type nothing declares,
+/// a local where a constant goes (E0435), a tuple pattern's fields (E0023) or one of a unit or struct variant (E0532,
+/// E0164), an unsafe call outside `unsafe` (E0133). Not one naming `Self` (of an impl around the item, which the
+/// hoisting leaves behind), a name the hoisting made, or what zustc does not read
+fn hoisted_check_err_holds(msg: &str) -> bool {
+    const HOLDS: [&str; 5] = [
+        "cannot find type `",
+        "attempt to use a non-constant value in a constant",
+        "this pattern has ",
+        "expected tuple struct or tuple variant, found ",
+        "call to unsafe function",
+    ];
+    HOLDS.iter().any(|h| msg.starts_with(h)) && !msg.contains("Self") && !msg.contains("__h") && !msg.contains("unsupported")
+}
+
+/// E0170 (bindings_with_variant_name) taken out of errs where an attribute of an item's (its leading ones) or of the
+/// crate's names the lint (an `allow`, read for all of the program)
+#[cold]
+#[inline(never)]
+fn allow_variant_bindings(src: &str, errs: &mut Vec<String>) {
+    let Ok(items) = crate::lexer::split(src) else { return };
+    // (the crate's own, `#![allow(..)]`, is an item of its own)
+    let allowed = items.iter().any(|it| {
+        src.get(it.start..it.end).is_some_and(|t| t.starts_with('#') && if t.starts_with("#!") { t } else { leading_attrs(t) }.contains("bindings_with_variant_name"))
+    });
+    if allowed {
+        errs.retain(|e| !e.ends_with("(E0170)"));
+    }
+}
+
+/// E0276 "impl has stricter requirements than trait", at the bound: a method of an impl of a trait of the program's
+/// whose own type parameter (by its place) has a trait bound, inline or in the method's where clause, that the trait's
+/// method's parameter does not have, nor one of the bounds it has as a supertrait (`T: Ord` where the trait says
+/// `T: Eq`; `T: Eq` where it says `T: Ord` is fine). Bounds are told by their trait's name, not its arguments; not
+/// lifetimes, nor the impl's own parameters. Only read for a program with a trait with a generic method
+fn stricter_impl_bound(src: &str, items: &[SrcItem]) -> Option<String> {
+    let text = |it: &SrcItem| src.get(it.start..it.end).unwrap_or("");
+    // (a trait member with type parameters of its own: `fn f<T` before its `(`)
+    let generic_fn = |t: &str| t.find('(').is_some_and(|p| t[..p].contains('<') && t[..p].contains("fn "));
+    if !items.iter().any(|it| matches!(it.kind, crate::lexer::ItemKind::TraitMember(_)) && generic_fn(text(it))) {
+        return None;
+    }
+    let (line, col, m) = stricter_impl_bound_in(src, items)?;
+    Some(format!("{line}:{col}: {m}"))
+}
+
+#[cold]
+#[inline(never)]
+fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize, String)> {
+    use crate::lexer::ItemKind as K;
+    let text = |it: &SrcItem| src.get(it.start..it.end).unwrap_or("");
+    let generic_fn = |t: &str| t.find('(').is_some_and(|p| t[..p].contains('<') && t[..p].contains("fn "));
+    use crate::parse::{Bound, GParam, Ty as PTy};
+    // (a header's name after its keyword, and the names after a `:` before its `{` / `where`: `trait B: A + Sized {`)
+    let words = |t: &str| -> Vec<String> { crate::lexer::tokenize(t.as_bytes()).iter().filter(|x| x.0 == 0).map(|x| t[x.1..x.2].to_string()).collect() };
+    let mut supers: crate::fxhash::FxMap<String, Vec<String>> = Default::default();
+    let mut trait_of: crate::fxhash::FxMap<u32, String> = Default::default();
+    for (i, it) in items.iter().enumerate() {
+        if it.kind != K::TraitHeader {
+            continue;
+        }
+        let t = text(it);
+        let head = &t[..t.find('{').unwrap_or(t.len())];
+        let w = words(head);
+        let Some(k) = w.iter().position(|x| x == "trait") else { continue };
+        let Some(name) = w.get(k + 1) else { continue };
+        let sup: Vec<String> = match head.find(':') {
+            Some(c) => {
+                let r = &head[c + 1..];
+                let r = &r[..r.find("where").unwrap_or(r.len())];
+                words(r).into_iter().filter(|x| x.starts_with(|c: char| c.is_ascii_uppercase())).collect()
+            }
+            None => vec![],
+        };
+        supers.insert(name.clone(), sup);
+        trait_of.insert(i as u32, name.clone());
+    }
+    // (std's supertraits)
+    let std_supers = |n: &str| -> &'static [&'static str] {
+        match n {
+            "Eq" => &["PartialEq"],
+            "Ord" => &["Eq", "PartialOrd", "PartialEq"],
+            "PartialOrd" => &["PartialEq"],
+            "Copy" => &["Clone"],
+            "Error" => &["Debug", "Display"],
+            "DoubleEndedIterator" | "ExactSizeIterator" => &["Iterator"],
+            "Fn" => &["FnMut", "FnOnce"],
+            "FnMut" => &["FnOnce"],
+            _ => &[],
+        }
+    };
+    let close = |ns: Vec<String>| -> Vec<String> {
+        let mut out = ns;
+        let mut k = 0;
+        while k < out.len() {
+            let n = out[k].clone();
+            for s in std_supers(&n) {
+                if !out.iter().any(|o| o == s) {
+                    out.push(s.to_string());
+                }
+            }
+            if let Some(ss) = supers.get(&n) {
+                for s in ss {
+                    if !out.contains(s) {
+                        out.push(s.clone());
+                    }
+                }
+            }
+            k += 1;
+        }
+        out
+    };
+    // (a method's own type parameters with their bounds: inline, and its where clause's `T: B`)
+    let params = |g: &crate::parse::Generics| -> Vec<Vec<(String, crate::parse::Pos)>> {
+        g.params
+            .iter()
+            .filter_map(|q| match q {
+                GParam::Ty(n, bs, _) => {
+                    let mut v: Vec<(String, crate::parse::Pos)> = vec![];
+                    let mut add = |bs: &[Bound]| {
+                        for b in bs {
+                            if let Bound::Trait(false, p) = b {
+                                if let Some(s) = p.segs.last() {
+                                    v.push((s.name.clone(), p.pos));
+                                }
+                            }
+                        }
+                    };
+                    add(bs);
+                    for (t, pbs) in &g.preds {
+                        if matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == *n && p.segs[0].args.is_empty()) {
+                            add(pbs);
+                        }
+                    }
+                    Some(v)
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    // (a member's signature alone, as a declaration: its body is not parsed)
+    let sig = |t: &str| -> Option<crate::parse::FnSig> {
+        let decl = match fn_body_start(t) {
+            Some(b) => std::borrow::Cow::Owned(format!("{};", &t[..b])),
+            None => std::borrow::Cow::Borrowed(t),
+        };
+        match crate::parse::parse_file(&decl).ok()?.items.into_iter().next()?.kind {
+            crate::parse::ItemKind::Fn(s, _) => Some(s),
+            _ => None,
+        }
+    };
+    // (a member's fn name: `fn name<..>(`)
+    fn fn_name(t: &str) -> Option<&str> {
+        let k = t.find("fn ")? + 3;
+        let r = t[k..].trim_start();
+        Some(&r[..r.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(r.len())])
+    }
+    // (the generic methods of the program's traits, by trait and name; their signatures parsed once each)
+    let mut decls: crate::fxhash::FxMap<(u32, &str), &SrcItem> = Default::default();
+    for d in items {
+        if let K::TraitMember(th) = d.kind {
+            if generic_fn(text(d)) {
+                if let Some(n) = fn_name(text(d)) {
+                    decls.insert((th, n), d);
+                }
+            }
+        }
+    }
+    let mut decl_sigs: crate::fxhash::FxMap<(u32, &str), Option<crate::parse::FnSig>> = Default::default();
+    // (each impl header's trait of the program's, read once)
+    let mut impl_trait: crate::fxhash::FxMap<u32, Option<u32>> = Default::default();
+    let mut by_text: crate::fxhash::FxMap<&str, Option<u32>> = Default::default();
+    // (a member's verdict: E0276 at a bound, or E0049 with (its own, the trait's) type parameter counts)
+    let mut verdicts: crate::fxhash::FxMap<(u32, &str), Option<Result<crate::parse::Pos, (usize, usize, bool)>>> = Default::default();
+    for m in items {
+        let K::ImplMember(h) = m.kind else { continue };
+        // (a fn of the impl: a generic one for E0276, any for E0049 against a generic method of the trait)
+        if !text(m).contains("fn ") {
+            continue;
+        }
+        let th = *impl_trait.entry(h).or_insert_with(|| {
+            // (`impl<..> Tr<..> for X {`: the trait's name before `for`, by the text before it (the same for each impl
+            // a macro writes: `impl FromHex for [u8; N]`))
+            let t = text(items.get(h as usize)?);
+            let head = &t[..t.find('{').unwrap_or(t.len())];
+            let f = head.find(" for ")?;
+            let before = &head[..f];
+            let before = before[..before.find('<').filter(|&l| before[l..].contains('>') && !before[..l].ends_with("impl")).unwrap_or(before.len())].trim_end();
+            *by_text.entry(before).or_insert_with(|| {
+                let tw = words(before);
+                let tr = tw.last()?;
+                trait_of.iter().find(|(_, n)| *n == tr).map(|(&th, _)| th)
+            })
+        });
+        let Some(th) = th else { continue };
+        let Some(name) = fn_name(text(m)) else { continue };
+        let Some(&d) = decls.get(&(th, name)) else { continue };
+        // (the verdict by the member's signature text, the same for each impl a macro writes: where in it a bound is
+        // stricter, if one is)
+        let mt = text(m);
+        let key = &mt[..fn_body_start(mt).unwrap_or(mt.len())];
+        let at = verdicts.entry((th, key)).or_insert_with(|| {
+            let ms = sig(mt)?;
+            let ds = decl_sigs.entry((th, name)).or_insert_with(|| sig(text(d))).clone()?;
+            let (mp, dp) = (params(&ms.generics), params(&ds.generics));
+            // (not when the counts of type and const parameters together agree: a kind that differs is rustc's
+            // "incompatible generic parameter" (E0053))
+            let all = |g: &crate::parse::Generics| g.params.iter().filter(|q| !matches!(q, GParam::Lifetime(_))).count();
+            if mp.len() != dp.len() && all(&ms.generics) == all(&ds.generics) {
+                return None;
+            }
+            if mp.len() != dp.len() {
+                // (not with an `impl Trait` parameter on either side, which rustc reports otherwise (E0643))
+                let dt = text(d);
+                let apit = |t: &str| [": impl ", ": &impl ", ": &mut impl "].iter().any(|p| t.contains(p));
+                if apit(key) || apit(&dt[..fn_body_start(dt).unwrap_or(dt.len())]) {
+                    return None;
+                }
+                return Some(Err((mp.len(), dp.len(), ms.recv.is_some())));
+            }
+            mp.iter().zip(&dp).find_map(|(mb, db)| {
+                let allowed = close(db.iter().map(|x| x.0.clone()).collect());
+                mb.iter().find(|(n, _)| n != "Sized" && !allowed.contains(n)).map(|x| Ok(x.1))
+            })
+        });
+        match *at {
+            Some(Ok(pos)) => {
+                // (the position in the member's text: its first line starts where the member does)
+                let line = m.line + pos.line as usize - 1;
+                let col = if pos.line == 1 { m.start - src[..m.start].rfind('\n').map_or(0, |k| k + 1) + pos.col as usize + 1 } else { pos.col as usize + 1 };
+                return Some((line, col, "impl has stricter requirements than trait (E0276)".to_string()));
+            }
+            // (E0049: `fn foo(x: bool)` for the trait's `fn foo<T: Default>(x: T)`)
+            Some(Err((mc, dc, method))) => {
+                let kind = if method { "method" } else { "associated function" };
+                let n = |c: usize| if c == 1 { "1 type parameter".to_string() } else { format!("{c} type parameters") };
+                return Some((m.line, 1, format!("{kind} `{name}` has {} but its trait declaration has {} (E0049)", n(mc), n(dc))));
+            }
+            None => {}
+        }
+    }
+    None
+}
+
+/// Two items of one name in one impl block, in one namespace (a fn's and a const's are values, a type's is a type):
+/// "duplicate definitions with name `bar`:" (E0201) in a trait's impl, "duplicate definitions with name `bar`"
+/// (E0592) in an inherent one, at the second item's start (rustc 1.100). Read from the items' own identifiers
+/// Types of std that a crate's inherent impl cannot name (E0116), unless the crate has a type of that name
+const STD_ADTS: &[&str] = &[
+    "Arc", "BTreeMap", "BTreeSet", "BinaryHeap", "Box", "Cell", "Cow", "Duration", "HashMap", "HashSet", "LinkedList", "Mutex", "NonNull",
+    "Option", "PhantomData", "Pin", "Rc", "RefCell", "Result", "RwLock", "String", "Vec", "VecDeque", "Weak",
+];
+
+/// Where a fn item's body starts in its text: the first `{` outside its generics, parameters and brackets (None for
+/// a declaration, `fn f();`)
+fn fn_body_start(t: &str) -> Option<usize> {
+    let b = t.as_bytes();
+    let mut d = 0i32;
+    for (i, &c) in b.iter().enumerate() {
+        match c {
+            b'<' | b'(' | b'[' => d += 1,
+            b'>' if i > 0 && b[i - 1] == b'-' => {}
+            b'>' | b')' | b']' => d -= 1,
+            b'{' if d <= 0 => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// E0084: `#[repr(i32)] enum Foo {}`, an integer or `C` representation of an enum without variants, at the `repr`.
+/// text: the item's, t: past its attributes and visibility
+#[cold]
+fn zero_variant_repr(it: &SrcItem, text: &str, t: &str) -> Option<String> {
+    let body = t[t.find('{')? + 1..].trim_start();
+    if !body.starts_with('}') {
+        return None;
+    }
+    let attrs = &text[..text.len() - t.len()];
+    let at = attrs.find("repr(")?;
+    let list = &attrs[at + 5..at + 5 + attrs[at + 5..].find(')')?];
+    const INTS: &[&str] = &["C", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize"];
+    if !list.split(',').any(|h| INTS.contains(&h.trim())) {
+        return None;
+    }
+    let line = it.line + attrs[..at].matches('\n').count();
+    Some(format!("{line}:1: unsupported representation for zero-variant enum (E0084)"))
+}
+
+/// The keyword of an impl member (past its visibility and qualifiers): `fn`, `type` or `const`
+fn x_kind<'a>(mut w: impl Iterator<Item = &'a str>) -> &'a str {
+    let mut prev = "";
+    for x in w.by_ref().take(8) {
+        match x {
+            "fn" | "type" => return x,
+            "pub" | "crate" | "self" | "super" | "in" | "unsafe" | "async" | "extern" | "default" => {}
+            "const" => prev = "const",
+            _ if prev == "const" => return "const",
+            _ => return "",
+        }
+    }
+    prev
+}
+
+/// E0437 / E0438: member `name` (a type when `ty`) of the trait impl whose header is item `h`, when the impl is of a
+/// trait of the program's (one of that name) that declares no type or const of that name
+#[cold]
+fn not_a_member<'a>(src: &'a str, items: &[SrcItem], it: &SrcItem, h: u32, ty: bool, name: &str, traits: &mut Option<TraitMembers<'a>>) -> Option<String> {
+    let TraitMembers { traits: tmap, names, by_header } = traits.get_or_insert_with(|| TraitMembers::new(src, items));
+    // (a name a trait of the program declares is taken as one of its impl's trait, without reading the impl's header: an
+    // impl of another trait of the program that names it is missed)
+    if names.contains(&(ty, name)) {
+        return None;
+    }
+    // (else no trait of the program declares it: an error in an impl of one)
+    (*by_header.entry(h).or_insert_with(|| {
+        let tr = impl_trait_name(src, items.get(h as usize)?)?;
+        *tmap.get(tr)?
+    }))?;
+    let tr = impl_trait_name(src, items.get(h as usize)?)?;
+    let col = it.start - src[..it.start].rfind('\n').map_or(0, |k| k + 1) + 1;
+    Some(if ty {
+        format!("{}:{col}: type `{name}` is not a member of trait `{tr}` (E0437)", it.line)
+    } else {
+        format!("{}:{col}: const `{name}` is not a member of trait `{tr}` (E0438)", it.line)
+    })
+}
+
+/// The trait's name of a trait impl's header (`impl<T> Tr<T> for X {` -> `Tr`); None for an inherent impl
+fn impl_trait_name<'a>(src: &'a str, hi: &SrcItem) -> Option<&'a str> {
+    let head = src.get(hi.start..hi.end)?;
+    let head = item_text(head).strip_prefix("unsafe ").map_or(item_text(head), |r| r.trim_start());
+    let rest = head.strip_prefix("impl")?;
+    if !hi.idents.iter().any(|&(a, b)| src.get(a as usize..b as usize) == Some("for")) {
+        return None;
+    }
+    Some(impl_self_name(rest))
+}
+
+/// The program's traits, read once for E0437 / E0438: each name's header (None for a name two traits have), the
+/// (trait, a type?, name) of their associated types and consts, and each impl header's trait
+struct TraitMembers<'a> {
+    traits: FxMap<&'a str, Option<u32>>,
+    /// (a type?, name) of their associated types and consts
+    names: FxSet<(bool, &'a str)>,
+    by_header: FxMap<u32, Option<u32>>,
+}
+
+impl<'a> TraitMembers<'a> {
+    #[cold]
+    fn new(src: &'a str, items: &[SrcItem]) -> Self {
+        use crate::lexer::ItemKind as K;
+        let mut traits: FxMap<&str, Option<u32>> = FxMap::default();
+        let mut names = FxSet::default();
+        for (i, t) in items.iter().enumerate() {
+            match t.kind {
+                K::TraitHeader => {
+                    let mut w = t.idents.iter().map(|&(a, b)| src.get(a as usize..b as usize).unwrap_or(""));
+                    if w.find(|&x| x == "trait").is_some() {
+                        if let Some(n) = w.next() {
+                            traits.entry(n).and_modify(|e| *e = None).or_insert(Some(i as u32));
+                        }
+                    }
+                }
+                // (a member by its text, past its attributes and visibility: `#[doc(hidden)] type Buffer: 'static;`)
+                K::TraitMember(th) => {
+                    let raw = src.get(t.start..t.end).unwrap_or("");
+                    // (a fn by its first byte, before reading past attributes)
+                    if !matches!(raw.as_bytes().first(), Some(b't' | b'c' | b'#' | b'p')) {
+                        continue;
+                    }
+                    let text = item_text(raw);
+                    let (is_ty, r) = match (text.strip_prefix("type"), text.strip_prefix("const")) {
+                        (Some(r), _) => (true, r),
+                        (_, Some(r)) => (false, r),
+                        _ => continue,
+                    };
+                    if !r.starts_with(char::is_whitespace) {
+                        continue;
+                    }
+                    let r = r.trim_start();
+                    let n = &r[..r.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(r.len())];
+                    if !n.is_empty() && n != "fn" {
+                        names.insert((is_ty, n));
+                    }
+                }
+                _ => {}
+            }
+        }
+        TraitMembers { traits, names, by_header: FxMap::default() }
+    }
+}
+
+/// Errors of an item's declaration, read from its text: an inherent impl of a type of std (E0116: `impl Vec<u8> {}`,
+/// named or through a type alias of the crate, which only std can have; `foreign`: when the crate has no
+/// dependencies) or of a type parameter (E0118), a type parameter of a type alias that the alias's type does not
+/// name (E0091: `type Foo<T> = u32;`; a lifetime or a const parameter may go unused, and so may the parameters of an
+/// `impl Trait` alias)
+fn item_decl_err(src: &str, items: &[SrcItem], foreign: bool) -> Option<String> {
+    use crate::lexer::ItemKind as K;
+    let mut aliases = None;
+    // (the program's types and traits with lifetime parameters, read once when an impl is met)
+    let mut lts: Option<crate::fxhash::FxSet<&str>> = None;
+    let sb = src.as_bytes();
+    for it in items {
+        if !matches!(it.kind, K::ImplHeader | K::Normal | K::ImplMember(_)) {
+            continue;
+        }
+        // (by the first byte: an attribute, a visibility, `impl`, `type`, `async` or `unsafe`; `pub fn` and the like by
+        // the fifth; an impl's member only for `async`)
+        let b = &sb[it.start.min(sb.len())..it.end.min(sb.len())];
+        if !matches!(b.first(), Some(b'i' | b't' | b'p' | b'#' | b'u' | b'a'))
+            || b.get(3) == Some(&b' ') && !matches!(b.get(4), Some(b't' | b'a')) && b[0] == b'p'
+            || matches!(it.kind, K::ImplMember(_)) && !matches!(b.first(), Some(b'a' | b'p' | b'#'))
+        {
+            continue;
+        }
+        let text = src.get(it.start..it.end).unwrap_or("");
+        let t = item_text(text);
+        if t.starts_with("async") {
+            // (E0726: an `async fn`'s parameter of a type with lifetime parameters written without them)
+            let l = lts.get_or_insert_with(|| lt_names(src, items));
+            if !l.is_empty() {
+                if let Some(e) = elided_async_lt(it, text, t, l) {
+                    return Some(e);
+                }
+            }
+            continue;
+        }
+        if matches!(it.kind, K::ImplMember(_)) {
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix("impl") {
+            // (E0726: `impl MyTrait for Foo` of a `Foo<'a>` / a `MyTrait<'a>`)
+            let l = lts.get_or_insert_with(|| lt_names(src, items));
+            // (only an impl whose header names one of them: by its identifiers)
+            if !l.is_empty() && it.idents.iter().any(|&(a, e)| src.get(a as usize..e as usize).is_some_and(|w| l.contains(w))) {
+                if let Some(e) = elided_impl_lt(text, it, rest, l) {
+                    return Some(e);
+                }
+            }
+            if let Some(e) = inherent_impl_err(src, items, it, rest, foreign, &mut aliases) {
+                return Some(e);
+            }
+        } else if let Some(rest) = t.strip_prefix("unsafe").and_then(|r| r.trim_start().strip_prefix("impl")) {
+            // (E0197: `unsafe impl S {}`, an inherent impl)
+            let head_end = it.end - rest.len() + rest.find('{').unwrap_or(rest.len());
+            if !it.idents.iter().take_while(|&&(a, _)| (a as usize) < head_end).any(|&(a, b)| src.get(a as usize..b as usize) == Some("for")) {
+                let line = it.line + text[..text.len() - t.len()].matches('\n').count();
+                return Some(format!("{line}:1: inherent impls cannot be unsafe (E0197)"));
+            }
+        } else if b[0] == b'#' && it.kind == K::Normal && t.starts_with("enum") {
+            if let Some(e) = zero_variant_repr(it, text, t) {
+                return Some(e);
+            }
+        } else if it.kind == K::Normal && t.starts_with("type") {
+            let at = text.len() - t.len();
+            let Some(lt) = t.find(['<', '=', ';']).filter(|&k| t.as_bytes()[k] == b'<') else { continue };
+            if let Some(e) = unused_alias_param_in(src, items, it, at + lt) {
+                return Some(e);
+            }
+        }
+    }
+    None
+}
+
+/// The names of the program's structs, enums, unions and traits declared with lifetime parameters (`struct Foo<'a>`)
+fn lt_names<'a>(src: &'a str, items: &[SrcItem]) -> crate::fxhash::FxSet<&'a str> {
+    use crate::lexer::ItemKind as K;
+    let mut out = crate::fxhash::FxSet::default();
+    for it in items {
+        if !matches!(it.kind, K::Normal | K::TraitHeader) {
+            continue;
+        }
+        let raw = src.get(it.start..it.end).unwrap_or("");
+        // (by the first byte before reading past attributes and visibility: a fn or an impl is none of them)
+        if !matches!(raw.as_bytes().first(), Some(b's' | b'e' | b'u' | b't' | b'#' | b'p')) || !raw.as_bytes()[..raw.len().min(256)].contains(&b'\'') {
+            continue;
+        }
+        let t = item_text(raw);
+        let t = t.strip_prefix("unsafe ").unwrap_or(t);
+        if !matches!(t.as_bytes().first(), Some(b's' | b'e' | b'u' | b't')) {
+            continue;
+        }
+        let Some(r) = ["struct ", "enum ", "union ", "trait "].iter().find_map(|k| t.strip_prefix(k)) else { continue };
+        let r = r.trim_start();
+        let n = &r[..r.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(r.len())];
+        if !n.is_empty() && r[n.len()..].trim_start().starts_with("<'") {
+            out.insert(n);
+        }
+    }
+    out
+}
+
+/// E0726 of an impl header (the text past `impl`): its trait's or self type's path names one of `lts` with no
+/// arguments
+#[cold]
+fn elided_impl_lt(text: &str, it: &SrcItem, rest: &str, lts: &crate::fxhash::FxSet<&str>) -> Option<String> {
+    let r = rest.trim_start();
+    let b = r.as_bytes();
+    let mut i = 0;
+    if b.first() == Some(&b'<') {
+        let mut d = 0;
+        while i < b.len() {
+            match b[i] {
+                b'<' => d += 1,
+                b'>' if i > 0 && b[i - 1] != b'-' => d -= 1,
+                _ => {}
+            }
+            i += 1;
+            if d == 0 {
+                break;
+            }
+        }
+    }
+    let head = &r[i.min(r.len())..];
+    let head = &head[..head.find('{').unwrap_or(head.len())];
+    let head = &head[..head.find(" where ").unwrap_or(head.len())];
+    for part in head.split(" for ") {
+        let p = part.trim_start().trim_start_matches(['&', ' ']);
+        let p = p.strip_prefix("dyn ").unwrap_or(p).trim_start();
+        let end = p.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':')).unwrap_or(p.len());
+        let name = p[..end].rsplit("::").next().unwrap_or("");
+        if lts.contains(name) && !p[end..].trim_start().starts_with('<') {
+            let line = it.line + text[..text.len() - rest.len()].matches('\n').count();
+            return Some(format!("{line}:1: implicit elided lifetime not allowed here (E0726)"));
+        }
+    }
+    None
+}
+
+/// E0726 of an `async fn` (the item's text, and t past its attributes and visibility): a parameter's type naming one
+/// of `lts` with no arguments
+#[cold]
+fn elided_async_lt(it: &SrcItem, text: &str, t: &str, lts: &crate::fxhash::FxSet<&str>) -> Option<String> {
+    {
+        let Some(r) = t.strip_prefix("async").filter(|r| r.trim_start().starts_with("fn ")) else { return None };
+        let Some(open) = r.find('(') else { return None };
+        let mut d = 0i32;
+        let close = r[open..].char_indices().find(|&(_, c)| {
+            match c {
+                '(' => d += 1,
+                ')' => d -= 1,
+                _ => {}
+            }
+            d == 0
+        });
+        let Some((cl, _)) = close else { return None };
+        let params = &r[open + 1..open + cl];
+        let mut k = 0;
+        while k < params.len() {
+            let w = &params[k..];
+            let n = w.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(w.len());
+            if n == 0 {
+                k += w.chars().next().map_or(1, |c| c.len_utf8());
+                continue;
+            }
+            if lts.contains(&w[..n]) && !w[n..].trim_start().starts_with('<') {
+                let line = it.line + text[..text.len() - t.len()].matches('\n').count();
+                return Some(format!("{line}:1: implicit elided lifetime not allowed here (E0726)"));
+            }
+            k += n;
+        }
+    }
+    None
+}
+
+/// E0118 / E0116 of an impl whose text past `impl` is `rest`: none for a trait impl (a `for` in its header)
+fn inherent_impl_err<'a>(src: &'a str, items: &[SrcItem], it: &SrcItem, rest: &str, foreign: bool, aliases: &mut Option<crate::fxhash::FxSet<&'a str>>) -> Option<String> {
+    let head_end = it.end - rest.len() + rest.find('{').unwrap_or(rest.len());
+    if it.idents.iter().take_while(|&&(a, _)| (a as usize) < head_end).any(|&(a, b)| src.get(a as usize..b as usize) == Some("for")) {
+        return None;
+    }
+    let name = impl_self_name(rest);
+    if name.is_empty() {
+        return None;
+    }
+    // (E0118: `impl<T> T {}`, the self type one of the impl's type parameters)
+    if rest.trim_start().starts_with('<') && impl_param_self(rest, name) {
+        let off = src.get(it.start..it.end)?.len() - rest.len();
+        let line = it.line + src[it.start..it.start + off].matches('\n').count();
+        return Some(format!("{line}:1: no nominal type found for inherent implementation (E0118)"));
+    }
+    if !foreign {
+        return None;
+    }
+    if !STD_ADTS.contains(&name) {
+        // (the crate's type aliases, read once: one of them may name a type of std)
+        let al = aliases.get_or_insert_with(|| items.iter().filter_map(|a| alias_name(src, a)).collect());
+        if !al.contains(name) {
+            return None;
+        }
+    }
+    foreign_inherent_impl_err(src, items, it, rest, name)
+}
+
+/// The last name of the self type's path of an inherent impl (the text past `impl`): `<T> a::B<T> {` -> `B`; ""
+/// for a type that is no path
+fn impl_self_name(rest: &str) -> &str {
+    let b = rest.as_bytes();
+    let mut i = 0;
+    while b.get(i).is_some_and(|c| c.is_ascii_whitespace()) {
+        i += 1;
+    }
+    if b.get(i) == Some(&b'<') {
+        let mut d = 0;
+        while i < b.len() {
+            match b[i] {
+                b'<' => d += 1,
+                b'>' if b[i - 1] != b'-' => d -= 1,
+                _ => {}
+            }
+            i += 1;
+            if d == 0 {
+                break;
+            }
+        }
+    }
+    let r = rest[i..].trim_start();
+    let end = r.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == ':')).unwrap_or(r.len());
+    let path = &r[..end];
+    path.rsplit("::").next().unwrap_or("")
+}
+
+/// Whether the self type of an inherent impl (the text past `impl`, its generics first) is the single name of one of
+/// its type parameters: `<T: Tr> T {`
+fn impl_param_self(rest: &str, name: &str) -> bool {
+    let r = rest.trim_start();
+    let b = r.as_bytes();
+    let (mut d, mut i, mut start) = (0i32, 0, true);
+    let mut found = false;
+    while i < b.len() {
+        match b[i] {
+            b'<' | b'(' | b'[' => d += 1,
+            b'>' if i > 0 && b[i - 1] == b'-' => {}
+            b'>' | b')' | b']' => {
+                d -= 1;
+                if d == 0 {
+                    i += 1;
+                    break;
+                }
+            }
+            b',' if d == 1 => start = true,
+            c if start && d == 1 && !c.is_ascii_whitespace() => {
+                start = false;
+                found |= r[i..].starts_with(name) && !r[i + name.len()..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_');
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    // (the self type is that name alone, not a path through it (`T::Assoc`) nor a type it is an argument of)
+    let t = r[i.min(r.len())..].trim_start();
+    found && t.starts_with(name) && t[name.len()..].trim_start().starts_with(['{', 'w'])
+}
+
+/// Whether `#[test]` may be on an item: a free fn (`async`, `const`, `unsafe` or `extern "C"` too), or a macro call
+/// (a warning); not an associated fn, nor another kind of item
+fn test_target(text: &str, kind: crate::lexer::ItemKind) -> bool {
+    if kind != crate::lexer::ItemKind::Normal {
+        return false;
+    }
+    let mut t = item_text(text);
+    loop {
+        let r = ["async ", "const ", "unsafe ", "safe "].iter().find_map(|q| t.strip_prefix(q));
+        let r = r.or_else(|| t.strip_prefix("extern ").map(|r| r.trim_start().strip_prefix('"').and_then(|r| Some(&r[r.find('"')? + 1..])).unwrap_or(r)));
+        match r {
+            Some(r) => t = r.trim_start(),
+            None => break,
+        }
+    }
+    if t.starts_with("fn ") {
+        return true;
+    }
+    let w = &t[..t.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':')).unwrap_or(t.len())];
+    !w.is_empty() && w != "macro_rules" && t[w.len()..].trim_start().starts_with('!')
+}
+
+/// An item's text past its attributes and visibility (`#[cfg(x)] pub(crate) type A = u8;` -> `type A = u8;`)
+fn item_text(text: &str) -> &str {
+    let t = if text.starts_with('#') { &text[leading_attrs(text).len()..] } else { text };
+    let b = t.as_bytes();
+    if !b.starts_with(b"pub") {
+        return t;
+    }
+    let mut i = 3;
+    while b.get(i).is_some_and(|c| c.is_ascii_whitespace()) {
+        i += 1;
+    }
+    if b.get(i) == Some(&b'(') {
+        i += b[i..].iter().position(|&c| c == b')').map_or(b.len() - i, |k| k + 1);
+        while b.get(i).is_some_and(|c| c.is_ascii_whitespace()) {
+            i += 1;
+        }
+    }
+    &t[i..]
+}
+
+/// Whether an item's text may start with `kw` past its attributes and visibility: by its first byte, before
+/// item_text reads it
+fn may_start(text: &str, kw: u8) -> bool {
+    matches!(text.as_bytes().first(), Some(&c) if c == kw || c == b'#' || c == b'p')
+}
+
+/// The name of a type alias item (`pub type Function = ..;`)
+fn alias_name<'a>(src: &'a str, a: &SrcItem) -> Option<&'a str> {
+    let text = src.get(a.start..a.end)?;
+    if a.kind != crate::lexer::ItemKind::Normal || !may_start(text, b't') {
+        return None;
+    }
+    let t = item_text(text).strip_prefix("type")?;
+    let t = t.trim_start();
+    Some(&t[..t.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).unwrap_or(t.len())])
+}
+
+/// Whether item `a` is `kw name` (`struct Vec`, `type Function`), past its attributes and visibility
+fn item_named(src: &str, a: &SrcItem, kw: &str, name: &str) -> bool {
+    let mut w = a.idents.iter().map(|&(x, y)| src.get(x as usize..y as usize).unwrap_or(""));
+    while let Some(x) = w.next() {
+        if x == kw {
+            return w.next() == Some(name);
+        }
+    }
+    false
+}
+
+#[cold]
+fn foreign_inherent_impl_err(src: &str, items: &[SrcItem], it: &SrcItem, rest: &str, name: &str) -> Option<String> {
+    use crate::lexer::ItemKind as K;
+    // (a type alias of the crate: what it names)
+    let mut name = name;
+    if let Some(a) = items.iter().find(|a| a.kind == K::Normal && item_named(src, a, "type", name)) {
+        let t = src.get(a.start..a.end).unwrap_or("");
+        let rhs = t[t.find('=')? + 1..].trim_start().trim_end_matches(';');
+        let end = rhs.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == ':')).unwrap_or(rhs.len());
+        name = rhs[..end].rsplit("::").next().unwrap_or("");
+    }
+    let own = |a: &&SrcItem| a.kind == K::Normal && ["struct", "enum", "union", "trait"].iter().any(|kw| item_named(src, a, kw, name));
+    let no_core = |a: &&SrcItem| a.kind == K::InnerAttr && src.get(a.start..a.end).is_some_and(|t| t.contains("no_core"));
+    if !STD_ADTS.contains(&name) || items.iter().any(|a| own(&a) || no_core(&a)) {
+        return None;
+    }
+    let off = src.get(it.start..it.end)?.len() - rest.len();
+    let line = it.line + src[it.start..it.start + off].matches('\n').count();
+    Some(format!("{line}:1: cannot define inherent `impl` for a type outside of the crate where the type is defined (E0116)"))
+}
+
+/// item_decl_err's E0091 for an alias whose generics start at byte `lt` of its text
+#[cold]
+fn unused_alias_param_in(src: &str, items: &[SrcItem], it: &SrcItem, lt: usize) -> Option<String> {
+    let text = src.get(it.start..it.end)?;
+    let b = text.as_bytes();
+    // (the parameters: the name each one starts with, past the `<` or a `,` at depth 1)
+    let mut params: Vec<usize> = vec![];
+    let (mut d, mut i, mut start) = (0i32, lt, true);
+    while i < b.len() {
+        match b[i] {
+            b'<' | b'(' | b'[' => d += 1,
+            b'>' if i > 0 && b[i - 1] == b'-' => {}
+            b'>' | b')' | b']' => {
+                d -= 1;
+                if d == 0 {
+                    i += 1;
+                    break;
+                }
+            }
+            b',' if d == 1 => start = true,
+            c if start && d == 1 && !c.is_ascii_whitespace() => {
+                start = false;
+                if c.is_ascii_alphabetic() || c == b'_' {
+                    params.push(i);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    let eq = i + text[i..].find('=')?;
+    let used = |n: &str| it.idents.iter().any(|&(x, y)| x as usize >= it.start + eq && src.get(x as usize..y as usize) == Some(n));
+    if used("impl") {
+        return None;
+    }
+    // (not when the type may not resolve: rustc reports that instead. `type A<T> = B;` of another alias of the crate
+    // (`type B = _;`), a path through modules (`<m::Alias as n::Trait>::Archived`, m and n unknown))
+    let rhs = text[eq + 1..].trim().trim_end_matches(';').trim_end();
+    if rhs.contains("::") || !rhs.is_empty() && rhs.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_') && items.iter().any(|a| alias_name(src, a) == Some(rhs)) {
+        return None;
+    }
+    for p in params {
+        let n = &text[p..p + text[p..].find(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).unwrap_or(0)];
+        if n.is_empty() || n == "const" || used(n) {
+            continue;
+        }
+        let line = it.line + text[..p].matches('\n').count();
+        return Some(format!("{line}:1: type parameter `{n}` is never used (E0091)"));
+    }
+    None
+}
+
+fn duplicate_impl_item(src: &str, items: &[SrcItem]) -> Option<String> {
+    use crate::lexer::ItemKind as K;
+    let mut seen: crate::fxhash::FxSet<(u32, bool, &str)> = Default::default();
+    // (the program's traits and their members, read once)
+    let mut traits: Option<TraitMembers> = None;
+    for it in items {
+        let K::ImplMember(h) = it.kind else { continue };
+        let ids = || it.idents.iter().map(|&(a, b)| src.get(a as usize..b as usize).unwrap_or(""));
+        // (the item's keyword and name, past its visibility and qualifiers: `pub const fn f`, `const C`, `type T`)
+        let mut w = ids().take(8).peekable();
+        let mut found = None;
+        while let Some(x) = w.next() {
+            match x {
+                "fn" | "type" => {
+                    found = w.next().map(|n| (x == "type", n));
+                    break;
+                }
+                "const" if !matches!(w.peek(), Some(&("fn" | "unsafe" | "async" | "extern"))) => {
+                    found = w.next().map(|n| (false, n));
+                    break;
+                }
+                "pub" | "crate" | "self" | "super" | "in" | "const" | "unsafe" | "async" | "extern" | "default" => {}
+                _ => break,
+            }
+        }
+        let Some((ty, name)) = found else { continue };
+        if name == "_" {
+            continue;
+        }
+        // (E0437 / E0438: an associated type or const of a trait impl that the program's trait does not declare)
+        if x_kind(ids()) != "fn" {
+            if let Some(e) = not_a_member(src, items, it, h, ty, name, &mut traits) {
+                return Some(e);
+            }
+        }
+        if !seen.insert((h, ty, name)) {
+            let head = items.get(h as usize).map_or("", |hi| src.get(hi.start..hi.end).unwrap_or(""));
+            let head = &head[..head.find('{').unwrap_or(head.len())];
+            let trait_impl = head.contains(" for ");
+            let col = it.start - src[..it.start].rfind('\n').map_or(0, |k| k + 1) + 1;
+            return Some(if trait_impl {
+                format!("{}:{col}: duplicate definitions with name `{name}`: (E0201)", it.line)
+            } else {
+                format!("{}:{col}: duplicate definitions with name `{name}` (E0592)", it.line)
+            });
+        }
+    }
+    None
+}
+
+/// std's traits (zustc's prelude has others, by `__` names); the ones std's prelude does not bring into scope are
+/// NON_PRELUDE_TRAITS
+const STD_TRAITS: &[&str] = &[
+    "Sized", "Send", "Sync", "Unpin", "Copy", "Clone", "Fn", "FnMut", "FnOnce", "Drop", "Iterator", "IntoIterator", "DoubleEndedIterator",
+    "ExactSizeIterator", "Extend", "FromIterator", "PartialEq", "Eq", "PartialOrd", "Ord", "Default", "AsRef", "AsMut", "Into", "From", "TryFrom",
+    "TryInto", "ToOwned", "ToString", "Future", "IntoFuture",
+];
+const NON_PRELUDE_TRAITS: &[&str] = &[
+    "Debug", "Display", "Hash", "Hasher", "BuildHasher", "Error", "FromStr", "Read", "Write", "BufRead", "Seek", "Deref", "DerefMut", "Add", "Sub",
+    "Mul", "Div", "Rem", "Neg", "Not", "BitAnd", "BitOr", "BitXor", "Shl", "Shr", "AddAssign", "SubAssign", "MulAssign", "DivAssign", "RemAssign",
+    "BitAndAssign", "BitOrAssign", "BitXorAssign", "ShlAssign", "ShrAssign", "Index", "IndexMut", "Borrow", "BorrowMut", "FusedIterator", "Any",
+    "Sum", "Product", "Pointer", "LowerHex", "UpperHex", "Binary", "Octal", "LowerExp", "UpperExp", "RangeBounds", "Termination", "Step",
+    "UnwindSafe", "RefUnwindSafe", "Unsize", "CoerceUnsized", "DispatchFromDyn", "Tuple",
+];
+
+/// A trait bound of a fn of the program's (its own type parameters', inline or in its where clause, and its `impl Tr`
+/// parameters') that names no trait in scope: "cannot find trait `Nope` in this scope", at the name (rustc 1.100's
+/// E0405; E0404 for `Debug` and `Hash`, std's derive macros of those names being in scope). Not a trait the program
+/// declares nor one of std's, which zustc may not have loaded; std's traits outside its prelude (`Debug`, `Display`,
+/// `Hash`, ..) only where the bound writes the name alone, no `use` of the program's writes it, and none is a glob
+#[cold]
+#[inline(never)]
+fn unknown_trait_bound(prog: &Program, src: &str, src0: &str, items: &[SrcItem], user: usize) -> Option<String> {
+    // (the names the `use`s of the source as written write, read once at the first std trait outside the prelude:
+    // the preprocessing takes std's `use`s away; and whether one is a glob)
+    let mut used: Option<(bool, crate::fxhash::FxSet<&str>)> = None;
+    let mut imported = |n: &str| {
+        let (globs, names) = used.get_or_insert_with(|| {
+            let mut names: crate::fxhash::FxSet<&str> = Default::default();
+            let mut globs = false;
+            // (each `use ` that starts a declaration (after its line's indentation and a `pub`), to its `;`)
+            for (k, _) in src0.match_indices("use ") {
+                let ls = src0[..k].rfind('\n').map_or(0, |i| i + 1);
+                let before = src0[ls..k].trim();
+                if !(before.is_empty() || before.starts_with("pub")) {
+                    continue;
+                }
+                let r = &src0[k + 4..src0[k..].find(';').map_or(src0.len(), |e| k + e)];
+                globs |= r.contains('*');
+                names.extend(r.split(|c: char| !(c == '_' || c.is_ascii_alphanumeric())).filter(|w| !w.is_empty()));
+            }
+            (globs, names)
+        });
+        *globs || names.contains(n)
+    };
+    for (i, sg) in prog.sigs.iter().enumerate() {
+        let Some(ii) = prog.item_of[i].filter(|&ii| (ii as usize) < user) else { continue };
+        for (_, bs) in &sg.generics {
+            for b in bs {
+                let name = b.split('<').next().unwrap_or("").trim();
+                // (not a lifetime, `?Sized`, a path or a higher-ranked bound, nor `use<..>` (precise capturing))
+                if name.is_empty() || name.starts_with('\'') || name.starts_with('?') || name.contains(' ') || name.contains("__") || matches!(name, "use" | "for" | "const" | "async") {
+                    continue;
+                }
+                let known = prog.traits.contains_key(name) || prog.user_traits.contains(name) || STD_TRAITS.contains(&name);
+                let std_outside = NON_PRELUDE_TRAITS.contains(&name);
+                if known && !std_outside {
+                    continue;
+                }
+                // (a name a `use` brings, std's that zustc does not know too (`use std::marker::ConstParamTy_;`))
+                if prog.use_names.contains(name) || prog.user_traits.contains(name) {
+                    continue;
+                }
+                // (where the item writes the name alone, not as a path's last segment (`fmt::Debug`); a std trait as
+                // a bound (after `:`, `+`, `impl`, `dyn`), not a derive's expansion's)
+                let it = &items[ii as usize];
+                let text = src.get(it.start..it.end).unwrap_or("");
+                let tb = text.as_bytes();
+                let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+                let bound_at = |k: usize| {
+                    let before = text[..k].trim_end();
+                    !std_outside || before.ends_with([':', '+']) || before.ends_with("impl") || before.ends_with("dyn")
+                };
+                let Some(at) = text.match_indices(name).map(|(k, _)| k).find(|&k| {
+                    (k == 0 || !id(tb[k - 1])) && tb.get(k + name.len()).is_none_or(|&c| !id(c)) && !text[..k].ends_with("::") && !text[k + name.len()..].starts_with("::")
+                        && !text[k + name.len()..].trim_start().starts_with('!')
+                        && bound_at(k)
+                }) else {
+                    continue;
+                };
+                // (a name a `use` brings, std's that zustc does not know too (`use std::marker::ConstParamTy_;`); read
+                // last, as it reads the whole source)
+                if imported(name) {
+                    continue;
+                }
+                let off = it.start + at;
+                let line = src[..off].matches('\n').count() + 1;
+                let col = off - src[..off].rfind('\n').map_or(0, |k| k + 1) + 1;
+                let code = if matches!(name, "Debug" | "Hash") { "E0404" } else { "E0405" };
+                return Some(format!("{line}:{col}: cannot find trait `{name}` in this scope ({code})"));
+            }
+        }
+    }
+    None
+}
+
+/// A merge's diff marker in the source (`<<<<<<<` at a line's start, outside strings and comments) in place of the
+/// analysis's error e: rustc's parser stops at it ("encountered diff marker", at its first column), after the lexer's
+/// errors of delimiters only
+#[cold]
+#[inline(never)]
+fn diff_marker_first(src: &str, e: String) -> String {
+    let lexer = ["this file contains an unclosed delimiter", "closing delimiter: `"].iter().any(|m| e.contains(m));
+    match crate::lexer::diff_marker_line(src.as_bytes()) {
+        Some(l) if !lexer && src.contains("<<<<<<<") => format!("{l}:1: encountered diff marker"),
+        _ => e,
+    }
 }
 
 /// e with its leading line `L:` made l
@@ -6653,7 +11318,7 @@ impl Session2 {
         self.checking = false;
         let mut a = match r {
             Ok(a) => a,
-            Err(e) => return vec![Diagnostic::parse(&self.unhoist_analysis_err(src, e))],
+            Err(e) => return vec![Diagnostic::parse(&self.unhoist_analysis_err(src, diff_marker_first(src, e)))],
         };
         // 検査だけ: コード生成 (acg) で型を検査し、機械語は作らない (ZUSTC_CHECK_CODEGEN=1 で機械語まで作る)。
         // 検査済みの印は、要求したインスタンスへの再配置だけを持つ空の Blob を、ビルドとは別のキーで覚える
@@ -6797,7 +11462,7 @@ impl Session2 {
                                         errs.push(format!("{l}:1: {}", &e[m..]));
                                     }
                                 }
-                                None => errs.push(e),
+                                None => errs.push(const_err_line(e, src)),
                             }
                             ok = false;
                             Some(vec![])
@@ -6851,14 +11516,23 @@ impl Session2 {
         }
         tm.lap("check", format!("{n_memo} from the last check, {n_keys} keys, {n_hit} cached, {n_checked} checked"));
         self.const_lines.clear();
+        if errs.is_empty() {
+            errs.extend(a.late_err.clone());
+        }
+        // (E0170 is a lint: not where an attribute an item starts with allows it, read only when there is one)
+        if errs.iter().any(|e| e.ends_with("(E0170)")) {
+            allow_variant_bindings(src, &mut errs);
+        }
         let mut d: Vec<Diagnostic> = errs.iter().map(|e| Diagnostic::parse(e)).collect();
         // (an item moved out of a fn body (`fn main() { fn helper() { .. } }`) is past the source's last line: its borrow
-        // and region checks' errors are at the lines it was moved from. Not its other errors: typeck does not know all
-        // such an item may name where it was (`Self` of the impl around it), so they are left out as before)
-        if d.iter().any(|x| x.line > user_lines && acg::borrow_check_error(&x.msg)) {
+        // and region checks' errors are at the lines it was moved from, and the type errors that hold wherever it is
+        // (hoisted_check_err_holds). Not its other errors: typeck does not know all such an item may name where it was
+        // (`Self` of the impl around it), so they are left out as before)
+        let holds = |m: &str| acg::borrow_check_error(m) || hoisted_check_err_holds(m);
+        if d.iter().any(|x| x.line > user_lines && holds(&x.msg)) {
             if let Some(moved) = self.moved_lines(src) {
                 for x in &mut d {
-                    if x.line > user_lines && acg::borrow_check_error(&x.msg) {
+                    if x.line > user_lines && holds(&x.msg) {
                         if let Some(l) = moved_line(&moved, user_lines, x.line) {
                             x.line = l;
                             x.msg = moved_msg_lines(&x.msg, &moved, user_lines);
@@ -6872,6 +11546,47 @@ impl Session2 {
         d.dedup();
         d
     }
+}
+
+/// An error of a constant's evaluation that has no place (`0:1: in constant `X`: overflow in constant`): at the line
+/// of its initializer in the source (`const X: u8 = ..`, the `=`), as rustc's E0080; a position inside the message is
+/// left out
+fn const_err_line(e: String, src: &str) -> String {
+    let Some(rest) = e.strip_prefix("0:1: in constant `") else { return e };
+    let Some((name, tail)) = rest.split_once("`: ") else { return e };
+    // (what rustc reports at the constant: an overflow, a transmute of sizes, mismatched types; not what zustc does
+    // not evaluate)
+    if !["overflow in constant", "cannot transmute between types of different sizes", "mismatched types"].iter().any(|m| tail.contains(m)) {
+        return e;
+    }
+    let name = name.rsplit("::").next().unwrap_or(name);
+    let b = src.as_bytes();
+    let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let at = src.match_indices(name).map(|(i, _)| i).find(|&i| {
+        let before = src[..i].trim_end();
+        (i == 0 || !word(b[i - 1])) && b.get(i + name.len()).is_none_or(|&c| !word(c)) && (before.ends_with("const") || before.ends_with("static"))
+    });
+    let Some(at) = at else { return e };
+    // (the `=` of its initializer: not one inside its type's brackets, `[u8; N]`)
+    let mut eq = at + name.len();
+    let mut depth = 0i32;
+    while eq < b.len() {
+        match b[eq] {
+            b'[' | b'(' | b'{' => depth += 1,
+            b']' | b')' | b'}' => depth -= 1,
+            b';' if depth <= 0 => break,
+            b'=' if depth <= 0 && !matches!(b.get(eq + 1), Some(b'=') | Some(b'>')) && !matches!(b.get(eq.wrapping_sub(1)), Some(b'=') | Some(b'!') | Some(b'<') | Some(b'>')) => break,
+            _ => {}
+        }
+        eq += 1;
+    }
+    let line = src[..eq.min(b.len())].matches('\n').count() + 1;
+    // (a position inside: `21:2: overflow in constant`)
+    let msg = match tail.split_once(": ") {
+        Some((pos, m)) if pos.split(':').all(|x| !x.is_empty() && x.bytes().all(|c| c.is_ascii_digit())) => m,
+        _ => tail,
+    };
+    format!("{line}:1: in constant `{name}`: {msg}")
 }
 
 /// The line (1-based) in the source of line `line` of the prepared text, past the source's `user_lines`: in the
@@ -7011,8 +11726,20 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
             continue;
         }
         let args: Vec<Ty> = sig.generics.iter().enumerate().map(|(k, (n, bs))| Ty::Struct(p.placeholder(id as u32, k as u32, n, bs))).collect();
-        if let (Ok(iid), true) = (g.request(p, id as u32, args), recheck) {
-            g.recheck.insert(iid);
+        // (a where clause of the fn's, or of its impl's header: `impl<'a, T> Tr for &'a W<T> where &'a T: Tr`)
+        let header = match a.items.get(ii).map(|it| it.kind) {
+            Some(crate::lexer::ItemKind::ImplMember(h) | crate::lexer::ItemKind::TraitMember(h)) => a.items.get(h as usize).and_then(|it| a.src.get(it.start..it.end)).unwrap_or(""),
+            _ => "",
+        };
+        let wheres = body.contains("where") || header.contains("where");
+        let r = g.request(p, id as u32, args);
+        if let Ok(iid) = r {
+            if recheck {
+                g.recheck.insert(iid);
+            }
+            if wheres {
+                g.where_bound.insert(iid);
+            }
         }
     }
     std::mem::take(&mut g.pending)
@@ -7070,45 +11797,11 @@ fn where_preds(head: &str) -> Option<Vec<(String, Vec<String>)>> {
     Some(preds)
 }
 
-/// Well-formedness of the program's struct fields and impl headers: a type that names a struct of the program's whose
-/// parameter is bounded (`struct S<T: Tr>`) needs the bound of what it gives the parameter (E0277). A parameter of
-/// the enclosing item holds it when its own bounds give it, or when the item names the trait anywhere (a where clause
-/// zustc does not read, a bound with arguments); a concrete type when bound_holds says so (the program's traits, and
-/// the prelude's for the types `implements` judges exactly)
-fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user: usize) -> Option<String> {
-    let user_sm = |ii: usize| ii < user;
-    // (the bounded parameters of the program's structs named in t, with what t gives them)
-    fn needs(prog: &Program, sums: &[Summary], user: usize, t: Ty, out: &mut Vec<(Ty, String)>, depth: u32) {
-        if depth > 16 {
-            return;
-        }
-        match t {
-            Ty::Struct(s) => {
-                let sd = &prog.structs[s as usize];
-                if let Some(b) = sd.base {
-                    if let Some(sm) = prog.struct_item.get(b as usize).map(|&bi| bi as usize).filter(|&bi| bi < user).and_then(|bi| sums.get(bi)) {
-                        for (pn, trs) in &sm.adt_bounds {
-                            let Some(&a) = sm.adt_generics.iter().position(|g| g == pn).and_then(|k| sd.args.get(k)) else { continue };
-                            out.extend(trs.iter().filter(|tr| !tr.starts_with(crate::types::CONST_GENERIC)).map(|tr| (a, tr.clone())));
-                        }
-                    }
-                    for &a in &sd.args {
-                        needs(prog, sums, user, a, out, depth + 1);
-                    }
-                }
-            }
-            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => needs(prog, sums, user, *i, out, depth + 1),
-            Ty::Fn(f) => {
-                for &p in f.params.iter().chain([&f.ret]) {
-                    needs(prog, sums, user, p, out, depth + 1);
-                }
-            }
-            _ => {}
-        }
-    }
-    // (`n: ?Sized` / `n: Tr + ?Sized`, in the parameter list or a where clause: the `:` before a `?Sized` with only
-    // bounds between, and the parameter's name before the `:`)
-    let maybe_unsized = |text: &str, n: &str| {
+/// Whether the parameter `n` of an item may be unsized: `n: ?Sized` / `n: Tr + ?Sized`, in the parameter list or a
+/// where clause, read from the item's text (the `:` before a `?Sized` with only bounds between, and the parameter's
+/// name before the `:`)
+fn param_maybe_unsized(text: &str, n: &str) -> bool {
+    {
         // (from the tokens: not a `?Sized` in a string, `#[doc = "K: ?Sized"]`)
         let b = text.as_bytes();
         let t = crate::lexer::tokenize(b);
@@ -7164,7 +11857,220 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
             }
             false
         })
+    }
+}
+
+/// E0277 "the size for values of type `[u8]` cannot be known at compilation time": an unsized type (`[T]`, `str`,
+/// `dyn Tr`) written where a type must be Sized. Read from the written types of the program's items (their fn
+/// signatures, fields and impl headers): an argument of std's containers that need Sized (`Vec<[i32]>`,
+/// `Option<[u8]>`), or of a type or trait of the program's whose parameter does not say `?Sized`; an enum variant's
+/// field, and a struct's field other than the last
+fn sized_error(sums: &[Summary], src: &str, items: &[SrcItem], user: usize) -> Option<String> {
+    use crate::types::TySyn;
+    // (the last segment of a path: `std::vec::Vec` → `Vec`, a char search, not a str one)
+    fn last(n: &str) -> &str {
+        n.rfind(':').map_or(n, |i| &n[i + 1..])
+    }
+    fn unsized_ty(t: &TySyn) -> bool {
+        matches!(t, TySyn::Slice(_) | TySyn::Str | TySyn::Dyn(_))
+    }
+    fn show(t: &TySyn) -> String {
+        match t {
+            TySyn::Slice(i) => format!("[{}]", show(i)),
+            TySyn::Str => "str".into(),
+            TySyn::Dyn(d) if d.contains('\'') => format!("(dyn {d})"),
+            TySyn::Dyn(d) => format!("(dyn {d} + 'static)"),
+            TySyn::Prim(p) => format!("{p:?}").to_lowercase(),
+            TySyn::Named(n) => n.rsplit("::").next().unwrap_or(n).replace("__u_", ""),
+            TySyn::App(n, a) => format!("{}<{}>", n.rsplit("::").next().unwrap_or(n).replace("__u_", ""), a.iter().map(show).collect::<Vec<_>>().join(", ")),
+            TySyn::Ref(m, i) => format!("&{}{}", if *m { "mut " } else { "" }, show(i)),
+            TySyn::Ptr(m, i) => format!("*{} {}", if *m { "mut" } else { "const" }, show(i)),
+            TySyn::Tuple(ts) => format!("({})", ts.iter().map(show).collect::<Vec<_>>().join(", ")),
+            _ => "_".into(),
+        }
+    }
+    // (the quick look first: a written type with an unsized type where it may be one that needs Sized; not std's types
+    // that allow one, `Box<dyn Fn()>`, `Rc<str>`)
+    fn may(t: &TySyn) -> bool {
+        match t {
+            TySyn::App(n, a) => {
+                let open = matches!(last(n), "Box" | "Rc" | "Arc" | "Weak" | "Cell" | "RefCell" | "UnsafeCell" | "Mutex" | "RwLock" | "PhantomData" | "NonNull" | "ManuallyDrop" | "Cow" | "Pin");
+                a.iter().any(|x| (unsized_ty(x) && !open) || may(x))
+            }
+            TySyn::Slice(i) | TySyn::Array(i, _) => unsized_ty(i) || may(i),
+            TySyn::Ref(_, i) | TySyn::Ptr(_, i) | TySyn::Assoc(i, _) => may(i),
+            TySyn::Tuple(ts) => ts.iter().enumerate().any(|(k, x)| (k + 1 < ts.len() && unsized_ty(x)) || may(x)),
+            _ => false,
+        }
+    }
+    let user_sums = &sums[..user.min(sums.len()).min(items.len())];
+    // (an item's written types, in order: its fns' signatures, its fields, its impl header)
+    fn sig_tys(sm: &Summary) -> impl Iterator<Item = &TySyn> {
+        sm.fns
+            .iter()
+            .flat_map(|(_, sig)| sig.params.iter().chain(std::iter::once(&sig.ret)))
+            .chain(sm.structs.iter().flat_map(|(_, fs)| fs.iter().map(|f| &f.1)))
+            .chain(sm.enums.iter().flat_map(|(_, vs)| vs.iter().flat_map(|x| x.fields.iter().map(|f| &f.1))))
+            .chain(sm.impl_self_ty.iter())
+            .chain(sm.impl_trait_args.iter())
+    }
+    // (a field that must be Sized (a variant's, a struct's before the last) of a type that is not, or (`param`) of a
+    // parameter of the item's, which is one when the item says `?Sized` for it)
+    let fields_unsized = |sm: &Summary, param: bool| {
+        let bad = |t: &TySyn| if param { matches!(t, TySyn::Named(n) if sm.adt_generics.iter().any(|g| g == n)) } else { unsized_ty(t) };
+        sm.enums.iter().any(|(_, vs)| vs.iter().any(|x| x.fields.iter().any(|f| bad(&f.1))))
+            || sm.structs.iter().any(|(_, fs)| fs.len() > 1 && fs[..fs.len() - 1].iter().any(|f| bad(&f.1)))
     };
+    // (without collecting: most items have nothing to look at)
+    // (a primitive or a name has nothing in it: no call)
+    #[inline(always)]
+    fn may0(t: &TySyn) -> bool {
+        !matches!(t, TySyn::Prim(_) | TySyn::Named(_) | TySyn::Str | TySyn::Infer) && may(t)
+    }
+    let any_may = |sm: &Summary| {
+        sm.fns.iter().any(|(_, sig)| sig.params.iter().any(may0) || may0(&sig.ret))
+            || sm.structs.iter().any(|(_, fs)| fs.iter().any(|f| may0(&f.1)))
+            || sm.enums.iter().any(|(_, vs)| vs.iter().any(|x| x.fields.iter().any(|f| may0(&f.1))))
+            || sm.impl_self_ty.as_ref().is_some_and(may0)
+            || sm.impl_trait_args.iter().any(may0)
+    };
+    // (the items to read: a written type that may have one, or a field of a parameter of an item that writes `?Sized`)
+    let text_of = |ii: usize| src.get(items[ii].start..items[ii].end).unwrap_or("");
+    let cands: Vec<usize> = (0..user_sums.len())
+        .filter(|&ii| {
+            let sm = &user_sums[ii];
+            any_may(sm) || fields_unsized(sm, false) || (fields_unsized(sm, true) && text_of(ii).contains("?Sized"))
+        })
+        .collect();
+    if cands.is_empty() {
+        return None;
+    }
+    // (std's containers whose parameters need Sized; the program's own types and traits by their text)
+    const STD_SIZED: &[&str] = &["Vec", "Option", "Result", "HashMap", "HashSet", "BTreeMap", "BTreeSet", "VecDeque", "BinaryHeap", "LinkedList", "MaybeUninit"];
+    let needs_sized = |name: &str, k: usize| -> bool {
+        let n = last(name).trim_start_matches("__u_");
+        for (ii, sm) in user_sums.iter().enumerate() {
+            let own_adt = sm.structs.iter().any(|x| last(&x.0) == n) || sm.enums.iter().any(|x| last(&x.0) == n);
+            let own_trait = sm.trait_decl.as_deref().is_some_and(|t| last(t) == n);
+            if !own_adt && !own_trait {
+                continue;
+            }
+            let gens: Vec<&str> = if own_adt { sm.adt_generics.iter().map(String::as_str).collect() } else { sm.trait_generics.iter().map(|g| g.0.as_str()).filter(|g| !g.starts_with('#')).collect() };
+            let Some(g) = gens.get(k) else { return false };
+            let text = src.get(items[ii].start..items[ii].end).unwrap_or("");
+            return !param_maybe_unsized(text, g);
+        }
+        STD_SIZED.contains(&n)
+    };
+    // (the first argument of a written type that is unsized where it must not be: the type it is given to, and it)
+    fn find<'a>(t: &'a TySyn, needs: &dyn Fn(&str, usize) -> bool) -> Option<(Option<&'a str>, &'a TySyn)> {
+        match t {
+            TySyn::App(n, a) => a.iter().enumerate().find_map(|(k, x)| if unsized_ty(x) && needs(n, k) { Some((Some(n.as_str()), x)) } else { find(x, needs) }),
+            TySyn::Slice(i) | TySyn::Array(i, _) => if unsized_ty(i) { Some((None, &**i)) } else { find(i, needs) },
+            TySyn::Ref(_, i) | TySyn::Ptr(_, i) | TySyn::Assoc(i, _) => find(i, needs),
+            TySyn::Tuple(ts) => ts.iter().enumerate().find_map(|(k, x)| if k + 1 < ts.len() && unsized_ty(x) { Some((None, x)) } else { find(x, needs) }),
+            _ => None,
+        }
+    }
+    let ident = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+    for ii in cands {
+        let sm = &user_sums[ii];
+        let it = &items[ii];
+        let text = text_of(ii);
+        // (where the item writes `name`, after its attributes: the line and column)
+        let at = |name: &str| -> String {
+            // (as the prepared text writes it: a type of the program's renamed, `__u_Vec`, or as written)
+            let raw = last(name);
+            let b = text.as_bytes();
+            let from = leading_attrs(text).len();
+            let find = |w: &str| text[from..].match_indices(w).map(|(i, _)| from + i).find(|&i| (i == 0 || !ident(b[i - 1])) && b.get(i + w.len()).is_none_or(|&c| !ident(c)));
+            let pos = find(raw).or_else(|| find(raw.trim_start_matches("__u_")));
+            match pos {
+                Some(i) => {
+                    let abs = it.start + i;
+                    format!("{}:{}", it.line + text[..i].matches('\n').count(), abs - src[..abs].rfind('\n').map_or(0, |p| p + 1) + 1)
+                }
+                None => format!("{}:1", it.line),
+            }
+        };
+        let msg = |t: &TySyn| format!("the size for values of type `{}` cannot be known at compilation time (E0277)", show(t));
+        // (an enum variant's field, a struct's field before the last: at the field. A field of the item's parameter
+        // that says `?Sized` is one too)
+        let unsized_field = |t: &TySyn| unsized_ty(t) || matches!(t, TySyn::Named(n) if sm.adt_generics.iter().any(|g| g == n) && param_maybe_unsized(text, n));
+        for (_, vs) in &sm.enums {
+            for (vi, v) in vs.iter().enumerate() {
+                if let Some((fi, f)) = v.fields.iter().enumerate().find(|(_, f)| unsized_field(&f.1)) {
+                    let (l, c) = field_pos(text, true, vi, fi).unwrap_or((0, 0));
+                    return Some(format!("{}:{}: {}", it.line + l, c + 1, msg(&f.1)));
+                }
+            }
+        }
+        for (_, fs) in &sm.structs {
+            if sm.unions.is_empty() && fs.len() > 1 {
+                if let Some((fi, f)) = fs[..fs.len() - 1].iter().enumerate().find(|(_, f)| unsized_field(&f.1)) {
+                    let (l, mut c) = field_pos(text, false, 0, fi).unwrap_or((0, 0));
+                    // (a named field's type, after its `name:`, as rustc points)
+                    if let Some(line) = text.lines().nth(l).filter(|_| !f.0.chars().all(|ch| ch.is_ascii_digit())) {
+                        if let Some(k) = line.get(c..).and_then(|r| r.find(':')) {
+                            c += k + 1 + line[c + k + 1..].len() - line[c + k + 1..].trim_start().len();
+                        }
+                    }
+                    return Some(format!("{}:{}: {}", it.line + l, c + 1, msg(&f.1)));
+                }
+            }
+        }
+        for t in sig_tys(sm) {
+            if !may(t) {
+                continue;
+            }
+            if let Some((outer, x)) = find(t, &needs_sized) {
+                let pos = outer.map_or_else(|| format!("{}:1", it.line), |o| at(o));
+                return Some(format!("{pos}: {}", msg(x)));
+            }
+        }
+    }
+    None
+}
+
+/// Well-formedness of the program's struct fields and impl headers: a type that names a struct of the program's whose
+/// parameter is bounded (`struct S<T: Tr>`) needs the bound of what it gives the parameter (E0277). A parameter of
+/// the enclosing item holds it when its own bounds give it, or when the item names the trait anywhere (a where clause
+/// zustc does not read, a bound with arguments); a concrete type when bound_holds says so (the program's traits, and
+/// the prelude's for the types `implements` judges exactly)
+fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user: usize) -> Option<String> {
+    let user_sm = |ii: usize| ii < user;
+    // (the bounded parameters of the program's structs named in t, with what t gives them)
+    fn needs(prog: &Program, sums: &[Summary], user: usize, t: Ty, out: &mut Vec<(Ty, String)>, depth: u32) {
+        if depth > 16 {
+            return;
+        }
+        match t {
+            Ty::Struct(s) => {
+                let sd = &prog.structs[s as usize];
+                if let Some(b) = sd.base {
+                    if let Some(sm) = prog.struct_item.get(b as usize).map(|&bi| bi as usize).filter(|&bi| bi < user).and_then(|bi| sums.get(bi)) {
+                        for (pn, trs) in &sm.adt_bounds {
+                            let Some(&a) = sm.adt_generics.iter().position(|g| g == pn).and_then(|k| sd.args.get(k)) else { continue };
+                            out.extend(trs.iter().filter(|tr| !tr.starts_with(crate::types::CONST_GENERIC)).map(|tr| (a, tr.clone())));
+                        }
+                    }
+                    for &a in &sd.args {
+                        needs(prog, sums, user, a, out, depth + 1);
+                    }
+                }
+            }
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => needs(prog, sums, user, *i, out, depth + 1),
+            Ty::Fn(f) => {
+                for &p in f.params.iter().chain([&f.ret]) {
+                    needs(prog, sums, user, p, out, depth + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    // (`n: ?Sized` / `n: Tr + ?Sized`, in the parameter list or a where clause: the `:` before a `?Sized` with only
+    // bounds between, and the parameter's name before the `:`)
+    let maybe_unsized = |text: &str, n: &str| param_maybe_unsized(text, n);
     // (a bound whose trait has `Sized` as a supertrait: std's `Clone`, `Copy`, `Default`, the conversions, or one of
     // the program's traits through its supertraits)
     let implies_sized = |b: &str| {
@@ -7760,16 +12666,73 @@ fn attr_gate(name: &str, args: &[&str]) -> Option<(&'static str, String)> {
     }
 }
 
+/// A const or a static of the program's whose value names an extern block's static: (its index, the static's name).
+/// Read only for a program with an extern static
+fn extern_static_in_value(prog: &crate::program::Program) -> Option<(usize, String)> {
+    let ext: Vec<&str> = prog.consts.iter().filter(|c| c.expr.starts_with(crate::parse::EXTERN_STATIC_SYM)).map(|c| c.name.as_str()).collect();
+    if ext.is_empty() {
+        return None;
+    }
+    prog.consts.iter().enumerate().find_map(|(ci, c)| {
+        if c.item >= prog.prelude_from || c.expr.starts_with(crate::parse::EXTERN_STATIC_SYM) {
+            return None;
+        }
+        let b = c.expr.as_bytes();
+        let toks = lexer::tokenize(b);
+        let tx = |k: usize| &b[toks[k].1..toks[k].2];
+        // (a read of it: not its address, `&X`, `&mut X`, `&raw const X`, `addr_of!(X)`, unless the address is read
+        // again, `*&X`)
+        let read = |k: usize| {
+            let mut j = k;
+            if j >= 1 && matches!(tx(j - 1), b"mut" | b"const") {
+                j -= 1;
+            }
+            if j >= 1 && tx(j - 1) == b"raw" {
+                j -= 1;
+            }
+            if j >= 1 && tx(j - 1) == b"&" {
+                return j >= 2 && tx(j - 2) == b"*";
+            }
+            !(k >= 3 && tx(k - 1) == b"(" && tx(k - 2) == b"!" && matches!(tx(k - 3), b"addr_of" | b"addr_of_mut"))
+        };
+        let n = ext.iter().find(|n| (0..toks.len()).any(|k| toks[k].0 == 0 && tx(k) == n.as_bytes() && read(k)))?;
+        Some((ci, n.to_string()))
+    })
+}
+
+/// The ABIs rustc 1.100 knows, stable or behind a feature (`extern "rust-intrinsic"` is no longer one)
+const KNOWN_ABIS: &[&str] = &[
+    "Rust", "C", "C-unwind", "cdecl", "cdecl-unwind", "stdcall", "stdcall-unwind", "fastcall", "fastcall-unwind", "vectorcall", "vectorcall-unwind",
+    "thiscall", "thiscall-unwind", "aapcs", "aapcs-unwind", "win64", "win64-unwind", "sysv64", "sysv64-unwind", "ptx-kernel", "msp430-interrupt",
+    "x86-interrupt", "gpu-kernel", "efiapi", "avr-interrupt", "avr-non-blocking-interrupt", "riscv-interrupt-m", "riscv-interrupt-s",
+    "cmse-nonsecure-call", "cmse-nonsecure-entry", "C-cmse-nonsecure-call", "C-cmse-nonsecure-entry", "system", "system-unwind", "rust-call",
+    "unadjusted", "rust-cold", "rust-invalid", "custom", "tail", "rust-preserve-none", "llvm-intrinsic", "Swift", "interrupt",
+];
+
 /// An ABI behind a feature gate the source does not enable, `extern "rust-cold" fn f()` (rustc 1.100): `line:col:
 /// the extern "x" ABI is experimental and subject to change (E0658)`, at the ABI's string
 fn gated_abi(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>) -> Option<String> {
     let toks = lexer::tokenize(&src.as_bytes()[from..to]);
     let tx = |k: usize| &src[from + toks[k].1..from + toks[k].2];
+    // (the item's head, before its first `{`, `(` or `;`: an ABI there is the item's, not a fn pointer type's or a macro
+    // call's input)
+    let head = (0..toks.len()).find(|&k| toks[k].0 == 1 && matches!(tx(k), "{" | "(" | ";")).unwrap_or(toks.len());
     for k in 1..toks.len() {
         if toks[k].0 != 2 || toks[k - 1].0 != 0 || tx(k - 1) != "extern" {
             continue;
         }
         let Some(abi) = str_lit_value(tx(k)) else { continue };
+        // (E0703: a name no ABI of rustc's has, `extern "fictional" fn`; a literal with a suffix, `"C"__`, is rustc's
+        // error of the literal first)
+        if k < head && !KNOWN_ABIS.contains(&abi.as_str()) {
+            let i = from + toks[k].1;
+            let line = src[..i].matches('\n').count() + 1;
+            let col = i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1;
+            if toks.get(k + 1).is_some_and(|n| n.0 == 0 && n.1 == toks[k].2) {
+                return Some(format!("{line}:{col}: suffixes on string literals are invalid"));
+            }
+            return Some(format!("{line}:{col}: invalid ABI: found `{abi}` (E0703)"));
+        }
         let (feat, how) = match abi.as_str() {
             "rust-cold" => ("rust_cold_cc", "is experimental and subject to change"),
             "tail" => ("rust_tail_cc", "is experimental and subject to change"),

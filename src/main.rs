@@ -142,6 +142,13 @@ fn main() {
         let mut s = Session2::new(Options2 { no_cache: true, ..o });
         // (a crate of one file: the `extern crate` items the configuring blanked, in their places in it (the loader
         // drops them when an expansion moved them))
+        // (the root file's first malformed `cfg`, at its line in the combined source: other files' lines come before
+        // it when the root's `mod x;` items are read in)
+        let cfg_err = map.cfg_err.take().map(|e| match e.split_once(':').and_then(|(l, rest)| Some((l.parse::<u32>().ok()?, rest))) {
+            Some((l, rest)) => format!("{}:{rest}", map.root_to_combined(l)),
+            None => e,
+        });
+        s.cfg_err = cfg_err;
         if map.inputs.len() == 1 {
             s.externs = std::mem::take(&mut map.externs);
         }
