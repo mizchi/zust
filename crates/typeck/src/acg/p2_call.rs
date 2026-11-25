@@ -1323,7 +1323,18 @@ impl Cx<'_> {
                     // (the receiver is the Box: of its type also where p0 is what a temporary Box points to,
                     // `Box::new(S).f()`; an `unsafe fn` is so here too, E0133 outside `unsafe`)
                     self.check_unsafe_call(id, msp.start)?;
+                    // (the receiver's tree for the region check, as on the other path: a result that borrows
+                    // through the Box's value is tied to what that borrows, `Box::new(S(&x)).get()`)
+                    if !via_deref {
+                        let user = self.prog.item_of.get(id as usize).copied().flatten().is_some_and(|i| i < self.prog.prelude_from);
+                        self.rg_recv(recv, Ty::Box(bi), sid, user.then_some(e));
+                    }
+                    if self.rg_on() || self.rg.eligible {
+                        self.rg.call_sp = borrowck::pos(e);
+                    }
                     let r = self.call_fn(id, Some((bv, Ty::Box(bi))), &margs.iter().collect::<Vec<_>>(), tf, expected, SP);
+                    // (the result's tree is this call's, as on the other path)
+                    self.rg_took_call(e);
                     // (the call takes the receiver after its arguments: what the holder holds ends there, not
                     // before them (`D(&x).consume({ x = 2; })` is E0506))
                     if let Some(h) = recv_holder {

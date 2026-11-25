@@ -2842,6 +2842,12 @@ impl Cx<'_> {
                         // (of the program's own types: the prelude's (`Vec`) are read where they are lowered)
                         Ty::Struct(sid) if self.prog.struct_item.get(self.prog.base_of(sid) as usize).is_some_and(|&i| i < self.prog.prelude_from) => {
                             let id = self.prog.method(sid, "index")?;
+                            // (not where it has several (`Index<usize>` and `Index<&str>`): which one the index takes is
+                            // not known here)
+                            let gname = &self.prog.names[id as usize];
+                            if self.prog.overloads.get(gname.split('#').next().unwrap_or(gname)).is_some_and(|c| c.len() > 1) {
+                                return None;
+                            }
                             let sig = &self.prog.sigs[id as usize];
                             let mut sol = vec![None; sig.generics.len()];
                             if sig.trait_of.is_some() {

@@ -657,7 +657,8 @@ impl<'a> Slots<'a> {
             if !plain {
                 let (mut lts, mut tys) = (vec![], vec![]);
                 if me.derived.is_some() {
-                    ty_parts(lhs, "", &mut lts, &mut tys);
+                    let tps = me.tparams.clone();
+                    ty_parts(lhs, "", &tps, &mut lts, &mut tys);
                 }
                 for b in bs {
                     if let Bound::Lifetime(l) = b {
@@ -720,9 +721,11 @@ impl<'a> Slots<'a> {
 
 /// The lifetimes and the plain type names (a parameter's, maybe) that a type is made of, for the outlives its bound
 /// implies, each with the names of the paths it is in (comma-separated: one of them may be a type alias, which the
-/// program knows). Not through a projection (`<T as Tr>::X: 'b` says nothing of T) or a trait object's bounds
-fn ty_parts(t: &PTy, paths: &str, lts: &mut Vec<(String, String)>, tys: &mut Vec<(String, String)>) {
+/// program knows). Not through a projection (`<T as Tr>::X: 'b` says nothing of T, nor `T::A<'a>: 'b` of 'a: it is one
+/// component of its own) or a trait object's bounds
+fn ty_parts(t: &PTy, paths: &str, tps: &[&str], lts: &mut Vec<(String, String)>, tys: &mut Vec<(String, String)>) {
     match t {
+        PTy::Path(None, p) if p.segs.len() > 1 && (p.segs[0].name == "Self" || tps.contains(&p.segs[0].name.as_str())) => {}
         PTy::Path(None, p) => {
             if let [s] = p.segs.as_slice() {
                 if s.args.is_empty() && s.fn_args.is_none() && !s.name.starts_with('\'') {
@@ -735,13 +738,13 @@ fn ty_parts(t: &PTy, paths: &str, lts: &mut Vec<(String, String)>, tys: &mut Vec
                 for a in &s.args {
                     match a {
                         GArg::Lifetime(l) if l != "'_" && l != "'static" => lts.push((inner.clone(), l.clone())),
-                        GArg::Ty(t) | GArg::Bind(_, t) => ty_parts(t, &inner, lts, tys),
+                        GArg::Ty(t) | GArg::Bind(_, t) => ty_parts(t, &inner, tps, lts, tys),
                         _ => {}
                     }
                 }
                 if let Some((ps, r)) = &s.fn_args {
                     for t in ps.iter().chain(r.as_deref()) {
-                        ty_parts(t, &inner, lts, tys);
+                        ty_parts(t, &inner, tps, lts, tys);
                     }
                 }
             }
@@ -750,12 +753,12 @@ fn ty_parts(t: &PTy, paths: &str, lts: &mut Vec<(String, String)>, tys: &mut Vec
             if let Some(l) = l.as_ref().filter(|l| *l != "'_" && *l != "'static") {
                 lts.push((paths.to_string(), l.clone()));
             }
-            ty_parts(t, paths, lts, tys);
+            ty_parts(t, paths, tps, lts, tys);
         }
-        PTy::Ptr(_, t) | PTy::Slice(t) | PTy::Array(t, _) => ty_parts(t, paths, lts, tys),
+        PTy::Ptr(_, t) | PTy::Slice(t) | PTy::Array(t, _) => ty_parts(t, paths, tps, lts, tys),
         PTy::Tuple(ts) => {
             for t in ts {
-                ty_parts(t, paths, lts, tys);
+                ty_parts(t, paths, tps, lts, tys);
             }
         }
         _ => {}

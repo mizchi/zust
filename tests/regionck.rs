@@ -4469,6 +4469,29 @@ fn g<'a>(x: &'a i32) -> &'static i32 where W<'a>: 'static { x }
 fn main() { let v = 1; let _ = (f(&v), g(&v)); }
 "#, &[(2, "lifetime may not live long enough"), (5, "does not live long enough")], "a1");
     // (an `unsafe fn` with `self: Box<Self>` called on a temporary Box outside `unsafe` is E0133; inside it is not)
+    // (a `self: Box<Self>` method's result that borrows through the Box's value is tied to what it borrows, on a
+    // Box local and on a temporary one: E0515 at each return, as in rustc 1.97)
+    errors_at(r#"struct S<'a>(&'a i32);
+impl<'a> S<'a> { fn get(self) -> &'a i32 { self.0 } fn getb(self: Box<Self>) -> &'a i32 { self.0 } }
+fn f<'x>() -> &'x i32 { let x = 5; S(&x).get() }
+fn g<'x>() -> &'x i32 { let x = 5; let b = Box::new(S(&x)); b.getb() }
+fn h<'x>() -> &'x i32 { let x = 5; Box::new(S(&x)).getb() }
+fn main() { let _ = (f(), g(), h()); }
+"#, &[(3, "E0515"), (4, "E0515"), (5, "E0515")], "b2");
+    // (a bound on a generic associated type with lifetime arguments (`T::A<'a>: 'static`) is one component of its
+    // own: it implies nothing of 'a)
+    errors_at(r#"trait Tr { type A<'x>; }
+fn bad<'a, T: Tr>(x: &'a i32) -> &'static i32 where T::A<'a>: 'static { x }
+fn main() {}
+"#, &[(2, "lifetime may not live long enough")], "g1");
+    // (an inherent `unsafe fn` with `self: Box<Self>` is chosen before a trait's method of the name, as in rustc:
+    // E0133 outside `unsafe`)
+    errors_at(r#"struct S;
+impl S { unsafe fn f(self: Box<Self>) -> i32 { 1 } }
+trait T { fn f(self: Box<Self>) -> i32; }
+impl T for S { fn f(self: Box<Self>) -> i32 { 2 } }
+fn main() { println!("{}", Box::new(S).f()); }
+"#, &[(5, "call to unsafe function")], "un2");
     errors_at(r#"struct S;
 impl S { unsafe fn f(self: Box<Self>) -> i32 { 1 } }
 fn main() { let a = unsafe { Box::new(S).f() }; let b = Box::new(S).f(); println!("{} {}", a, b); }
