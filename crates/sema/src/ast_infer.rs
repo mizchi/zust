@@ -1146,7 +1146,42 @@ impl Inf<'_> {
             }
             // (the left operand's type, a number behind a reference dereferenced: `let _: u8 = &0 << 0;`)
             "<<" | ">>" if !adt => self.num_operand(l),
-            "<<" | ">>" => l,
+            // (a struct's, or a reference to one's: the impl's `shl` / `shr`, whose Output is the type, `impl Shl<u8> for
+            // &S { type Output = u32; .. }`; the operands are not unified)
+            "<<" | ">>" => {
+                let m = if op == "<<" { "shl" } else { "shr" };
+                let found = match self.resolve(l) {
+                    Some(Ty::Struct(sid)) => self.prog.method(sid, m),
+                    Some(Ty::Ref(_, Ty::Struct(sid))) => self.prog.method(*sid, &format!("__ref_{m}")),
+                    _ => None,
+                };
+                // (of two impls, `Shl<u8>` and `Shl<u16>`, the one the right operand's type picks: while that is not
+                // known (`let n = 9; S(1) << n`), neither's signature is taken, as code generation picks by it)
+                let group = found.and_then(|id| self.prog.overloads.get(self.prog.names[id as usize].split('#').next().unwrap_or("")));
+                let found = match (found, group) {
+                    (Some(_), Some(g)) if g.len() > 1 => {
+                        let rt = self.resolve(r);
+                        let fit: Vec<u32> = g
+                            .iter()
+                            .copied()
+                            .filter(|&c| {
+                                let sig = &self.prog.sigs[c as usize];
+                                let mut sol = vec![None; sig.generics.len()];
+                                rt.is_some_and(|t| sig.params.get(1).is_some_and(|&pt| self.prog.match_ty(pt, t, &mut sol)))
+                            })
+                            .collect();
+                        match fit.as_slice() {
+                            [c] => Some(*c),
+                            _ => return self.var(),
+                        }
+                    }
+                    _ => found,
+                };
+                match found {
+                    Some(id) => self.apply_recv(Some(id), vec![r], l),
+                    None => l,
+                }
+            }
             "<<=" | ">>=" => self.known(Ty::Unit),
             "+=" | "-=" | "*=" | "/=" | "%=" | "^=" | "&=" | "|=" => {
                 self.unify(l, r);
@@ -2613,6 +2648,25 @@ impl Inf<'_> {
                     };
                     if let Some(&id) = self.prog.index.get(&format!("__exr_str_{h}")) {
                         return self.apply_helper(id, tf, avs);
+                    }
+                }
+            }
+        }
+        // (an inherent method of one name in impls for disjoint instances, `W<u8>::get` / `W<u16>::get`, `W<&T>::copied`
+        // / `W<&mut T>::copied`: the receiver's, once its type tells them apart; until then nothing is learned from it)
+        if let Some(id) = callee {
+            let prog = self.prog;
+            if let Some(cands) = prog.overloads.get(&prog.names[id as usize]) {
+                let inherent = |c: &u32| prog.sigs[*c as usize].impl_trait.is_none() && prog.sigs[*c as usize].has_self;
+                if cands.iter().all(inherent) {
+                    let fits = |c: u32, t: Ty| {
+                        let sig = &prog.sigs[c as usize];
+                        let mut sol = vec![None; sig.generics.len()];
+                        sig.self_ty.is_some_and(|st| prog.match_ty_exact(st, t, &mut sol))
+                    };
+                    match self.resolve(rv).and_then(|t| cands.iter().copied().find(|&c| fits(c, t))) {
+                        Some(c) => callee = Some(c),
+                        None => return self.var(),
                     }
                 }
             }

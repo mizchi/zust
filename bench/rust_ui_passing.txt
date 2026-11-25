@@ -417,6 +417,7 @@ compile-fail	async-await/await-keyword/incorrect-syntax-suggestions.rs
 check-pass	async-await/await-unsize.rs
 check-pass	async-await/bound-normalization.rs
 compile-fail	async-await/clone-suggestion.rs
+compile-fail	async-await/const-async-fn-in-main.rs
 run-pass	async-await/context-is-sorta-unwindsafe.rs
 compile-fail	async-await/coroutine-desc.rs
 build-pass	async-await/default-struct-update.rs
@@ -1480,6 +1481,7 @@ compile-fail	closures/issue-80313-mutation-in-move-closure.rs
 compile-fail	closures/issue-81700-mut-borrow.rs
 compile-fail	closures/issue-82438-mut-without-upvar.rs
 compile-fail	closures/issue-84044-drop-non-mut.rs
+compile-fail	closures/issue-84128.rs
 run-pass	closures/issue-868.rs
 compile-fail	closures/issue-87461.rs
 check-pass	closures/issue-97607.rs
@@ -1641,6 +1643,7 @@ compile-fail	coherence/coherence-overlap-unnormalizable-projection-1.rs
 compile-fail	coherence/coherence-projection-conflict-ty-param.rs
 check-pass	coherence/coherence-projection-ok-orphan.rs
 check-pass	coherence/coherence-projection-ok.rs
+run-pass	coherence/coherence-rfc447-constrained.rs
 check-pass	coherence/coherence-subtyping.rs
 compile-fail	coherence/coherence-tuple-conflict.rs
 run-pass	coherence/coherence-where-clause.rs
@@ -2153,6 +2156,7 @@ compile-fail	consts/transmute-size-mismatch-before-typeck.rs
 check-pass	consts/unnormalized-param-env.rs
 check-pass	consts/unsafe_cell_in_const.rs
 check-pass	consts/unwind-abort.rs
+compile-fail	contracts/internal_machinery/internal-feature-gating.rs
 compile-fail	coroutine/coroutine-in-orphaned-anon-const.rs
 check-pass	coroutine/issue-53548-1.rs
 check-pass	coroutine/issue-62506-two_awaits.rs
@@ -2871,6 +2875,7 @@ compile-fail	feature-gates/feature-gate-derive-coerce-pointee.rs
 compile-fail	feature-gates/feature-gate-derive-from.rs
 compile-fail	feature-gates/feature-gate-diagnostic-on-move.rs
 check-pass	feature-gates/feature-gate-diagnostic-on-type-error-malformed-args.rs
+compile-fail	feature-gates/feature-gate-diagnostic-on-type-error.rs
 compile-fail	feature-gates/feature-gate-diagnostic-on-unmatched-args.rs
 compile-fail	feature-gates/feature-gate-doc_cfg.rs
 compile-fail	feature-gates/feature-gate-doc_masked.rs
@@ -3934,6 +3939,7 @@ compile-fail	label/label_break_value_illegal_uses.rs
 compile-fail	label/label_break_value_unlabeled_break.rs
 compile-fail	label/label_misspelled.rs
 compile-fail	label/label_misspelled_2.rs
+compile-fail	label/loop-label-included-in-span.rs
 compile-fail	label/undeclared-label-span.rs
 check-pass	late-bound-lifetimes/downgraded_to_early_through_alias.rs
 run-pass	late-bound-lifetimes/issue-36381.rs
@@ -4845,6 +4851,7 @@ run-pass	methods/method-early-bound-lifetimes-on-self.rs
 compile-fail	methods/method-macro-backtrace.rs
 run-pass	methods/method-normalize-bounds-issue-20604.rs
 compile-fail	methods/method-not-found-but-doc-alias.rs
+compile-fail	methods/method-not-found-generic-arg-elision.rs
 compile-fail	methods/method-not-found-on-iterator.rs
 compile-fail	methods/method-not-found-on-struct.rs
 compile-fail	methods/method-path-in-pattern.rs
@@ -4856,6 +4863,7 @@ compile-fail	methods/method-self-arg-1.rs
 compile-fail	methods/method-self-arg-2.rs
 run-pass	methods/method-self-arg.rs
 compile-fail	methods/method-suggestion-trait-with-extra-generics-no-ice.rs
+run-pass	methods/method-two-traits-distinguished-via-where-clause.rs
 compile-fail	methods/method-value-without-call.rs
 run-pass	methods/method-where-clause.rs
 check-pass	methods/nested-fn-call-shadowed-assoc-fn-variable.rs
@@ -4943,6 +4951,7 @@ compile-fail	mismatched_types/float-literal-inference-restrictions.rs
 compile-fail	mismatched_types/fn-pointer-mismatch-diagnostics.rs
 compile-fail	mismatched_types/for-loop-has-unit-body.rs
 compile-fail	mismatched_types/generic-mismatch-reporting-issue-116615.rs
+compile-fail	mismatched_types/int-float-type-mismatch.rs
 compile-fail	mismatched_types/issue-106182.rs
 compile-fail	mismatched_types/issue-112036.rs
 compile-fail	mismatched_types/issue-118145-unwrap-for-shorthand.rs
@@ -4962,6 +4971,7 @@ compile-fail	mismatched_types/mismatch-sugg-for-shorthand-field.rs
 compile-fail	mismatched_types/mismatch-ty-dont-suggest.rs
 compile-fail	mismatched_types/mismatch-ty-unwrap-expect.rs
 compile-fail	mismatched_types/never-option-unwrap-suggestion-issue-162241.rs
+compile-fail	mismatched_types/newlines-in-diagnostic-fix-suggestions-92741.rs
 compile-fail	mismatched_types/normalize-fn-sig.rs
 compile-fail	mismatched_types/numeric-literal-cast.rs
 compile-fail	mismatched_types/recovered-block.rs
@@ -5621,6 +5631,7 @@ compile-fail	parser/fn-defined-using-fun.rs
 compile-fail	parser/fn-defined-using-func.rs
 compile-fail	parser/fn-defined-using-function.rs
 compile-fail	parser/fn-field-parse-error-ice.rs
+compile-fail	parser/fn-header-semantic-fail.rs
 check-pass	parser/fn-header-syntactic-pass.rs
 check-pass	parser/fn-returns-fn-pointer.rs
 check-pass	parser/foreign-static-syntactic-pass.rs
@@ -6082,6 +6093,7 @@ compile-fail	parser/recover/recover-ampersand-less-ref-ty.rs
 compile-fail	parser/recover/recover-colon-instead-of-eq-in-local.rs
 compile-fail	parser/recover/recover-const-async-fn-ptr.rs
 compile-fail	parser/recover/recover-enum-with-bad-where.rs
+compile-fail	parser/recover/recover-enum.rs
 compile-fail	parser/recover/recover-enum2.rs
 compile-fail	parser/recover/recover-field-extra-angle-brackets-in-struct-with-a-field.rs
 compile-fail	parser/recover/recover-field-extra-angle-brackets.rs
@@ -7077,6 +7089,7 @@ check-pass	rfcs/rfc-2294-if-let-guard/partially-macro-expanded.rs
 run-pass	rfcs/rfc-2294-if-let-guard/run-pass.rs
 check-pass	rfcs/rfc-2294-if-let-guard/shadowing.rs
 check-pass	rfcs/rfc-2294-if-let-guard/type-inference.rs
+compile-fail	rfcs/rfc-2294-if-let-guard/typeck.rs
 compile-fail	rfcs/rfc-2361-dbg-macro/dbg-macro-move-semantics.rs
 compile-fail	rfcs/rfc-2361-dbg-macro/dbg-macro-requires-debug.rs
 check-pass	rfcs/rfc-2396-target_feature-11/check-pass.rs
@@ -7159,6 +7172,7 @@ compile-fail	self/arbitrary_self_types_pin_lifetime_impl_trait.rs
 compile-fail	self/arbitrary_self_types_pin_lifetime_mismatch-async.rs
 compile-fail	self/arbitrary_self_types_pin_lifetime_mismatch.rs
 compile-fail	self/arbitrary_self_types_pin_needing_borrow.rs
+run-pass	self/builtin-superkinds-self-type.rs
 run-pass	self/by-value-self-in-mut-slot.rs
 compile-fail	self/class-missing-self.rs
 check-pass	self/dispatch-from-dyn-layout-2.rs
@@ -7718,6 +7732,7 @@ compile-fail	suggestions/lifetimes/type-param-bound-scope.rs
 compile-fail	suggestions/lifetimes/type-param-missing-lifetime.rs
 compile-fail	suggestions/many-type-ascription.rs
 compile-fail	suggestions/match-ergonomics.rs
+compile-fail	suggestions/match-needing-semi.rs
 compile-fail	suggestions/match-prev-arm-needing-semi.rs
 compile-fail	suggestions/match-with-different-arm-types-as-stmt-instead-of-expr.rs
 compile-fail	suggestions/method-access-to-range-literal-typo.rs
@@ -7776,6 +7791,7 @@ compile-fail	suggestions/return-cycle.rs
 compile-fail	suggestions/return-elided-lifetime.rs
 compile-fail	suggestions/return-without-lifetime.rs
 compile-fail	suggestions/semi-suggestion-when-stmt-and-expr-span-equal.rs
+compile-fail	suggestions/shadowed-lplace-method-2.rs
 compile-fail	suggestions/silenced-binding-typo.rs
 compile-fail	suggestions/slice-issue-87994.rs
 compile-fail	suggestions/struct-field-type-including-single-colon.rs
@@ -8413,6 +8429,7 @@ compile-fail	type/type-check/issue-41314.rs
 compile-fail	type/type-check/issue-67273-assignment-match-prior-arm-bool-expected-unit.rs
 compile-fail	type/type-check/missing_trait_impl.rs
 compile-fail	type/type-check/point-at-inference-3.rs
+compile-fail	type/type-check/point-at-inference-issue-116155.rs
 compile-fail	type/type-check/unknown_type_for_closure.rs
 compile-fail	type/type-dependent-def-issue-49241.rs
 compile-fail	type/type-error-break-tail.rs

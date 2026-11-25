@@ -7,6 +7,13 @@ use crate::minclif::{DataDef, Reloc};
 // (Fx hashing: deterministic and cheaper than the std map's random-seeded SipHash)
 type HashMap<K, V> = crate::fxhash::FxMap<K, V>;
 
+/// The fns (and instances) a Blob refers to: its calls and address-takings, and its vtables' slots
+fn blob_fns(b: &Blob) -> Vec<u32> {
+    let mut v: Vec<u32> = b.relocs.iter().filter_map(|r| match r.target { Target::Func(i) => Some(i), _ => None }).collect();
+    v.extend(b.vtables.iter().flatten().copied());
+    v
+}
+
 /// 記録を機械語にして Blob を作る
 pub(super) fn lower_blob(a: &Analysis, c: acg::Compiled, req: Vec<u32>) -> R<(Blob, Vec<u32>)> {
     let (code, relocs, traps) = crate::lower::lower(&c.rec, &c.late, a.prog.opt, a.cl)?;
@@ -30,7 +37,9 @@ pub fn build(src: &str, output: &std::path::Path, opt: bool, linker: Option<&str
 impl Session2 {
     /// ids をコンパイルする (jobs > 1 で数が多ければ fork した子プロセスで分けて)。結果は ids と同じ順
     fn compile_many(&self, a: &Analysis, insts: &Mutex<Insts>, ids: &[u32]) -> R<Vec<Blob>> {
-        let jobs = self.opts.jobs.min(ids.len() / 16).max(1);
+        // (at least 16 per child; ZUSTC_BUILD_PAR_MIN for tests: 1 splits nearly every wave)
+        let per_job = std::env::var("ZUSTC_BUILD_PAR_MIN").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(16).max(1);
+        let jobs = self.opts.jobs.min(ids.len() / per_job).max(1);
         if jobs <= 1 {
             let mut out = vec![];
             for &id in ids {
@@ -56,12 +65,22 @@ impl Session2 {
                 let mut buf = vec![];
                 let mut i = k;
                 while i < ids.len() {
+                    let at = buf.len();
                     crate::cache2::put_uv(&mut buf, i as u64);
                     match compile_id(a, insts, ids[i]) {
                         Ok(b) => {
                             let mut e = vec![];
                             {
                                 let g = insts.lock().unwrap();
+                                // (a Blob that names an instance the encoding cannot write is not sent: the parent
+                                // compiles that fn again. A closure's fn-pointer instance (request_fnptr) is written as
+                                // the closure's own, so the parent's code called the closure through a fn pointer
+                                // with its environment's parameter, and got the arguments wrong (#192))
+                                if !sendable(a, &*g, &blob_fns(&b)) {
+                                    buf.truncate(at);
+                                    i += jobs;
+                                    continue;
+                                }
                                 crate::cache2::encode_blob(&b, &a.prog, &*g, &mut e);
                             }
                             buf.push(0);
