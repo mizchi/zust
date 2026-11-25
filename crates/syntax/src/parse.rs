@@ -220,6 +220,10 @@ pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
         } else if is_ident_start(ch) {
             if c == b'r' && b.get(i + 1) == Some(&b'#') {
                 i += 2;
+                // (`r#self` / `r#_`: a name no raw identifier can be)
+                if let Some(w) = reserved_raw(src, i) {
+                    return Err(format!("{tline}:{}: `{w}` cannot be a raw identifier", col + 1));
+                }
             }
             while i < b.len() {
                 let d0 = b[i];
@@ -258,6 +262,15 @@ pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
         out.push(Tok { kind: kind, text: src[start..i].to_string(), joint: joint, line: tline, col: col, lo: start as u32 });
     }
     Ok(out)
+}
+
+/// The name after `r#` at src[i..] when it is one no raw identifier can be, `r#self` / `r#_`
+#[cold]
+#[inline(never)]
+fn reserved_raw(src: &str, i: usize) -> Option<&str> {
+    let n = src[i..].bytes().take_while(|c| c.is_ascii_alphanumeric() || *c == b'_').count();
+    let w = &src[i..i + n];
+    matches!(w, "self" | "super" | "crate" | "Self" | "_").then_some(w)
 }
 
 /// A raw lifetime `'r#a` (src[start..end]) as the token `'a`, marked `joint` (which a lifetime has no other use for):
@@ -3346,6 +3359,10 @@ impl Parser {
                     let t = self.tok(0).ok_or_else(|| self.err("unterminated use"))?;
                     // (名前・`}` の後ろにすぐ名前は来ない: `use a::{b} struct X` は `;` がない)
                     let word = t.kind == TokKind::Ident || (t.kind == TokKind::Close);
+                    // (`use foo::{bar} as baz;` / `use foo::* as baz;`: a group or a glob has no name to rename)
+                    if t.text == "as" && prefixes.is_empty() && (s.ends_with('}') || s.ends_with('*')) {
+                        return Err(self.err_plain("expected `;`, found keyword `as`"));
+                    }
                     if prev_word && t.kind == TokKind::Ident && t.text != "as" && !s.ends_with("as") {
                         return Err(self.err("expected `;`"));
                     }

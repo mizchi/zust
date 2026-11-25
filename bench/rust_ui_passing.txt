@@ -4460,6 +4460,7 @@ check-pass	macros/block-to-expr-metavar.rs
 check-pass	macros/break-last-token-twice.rs
 compile-fail	macros/builtin-env-issue-114010.rs
 compile-fail	macros/builtin-prelude-no-accidents.rs
+compile-fail	macros/builtin-std-paths-fail.rs
 check-pass	macros/builtin-std-paths.rs
 compile-fail	macros/cfg.rs
 check-pass	macros/column-macro-collision.rs
@@ -5501,6 +5502,7 @@ check-pass	parser/extern-abi-string-escaping.rs
 check-pass	parser/extern-abi-syntactic.rs
 check-pass	parser/extern-crate-async.rs
 compile-fail	parser/extern-crate-unexpected-token.rs
+compile-fail	parser/extern-expected-fn-or-brace.rs
 compile-fail	parser/extern-foreign-crate.rs
 compile-fail	parser/extern-no-fn.rs
 compile-fail	parser/ferris-static-mut.rs
@@ -5542,7 +5544,9 @@ compile-fail	parser/impl-parsing-2.rs
 check-pass	parser/impls-nested-within-anon-consts-semantic.rs
 check-pass	parser/impls-nested-within-fns-semantic-0.rs
 compile-fail	parser/import-from-path.rs
+compile-fail	parser/import-from-rename.rs
 compile-fail	parser/import-glob-path.rs
+compile-fail	parser/import-glob-rename.rs
 compile-fail	parser/increment-autofix-2.rs
 compile-fail	parser/increment-autofix.rs
 check-pass	parser/inner-attr-in-trait-def.rs
@@ -5946,6 +5950,8 @@ compile-fail	parser/raw/issue-70677-panic-on-unterminated-raw-str-at-eof.rs
 compile-fail	parser/raw/raw-byte-string-eof.rs
 compile-fail	parser/raw/raw-byte-string-literals.rs
 compile-fail	parser/raw/raw-literal-keywords.rs
+compile-fail	parser/raw/raw-literal-self.rs
+compile-fail	parser/raw/raw-literal-underscore.rs
 compile-fail	parser/raw/raw-str-delim.rs
 check-pass	parser/raw/raw-str-in-macro-call.rs
 compile-fail	parser/raw/raw-str-unbalanced.rs

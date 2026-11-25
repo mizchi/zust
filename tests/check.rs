@@ -2823,3 +2823,20 @@ fn a_for_loop_over_a_struct_with_its_own_next() {
     let ok = "struct C(u8);\nimpl Iterator for C {\n    type Item = u8;\n    fn next(&mut self) -> Option<u8> { None }\n}\nfn main() {\n    for x in C(3) { let _ = x; }\n}\n";
     assert_eq!(first(ok), None);
 }
+
+#[test]
+fn renamed_groups_and_derives_by_std_paths() {
+    // (rustc 1.100: a group or a glob has no name to rename; a derive of a name std's root does not have. `extern "C"
+    // mod foo;` is srcmap's, missing_mod_tests)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let m = "mod foo {\n    pub fn bar() {}\n}\nfn main() {}\n";
+    assert_eq!(first(&format!("use foo::{{bar}} as baz;\n{m}")), Some((1, 16, "expected `;`, found keyword `as`".to_string())));
+    assert_eq!(first(&format!("use foo::* as baz;\n{m}")), Some((1, 12, "expected `;`, found keyword `as`".to_string())));
+    assert_eq!(first(&format!("use foo::{{bar as baz}};\n{m}")).map(|e| e.2).filter(|e| e.contains("found keyword")), None);
+    let e = first("#[derive(\n    core::RustcDecodable,\n)]\nstruct S;\nfn main() {}\n");
+    assert_eq!(e.map(|e| (e.0, e.2)), Some((2, "cannot find `RustcDecodable` in `core`".to_string())));
+    assert_eq!(first("#[derive(core::clone::Clone, ::std::marker::Copy)]\nstruct S;\nfn main() {}\n"), None);
+}

@@ -971,6 +971,15 @@ fn mod_not_found(display: &str, src: &str, name: &str) -> String {
         let after = src[i + pat.len()..].trim_start();
         (prefix_ok && after.starts_with(';')).then(|| 1 + src[..i].matches('\n').count())
     });
+    // (`extern "C" mod foo;`: rustc's parse error at the `mod`, an ABI is followed by `{` or `fn`)
+    let ext = src.match_indices(&pat).find(|&(i, _)| {
+        let ls = src[..i].rfind('\n').map_or(0, |k| k + 1);
+        src[ls..i].trim_start().starts_with("extern ") && src[i + pat.len()..].trim_start().starts_with(';')
+    });
+    if let Some((i, _)) = ext {
+        let ls = src[..i].rfind('\n').map_or(0, |k| k + 1);
+        return format!("{display}:{}:{}: expected `{{`, found keyword `mod`", 1 + src[..i].matches('\n').count(), src[ls..i].chars().count() + 1);
+    }
     match line {
         Some(l) => format!("{display}:{l}:1: file not found for module `{name}` (E0583)"),
         None => format!("{display}: file not found for module `{name}`"),
@@ -993,6 +1002,10 @@ mod missing_mod_tests {
         std::fs::write(dir.join("main.rs"), "fn main() {\n    mod nowhere;\n}\n").unwrap();
         let e = super::load_crate(&dir.join("main.rs"), "src/main.rs", &cfg).unwrap_err();
         assert_eq!(e, "src/main.rs: file not found for module `nowhere`");
+        // (after an ABI: rustc's parse error at the `mod`)
+        std::fs::write(dir.join("main.rs"), "fn main() {}\nextern \"C\" mod nowhere;\n").unwrap();
+        let e = super::load_crate(&dir.join("main.rs"), "src/main.rs", &cfg).unwrap_err();
+        assert_eq!(e, "src/main.rs:2:12: expected `{`, found keyword `mod`");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

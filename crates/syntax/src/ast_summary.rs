@@ -52,6 +52,22 @@ fn derive_names(attrs: &[String]) -> Vec<String> {
     out
 }
 
+/// The std crate a derive's path names `name` right under, `#[derive(core::name)]` / `#[derive(::std::name)]`
+#[cold]
+fn derive_root_of(attrs: &[String], name: &str) -> Option<&'static str> {
+    for a in attrs {
+        let c = compact(a);
+        let Some(inner) = c.find("derive(").and_then(|i| c[i + 7..].strip_suffix(")]")) else { continue };
+        for part in inner.split(',') {
+            let p = part.strip_prefix("::").unwrap_or(part);
+            if let Some(k) = ["core", "std", "alloc"].into_iter().find(|k| p.strip_prefix(k).and_then(|r| r.strip_prefix("::")) == Some(name)) {
+                return Some(k);
+            }
+        }
+    }
+    None
+}
+
 /// The integer type of `#[repr(u8)]` / `#[repr(C, i16)]`
 fn int_repr(attrs: &[String]) -> Option<String> {
     for a in attrs {
@@ -1410,6 +1426,10 @@ fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields
     for d in &derives {
         if !matches!(d.as_str(), "Clone" | "Copy" | "Debug" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Default") {
             // (`\u{5}word\u{5}msg`: at the word in the item's text, the derive's name)
+            // (`#[derive(core::RustcDecodable)]`: a name std's root does not have)
+            if let Some(k) = derive_root_of(attrs, d) {
+                return Err(format!("\u{5}{d}\u{5}cannot find `{d}` in `{k}`"));
+            }
             return Err(format!("\u{5}{d}\u{5}cannot find derive macro `{d}` in this scope"));
         }
     }
