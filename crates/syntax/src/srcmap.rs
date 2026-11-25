@@ -1,24 +1,24 @@
-//! 複数ファイルのクレート: `mod x;` を `x.rs` (か `x/mod.rs`) の中身で置き換えて 1 つのソースにし、
-//! 結合したソースの行 → (ファイル, ファイルの中の行) の対応 (SrcMap) を作る。
+//! Multi-file crates: replaces `mod x;` with the contents of `x.rs` (or `x/mod.rs`) to make one source,
+//! and builds the map (SrcMap) from a line of the combined source → (file, line in that file).
 //!
-//! 行番号をずらさないため、`mod x;` は同じ長さの空白にして、中身はファイルの最後に `pub mod x { .. }` として足す
-//! (Rust ではアイテムの順は意味を持たない)。コンパイルエラーの `行:桁:` と panic の場所はこの対応で元のファイルに戻す。
+//! To keep line numbers, `mod x;` is blanked to the same length and the contents appended as `pub mod x { .. }`
+//! (item order means nothing in Rust). The map takes errors' `line:col:` and panic places back to their files.
 
 use std::path::{Path, PathBuf};
 
-/// 結合したソースの行の区間: (開始行 (1 始まり), ファイルの番号, そのファイルでの開始行)
+/// Line ranges of the combined source: (first line (1-based), file index, first line in that file)
 #[derive(Clone, Debug, Default)]
 pub struct SrcMap {
     pub segs: Vec<(u32, u32, u32)>,
-    /// 表示するファイルの名前 (`src/main.rs`, `src/foo/bar.rs` など)
+    /// The file names to display (`src/main.rs`, `src/foo/bar.rs` and so on)
     pub files: Vec<String>,
-    /// 読んだファイル
+    /// The files read
     pub inputs: Vec<PathBuf>,
-    /// `mod x;` で探した場所 (`x.rs` と `x/mod.rs`; 無いものも): ここに現れる・消えるファイルは読むものを変える
+    /// Where `mod x;` looked (`x.rs`, `x/mod.rs`, absent ones too): a file coming or going there changes the input
     pub probes: Vec<PathBuf>,
-    /// 読んだファイルの外のもの (include_str!, include_bytes!) に依るか: ファイルのスタンプだけでは新しさが言えない
+    /// Whether it depends on more than the files read (include_str!, include_bytes!): stamps cannot prove it fresh
     pub volatile: bool,
-    /// モジュールの名前を変えて桁がずれた所: (行, 桁, ずれ) (lexer::rename_module_collisions_fix)
+    /// Where renaming a module shifted columns: (line, column, shift) (lexer::rename_module_collisions_fix)
     pub colfix: Vec<(u32, u32, i32)>,
     /// The root file's `extern crate x;` items, which the configuring blanks: (byte offset, text)
     /// (cfg::strip_noting). Only read when `keep_externs` is set before loading (load_crate_keeping_externs)
@@ -31,12 +31,12 @@ pub struct SrcMap {
 }
 
 impl SrcMap {
-    /// 1 ファイルだけ (区間 1 つ)
+    /// A single file (one range)
     pub fn single(name: &str) -> SrcMap {
         SrcMap { segs: vec![(1, 0, 1)], files: vec![name.to_string()], inputs: vec![], probes: vec![], volatile: false, colfix: vec![], externs: vec![], keep_externs: false, cfg_err: None }
     }
 
-    /// 結合したソースの行 → (ファイルの名前, ファイルの中の行)
+    /// A line of the combined source → (file name, line in the file)
     pub fn locate(&self, line: u32) -> (&str, u32) {
         let mut best = (0u32, 1u32, 1u32);
         for &(s, f, first) in &self.segs {
@@ -59,7 +59,7 @@ impl SrcMap {
         best.map_or(line, |(s, first)| s + (line - first))
     }
 
-    /// 結合したソースの (行, 桁) の桁を、名前を変える前の桁にする
+    /// Maps the column of a (line, column) in the combined source back to the column before renaming
     pub fn fix_col(&self, line: u32, col: u32) -> u32 {
         let mut d = 0;
         for &(l, c, cum) in &self.colfix {
@@ -96,7 +96,7 @@ impl SrcMap {
         format!("{}(at {place}){}", &head[..k], &rest[j + 1..])
     }
 
-    /// エラーの先頭の `行:桁:` (か `行:`) を `ファイル:行:桁:` にする
+    /// Turns the leading `line:col:` (or `line:`) of an error into `file:line:col:`
     fn relocate_head(&self, e: &str) -> String {
         let b = e.as_bytes();
         let mut i = 0;
@@ -108,7 +108,7 @@ impl SrcMap {
         }
         let line: u32 = e[..i].parse().unwrap_or(0);
         let (f, l) = self.locate(line);
-        // (桁)
+        // (column)
         let mut j = i + 1;
         while j < b.len() && b[j].is_ascii_digit() {
             j += 1;
@@ -125,7 +125,7 @@ fn line_count(s: &str) -> u32 {
     s.as_bytes().iter().filter(|&&c| c == b'\n').count() as u32
 }
 
-/// クレートの根のファイル (main.rs / lib.rs) を読み、`mod x;` を展開する。display は根の表示名 (`src/main.rs` など)
+/// Reads the crate root file (main.rs / lib.rs), expanding `mod x;`; display names the root (as `src/main.rs`)
 pub fn load_crate(root: &Path, display: &str, cfg: &crate::cfg::CfgSet) -> Result<(String, SrcMap), String> {
     load_crate_in(root, display, cfg, SrcMap::default())
 }
@@ -194,8 +194,8 @@ fn lexical(p: &Path) -> String {
     if abs { format!("/{j}") } else { j }
 }
 
-/// ファイル path を読んで展開する。mod_dir は子のモジュールのファイルを探すディレクトリ。start は結合したソースでの開始行。
-/// open は読んでいる途中のファイル (根から): 同じファイルがまた出てきたら循環 (rustc と同じく "circular modules")
+/// Reads and expands file path; mod_dir holds child module files; start is its first line in the combined source.
+/// open: the files being read (from the root); the same file again is a cycle ("circular modules", as in rustc)
 #[allow(clippy::too_many_arguments)]
 fn load_file(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, start: u32, map: &mut SrcMap, cfg: &crate::cfg::CfgSet, open: &mut Vec<(String, String)>) -> Result<String, String> {
     let key = file_key(path);
@@ -228,7 +228,7 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
             return Err(format!("{display}:{e}"));
         }
     }
-    // (cfg を先に評価する: 偽の `#[cfg(..)] mod x;` のファイルは読まない)
+    // (cfg is evaluated first: the file of a false `#[cfg(..)] mod x;` is not read)
     // (and whether it may call `env!` / `option_env!`, seen by the same tokens)
     let mut env = None;
     let mut externs = vec![];
@@ -400,7 +400,7 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
         let body = load_file(p.as_path(), &disp, sub.as_path(), &sub_disp, at, map, cfg, open)?;
         text.push_str(&body);
         text.push_str("\n}\n");
-        // (`}` の行は、元のファイルの最後の行の続きにしておく)
+        // (the `}` line counts as following the last line of the original file)
         map.segs.push((start + line_count(&text) - 1, fi, 1 + line_count(&src)));
     }
     hoist_macro_mods(text, path, mod_dir, disp_dir, start, map, cfg, open, fi, end_line)
@@ -607,7 +607,7 @@ fn join_disp(dir: &str, rest: &str) -> String {
     if dir.is_empty() { rest.to_string() } else { format!("{dir}/{rest}") }
 }
 
-/// トップレベルの `[pub[(..)]] mod x;` を空白にし、(名前, #[cfg(test)] か) の列を返す。`#[cfg(test)]` のものは読まない
+/// Blanks top-level `[pub[(..)]] mod x;` items, giving (name, is #[cfg(test)]); `#[cfg(test)]` ones are not read
 /// A `mod x;` inside inline modules (`mod a { #[path = "d"] mod b { mod x; } }`): where it is in the text and the
 /// directories of the modules around it, outermost first (Ok: the module's name, Err: its `#[path]`)
 type Nested = Option<(usize, Vec<Result<String, String>>)>;
@@ -714,7 +714,7 @@ fn blank_mod_decls(src: &str, cfg: &crate::cfg::CfgSet) -> Result<(String, Vec<(
             inline.push((depth + 1, pa.ok_or(name)));
         } else if toks[k].0 == 0 && tok(k) == b"mod" && k + 2 < toks.len() && toks[k + 1].0 == 0 && is_sym(k + 2, b';') {
             let nested = (depth != 0).then(|| (toks[k + 2].2, inline.iter().map(|m| m.1.clone()).collect::<Vec<_>>()));
-            // (前の `pub` / `pub(crate)` と `#[..]` も消す)
+            // (also erases the `pub` / `pub(crate)` and `#[..]` before it)
             let mut b = k;
             if b >= 1 && is_sym(b - 1, b')') {
                 let mut j = b - 1;
