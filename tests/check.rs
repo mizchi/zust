@@ -3252,3 +3252,44 @@ fn a_binding_mode_shorthand_with_a_pattern_and_a_dollar_bracket_in_a_macro_body(
     assert_eq!(first("macro_rules! foo {\n    ( $( $i:ident ),* ) => {\n        $[count($i)]\n    };\n}\nfn main() {}\n"), Some((3, 10, "expected `(` or `{`, found `[`".to_string())));
     assert_eq!(first("struct Foo { x: isize }\nfn main() {\n    let Foo { ref x } = Foo { x: 1 };\n    let _ = x;\n}\n"), None);
 }
+
+#[test]
+fn a_mismatch_at_the_use_of_a_value_made_with_another_type_argument() {
+    // (rustc 1.100, at its line: `let foo = Foo(1u8); takes_foo(foo);` with `fn takes_foo(_: Foo<i32>)` is at the
+    // call, not at the `let` (the value keeps the type it was made with); so is `Option<Vec<u8>>` for
+    // `Option<&[u8]>`. A closure's first `return` gives its type: `Foo(())` after `return Foo(0)` is the mismatch)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    assert_eq!(first("struct Foo<T>(T);\nfn takes_foo(_: Foo<i32>) {}\nfn main() {\n    let foo = Foo(1u8);\n    takes_foo(foo);\n}\n"), Some((5, "mismatched types: expected `Foo<i32>`, found `Foo<u8>`".to_string())));
+    assert_eq!(first("fn main() {\n    let some = Some(vec![1u8]);\n    let Some(a): Option<&[u8]> = some else { return };\n    let _ = a;\n}\n"), Some((3, "mismatched types: expected `Option<&[u8]>`, found `Option<Vec<u8>>`".to_string())));
+    assert_eq!(first("struct Foo<T>(T);\nfn main() {\n    let _ = || {\n        if false {\n            return Foo(0);\n        }\n        Foo(())\n    };\n}\n").map(|x| x.0), Some(7));
+    // (an unsuffixed literal takes its type from the use)
+    assert_eq!(first("struct Foo<T>(T);\nfn takes_foo(_: Foo<u8>) {}\nfn main() {\n    let foo = Foo(1);\n    takes_foo(foo);\n}\n"), None);
+}
+
+#[test]
+fn a_method_of_another_instance_only() {
+    // (rustc 1.100: `impl Point<f64> { fn distance(&self) }` has no method for a `Point<i32>`, E0599 at the call)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let src = "struct Point<T> { x: T }\nimpl Point<f64> {\n    fn distance(&self) -> f64 { self.x }\n}\nfn main() {\n    let p = Point { x: 1_i32 };\n    let _ = p.distance();\n}\n";
+    assert_eq!(first(src), Some((7, "no method named `distance` found for struct `Point<i32>` in the current scope (E0599)".to_string())));
+    assert_eq!(first(&src.replace("1_i32", "1.0")), None);
+}
+
+#[test]
+fn where_a_value_that_is_not_the_type_its_place_wants_is() {
+    // (rustc 1.100, at its line: a `match` statement without `;` that is not `()` is its block arm's tail (`foo()`);
+    // `let _: i32 = 'a: loop { break };` the `break`; a function's tail `&mut if c { .. }` the `&`)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| d.line)
+    };
+    assert_eq!(first("fn main() {\n    match 3 {\n        4 => 1,\n        3 => {\n            foo()\n        }\n        _ => 2\n    }\n    let _ = ();\n}\nfn foo() -> i32 { 42 }\n"), Some(5));
+    assert_eq!(first("fn main() {\n    let _: i32 =\n        'a:\n        loop { break };\n}\n"), Some(4));
+    assert_eq!(first("fn main() {}\nfn f() -> bool {\n    &\n    mut\n    if true { true } else { false }\n}\n"), Some(3));
+}

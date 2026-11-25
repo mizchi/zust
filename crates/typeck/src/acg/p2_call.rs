@@ -241,6 +241,22 @@ impl Cx<'_> {
 
     /// An impl's method i is for t: its impl's self type (its parameters solved) is t (`impl A for W<u8>`'s is not
     /// W<u16>'s); one without a self type is
+    /// Method id is inherent and every method of its name is in an impl for another instance of sid's type than sid,
+    /// which has no `deref` to look further in
+    #[cold]
+    fn other_instances_only(&self, id: u32, sid: u32) -> bool {
+        let t = Ty::Struct(sid);
+        let sg = &self.prog.sigs[id as usize];
+        if !sg.has_self || sg.impl_trait.is_some() || sg.self_ty.is_none() || self.prog.has_param(t) || has_hole(self.prog, t) || self.prog.method(sid, "deref").is_some() {
+            return false;
+        }
+        let fits = |c: u32| {
+            let sg = &self.prog.sigs[c as usize];
+            sg.self_ty.is_none_or(|st| self.prog.match_ty(st, t, &mut vec![None; sg.generics.len().max(1)]))
+        };
+        !fits(id) && self.prog.overloads.get(&self.prog.names[id as usize]).is_none_or(|g| !g.iter().any(|&c| fits(c)))
+    }
+
     pub(crate) fn self_fits(&self, i: u32, t: Ty) -> bool {
         let sg = &self.prog.sigs[i as usize];
         sg.self_ty.is_none_or(|st| self.prog.match_ty(st, t, &mut vec![None; sg.generics.len().max(1)]) && self.prog.refs_agree(st, t, 0))
@@ -1318,7 +1334,15 @@ impl Cx<'_> {
             if let Some(id) = self.prog.method(sid, &name).or_else(|| self.prog.default_method(sid, &name)) {
                 // (inherent overloads, in impls for other instances of the type: the one for this receiver's, before its
                 // receiver is borrowed (or not) as that method takes self)
-                break (a, o, sid, self.prog.inherent_overload_for(id, Ty::Struct(sid)));
+                let c = self.prog.inherent_overload_for(id, Ty::Struct(sid));
+                // (only in impls for other instances (`impl Point<f64> { fn distance(&self) }` and a `Point<i32>`):
+                // rustc finds no method)
+                if self.user_code && self.other_instances_only(c, sid) {
+                    let b = self.prog.base_of(sid);
+                    let what = if self.prog.structs[b as usize].is_enum { "enum" } else { "struct" };
+                    return err(SP, format!("no method named `{name}` found for {what} `{}` in the current scope (E0599)", self.prog.tn(Ty::Struct(sid))));
+                }
+                break (a, o, sid, c);
             }
             let sd = &self.prog.structs[sid as usize];
             let gens = sd.args.clone();

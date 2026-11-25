@@ -2662,6 +2662,11 @@ impl Parser {
                     "while" | "if" => self.peek_is(1, "{"),
                     _ => false,
                 },
+                // (`&mut if c { a } else { b }`: a reference has no position of its own, nor has what it borrows here)
+                Some(t) if t.kind == TokKind::Punct && (t.text == "&" || t.text == "&&") => {
+                    let k = if self.tok(1).is_some_and(|t| t.kind == TokKind::Ident && t.text == "mut") { 2 } else { 1 };
+                    self.tok(k).is_some_and(|t| t.kind == TokKind::Ident && matches!(t.text.as_str(), "if" | "match" | "loop" | "unsafe" | "while" | "for"))
+                }
                 // (`{ .. }`, `[]`, `()`, `(return)(..)`)
                 Some(t) if t.kind == TokKind::Open => {
                     t.text == "{"

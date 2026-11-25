@@ -448,10 +448,15 @@ impl Solver<'_> {
             }
             // (two instances of one struct that may have an unsized tail, with arguments known to differ
             // (`[&Foo<u8>, &Foo<u64>]` as `[&Foo<dyn Tr>; 2]`, each coerced): not one type, nothing to unify)
+            // (or with an argument known to differ, whatever the struct (`let foo = Foo(1u8); takes_foo(foo);` with
+            // `fn takes_foo(_: Foo<i32>)`): the value keeps the type it was made with, and the mismatch is the use's,
+            // where rustc reports it)
             (Some(Shape::Adt(x, s1, l1)), Some(Shape::Adt(y, s2, l2)))
                 if x == y
-                    && self.prog.unsized_params.contains_key(&x)
-                    && self.adt_vars_of(s1, l1).into_iter().zip(self.adt_vars_of(s2, l2)).any(|(p, q)| self.clash(p, q)) => {}
+                    && (0..l1.min(l2)).any(|j| {
+                        let (p, q) = (self.find(self.adt_args[(s1 + j) as usize]), self.find(self.adt_args[(s2 + j) as usize]));
+                        if self.prog.unsized_params.contains_key(&x) { self.clash(p, q) } else { self.arg_clash((self.shape[p as usize], self.int_lit[p as usize]), (self.shape[q as usize], self.int_lit[q as usize])) }
+                    }) => {}
             (Some(Shape::Adt(x, s1, l1)), Some(Shape::Adt(y, s2, l2))) if x == y => {
                 // (`S<[T; N]>` passed as `S<[T]>` (a coercion, a struct with an unsized tail): not one type, only
                 // the arguments are unified (an array's element with the slice's))
@@ -470,6 +475,18 @@ impl Solver<'_> {
             | (Some(Shape::Known(Ty::Struct(i))), Some(Shape::Adt(x, st, l)))
                 if self.prog.base_of(i) == x =>
             {
+                // (an argument already known to be another type (`let foo = Foo(1u8); takes_foo(foo);` with
+                // `fn takes_foo(_: Foo<i32>)`): no one type. The value keeps the type it was made with, and the
+                // mismatch is the use's, where rustc reports it)
+                if !Ty::Struct(i).is_dst_struct() {
+                    let prog = self.prog;
+                    for (j, &t) in prog.structs[i as usize].args.iter().enumerate().take(l as usize) {
+                        let r = self.find(self.adt_args[st as usize + j]);
+                        if self.arg_clash((self.shape[r as usize], self.int_lit[r as usize]), (Some(Shape::Known(t)), false)) {
+                            return;
+                        }
+                    }
+                }
                 // 具体型の方を代表にする
                 let (adt_root, known_root) =
                     if matches!(self.shape[a as usize], Some(Shape::Adt(..))) {
@@ -1063,12 +1080,44 @@ impl Solver<'_> {
     /// different structs): what a coercion may join (`&Foo<u8>` and `&Foo<(u16, u32)>`, both to `&Foo<dyn Tr>`)
     fn clash(&mut self, x: u32, y: u32) -> bool {
         let (x, y) = (self.find(x), self.find(y));
-        let scalar = |t: Ty| !matches!(t, Ty::Struct(_) | Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_) | Ty::Array(..) | Ty::Slice(_) | Ty::Assoc(_) | Ty::Param(_) | Ty::Fn(_) | Ty::Dyn(_) | Ty::Never);
         match (self.shape[x as usize], self.shape[y as usize]) {
-            (Some(Shape::Known(a)), Some(Shape::Known(b))) => a != b && (scalar(a) || scalar(b)),
-            (Some(Shape::Known(a)), Some(_)) | (Some(_), Some(Shape::Known(a))) => scalar(a),
+            (Some(Shape::Known(a)), Some(Shape::Known(b))) => a != b && (scalar_ty(a) || scalar_ty(b)),
+            (Some(Shape::Known(a)), Some(_)) | (Some(_), Some(Shape::Known(a))) => scalar_ty(a),
             (Some(Shape::Adt(a, ..)), Some(Shape::Adt(b, ..))) => a != b,
             _ => false,
+        }
+    }
+
+    /// Two type arguments of one generic type that are certainly not one type: there no coercion applies, so a
+    /// struct, a reference, an array, a slice and a scalar are each another kind of type (`Option<Vec<u8>>` and
+    /// `Option<&[u8]>`), as are two structs of other definitions and two scalars; and an integer literal's type is an
+    /// integer (`Foo<{integer}>` and `Foo<()>`). Each is a representative's shape and whether it is an integer
+    /// literal's
+    fn arg_clash(&self, (x, xi): (Option<Shape>, bool), (y, yi): (Option<Shape>, bool)) -> bool {
+        // (an integer literal's type not known yet, and a type that is no integer: neither unknown, nor an integer, a
+        // type parameter or `!`)
+        let no_int = |s: Option<Shape>| match s {
+            None => false,
+            Some(Shape::Known(t)) => !(t.is_int() || matches!(t, Ty::Param(_) | Ty::Assoc(_) | Ty::Never)),
+            Some(_) => true,
+        };
+        if (xi && x.is_none()) || (yi && y.is_none()) {
+            return (xi && x.is_none() && no_int(y)) || (yi && y.is_none() && no_int(x));
+        }
+        let kind = |s: Option<Shape>| match s {
+            Some(Shape::Known(Ty::Struct(i))) => (1, Some(self.prog.base_of(i))),
+            Some(Shape::Adt(b, ..)) => (1, Some(b)),
+            Some(Shape::Known(Ty::Ref(..)) | Shape::Ref(..)) => (2, None),
+            Some(Shape::Known(Ty::Array(..)) | Shape::Arr(..)) => (3, None),
+            Some(Shape::Known(Ty::Slice(_)) | Shape::Slc(_)) => (4, None),
+            Some(Shape::Known(t)) if t != Ty::Never && scalar_ty(t) => (5, None),
+            _ => (0, None),
+        };
+        match (kind(x), kind(y)) {
+            ((0, _), _) | (_, (0, _)) => false,
+            ((5, _), (5, _)) => !matches!((x, y), (Some(Shape::Known(a)), Some(Shape::Known(b))) if a == b),
+            ((1, a), (1, b)) => a != b,
+            ((a, _), (b, _)) => a != b,
         }
     }
 
@@ -1313,4 +1362,10 @@ pub fn shape_tag(s: &Option<Shape>) -> u8 {
         Some(Shape::Clo(..)) => 7,
         Some(Shape::Bx(_)) => 8,
     }
+}
+
+/// A type that is no other type whatever its parameters (an integer, `bool`, `()`): not a struct, reference, pointer
+/// or other type that a coercion or a type parameter may stand for
+fn scalar_ty(t: Ty) -> bool {
+    !matches!(t, Ty::Struct(_) | Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_) | Ty::Array(..) | Ty::Slice(_) | Ty::Assoc(_) | Ty::Param(_) | Ty::Fn(_) | Ty::Dyn(_) | Ty::Never)
 }
