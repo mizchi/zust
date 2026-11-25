@@ -151,7 +151,11 @@ fn order(f: bool, a: bool) -> Option<String> {
   let mut w = 1;
   let none: Array<i32> = [];
   let fw = none.fold(w, { w = 2; Some(add2) }?);
-  Some(`${some_fn(f)?(some_arg(a)?)} ${p} ${s} ${n} ${r} ${x} ${y} ${k} ${fw}`)
+  let mut c = 1;
+  let fc = (c as f64) + ({ c = 2; Some(3.0) }?);
+  let mut g = add2;
+  let fg = g({ g = sub2; Some(5) }?, 1);
+  Some(`${some_fn(f)?(some_arg(a)?)} ${p} ${s} ${n} ${r} ${x} ${y} ${k} ${fw} ${fc} ${fg}`)
 }
 
 export fn orders() -> String {
@@ -180,3 +184,4 @@ export fn ranged(ok: bool) -> Option<String> {
 }
 
 fn add2(a: i32, b: i32) -> i32 { a + b }
+fn sub2(a: i32, b: i32) -> i32 { a - b }

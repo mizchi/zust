@@ -534,7 +534,8 @@ impl<'a> Js<'a> {
         if !later.iter().any(|y| has_try(y)) || matches!(x.kind, EK::Lit(_)) {
             return s;
         }
-        if matches!(x.kind, EK::Var(_)) && later.iter().any(|y| assigns_local(y)) {
+        // (whatever it is written as: `x as f64` is `x` in JS)
+        if later.iter().any(|y| assigns_local(y)) {
             let t = self.fresh();
             self.line(&format!("const {t} = {s};"));
             return t;
@@ -1047,7 +1048,10 @@ impl<'a> Js<'a> {
                     };
                 }
                 // (a computed callee is evaluated before the arguments, as JS does)
-                let callee = if matches!(f.kind, EK::Var(_) | EK::Path(..)) {
+                // (a local function an argument may assign is read first too, as JS reads it)
+                let local_fn = matches!(&f.kind, EK::Var(n) if matches!(self.info.callee.get(&f.id), Some(Callee::Local)) && !self.conts.contains(n) && !self.dconts.contains(n));
+                let reassigned = local_fn && args.iter().any(has_try) && args.iter().any(assigns_local);
+                let callee = if matches!(f.kind, EK::Var(_) | EK::Path(..)) && !reassigned {
                     None
                 } else {
                     let c = self.expr(f);
