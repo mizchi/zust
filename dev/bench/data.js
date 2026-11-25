@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795639579130,
+  "lastUpdate": 1795639582415,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -83152,6 +83152,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 100.652,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c8d7b59df5f4f39a01d0e08afe68dd419d8ae816",
+          "message": "lexer: E0758 for a block comment the file ends in, also after the last item (#181) (#223)\n\n`fn main() {}\\n/*x` was accepted by `zustc check` and `zustc build`; rustc\n1.100 reports \"unterminated block comment\" (E0758) at 2:1. The lexer's E0758\ncheck (`unterminated_literal`) runs only when the items do not split, and a\ncomment after the last item leaves none unsplit.\n\nThe item splitter now asks unterminated_literal when a block comment runs to\nthe end of the file. It scans from the start, so an unterminated literal\nbefore the comment is reported instead, as rustc's lexer does\n(`const S: &str = \"abc /* x` is E0765 at the string).\n\nA doc comment (`/**`, `/*!`; not `/***` or `/**/`) is \"unterminated block\ndoc-comment\", as rustc names it, also inside an item.\n\nTests: tests/check.rs `literals_and_comments_a_file_ends_in`, with rustc's\nline and column for each: after the last item, with a non-ASCII character,\nnested, `/**` and `/*!` and `/***`, a doc comment in a body, a string before\nit, and two closed comments after the last item (no error).\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T05:40:53+09:00",
+          "tree_id": "4cd5ce1e601d943fc47c7e88397f7c00239e18e6",
+          "url": "https://github.com/mizchi/zust/commit/c8d7b59df5f4f39a01d0e08afe68dd419d8ae816"
+        },
+        "date": 1795639581830,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.995,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.73,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.714,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 10.844,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.402,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.124,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 2.423,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 281.154,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 100.18,
             "unit": "MiB"
           }
         ]
