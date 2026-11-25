@@ -70,7 +70,7 @@ pub struct Analysis {
     /// prelude の先頭の行 (結合したソースの行)
     pub prelude_line0: usize,
     /// 読んだ関数の本体 (関数 id → 構文木)
-    pub asts: Mutex<FxMap<u32, ItemFn>>,
+    pub asts: Mutex<FxMap<u32, std::sync::Arc<ItemFn>>>,
     /// 囲む関数 (アイテム番号) ごとのクロージャの式 (クロージャの本体を引くたびに囲む関数を読み直さない)
     /// item → its closures, and whether each is written inside `unsafe { }`
     pub encl: Mutex<FxMap<u32, Vec<(Expr, bool)>>>,
@@ -975,9 +975,28 @@ impl Session2 {
             }
             // (多ければ fork して分けて作る: 子 k は j % jobs == k のものを作り、直列化して返す)
             // (not in a process of more threads than this one: single_threaded)
-            let jobs = if single_threaded() { self.opts.jobs.min(miss.len() / 32).max(1) } else { 1 };
+            // (ZUSTC_PAR=threads: on worker threads of this process instead (crate::par), in any process; the
+            // summaries come back as they are, not encoded)
+            let par = crate::par::mode();
+            let jobs = match par {
+                crate::par::Mode::Threads => self.opts.jobs.min(miss.len() / par_min("ZUSTC_SUMMARY_PAR_MIN", 32)).max(1),
+                crate::par::Mode::Fork if single_threaded() => self.opts.jobs.min(miss.len() / 32).max(1),
+                _ => 1,
+            };
             let mut got: Vec<Option<Summary>> = vec![None; miss.len()];
-            if jobs > 1 {
+            if jobs > 1 && par == crate::par::Mode::Threads {
+                let tls = WorkerTls::take();
+                let (items, sums, src) = (&items, &sums, &src);
+                got = crate::par::map(jobs, miss.len(), 4, &|| tls.set(), &|j| {
+                    let it = &items[miss[j].0];
+                    let ow = if pass == 1 { crate::ast_summary::owner_of(it, sums) } else { None };
+                    // (失敗したものは返さない: 親が作り直してエラーを出す)
+                    crate::ast_summary::parse_and_summarize(src, it, ow.as_ref()).ok()
+                })
+                .into_iter()
+                .map(Option::flatten)
+                .collect();
+            } else if jobs > 1 {
                 let mut kids: Vec<(i32, i32)> = vec![];
                 for kk in 0..jobs {
                     let mut fds = [0i32; 2];
@@ -6212,14 +6231,23 @@ fn name_line(e: &str, src: &str, items: &[SrcItem]) -> String {
 
 /// compile_id と、コード生成が要求した (総称関数の) インスタンス
 fn compile_id_req(a: &Analysis, insts: &Mutex<Insts>, id: u32) -> R<(Blob, Vec<u32>)> {
-    let body = insts.lock().unwrap().body_of(id);
+    let (body, inst) = {
+        let g = insts.lock().unwrap();
+        (g.body_of(id), g.get(id).is_some())
+    };
     // (本体の構文木は本体ごとに 1 回だけ読む: 総称関数のインスタンスごとに読み直していた (コンパイルの 10%))
-    let mut asts = a.asts.lock().unwrap();
-    if !asts.contains_key(&body) {
-        let f = fn_ast(a, body)?;
-        asts.insert(body, f);
-    }
-    let f = asts.get(&body).unwrap();
+    // (only an instance's body is kept: a fn that is not generic is lowered once, and keeping its tree too held every
+    // fn's tree until the analysis was dropped (dropping them was 83 ms of a check of 5000 fns). The table is not
+    // held while the fn is lowered: worker threads share it (check_many); two that parse one body at once keep the
+    // first)
+    let cached = if inst { a.asts.lock().unwrap().get(&body).cloned() } else { None };
+    let f = match cached {
+        Some(f) => f,
+        None => {
+            let f = std::sync::Arc::new(fn_ast(a, body)?);
+            if inst { a.asts.lock().unwrap().entry(body).or_insert(f).clone() } else { f }
+        }
+    };
     let ii = a.prog.item_of[body as usize].unwrap() as usize;
     let it = &a.items[ii];
     // (acg のエラーはファイルの中の `行:桁:` を持つ。持たないものはアイテムの先頭の行にする)
@@ -6234,7 +6262,7 @@ fn compile_id_req(a: &Analysis, insts: &Mutex<Insts>, id: u32) -> R<(Blob, Vec<u
         a.line_shift(&*g, id)
     };
     let l0 = insts.lock().unwrap().fx_log.len();
-    let (c, req) = acg::compile(&a.prog, insts, id, f, lb, &a.inl)
+    let (c, req) = acg::compile(&a.prog, insts, id, &f, lb, &a.inl)
         .map_err(|e| {
             if acg::has_loc(&e) {
                 return untag_lines(&e, shift);
@@ -6283,6 +6311,28 @@ pub(crate) fn single_threaded() -> bool {
         .ok()
         .and_then(|s| s.lines().find(|l| l.starts_with("Threads:")).and_then(|l| l[8..].trim().parse::<u32>().ok()))
         == Some(1)
+}
+
+/// The thread-locals the driver sets for the program it analyzes, which a worker thread (crate::par) must see as the
+/// thread that started it does: taken there, set on each worker. (A forked child has them as they were.) The others
+/// are each computation's own (a depth, a memo) and start empty on a new thread
+#[derive(Clone, Copy)]
+struct WorkerTls {
+    wild_fake_reads: bool,
+}
+
+impl WorkerTls {
+    fn take() -> WorkerTls {
+        WorkerTls { wild_fake_reads: crate::ast_closure::WILD_FAKE_READS.with(|c| c.get()) }
+    }
+    fn set(&self) {
+        crate::ast_closure::WILD_FAKE_READS.with(|c| c.set(self.wild_fake_reads));
+    }
+}
+
+/// The least number of items per worker for a parallel part (an env var overrides the default: tests and measuring)
+fn par_min(var: &str, default: usize) -> usize {
+    std::env::var(var).ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(default).max(1)
 }
 
 /// How many times this process has forked for parallel work (summaries, checks, builds): tests read it to see that a
@@ -6334,11 +6384,53 @@ fn syn_sendable(t: &crate::types::TySyn) -> bool {
 /// A checked fn: the instances it requested and its Blob as the cache keeps it (None when nothing needs it), or its error
 type Checked = R<(Vec<u32>, Option<Vec<u8>>)>;
 
+/// What a child of check_many (a forked process, a worker thread) sends back of a fn it checked: its Blob encoded by
+/// name, or its error and the Blob of what it did before it failed
+type Sent = Result<Vec<u8>, (String, Vec<u8>)>;
+
+/// check_many's child: checks id on the child's own instances, and gives what it can send (None: the parent checks it
+/// again)
+fn send_checked(a: &Analysis, insts: &Mutex<Insts>, id: u32) -> Option<Sent> {
+    let (p0, l0) = {
+        let g = insts.lock().unwrap();
+        (g.pending.len(), g.fx_log.len())
+    };
+    let mut e = vec![];
+    match compile_id_req(a, insts, id) {
+        Ok((b, req)) => {
+            let g = insts.lock().unwrap();
+            // (the instances it made, in the order it made them (what the parent's pending gets when it checks the fn
+            // itself), then the others it requested: lowering makes some that it does not return in req)
+            let mut all: Vec<u32> = g.pending[p0..].to_vec();
+            all.extend(req.iter().filter(|i| !all.contains(i)).copied().collect::<Vec<u32>>());
+            if !sendable(a, &*g, &all) {
+                return None;
+            }
+            crate::cache2::encode_blob(&check_blob(b, &all), &a.prog, &*g, &mut e);
+            (!e.is_empty()).then_some(Ok(e))
+        }
+        Err(m) => {
+            // (and what it did before it failed, which the fn checked here leaves behind: the instances it made,
+            // pending, and what it told the closures it makes)
+            let g = insts.lock().unwrap();
+            let made = g.pending[p0..].to_vec();
+            if !sendable(a, &*g, &made) {
+                return None;
+            }
+            let b = Blob { clo_facts: g.facts_since(l0), ..acg::Compiled::empty_blob() };
+            crate::cache2::encode_blob(&check_blob(b, &made), &a.prog, &*g, &mut e);
+            (!e.is_empty()).then_some(Err((m, e)))
+        }
+    }
+}
+
 impl Session2 {
     /// Checks ids, in forked children when there are many (#101): child k checks ids[i] with i % jobs == k and sends
     /// back each one's Blob (encoded by name, as a parallel build's children do) or its error. The parent reads them
     /// back in the order of ids, which requests again the instances each one requested, so what follows (the
-    /// diagnostics, the next wave) is as with one process. Only when checking (no machine code), with -j above 1
+    /// diagnostics, the next wave) is as with one process. Only when checking (no machine code), with -j above 1.
+    /// With ZUSTC_PAR=threads the children are worker threads (crate::par), each on its own copy of the instances: the
+    /// same results, read back the same way, in a process of any number of threads
     fn check_many(&self, a: &Analysis, insts: &Mutex<Insts>, ids: &[u32], check_only: bool) -> Vec<Checked> {
         let one = |id: u32| -> Checked {
             let (b, req) = compile_id_req(a, insts, id)?;
@@ -6353,116 +6445,97 @@ impl Session2 {
             }
             Ok((req, Some(e)))
         };
-        let per_job = std::env::var("ZUSTC_CHECK_FORK_MIN").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(32).max(1);
-        let jobs = if check_only { self.opts.jobs.min(ids.len() / per_job).max(1) } else { 1 };
-        if jobs <= 1 || !single_threaded() {
+        // (ZUSTC_PAR=threads: on worker threads (crate::par) instead of forked children, in any process)
+        let par = crate::par::mode();
+        let threads = par == crate::par::Mode::Threads;
+        let per_job = par_min("ZUSTC_CHECK_FORK_MIN", 32);
+        let jobs = if check_only && par != crate::par::Mode::Off { self.opts.jobs.min(ids.len() / per_job).max(1) } else { 1 };
+        if jobs <= 1 || !(threads || single_threaded()) {
             return ids.iter().map(|&id| one(id)).collect();
         }
-        let mut kids: Vec<(i32, i32)> = vec![];
-        for k in 0..jobs {
-            let mut fds = [0i32; 2];
-            // SAFETY: fds は 2 つの int
-            if unsafe { c_pipe(fds.as_mut_ptr()) } != 0 {
-                continue;
-            }
-            // SAFETY: 子は検査して書くだけで _exit する
-            let pid = fork_counted();
-            if pid < 0 {
-                unsafe { c_close(fds[0]) };
-                unsafe { c_close(fds[1]) };
-                continue;
-            }
-            if pid == 0 {
-                let _exit_on_panic = ChildExit;
-                unsafe { c_close(fds[0]) };
-                let mut buf = vec![];
-                let mut i = k;
-                while i < ids.len() {
-                    crate::cache2::put_uv(&mut buf, i as u64);
-                    let (p0, l0) = {
-                        let g = insts.lock().unwrap();
-                        (g.pending.len(), g.fx_log.len())
-                    };
-                    match compile_id_req(a, insts, ids[i]) {
-                        Ok((b, req)) => {
-                            let mut e = vec![];
-                            {
-                                let g = insts.lock().unwrap();
-                                // (the instances it made, in the order it made them (what the parent's pending gets
-                                // when it checks the fn itself), then the others it requested: lowering makes some that
-                                // it does not return in req)
-                                let mut all: Vec<u32> = g.pending[p0..].to_vec();
-                                all.extend(req.iter().filter(|i| !all.contains(i)).copied().collect::<Vec<u32>>());
-                                if sendable(a, &*g, &all) {
-                                    crate::cache2::encode_blob(&check_blob(b, &all), &a.prog, &*g, &mut e);
-                                }
-                            }
-                            // (what cannot be sent is checked again by the parent)
-                            if e.is_empty() {
-                                buf.push(2);
-                                crate::cache2::put_uv(&mut buf, 0);
-                                i += jobs;
-                                continue;
-                            }
-                            buf.push(0);
-                            crate::cache2::put_uv(&mut buf, e.len() as u64);
-                            buf.extend_from_slice(&e);
-                        }
-                        Err(m) => {
-                            // (and what it did before it failed, which the fn checked here leaves behind: the instances
-                            // it made, pending, and what it told the closures it makes)
-                            let mut e = vec![];
-                            {
-                                let g = insts.lock().unwrap();
-                                let made = g.pending[p0..].to_vec();
-                                if sendable(a, &*g, &made) {
-                                    let b = Blob { clo_facts: g.facts_since(l0), ..acg::Compiled::empty_blob() };
-                                    crate::cache2::encode_blob(&check_blob(b, &made), &a.prog, &*g, &mut e);
-                                }
-                            }
-                            if e.is_empty() {
-                                buf.push(2);
-                                crate::cache2::put_uv(&mut buf, 0);
-                                i += jobs;
-                                continue;
-                            }
-                            buf.push(1);
-                            crate::cache2::put_uv(&mut buf, m.len() as u64);
-                            buf.extend_from_slice(m.as_bytes());
-                            crate::cache2::put_uv(&mut buf, e.len() as u64);
-                            buf.extend_from_slice(&e);
-                        }
-                    }
-                    i += jobs;
-                }
-                write_all(fds[1], &buf);
-                unsafe { c_close(fds[1]) };
-                unsafe { c_exit(0) };
-            }
-            unsafe { c_close(fds[1]) };
-            kids.push((pid, fds[0]));
-        }
-        let mut got: Vec<Option<Result<Vec<u8>, (String, Vec<u8>)>>> = (0..ids.len()).map(|_| None).collect();
-        for &(pid, fd) in &kids {
-            let d = read_all(fd);
-            unsafe { c_close(fd) };
-            wait_child(pid);
-            let mut r = crate::cache2::Rd { d: &d, pos: 0 };
-            while r.pos < d.len() {
-                let (Some(i), Some(fail), Some(n)) = (r.uv(), r.u8(), r.uv()) else { break };
-                let Some(body) = r.take(n as usize) else { break };
-                let v = if fail == 2 {
+        let mut got: Vec<Option<Sent>> = (0..ids.len()).map(|_| None).collect();
+        if threads {
+            // (each worker on its own copy of the instances as they are now, which is what a forked child has: what
+            // it makes is its own, and comes back by name, read back below in the order of ids as a child's is)
+            let base = insts.lock().unwrap();
+            let base: &Insts = &base;
+            let tls = WorkerTls::take();
+            let init = || {
+                tls.set();
+                Mutex::new(base.clone())
+            };
+            got = crate::par::map_with(jobs, ids.len(), 2, &init, &|mine, i| send_checked(a, mine, ids[i])).into_iter().map(Option::flatten).collect();
+        } else {
+            let mut kids: Vec<(i32, i32)> = vec![];
+            for k in 0..jobs {
+                let mut fds = [0i32; 2];
+                // SAFETY: fds は 2 つの int
+                if unsafe { c_pipe(fds.as_mut_ptr()) } != 0 {
                     continue;
-                } else if fail == 0 {
-                    Ok(body.to_vec())
-                } else {
-                    let m = String::from_utf8_lossy(body).into_owned();
-                    let Some(n2) = r.uv() else { break };
-                    let Some(made) = r.take(n2 as usize) else { break };
-                    Err((m, made.to_vec()))
-                };
-                if let Some(slot) = got.get_mut(i as usize) {
-                    *slot = Some(v);
+                }
+                // SAFETY: 子は検査して書くだけで _exit する
+                let pid = fork_counted();
+                if pid < 0 {
+                    unsafe { c_close(fds[0]) };
+                    unsafe { c_close(fds[1]) };
+                    continue;
+                }
+                if pid == 0 {
+                    let _exit_on_panic = ChildExit;
+                    unsafe { c_close(fds[0]) };
+                    let mut buf = vec![];
+                    let mut i = k;
+                    while i < ids.len() {
+                        crate::cache2::put_uv(&mut buf, i as u64);
+                        match send_checked(a, insts, ids[i]) {
+                            // (what cannot be sent is checked again by the parent)
+                            None => {
+                                buf.push(2);
+                                crate::cache2::put_uv(&mut buf, 0);
+                            }
+                            Some(Ok(e)) => {
+                                buf.push(0);
+                                crate::cache2::put_uv(&mut buf, e.len() as u64);
+                                buf.extend_from_slice(&e);
+                            }
+                            Some(Err((m, e))) => {
+                                buf.push(1);
+                                crate::cache2::put_uv(&mut buf, m.len() as u64);
+                                buf.extend_from_slice(m.as_bytes());
+                                crate::cache2::put_uv(&mut buf, e.len() as u64);
+                                buf.extend_from_slice(&e);
+                            }
+                        }
+                        i += jobs;
+                    }
+                    write_all(fds[1], &buf);
+                    unsafe { c_close(fds[1]) };
+                    unsafe { c_exit(0) };
+                }
+                unsafe { c_close(fds[1]) };
+                kids.push((pid, fds[0]));
+            }
+            for &(pid, fd) in &kids {
+                let d = read_all(fd);
+                unsafe { c_close(fd) };
+                wait_child(pid);
+                let mut r = crate::cache2::Rd { d: &d, pos: 0 };
+                while r.pos < d.len() {
+                    let (Some(i), Some(fail), Some(n)) = (r.uv(), r.u8(), r.uv()) else { break };
+                    let Some(body) = r.take(n as usize) else { break };
+                    let v = if fail == 2 {
+                        continue;
+                    } else if fail == 0 {
+                        Ok(body.to_vec())
+                    } else {
+                        let m = String::from_utf8_lossy(body).into_owned();
+                        let Some(n2) = r.uv() else { break };
+                        let Some(made) = r.take(n2 as usize) else { break };
+                        Err((m, made.to_vec()))
+                    };
+                    if let Some(slot) = got.get_mut(i as usize) {
+                        *slot = Some(v);
+                    }
                 }
             }
         }

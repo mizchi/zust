@@ -707,6 +707,7 @@ pub struct ClosureDef {
 }
 
 /// 単相化したインスタンス (ジェネリック関数 base に型引数 args を入れたもの)
+#[derive(Clone)]
 pub struct Inst {
     pub base: u32,
     pub args: Vec<Ty>,
@@ -717,6 +718,8 @@ pub struct Inst {
 
 /// インスタンス表。関数 ID は Program の関数の後ろに続けて振る。
 /// コード生成中に (並列に) 要求されたものを pending に積み、ドライバが不動点まで処理する
+/// (Clone: a worker thread of a parallel check works on a copy, as a forked child does: driver2's check_many)
+#[derive(Clone)]
 pub struct Insts {
     pub n_fns: u32,
     pub list: Vec<Inst>,
