@@ -518,7 +518,7 @@ fn modules_async_patterns_escapes() {
         assert!(o.status.success(), "{f}: {}", String::from_utf8_lossy(&o.stderr));
     }
     let out = node(&d, "const m = await import('./asyncmain.js'); console.log(JSON.stringify(await m.run()));");
-    assert_eq!(out, "{\"TAG\":\"Ok\",\"_0\":\"6 not positive 4,-1,0,3,-1,-2 tff_ \u{1F600}\u{e9}\"}\n");
+    assert_eq!(out, "{\"TAG\":\"Ok\",\"_0\":\"6 not positive 4,-1,0,3,-1,-2,3 tff_ \u{1F600}\u{e9}\"}\n");
     let dts = std::fs::read_to_string(d.join("asyncmain.d.ts")).unwrap();
     assert!(dts.contains("export declare function run(): Promise<Result<string, string>>;"), "{dts}");
 }

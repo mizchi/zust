@@ -1113,7 +1113,9 @@ impl Checker {
             Ty::Tuple(ts) => Some(vec![(None, ts)]),
             _ => None,
         };
-        let Some(ctors) = ctors else {
+        // (no constructor written in this column: only the rows with a wildcard there match, whatever the value. This
+        // also ends the walk into a recursive type's fields)
+        let Some(ctors) = ctors.filter(|_| rows.iter().any(|r| !wild(r[0]))) else {
             let rows: Vec<Vec<&Pat>> = rows.iter().filter(|r| wild(r[0])).map(|r| r[1..].to_vec()).collect();
             return self.uncovered(rest, &rows);
         };
