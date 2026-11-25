@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795628263770,
+  "lastUpdate": 1795628266492,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -80188,6 +80188,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 125.086,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4c2b4a2b3c3ba58e4ec04544e5f0184466568b51",
+          "message": "Merge pull request #196 from mizchi/claude/fix-192-parallel-fnptr\n\nParallel build: don't send a Blob naming a closure's fn-pointer instance (#192)",
+          "timestamp": "2026-11-26T02:32:17+09:00",
+          "tree_id": "2f25bda8de18271a0858b9219af03e337dffc68b",
+          "url": "https://github.com/mizchi/zust/commit/4c2b4a2b3c3ba58e4ec04544e5f0184466568b51"
+        },
+        "date": 1795628265911,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.888,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.698,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.696,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 5.97,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 2.012,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.135,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 2.354,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 276.054,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 125.641,
             "unit": "MiB"
           }
         ]
