@@ -554,6 +554,9 @@ pub struct ClosureSyn {
     pub n_parent: u64,
     /// The variables the body reads only by `let _ = place;` (ast_closure::fake_reads): not captured
     pub fake_reads: Vec<String>,
+    /// Per capture: a parameter of the fn that is a shared reference (`h: &T`, `&self`), used in the body only through
+    /// a deref of it (ast_closure::deref_uses_only). From edition 2021 it is held by value: the closure captures `*h`
+    pub deref: Vec<bool>,
 }
 
 /// impl / trait のメンバの所有者

@@ -1840,7 +1840,8 @@ fn part10_review_2() {
     let d = check("#[derive(Clone)]\nstruct Foo<T>(T);\nimpl Copy for Foo<&'static u32> {}\nfn main() {\n    let local = 2;\n    let f = Foo(&local);\n    let g = f;\n    let h = f;\n    drop((g, h));\n}\n");
     assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("does not live long enough"), "{d:?}");
     let d = check("struct S { value: u32 }\nfn main() {\n    let mut p = (0u32, S { value: 1 });\n    let r = &p.1.value;\n    let mut c = || {\n        let (ref mut x, S { value: ref mut y }) = p;\n        *x += 1;\n        *y += 1;\n    };\n    c();\n    println!(\"{}\", r);\n}\n");
-    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot borrow `p.1` as mutable"), "{d:?}");
+    // (the struct pattern's field is followed (part 32): `p.1.value`, as rustc 1.97 says in edition 2021)
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot borrow `p.1.value` as mutable"), "{d:?}");
     let d = check("fn main() {\n    match Some(String::from(\"arm\")) {\n        Some(foo) if { let c = move || { drop(foo.len()); false }; c() } => (),\n        _ => (),\n    }\n}\n");
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0507"), "{d:?}");
 }
@@ -4617,4 +4618,191 @@ fn main() { println!("{} {}", OK, BAD); }
     errors_at(r#"fn f(a: &mut Option<String>) { match (1, a) { (_, &mut Some(s)) => { drop(s); } _ => {} } }
 fn main() {}
 "#, &[(1, "cannot move out of a mutable reference")], "mr");
+}
+
+#[test]
+fn part32_shared_ref_captures_by_deref() {
+    // (edition 2021: a closure that uses a shared reference it captures (`h: &T`, `&self`) only through a deref of it
+    // (`h.mk()`, `self.n()`, `o.name.cmp(..)`) captures `*h` by reference, the same as a copy of h: collected from a
+    // `filter_map` or boxed, it may outlive the fn (no E0373), as in rustc 1.97. A local String it borrows (10) is
+    // E0373; using `h` itself (`let x = h`, 11) is rustc's E0373 too, not reported yet)
+    errors_at(r#"struct H<'a>(&'a str);
+impl<'a> H<'a> {
+    fn mk(&self) -> Option<&str> { Some(self.0) }
+    fn n(&self) -> usize { self.0.len() }
+    fn all<'s>(&'s self, v: &[u8]) -> Vec<&'s str> { v.iter().filter_map(|_| self.mk()).collect() }
+    fn boxed<'s>(&'s self) -> Box<dyn Fn() -> usize + 's> { Box::new(|| self.n()) }
+}
+fn f4<'r>(h: &'r H<'r>, v: Vec<u8>) -> Vec<&'r str> { v.iter().filter_map(|_| h.mk()).collect() }
+fn f5<'r>(h: &'r H<'r>) -> Box<dyn Fn() -> usize + 'r> { Box::new(|| h.n()) }
+fn f6<'r>(h: &'r H<'r>) -> Box<dyn Fn() -> usize + 'r> { let s = String::new(); Box::new(|| s.len() + h.n()) }
+fn f7<'r>(h: &'r H<'r>) -> Box<dyn Fn() -> &'r H<'r> + 'r> { Box::new(|| { let x = h; x }) }
+fn main() { let h = H("ab"); println!("{:?} {} {:?} {} {}", h.all(&[1, 2]), h.boxed()(), f4(&h, vec![1]), f5(&h)(), f7(&h)().0); let _ = f6(&h); }
+"#, &[(10, "closure may outlive")], "dr");
+    errors_at(r#"use std::cmp::Ordering;
+struct Task { pri: u32, name: String }
+fn c1(s: &Task, o: &Task) -> Ordering { s.pri.cmp(&o.pri).then_with(|| o.name.cmp(&s.name)) }
+fn c2(s: &Task, o: &Task) -> bool { let f = || o.name.len() > s.name.len(); f() }
+fn c3(s: &Task) -> usize { let f = || s.name.len(); f() }
+fn main() { let t = Task { pri: 1, name: "a".into() }; println!("{:?} {} {}", c1(&t, &t), c2(&t, &t), c3(&t)); }
+"#, &[], "dc");
+    // (a `for` over an Option's `iter()` binds its pattern at the iterable: a move out through `&a` is E0507 at
+    // `x.iter()` (3), as in rustc 1.97, not at the fn's line)
+    errors_at(r#"fn main() {
+    let x: Option<Box<i32>> = Some(Box::new(1));
+    for &a in x.iter() {
+        let _ = a;
+    }
+    let y = Some(String::new());
+    for s in y.iter() { println!("{}", s); }
+}
+"#, &[(3, "cannot move out of a shared reference")], "fo");
+    // (a `&mut T` wanted of a `&mut &T`: the deref coercion borrows mutably through a `&`, E0596 where the value is
+    // coerced (2; rustc also reports the `let .. else` at 6, zustc a fn's first error); not of a `&mut &mut T` (4))
+    errors_at(r#"fn main() {
+    let a: &mut Option<i32> = &mut &Some(5i32);
+    let mut o = Some(1);
+    let b: &mut Option<i32> = &mut &mut o;
+    let _ = (a, b);
+    let Some(n): &mut Option<i32> = &mut &Some(5i32) else { return };
+    *n += 1;
+}
+"#, &[(2, "E0596")], "ms");
+}
+
+#[test]
+fn part32_const_nested_block_borrow() {
+    // (a block in a const's initializer whose value borrows one of its own locals, also inside a call in an `unsafe`
+    // block: E0597 (1), as in rustc 1.97; a block whose value copies its local out is not (2, 3))
+    // (of a raw pointer's type, a borrow of the block's own local is no E0597 but a dangling pointer, at the item)
+    errors_at("const FOO: *const u32 = { let x = 42; &x };\nfn main() {}\n", &[(1, "encountered dangling pointer")], "dp");
+    // (a local with no value: E0381 at the borrow, whatever the const's type (consts/issue-78655.rs))
+    errors_at("const FOO: *const u32 = {\n    let x;\n    &x\n};\nfn main() {}\n", &[(3, "E0381")], "ui");
+    errors_at(r#"const A: &'static [i32; 3] = unsafe { std::mem::transmute({ let _ = 1; { let s = [0i32; 3]; &s } }) };
+const B: usize = { let v = [1, 2]; v.len() };
+const C: &'static i32 = &{ let q = 5; q };
+fn main() { println!("{:?} {} {}", A, B, C); }
+"#, &[(1, "`s` does not live long enough")], "cn");
+}
+
+#[test]
+fn part32_closure_pattern_captures() {
+    // (edition 2021: a closure's pattern that tests nothing captures nothing: the unit variant of an enum of one
+    // variant (5), a unit struct (6); a struct pattern captures the fields it names (7). An enum of two variants is
+    // read (8: E0505, as in rustc 1.97))
+    errors_at(r#"enum SingleVariant { A }
+enum Two { A, B }
+struct Unit;
+struct SStruct { a: u32, b: u32 }
+fn a() { let sv = SingleVariant::A; let c = || { match sv { SingleVariant::A => () } }; let _m = sv; c(); }
+fn b(mut x: (Unit, u32)) { let r = &mut x.0; let _ = || { let (Unit, a) = x; a }; let _ = *r; }
+fn c(mut x: SStruct) { let r = &mut x.a; let _ = || { let SStruct { b, .. } = x; b }; let _ = *r; }
+fn d() { let t = Two::A; let c = || { match t { Two::A => (), Two::B => () } }; let _m = t; c(); }
+fn main() { a(); }
+"#, &[(8, "cannot move out of `t` because it is borrowed")], "pc");
+}
+
+#[test]
+fn part32_review() {
+    // (review of #159, each case checked with rustc 1.97: a `let` of a raw pointer's type in a const coerces its
+    // block's tail before the block ends (1: no error), a reference's does not (4: E0597))
+    errors_at("const C: () = {\n    let _: *const u32 = { let x = 42; &x };\n};\nconst E: () = {\n    let _: *const u32 = { let y: &u32 = { let x = 42; &x }; y };\n};\nfn main() { let _ = C; let _ = E; }\n", &[(5, "`x` does not live long enough")], "rp");
+    // (a closure's pattern that binds a `&mut` field by value moves it (6, 12: E0382 after the call; the closure is
+    // `FnOnce`, 17), one that binds a Copy field reads it (22: no error))
+    errors_at(r#"struct S<'a> { p: &'a mut i32, q: i32 }
+struct T<'a>(&'a mut i32);
+fn a(mut n: i32) {
+    let s = S { p: &mut n, q: 1 };
+    let c = || { let S { p, .. } = s; p };
+    c(); let _ = &s.p;
+}
+fn b(mut n: i32) {
+    let s = T(&mut n);
+    let c = || { let T(p) = s; p };
+    c();
+    let _ = &s.0;
+}
+fn d(mut n: i32) {
+    let s = (&mut n, 1);
+    let mut c = || { let (p, _) = s; *p += 1; };
+    c(); c();
+}
+fn e(mut n: i32) {
+    let s = S { p: &mut n, q: 1 };
+    let c = || { let S { q, .. } = s; q };
+    c(); let _ = &s.p;
+}
+fn main() {}
+"#, &[(6, "use of moved value: `s.p`"), (12, "use of moved value: `s.0`"), (17, "use of moved value: `c`")], "rm");
+    // (a constant of an enum of one variant in a closure's pattern compares the value: it is read (7: E0506); a
+    // union's pattern captures the union (12: E0506 for a write to another field), and names one field)
+    errors_at(r#"#[derive(PartialEq, Eq)]
+enum E { V(u32) }
+impl E { const ZERO: E = E::V(0); }
+union U { a: u32, b: u32 }
+fn f() {
+    let mut e = E::V(1);
+    let c = || match e { E::ZERO => 1, _ => 0 };
+    e = E::V(2);
+    c();
+}
+fn g() {
+    let mut u = U { a: 1 };
+    let c = || unsafe { let U { a: ref x } = u; };
+    u.b = 2;
+    c();
+}
+fn h() -> u32 { let u = U { a: 1 }; unsafe { let U { b } = u; b } }
+fn main() {}
+"#, &[(8, "cannot assign to `e` because it is borrowed"), (14, "cannot assign to `u.b` because it is borrowed")], "rc");
+    // (second review: a union's pattern borrows the union's memory, so a write to the field it binds or to another one
+    // is E0506 while the binding lives (6, 14); a pattern that binds nothing of the union (`U { a: _ }`) captures
+    // nothing (21: no error))
+    errors_at(r#"union U { a: u32, b: u32 }
+fn f() {
+    let mut u = U { a: 1 };
+    unsafe {
+        let U { a: ref x } = u;
+        u.b = 2;
+        println!("{}", x);
+    }
+}
+fn g() {
+    let mut u = U { a: 1 };
+    unsafe {
+        let U { a: ref x } = u;
+        u.a = 2;
+        println!("{}", x);
+    }
+}
+fn h() {
+    let mut u = U { a: 1 };
+    let c = || { let U { a: _ } = u; };
+    u.b = 2;
+    c();
+}
+fn main() {}
+"#, &[(6, "cannot assign to `u.b` because it is borrowed"), (14, "cannot assign to `u.a` because it is borrowed")], "ru");
+    // (a constant of another type with the variant's name (`Other::V`) compares the value: it is read (10: E0506); the
+    // variant itself (`E::V`) is not (16: no error))
+    errors_at(r#"#[derive(PartialEq, Eq)]
+enum E { V }
+struct Other;
+impl Other {
+    const V: E = E::V;
+}
+fn f() {
+    let mut e = E::V;
+    let c = || match e { Other::V => 1, _ => 0 };
+    e = E::V;
+    c();
+}
+fn g() {
+    let mut e = E::V;
+    let c = || match e { E::V => 1 };
+    e = E::V;
+    c();
+}
+fn main() {}
+"#, &[(10, "cannot assign to `e` because it is borrowed")], "ro");
 }
