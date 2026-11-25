@@ -557,42 +557,52 @@ impl Scan<'_> {
         }
     }
 
+    /// Past the attributes at j (`#[..] #[..]`)
+    fn skip_attrs(&self, mut j: usize, end: usize) -> usize {
+        while self.sym(j, b'#') && self.sym(j + 1, b'[') {
+            j = self.close(j + 1, end) + 1;
+        }
+        j
+    }
+
+    /// The next `,` from j outside brackets, or end; with `angles`, `<..>` is a bracket too (a field's type)
+    fn next_comma(&self, j: usize, end: usize, angles: bool) -> usize {
+        let mut e = j;
+        while e < end && !self.sym(e, b',') {
+            if self.sym(e, b'(') || self.sym(e, b'[') || self.sym(e, b'{') {
+                e = self.close(e, end);
+            } else if angles && self.sym(e, b'<') {
+                let mut d = 0i32;
+                while e < end {
+                    if self.sym(e, b'<') {
+                        d += 1;
+                    } else if self.sym(e, b'>') {
+                        d -= 1;
+                        if d == 0 {
+                            break;
+                        }
+                    }
+                    e += 1;
+                }
+            }
+            e += 1;
+        }
+        e
+    }
+
     /// The fields of `{ a: T, pub b: U }`
     fn fields(&self, a: usize, end: usize, out: &mut Vec<Symbol>) {
         let mut k = a;
         while k < end {
             let start = k;
-            let mut j = k;
-            while self.sym(j, b'#') && self.sym(j + 1, b'[') {
-                j = self.close(j + 1, end) + 1;
-            }
+            let mut j = self.skip_attrs(k, end);
             if self.is(j, b"pub") {
                 j += 1;
                 if self.sym(j, b'(') {
                     j = self.close(j, end) + 1;
                 }
             }
-            // (Up to the next `,` outside brackets)
-            let mut e = j;
-            while e < end && !self.sym(e, b',') {
-                if self.sym(e, b'(') || self.sym(e, b'[') || self.sym(e, b'{') {
-                    e = self.close(e, end);
-                } else if self.sym(e, b'<') {
-                    let mut d = 0i32;
-                    while e < end {
-                        if self.sym(e, b'<') {
-                            d += 1;
-                        } else if self.sym(e, b'>') {
-                            d -= 1;
-                            if d == 0 {
-                                break;
-                            }
-                        }
-                        e += 1;
-                    }
-                }
-                e += 1;
-            }
+            let e = self.next_comma(j, end, true);
             if self.ident(j) && self.sym(j + 1, b':') && j + 2 < e {
                 let (na, nb) = (self.t[j].1, self.t[j].2);
                 out.push(Symbol {
@@ -616,17 +626,8 @@ impl Scan<'_> {
         let mut k = a;
         while k < end {
             let start = k;
-            let mut j = k;
-            while self.sym(j, b'#') && self.sym(j + 1, b'[') {
-                j = self.close(j + 1, end) + 1;
-            }
-            let mut e = j;
-            while e < end && !self.sym(e, b',') {
-                if self.sym(e, b'(') || self.sym(e, b'[') || self.sym(e, b'{') {
-                    e = self.close(e, end);
-                }
-                e += 1;
-            }
+            let j = self.skip_attrs(k, end);
+            let e = self.next_comma(j, end, false);
             if self.ident(j) {
                 let (na, nb) = (self.t[j].1, self.t[j].2);
                 let mut ch = vec![];

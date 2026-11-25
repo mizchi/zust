@@ -5206,14 +5206,21 @@ fn unify(pat: &str, act: &str, vars: &[String], out: &mut Vec<(String, String)>)
     }
 }
 
-/// The list of the parameter types of a closure (token s is `|` or `move`) (`|x, (a, b)|` → `&D, (u8, char)`)
-fn closure_args(ws: &[&FileIndex], file: usize, s: usize, depth: u32) -> Option<String> {
-    let f = ws[file];
+/// A closure's `|` that opens its parameters (token s is it, or `move` before it) and the `|` that closes them (the
+/// tokens' end when there is none)
+fn closure_bars(f: &FileIndex, s: usize) -> (usize, usize) {
     let s = if f.tok(s) == "move" { s + 1 } else { s };
     let mut e = s + 1;
     while e < f.toks.len() && !f.sym(e, b'|') {
         e += 1;
     }
+    (s, e)
+}
+
+/// The list of the parameter types of a closure (token s is `|` or `move`) (`|x, (a, b)|` → `&D, (u8, char)`)
+fn closure_args(ws: &[&FileIndex], file: usize, s: usize, depth: u32) -> Option<String> {
+    let f = ws[file];
+    let (s, e) = closure_bars(f, s);
     // (for each parameter: for a name its type, for a tuple pattern the element types listed)
     fn pat_ty(ws: &[&FileIndex], file: usize, a: usize, b: usize, depth: u32) -> Option<String> {
         let f = ws[file];
@@ -5271,13 +5278,9 @@ fn closure_args(ws: &[&FileIndex], file: usize, s: usize, depth: u32) -> Option<
 /// The return type of a closure (token s is `|` or `move`) (`-> T`, or the type of the body expression)
 fn closure_ret(ws: &[&FileIndex], file: usize, s: usize, depth: u32) -> Option<String> {
     let f = ws[file];
-    let mut j = if f.tok(s) == "move" { s + 1 } else { s };
-    if !f.sym(j, b'|') {
+    let (o, j) = closure_bars(f, s);
+    if !f.sym(o, b'|') {
         return None;
-    }
-    j += 1;
-    while j < f.toks.len() && !f.sym(j, b'|') {
-        j += 1;
     }
     let b = j + 1;
     if f.sym(b, b'-') && f.sym(b + 1, b'>') {
