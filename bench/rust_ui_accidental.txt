@@ -19,7 +19,6 @@ compile-fail	lint/issue-17718-const-naming.rs
 compile-fail	imports/unresolved-imports-used.rs
 compile-fail	imports/redundant-import-lang-prelude-attr.rs
 compile-fail	keyword/extern/keyword-extern-as-identifier-use.rs
-compile-fail	resolve/issue-105069.rs
 compile-fail	cfg/reserved-macro-names-rename.rs
 compile-fail	imports/issue-13404.rs
 compile-fail	simd/portable-intrinsics-arent-exposed.rs
@@ -76,3 +75,4 @@ compile-fail	span/send-is-not-static-std-sync-2.rs
 compile-fail	pin-macro/pin_move.rs
 compile-fail	parser/macro/kw-in-const-item-pos-recovery-149692.rs
 compile-fail	traits/object/issue-44454-3.rs
+compile-fail	suggestions/dont-suggest-ref/duplicate-suggestions.rs

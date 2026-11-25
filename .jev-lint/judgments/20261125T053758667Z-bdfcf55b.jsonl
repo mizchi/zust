@@ -1,0 +1,2 @@
+{"schema":"jev-lint-ledger-1","namespace":"jev-lint-documents-judgments-1","written":"2026-11-25T05:37:58.668Z","model":"jev-1.14.0"}
+{"key":"238ddc20ced738b2303413bb3a670667c7b48f1b0225987610e8659f82653d27","at":"2026-11-25T05:37:58.660Z","value":{"judgment":{"choice":"supports","confidence":0.4,"probabilities":{"supports":0.55,"contradicts":0.44,"unrelated":0,"insufficient_context":0.01}},"comparisonId":"docs_reports_README","target":"docs/ja/reports/README.md"}}

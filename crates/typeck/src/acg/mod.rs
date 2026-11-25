@@ -118,6 +118,13 @@ pub fn borrow_error(e: &str) -> bool {
 /// out (no projection `T::Item` / `<T as Tr>::X`, no `impl` / `dyn` type, no hole, no lifetime), as `x` of
 /// `impl Debug` returned as a String (a placeholder is `T#`)
 pub fn placeholder_mismatch(e: &str, bound_eqs: &[&str], free: &[String]) -> bool {
+    // (a local where a constant goes (E0435), a binding of a variant's name (E0170): hold whatever the parameters are)
+    if e.ends_with("attempt to use a non-constant value in a constant (E0435)")
+        || (e.ends_with("(E0170)") && e.contains("pattern binding `"))
+        || e.ends_with("use of unstable library feature `fn_traits` (E0658)")
+    {
+        return true;
+    }
     // (an operator a type parameter's bounds do not give, p3_ops: holds whatever the parameter is)
     if (e.ends_with("(E0369)") || e.ends_with("(E0368)"))
         && ["cannot add `", "cannot subtract `", "cannot multiply `", "cannot divide `", "cannot calculate the remainder of `", "binary assignment operation `"].iter().any(|v| e.contains(v))
@@ -382,10 +389,10 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
 
 #[allow(clippy::too_many_arguments)]
 fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_base: u32, inl: &Inline, force_rg: bool, rerun_out: &mut bool) -> R<(Compiled, Vec<u32>)> {
-    let (sig, env, body_id, fnptr, inst_args, clo_rg, lenient, recheck, fnmut_ret) = {
+    let (sig, env, body_id, fnptr, inst_args, clo_rg, lenient, recheck, fnmut_ret, where_bound) = {
         let g = insts.lock().unwrap();
         let b = g.body_of(id);
-        (g.sig(prog, id).clone(), g.env(prog, id), b, g.get(id).is_some_and(|i| i.fnptr), g.get(id).map(|i| i.args.clone()), g.closure_rg.get(&b).cloned(), g.lenient, g.recheck.contains(&id), g.kind_free.contains(&b))
+        (g.sig(prog, id).clone(), g.env(prog, id), b, g.get(id).is_some_and(|i| i.fnptr), g.get(id).map(|i| i.args.clone()), g.closure_rg.get(&b).cloned(), g.lenient, g.recheck.contains(&id), g.kind_free.contains(&b), g.where_bound.contains(&id))
     };
     // (zustc check's last round: instances with placeholders for type parameters, and those they request (only
     // there are placeholders): see below)
@@ -461,6 +468,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         ret: sig.ret,
         is_main: sig.is_main,
         user_code,
+        int_as_float: 0,
         raw_ref: 0,
         const_hint: None,
         // (a closure's body is checked too: one written inside `unsafe { }` comes wrapped in one, see synth_closure)
@@ -517,6 +525,9 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         owned: vec![],
         temps: vec![],
         owned_binds: 0,
+        at_binds: vec![],
+        at_pat_at: None,
+        dead_stmt: false,
         last_scrut: None,
         env,
         insts,
@@ -641,9 +652,32 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
             || prog.use_names.contains(n);
         !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_') && !e.contains("(unsupported path)") && !item
     };
+    // (E0599: a method of a parameter with no bounds but markers (`fn f<T>(t: T) { t.clone() }`), and no where clause:
+    // no trait gives it one, unless a blanket impl does (`impl<T> Tr for T`, std's `Into`), whatever the parameter is)
+    let unbounded_method = |e: &str| -> Option<String> {
+        if !f.sig.generics.preds.is_empty() || where_bound {
+            return None;
+        }
+        let i = e.find("no method named `")?;
+        let r = &e[i + 17..];
+        let m = r.split('`').next()?;
+        let rest = r[m.len() + 1..].strip_prefix(" found for ")?;
+        let rest = rest.strip_prefix("struct ").unwrap_or(rest);
+        let t = rest.strip_prefix('`')?.split('`').next()?;
+        let n = t.strip_suffix('#')?;
+        let marker = |b: &String| b.starts_with('\'') || matches!(b.as_str(), "Sized" | "?Sized" | "Send" | "Sync" | "Unpin");
+        let unbounded = cx.rg.inst_args.iter().any(|&a| matches!(a, Ty::Struct(s) if prog.structs[s as usize].name == t && prog.structs[s as usize].placeholder.as_ref().is_some_and(|bs| bs.iter().all(marker))));
+        let blanket = prog.blanket.contains_key(m) || matches!(m, "into" | "try_into" | "borrow" | "borrow_mut" | "type_id");
+        (unbounded && !blanket).then(|| format!("{}no method named `{m}` found for type parameter `{n}` in the current scope (E0599)", &e[..i]))
+    };
+    let r = match r {
+        Err(e) if placeholder => Err(unbounded_method(&e).unwrap_or(e)),
+        r => r,
+    };
+    let held = |e: &str| e.ends_with("in the current scope (E0599)") && e.contains("found for type parameter `");
     // (nor what the trait solver proved of a type with no placeholder in it: crate::traits::SOLVED_NO)
     let solved = |e: &str| e.contains(crate::traits::SOLVED_NO) || e.contains(&crate::traits::SOLVED_NO.replace("E0277", "E0271"));
-    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e) && !placeholder_mismatch(e, &bound_eqs, &free) && !undeclared(e) && !solved(e)) {
+    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e) && !placeholder_mismatch(e, &bound_eqs, &free) && !undeclared(e) && !held(e) && !solved(e)) {
         if regionck::debug() {
             eprintln!("regionck: placeholder instance not checked: {}", r.as_ref().err().map(|e| e.as_str()).unwrap_or(""));
         }
@@ -836,6 +870,74 @@ pub fn branch_pos(e: &Expr) -> Sp {
     }
 }
 
+/// Where rustc points when a value has not the type its place wants (a `let`'s annotation, a parameter): a block's
+/// tail expression, or the block itself when it has none (SP: the caller's position, its statement), or the expression
+pub fn value_pos(e: &Expr) -> Sp {
+    match e {
+        Expr::Block(_, false, b) => match b.stmts.last() {
+            Some(Stmt::Expr(t, false)) => value_pos(t),
+            _ => SP,
+        },
+        e => expr_start(e),
+    }
+}
+
+/// Where the value of an expression comes from, as rustc blames a mismatch: a `match`'s first arm that does not
+/// diverge (`None => ()` beside `Some(v) => { return v; }`), a block's tail, the expression itself; SP if unknown
+pub fn value_origin(e: &Expr) -> Sp {
+    fn diverges(e: &Expr) -> bool {
+        match e {
+            Expr::Return(_) | Expr::Break(..) | Expr::Continue(..) => true,
+            Expr::Macro(p, _, _) => p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")),
+            Expr::Block(_, _, b) => match b.stmts.last() {
+                Some(Stmt::Expr(x, _)) => diverges(x),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+    match e {
+        Expr::Match(_, arms) if !arms.is_empty() => match arms.iter().find(|a| !diverges(&a.body)) {
+            Some(a) => match value_origin(&a.body) {
+                p if p.line != 0 => p,
+                _ => a.pos,
+            },
+            None => SP,
+        },
+        Expr::Block(_, false, b) => match b.stmts.last() {
+            Some(Stmt::Expr(t, false)) => value_origin(t),
+            _ => SP,
+        },
+        e => expr_start(e),
+    }
+}
+
+/// A `loop`'s value is its `break`s': where the first one without a value is (not one of a loop or closure inside it)
+pub fn loop_break_pos(e: &Expr) -> Sp {
+    fn in_block(b: &crate::parse::Block) -> Sp {
+        b.stmts.iter().map(|s| match s {
+            Stmt::Expr(x, _) => find(x),
+            _ => SP,
+        }).find(|p| p.line != 0).unwrap_or(SP)
+    }
+    fn find(e: &Expr) -> Sp {
+        match e {
+            Expr::Break(None, None, p) => *p,
+            Expr::Block(_, _, b) => in_block(b),
+            Expr::If(_, b, els) => match in_block(b) {
+                p if p.line != 0 => p,
+                _ => els.as_deref().map_or(SP, find),
+            },
+            Expr::Match(_, arms) => arms.iter().map(|a| find(&a.body)).find(|p| p.line != 0).unwrap_or(SP),
+            _ => SP,
+        }
+    }
+    match e {
+        Expr::Loop(None, b) => in_block(b),
+        _ => SP,
+    }
+}
+
 /// [`branch_pos`] of a block
 pub fn block_end_pos(b: &crate::parse::Block) -> Sp {
     match b.stmts.last() {
@@ -866,6 +968,11 @@ pub fn expr_start(e: &Expr) -> Sp {
         Expr::Array(es) | Expr::Tuple(es) => es.first().map_or(SP, expr_start),
         _ => SP,
     }
+}
+
+/// A message of what zustc does not support (not an error rustc reports)
+pub fn unsupported(m: &str) -> bool {
+    m.contains("not supported") || m.contains("unsupported") || m.starts_with("array length must be a literal or a const")
 }
 
 /// メッセージが `行:桁: ` で始まるか
@@ -1005,6 +1112,17 @@ pub enum BindMode {
     Ref(bool),
 }
 
+/// How a binding of a pattern binds, for the check of `x @ sub` (at_conflict)
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AtBind {
+    /// by value, of a type that is not `Copy`
+    Move,
+    /// by value, of a `Copy` type
+    Copy,
+    /// by reference (`ref`, `ref mut`, or the default binding mode): whether `mut`
+    Ref(bool),
+}
+
 pub struct Cx<'p> {
     pub b: FunctionBuilder,
     /// 借用検査の記録
@@ -1018,6 +1136,9 @@ pub struct Cx<'p> {
     pub ret: Ty,
     pub is_main: bool,
     pub user_code: bool,
+    /// The text of the last integer literal reported where a float was expected (its address: the operator around
+    /// it reports rustc's E0277 instead)
+    pub int_as_float: usize,
     /// > 0 inside `unsafe { }`, an `unsafe fn`, or code not checked for E0133 (the prelude)
     pub unsafe_ok: u32,
     /// > 0 under `&raw const` / `&raw mut` / `addr_of!` (a raw reference to a `static mut` is safe)
@@ -1104,6 +1225,14 @@ pub struct Cx<'p> {
     pub owned: Vec<Owned>,
     pub temps: Vec<Owned>,
     pub owned_binds: usize,
+    /// The bindings the subpattern of each `x @ sub` being bound makes, innermost last: by move (not `Copy`), by copy,
+    /// or by reference (whether `mut`), with their names (pat_bind, at_conflict)
+    pub at_binds: Vec<Vec<(AtBind, String)>>,
+    /// Where the pattern a `let` binds starts, while it binds (at_pat_pos)
+    pub at_pat_at: Option<Sp>,
+    /// The statement being lowered comes after one that diverges, in its block or one around it (`return;`): the
+    /// borrow check's errors are not reported there, so the moves of an `x @ sub` are not checked (at_conflict)
+    pub dead_stmt: bool,
     pub last_scrut: Option<StackSlot>,
     /// 書き換えで作った式 (コード生成の間アドレスを動かさないために持っておく)
     pub keep: Vec<Box<Expr>>,
@@ -1405,7 +1534,34 @@ impl Cx<'_> {
     /// 書かれた型 (`Self` と型パラメータは env から)
     pub fn parse_ty(&self, t: &crate::parse::Ty) -> R<Ty> {
         let ts = crate::ast_types::tysyn(t, Some(&crate::types::TySyn::Named("Self".into())))?;
-        self.prog.resolve_env(&ts, &self.env)
+        self.prog.resolve_env(&ts, &self.env).map_err(|e| self.local_len_err(t, e))
+    }
+
+    /// E0435 of an array type whose length names a local, `let n = 3; let a: [u8; n];`, at the name (the program's
+    /// "cannot find constant `n`" otherwise)
+    #[cold]
+    #[inline(never)]
+    fn local_len_err(&self, t: &crate::parse::Ty, e: String) -> String {
+        use crate::parse::Ty as T;
+        let Some(n) = e.strip_prefix("cannot find constant `").and_then(|r| r.strip_suffix('`')) else { return e };
+        if !self.user_code || self.lookup(n).is_none() {
+            return e;
+        }
+        fn find(t: &T, n: &str) -> Option<Sp> {
+            match t {
+                T::Array(el, len) => match strip_paren(len) {
+                    Expr::Path(None, p) if ident_of(p) == Some(n) => Some(p.pos),
+                    _ => find(el, n),
+                },
+                T::Ref(_, _, x) | T::Ptr(_, x) | T::Slice(x) => find(x, n),
+                T::Tuple(ts) => ts.iter().find_map(|x| find(x, n)),
+                _ => None,
+            }
+        }
+        match find(t, n) {
+            Some(sp) => self.at(sp, "attempt to use a non-constant value in a constant (E0435)".to_string()),
+            None => e,
+        }
     }
 
     /// マクロの引数。型推論が読んだものがあればその構文木 (型の記録がある)、なければ読み直す
@@ -1917,14 +2073,26 @@ impl Cx<'_> {
             self.b.ins().trap(TrapCode::unwrap_user(1));
             return Ok(());
         }
-        // (エラーの場所は末尾の式 (なければ関数の先頭))
-        let tail = match f.block.stmts.last() {
-            Some(Stmt::Expr(e, false)) => err_pos(e),
-            _ => SP,
+        // (エラーの場所は末尾の式 (なければ関数の先頭)): its value's position (a block's tail, a `loop`'s `break`), else
+        // where its statement starts (`()`, `unsafe { .. }`)
+        let tail = || {
+            let n = f.block.stmts.len();
+            match f.block.stmts.last() {
+                Some(Stmt::Expr(e, false)) => match if matches!(e, Expr::Match(..)) { value_origin(e) } else { err_pos(e) } {
+                    p if p.line != 0 => p,
+                    _ => match loop_break_pos(e) {
+                        p if p.line != 0 => p,
+                        _ => f.block.spos.get(n - 1).unwrap_or(SP),
+                    },
+                },
+                _ => SP,
+            }
         };
         // (`fn f(x: &&T) -> &T { x }`: the deref coercion)
         let (v, t) = if t != self.ret { self.deref_coerce(v, t, self.ret) } else { (v, t) };
-        self.same(tail, t, self.ret)?;
+        if let Err(m) = self.same(SP, t, self.ret) {
+            return Err(self.at(tail(), m));
+        }
         self.drop_for_exit(0, 0);
         self.emit_return(v);
         Ok(())
@@ -2082,6 +2250,12 @@ impl Cx<'_> {
                     Some(Stmt::Expr(e, _)) => expr_start(e),
                     _ => SP,
                 };
+                // (`[];`, `match () {}`, a block's tail `()`: where the parser saw the statement start. Not what zustc
+                // does not support, which is no error of the program's at any line of it)
+                let sp = match blk.spos.get(self.stmt_i) {
+                    Some(p) if sp.line == 0 && !unsupported(&m) => p,
+                    _ => sp,
+                };
                 // (none here either: the block's own statement in the block around it decides)
                 self.stmt_i = saved;
                 Err(self.at(sp, m))
@@ -2106,7 +2280,7 @@ impl Cx<'_> {
                     st => stmts.push(st.clone()),
                 }
             }
-            let nb: &'static crate::parse::Block = Box::leak(Box::new(crate::parse::Block { stmts }));
+            let nb: &'static crate::parse::Block = Box::leak(Box::new(crate::parse::Block { stmts, spos: Default::default() }));
             return self.block_stmts(nb, expected);
         }
         self.scopes.push(vec![]);
@@ -2124,7 +2298,9 @@ impl Cx<'_> {
         // (the borrowed temporaries of each statement end with it; the tail expression's, with the enclosing one)
         let bk_mark = self.bk.stmt_temps.len();
         let mut tail_srcs: Vec<borrowck::Src> = vec![];
+        let dead0 = self.dead_stmt;
         for k in 0..n {
+            self.dead_stmt = dead0 || diverged;
             let (i, st) = if split.is_empty() { (k, &blk.stmts[k]) } else { split[k] };
             // (`let x = S::<&'static u32> { t: &c };` / `S::<&'a u32> { t: &c };`: a `let` of the type the path writes,
             // whose annotation the region check reads; a let's temporaries are extended as the literal's would be. Only
@@ -2140,7 +2316,7 @@ impl Cx<'_> {
             self.stmt_i = i;
             match st {
                 // (`let None = x;`: a unit variant or a constant, a pattern to test (E0005), not a new name)
-                Stmt::Let(pat, ann_ty, init, els, ..) if !is_simple_let(pat) || els.is_some() || self.names_variant_or_const(pat) => {
+                Stmt::Let(pat, ann_ty, init, els, let_at) if !is_simple_let(pat) || els.is_some() || self.names_variant_or_const(pat) => {
                     // 分解する let (`let S { x, y } = s;`): 反駁不能パターンとして束縛だけ行う
                     let Some(init) = init else {
                         // (a pattern that binds no name declares nothing: `let S { field: _, .. };`, libc 0.2's
@@ -2240,7 +2416,10 @@ impl Cx<'_> {
                     let pm = self.bk.pat_moves;
                     let pre = if is_place_expr(init) { self.moved_flag(init) } else { None };
                     self.bk_bind_begin();
+                    // (the pattern's position, after the `let`, where an error of a `x @ sub` in it is reported)
+                    let ap0 = std::mem::replace(&mut self.at_pat_at, Some(Sp { line: let_at.line, col: let_at.col + 4 }).filter(|s| s.line != 0));
                     let r = self.pat_bind(pat, place, BindMode::Move);
+                    self.at_pat_at = ap0;
                     self.bk_bind_end();
                     r?;
                     if self.owned_binds > ob || self.bk.pat_moves > pm {
@@ -2335,7 +2514,7 @@ impl Cx<'_> {
                             // (`dyn Foo<Bar = &'a u32>`, which keeps the text of its bounds) are the region check's)
                             let ptr = matches!((t, a), (Ty::Ptr(true, x), Ty::Ptr(false, y)) if x == y);
                             if !ptr && !self.apart_in_lifetimes(t, a) {
-                                self.same(SP, t, a).map_err(|m| self.at(expr_start(init), m))?;
+                                self.same(SP, t, a).map_err(|m| self.at(value_pos(init), m))?;
                             }
                         }
                         if let Some(v) = v {
@@ -2580,7 +2759,8 @@ impl Cx<'_> {
                             t = ty;
                         }
                     }
-                    self.same(SP, t, ty).map_err(|m| self.at(expr_start(init), m))?;
+                    // (a block's value is its tail's: rustc points there, `let _: ! = { 'a: while break 'a {} };`)
+                    self.same(SP, t, ty).map_err(|m| self.at(value_pos(init), m))?;
                     self.bk.mut_next = pat_mut(pat);
                     let rg_init = if self.rg_on() { self.rt_expr(init) } else { None };
                     self.bind(name.clone(), ty, v);
@@ -2750,8 +2930,10 @@ impl Cx<'_> {
                         result = self.detach_tail(r, t0, exp);
                         self.drop_tail_temps(t0, result);
                     } else {
+                        // (a block-like statement, `if .. {}` / `const { 2 }` without `;`, has the type `()`: rustc's
+                        // E0308)
                         if !*semi && !matches!(r.1, Ty::Unit | Ty::Never) {
-                            return err(SP, "expected `;` after non-unit expression");
+                            return err(SP, format!("mismatched types: expected `()`, found `{}`", self.prog.tn(r.1).replace('#', "")));
                         }
                         // (unused_must_use: a `Result` dropped by its statement)
                         if self.prog.deny_must_use && self.user_code {
@@ -2813,6 +2995,7 @@ impl Cx<'_> {
             }
         }
         self.pop_scope();
+        self.dead_stmt = dead0;
         if diverged && result.1 == Ty::Unit {
             result = (None, Ty::Never);
         }

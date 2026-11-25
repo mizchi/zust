@@ -4,7 +4,7 @@ The percentages are rustc's own UI tests that pass in that area: run-pass + chec
 directories named in the comment next to the number (`ui:`), or compile-fail (`cf:`). They count only the tests
 `bench/rust_ui.py` can ask zustc to handle (no nightly features, auxiliary crates, special flags or targets other than
 Linux x86-64), so 100% does not mean every test of a directory passes. They were measured
-<!-- measured -->2026-11-25, 5446014<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
+<!-- measured -->2026-11-25, 1c6f335<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
 `scripts/update_readme.py` writes them here). The totals for each kind of test are in the
 [README](README.md#coverage-of-rustcs-test-suite), the subset of the language in prose is in
 [docs/language.md](docs/language.md), and the [reports](docs/reports/) explain each step.
@@ -24,9 +24,9 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
 
 - [x] numbers, arithmetic, overflow checks: <!-- ui:numbers-arithmetic -->100.0%
 - [x] `for` / `while` / `loop`, labels: <!-- ui:for-loop-while,loops,label -->96.7%
-- [x] enums, `#[repr(u8)]`, auto-sized tags: <!-- ui:enum,enum-discriminant -->85.7%
+- [x] enums, `#[repr(u8)]`, auto-sized tags: <!-- ui:enum,enum-discriminant -->88.1%
 - [x] `cfg`: <!-- ui:cfg -->94.1%
-- [x] bindings, patterns, slice patterns, or-patterns (also with guards): <!-- ui:binding,pattern,or-patterns -->90.8%
+- [x] bindings, patterns, slice patterns, or-patterns (also with guards): <!-- ui:binding,pattern,or-patterns -->91.9%
 - [x] `match`: <!-- ui:match -->87.8%
 - [x] name resolution: <!-- ui:resolve -->88.6%
 - [x] statics: ints, floats, raw pointers, fn pointers, `const fn` calls: <!-- ui:statics -->95.0%
@@ -37,13 +37,13 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
 - [x] qualified paths: `<T as Tr>::C` for a trait's default constant (its `Self::` is the qualified type), `<() as Tr>::f()`, associated functions through a type alias (`type Ham = m::Qux; Ham::new()`)
 - [x] let chains (`if let A = x && cond`), also in match guards (`P if let Q = e =>`); inline `const { .. }`, `&raw const` / `&raw mut`
 - [x] parser: <!-- ui:parser -->90.9%
-- [x] closures (capture, `Fn` traits, `move`; with no captures also as fn pointers): <!-- ui:closures,unboxed-closures,functions-closures -->83.9%
+- [x] closures (capture, `Fn` traits, `move`; with no captures also as fn pointers): <!-- ui:closures,unboxed-closures,functions-closures -->84.4%
 - [x] derives: `Debug`, `Clone`, `Copy`, `PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`: <!-- ui:derives,deriving -->90.9%
 - [x] imports, `use`: <!-- ui:imports -->92.0%
 - [x] associated types: <!-- ui:associated-types -->84.6%
 - [x] generics: <!-- ui:generics -->95.2% (an integer literal for `T: Foo` takes the one integer type that implements Foo; a type
   parameter known only from the expected type is not inferred)
-- [ ] consts: <!-- ui:consts -->78.8% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
+- [ ] consts: <!-- ui:consts -->79.1% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
 - [ ] drop: <!-- ui:drop -->71.0% (the drop order of some temporaries differs)
 - [ ] traits: <!-- ui:traits -->73.9% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
 - [ ] `macro_rules!`: <!-- ui:macros -->78.6% (hygiene for `let`, labels, arm bindings; not every fragment kind)
@@ -56,9 +56,9 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
 
 ## Checks (compile-fail)
 
-- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->90.4%
+- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->91.3%
   ([report 08](docs/reports/2026-11-18-08-borrow-checking.md))
-- [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->75.1%, structs <!-- cf:structs -->81.2%
+- [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->79.4%, structs <!-- cf:structs -->95.8%
 - [x] unsafe operations outside `unsafe` (E0133): calls to `unsafe fn` and extern fns, raw pointer derefs, `static mut`,
   union field reads (not yet inside closures or consts, and not the `unsafe_op_in_unsafe_fn` lint)
 - [x] non-exhaustive `match` (E0004): bool, unit, enums (variants that cannot have a value need no arm), structs and
@@ -75,10 +75,10 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
   must outlive the fn live to its end, closures that are not general enough or let borrowed data escape, generic fns
   that are never called (checked with placeholder types). Not yet: what a closure's body requires of its fn,
   higher-ranked trait selection, the requirements of the impl a coercion selects, the prelude's iterators (their types
-  hold no lifetimes). regions <!-- cf:regions -->89.7%, lifetimes <!-- cf:lifetimes -->82.8%
+  hold no lifetimes). regions <!-- cf:regions -->89.7%, lifetimes <!-- cf:lifetimes -->85.2%
   ([issue #1](https://github.com/mizchi/zust/issues/1))
 - [ ] coherence, bounds of blanket impls, dyn compatibility (E0038), the bindings of `dyn Tr<A = T>` against the associated type's bounds (done when T is a primitive, `str` or a struct name)
-- [ ] lints and warnings: lint <!-- cf:lint -->38.5%
+- [ ] lints and warnings: lint <!-- cf:lint -->48.1%
 - [ ] editions (2015-only errors)
 
 ## Runtime and std
@@ -87,7 +87,7 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
   `BTreeMap`/`BTreeSet`, `VecDeque`, `BinaryHeap`, `Rc`/`Arc`, `Cell`/`RefCell`, `Mutex`, `OnceLock`, `ManuallyDrop`,
   `Duration`, `AtomicPtr`, `RangeTo` / `RangeFull` as types, `Fuse`, `iter::Empty`, `NonNull`, `Pin` (a plain pointer: `Pin::new`, `get_mut`, `into_inner`, deref), `std::task` (`Poll`, `Context`, `Waker::noop`) and the `Future` trait for futures implemented and polled by hand, `UnsafeCell`, `PhantomData`, atomics, `mpsc`, `mem::*`, `ptr::{read, write, drop_in_place, null}`,
   `iter::{repeat, once, empty, repeat_with, successors}`, `reverse` / `fill` / `rotate_left` / `rotate_right` on arrays and slices, formatting, stdin/stdout/fs/env/process basics
-- [ ] async / await: <!-- ui:async-await -->78.6%. An `async fn` runs at once and returns its value: it is not lowered
+- [ ] async / await: <!-- ui:async-await -->82.5%. An `async fn` runs at once and returns its value: it is not lowered
   to a state machine that `poll`s, and there is no executor or real `Waker`. Futures implemented and polled by hand
   work (above)
 - [ ] threads: <!-- ui:threads-sendsync -->70.7%. Green threads on one OS thread: each spawned thread has its own stack and runs until it waits (`join`, `recv`, a held `Mutex`, `sleep`, `yield_now`, an atomic `load`); no parallelism

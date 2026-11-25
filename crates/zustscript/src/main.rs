@@ -92,7 +92,7 @@ fn main() {
     let base = input.parent().map(|p| p.to_path_buf()).unwrap_or_default();
     let key = std::fs::canonicalize(&input).unwrap_or(input.clone());
     let items = match zscimport::expand(items, &base, &mut vec![key]).and_then(|items| tsimport::expand(items, &base)) {
-        Ok(i) => i,
+        Ok(i) => ast::with_prelude(i),
         Err(errs) => {
             for e in &errs {
                 match &e.file {

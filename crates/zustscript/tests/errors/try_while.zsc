@@ -1,0 +1,3 @@
+// expect: `?` cannot be used in a `while` condition
+fn a() -> Option<bool> { None }
+fn b() -> Option<i32> { while a()? { } Some(1) }

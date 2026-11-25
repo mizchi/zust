@@ -70,6 +70,46 @@ pub struct VariantDef {
     pub discr: i64,
 }
 
+/// The fields a module of the program may not read (E0616): the inline modules by their lines, and of each struct or
+/// union of a module whose name is the program's only item of that name, its fields that are not `pub`
+#[derive(Default, Debug)]
+pub struct FieldPriv {
+    /// (the line of a module's `{`, of its `}`, its parent); the crate root is module 0, of every line
+    pub mods: Vec<(u32, u32, u32)>,
+    /// the struct's or union's name -> (`struct` / `union`, [(a field, the module it is visible within)])
+    pub fields: FxMap<String, (&'static str, Vec<(String, u32)>)>,
+    /// E0624: a type's name -> [(a fn of its inherent impls that is not `pub`, the module it is visible within)]
+    pub methods: FxMap<String, Vec<(String, u32)>>,
+}
+
+impl FieldPriv {
+    /// the innermost module of a line (None on a line where a module starts or ends, which two modules share)
+    pub fn module_of(&self, line: u32) -> Option<u32> {
+        let mut best = 0u32;
+        for (i, &(a, e, _)) in self.mods.iter().enumerate().skip(1) {
+            if line == a || line == e {
+                return None;
+            }
+            if a < line && line < e {
+                best = i as u32;
+            }
+        }
+        Some(best)
+    }
+    /// whether module `m` is `scope` or inside it
+    pub fn within(&self, mut m: u32, scope: u32) -> bool {
+        loop {
+            if m == scope {
+                return true;
+            }
+            if m == 0 || m as usize >= self.mods.len() {
+                return false;
+            }
+            m = self.mods[m as usize].2;
+        }
+    }
+}
+
 /// struct と enum (名前付きの集約型) の定義。enum も同じ表に入れることで、
 /// コピー・引数渡し・impl・deep hash などの処理を struct と共有する。
 pub struct StructDef {
@@ -397,6 +437,9 @@ pub struct Program {
     /// the program's source declares modules (`mod m { .. }`), whose scopes are flattened away: a name's item may then
     /// be out of scope where the name is written
     pub has_mods: bool,
+    /// The program's inline modules and the fields of its structs and unions it may not see everywhere, for E0616
+    /// (set by the driver where it reads the modules)
+    pub field_priv: Option<Box<FieldPriv>>,
     /// some trait other than Clone has a fn `clone` (`trait Duplicate { fn clone(&self) -> S { .. } }`), or a blanket
     /// impl one: only then can default_method find a `clone` for a type
     pub trait_clone_fns: bool,
@@ -426,6 +469,12 @@ pub struct Program {
     pub deny_unused_mut: bool,
     /// the source allows (or warns of) `overflowing_literals`, at the crate or an item: no "literal out of range"
     pub allow_overflowing_literals: bool,
+    /// The names a `use` of the program's has a path through (`E` of `use E::*;` / `use m::E::{A, B};`): an enum of
+    /// one of these names may have its variants in scope, so a binding of a variant's name may be the variant
+    pub use_prefixes: Vec<String>,
+    /// The crate enables `fn_traits` (`#![feature(fn_traits)]`): a call of a closure's `call` / `call_mut` /
+    /// `call_once` is allowed
+    pub fn_traits: bool,
     /// `#[allow(dangerous_implicit_autorefs)]` (or warn / expect) somewhere in the program: the deny lint is not an error
     pub allow_implicit_autorefs: bool,
     /// `#![deny(trivial_casts)]` / `#![deny(trivial_numeric_casts)]`: a cast a coercion or nothing would do
@@ -734,6 +783,9 @@ pub struct Insts {
     /// Of those, the instances of fns that instances were made of with `Copy` types only (driver2's
     /// placeholder_wave): checked for what moving a T does, nothing else
     pub recheck: FxSet<u32>,
+    /// Of those, the instances of fns that a where clause bounds (the fn's, its impl's): a parameter's bounds there
+    /// may not be its own (`where &'a T: Trait`)
+    pub where_bound: FxSet<u32>,
     /// Closures' bodies (by their fn id) whose kind no bound nor expected type decides, made in the program's code: one that
     /// returns a mutable borrow of what it captures by reference is `FnMut`, and the borrow escapes its body
     pub kind_free: FxSet<u32>,
@@ -842,6 +894,7 @@ impl Insts {
             imp_cache: HashMap::default(),
             lenient: false,
             recheck: FxSet::default(),
+            where_bound: FxSet::default(),
             kind_free: FxSet::default(),
             fx_log: vec![],
         }
@@ -1286,8 +1339,14 @@ impl Program {
         //  when it would be, so not under `--test`. First, as it was when the summary reported it)
         if need_main && !sums.iter().any(|s| s.fns.iter().any(|(n, _)| n == TEST_ENTRY)) {
             for (i, s) in sums[..user.min(sums.len())].iter().enumerate() {
-                if let Some((_, sig)) = s.fns.iter().find(|(n, sig)| n == "main" && !sig.is_main && !sig.export && !sig.is_extern && sig.symbol == "_xmain") {
-                    let msg = if sig.generics.is_empty() { "`main` must be `fn main()`" } else { "`main` cannot be generic" };
+                if let Some((_, sig)) = s.fns.iter().find(|(n, sig)| n == "main" && !sig.is_main && !sig.export && !sig.is_extern && sig.symbol.starts_with("_xmain")) {
+                    let msg = if sig.symbol.ends_with(".async") {
+                        "`main` function is not allowed to be `async` (E0752)"
+                    } else if sig.generics.is_empty() {
+                        "`main` must be `fn main()`"
+                    } else {
+                        "`main` cannot be generic"
+                    };
                     return Err(format!("{}:1: {msg}", items.get(i).map_or(1, |it| it.line)));
                 }
             }
@@ -1331,6 +1390,8 @@ impl Program {
             deny_unused_alloc: false,
             deny_unused_mut: false,
             allow_overflowing_literals: false,
+            use_prefixes: Vec::new(),
+            fn_traits: false,
             allow_implicit_autorefs: false,
             deny_trivial_casts: (false, false),
             must_use_fns: vec![],
@@ -1364,6 +1425,7 @@ impl Program {
             unsized_params: FxMap::default(),
             tail_syn: FxMap::default(),
             has_mods: false,
+            field_priv: None,
             trait_clone_fns: false,
             multi_trait_methods: FxSet::default(),
             ambiguous_methods: FxMap::default(),
@@ -1595,7 +1657,8 @@ impl Program {
                 .chain(sm.enums.iter().map(|(n, v)| (n, AdtShape::Enum(v.clone()))));
             for (name, shape) in adts {
                 if p.struct_index.contains_key(name) {
-                    return Err(format!("{}:1: duplicate definition of `{name}`", it.line));
+                    // (rustc's E0428, at the second's name: the driver moves it to that line)
+                    return Err(format!("{}:1: the name `{name}` is defined multiple times (E0428)", it.line));
                 }
                 p.struct_index.insert(name.clone(), sdefs.len() as u32);
                 if let Some(r) = &sm.adt_regions {
@@ -2399,6 +2462,56 @@ impl Program {
                 }
             }
         }
+        // (E0204: `Copy` for a type of the program's with a field that is not: derived, at the type's name; an
+        // `impl Copy for S {}`, at its self type. A field of the type's parameter is Copy where the derive bounds the
+        // parameter, and where the impl's own parameter for it has a bound or a where clause)
+        for (ii, sm) in sums.iter().enumerate().take(user) {
+            let not_copy = |p: &Program, sid: u32, args: Option<&[TySyn]>, own_gen: &[(String, Vec<String>)]| {
+                let s = &p.structs[sid as usize];
+                let fields: Vec<Ty> = if s.is_enum { s.variants.iter().flat_map(|v| v.fields.iter().map(|f| f.1)).collect() } else { s.fields.iter().map(|f| f.1).collect() };
+                // (std's `PhantomData<T>` is Copy for every T, `ManuallyDrop<T>` when T is: the prelude's are not
+                // written so)
+                fn copy(p: &Program, t: Ty) -> bool {
+                    match t {
+                        Ty::Struct(sid) => match p.structs[p.base_of(sid) as usize].name.as_str() {
+                            "PhantomData" => true,
+                            "ManuallyDrop" => p.structs[sid as usize].args.iter().all(|&a| copy(p, a)),
+                            _ => p.implements(t, "Copy"),
+                        },
+                        _ => p.implements(t, "Copy"),
+                    }
+                }
+                fields.into_iter().any(|t| match t {
+                    Ty::Param(k) => args.and_then(|a| a.get(k as usize)).is_some_and(|a| matches!(a, TySyn::Named(n) if own_gen.iter().any(|g| g.0 == *n && g.1.is_empty()))),
+                    t => !p.has_param(t) && !copy(p, t),
+                })
+            };
+            let e = |n: &str| format!("{}:1: \u{5}{}\u{5}the trait `Copy` cannot be implemented for this type (E0204)", items[ii].line, n.rsplit("::").next().unwrap_or(n));
+            // (E0184: `Copy` for a type with a Drop impl)
+            let dtor = |p: &Program, n: &str| p.struct_index.get(n).is_some_and(|&sid| p.impls.contains(&(sid, "Drop".to_string())));
+            let e184 = |n: &str| format!("{}:1: \u{5}{}\u{5}the trait `Copy` cannot be implemented for this type; the type has a destructor (E0184)", items[ii].line, n.rsplit("::").next().unwrap_or(n));
+            for (tn, ds) in &sm.derives {
+                if ds.iter().any(|d| d == "Copy") && p.struct_index.get(tn).is_some_and(|&sid| not_copy(&p, sid, None, &[])) {
+                    return Err(e(tn));
+                }
+                if ds.iter().any(|d| d == "Copy") && dtor(&p, tn) {
+                    return Err(e184(tn));
+                }
+            }
+            if let (Some("Copy"), Some(sn)) = (sm.impl_trait.as_deref(), &sm.impl_self) {
+                let args = match &sm.impl_self_ty {
+                    Some(TySyn::App(_, a)) => Some(a.as_slice()),
+                    _ => None,
+                };
+                let own_gen = if sm.where_types.is_empty() { sm.impl_generics.as_slice() } else { &[] };
+                if p.struct_index.get(sn).is_some_and(|&sid| not_copy(&p, sid, args, own_gen)) {
+                    return Err(e(sn));
+                }
+                if dtor(&p, sn) {
+                    return Err(e184(sn));
+                }
+            }
+        }
         // 必須メソッドが実装されているか (derive したものは本体を codegen が作る)
         let derived: HashSet<(u32, String)> = sums
             .iter()
@@ -2427,6 +2540,9 @@ impl Program {
                 if let Some(e) = early_mismatch(ds, ms, m) {
                     return Err(format!("{}:1: {e}", items[ii as usize].line));
                 }
+                if let Some(at) = sig_incompatible(&p, ds, ms, tr) {
+                    return Err(format!("{}:1: \u{6}{at}\u{6}method `{m}` has an incompatible type for trait `{tr}` (E0053)", items[ii as usize].line));
+                }
             }
         }
         for (sid, tr) in &p.impls {
@@ -2450,6 +2566,10 @@ impl Program {
                     if let Some(mi) = p.method(*sid, m).filter(|&mi| p.sigs[mi as usize].impl_trait.as_deref() == Some(tr.as_str()) && mi != d) {
                         let (ds, ms) = (&p.sigs[d as usize], &p.sigs[mi as usize]);
                         let line = p.item_of[mi as usize].map_or(String::new(), |ii| format!("{}:1: ", items[ii as usize].line));
+                        // (E0185 / E0186: a receiver on one side only)
+                        if ds.has_self != ms.has_self {
+                            return Err(receiver_mismatch(&line, m, if ms.has_self { ms } else { ds }, ms.has_self));
+                        }
                         if ds.params.len() != ms.params.len() && ds.has_self == ms.has_self {
                             return Err(format!(
                                 "{line}method `{m}` has {} parameters but the declaration in trait `{tr}::{m}` has {} (E0050)",
@@ -2464,8 +2584,10 @@ impl Program {
                             Ty::Struct(x) if prog.structs[prog.base_of(x) as usize].name == "Pin" => 4,
                             _ => 0,
                         };
-                        if ds.has_self && ms.has_self && kind(&p, ds.params[0]) != kind(&p, ms.params[0]) {
-                            return Err(format!("{line}method `{m}` has an incompatible type for trait `{tr}` (E0053)"));
+                        // (at the receiver, or the part sig_incompatible names)
+                        let at = (ds.has_self && ms.has_self && kind(&p, ds.params[0]) != kind(&p, ms.params[0])).then(|| "p0".to_string());
+                        if let Some(at) = at.or_else(|| sig_incompatible(&p, ds, ms, tr)) {
+                            return Err(format!("{line}\u{6}{at}\u{6}method `{m}` has an incompatible type for trait `{tr}` (E0053)"));
                         }
                         // (E0195: the method's own lifetimes that bounds make early-bound, and how many bounds each has,
                         // are the trait's: `fn bar<'a, 'b: 'a>` in the trait, `fn bar<'a, 'b>` in the impl)
@@ -4254,6 +4376,14 @@ impl Program {
                 let l1 = if mutual && l0.1.is_none() && r0.1.is_some() { self.eval_t(l, depth, r0.1)? } else { l0 };
                 let r1 = if mutual && r0.1.is_none() && l1.1.is_some() { self.eval_t(r, depth, l1.1)? } else { r0 };
                 let ((lv, lt), (rv, rt)) = (l1, r1);
+                // (two operands of different integer types: `i8::MAX + 1u8` is rustc's E0308, not an overflow)
+                if !shift {
+                    if let (Some(a), Some(b)) = (lt, rt) {
+                        if a != b {
+                            return Err(format!("mismatched types: expected `{}`, found `{}`", a.name(), b.name()));
+                        }
+                    }
+                }
                 // (a shift has its left operand's type; another operator its operands' (one may be unsuffixed))
                 let t = if op == "<<" || op == ">>" { lt } else { lt.or(rt) };
                 let b = |x: bool| un(x as i128);
@@ -5147,6 +5277,10 @@ impl Program {
         vs: Vec<(String, VariantKind, Vec<(String, Ty)>, i64)>,
         tag: Ty,
     ) -> (Vec<VariantDef>, u32, u32) {
+        // (an enum of no variants has no values: no tag, size 0, as rustc lays it out)
+        if vs.is_empty() {
+            return (vec![], 0, self.min_align.get(name).copied().unwrap_or(1).max(1));
+        }
         let tag_size = tag.bits() / 8;
         // (`#[repr(u8)]` and the like on an enum with fields (RFC 2195): each variant is laid out as a `#[repr(C)]`
         // struct of the tag and its fields, the enum as their union)
@@ -5947,7 +6081,8 @@ impl Program {
         match state[id] {
             2 => return Ok(()),
             1 => {
-                return Err(format!("{}:1: recursive type `{}` has infinite size", items[sdefs[id].0].line, sdefs[id].1));
+                // (at the item's first token past its attributes, as rustc: name_line reads the mark)
+                return Err(format!("{}:1: \u{5}\u{5}recursive type `{}` has infinite size", items[sdefs[id].0].line, sdefs[id].1));
             }
             _ => {}
         }
@@ -6839,7 +6974,10 @@ fn syn_has_assoc(t: &TySyn) -> bool {
 fn early_bound(r: Option<&crate::types::RSigSyn>, g: &[(String, Vec<String>)], outer_names: &mut Vec<String>) -> (Vec<bool>, Vec<(i32, i32)>) {
     let Some(r) = r else { return (vec![], vec![]) };
     let in_bounds = |l: &str| g.iter().flat_map(|x| x.1.iter()).any(|b| b.match_indices(l).any(|(k, _)| !b[k + l.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')));
-    let idx: Vec<usize> = (r.outer as usize..r.lts.len()).filter(|&i| in_bounds(&r.lts[i]) || r.outlives.iter().any(|&(a, b)| a as usize == i || b as usize == i)).collect();
+    // (also a lifetime a where clause bounds a type by, of the trait's parameters too: `where T: 'a`)
+    let idx: Vec<usize> = (r.outer as usize..r.lts.len())
+        .filter(|&i| in_bounds(&r.lts[i]) || r.outlives.iter().any(|&(a, b)| a as usize == i || b as usize == i) || r.ty_outlives.iter().any(|x| x.1 as usize == i))
+        .collect();
     let mut ord = |c: u8| match idx.iter().position(|&k| k == c as usize) {
         Some(p) => Some(p as i32),
         None if c == crate::types::R_STATIC => Some(-1),
@@ -6855,6 +6993,32 @@ fn early_bound(r: Option<&crate::types::RSigSyn>, g: &[(String, Vec<String>)], o
     };
     let rel = r.outlives.iter().filter_map(|&(a, b)| Some((ord(a)?, ord(b)?))).collect();
     ((r.outer as usize..r.lts.len()).map(|i| idx.contains(&i)).collect(), rel)
+}
+
+/// E0053 beyond the receiver: `unsafe` on one side only, or a parameter's or the result's type other than the
+/// trait's, where both are concrete (no type parameter, `Self` or projection) and neither the trait nor the methods
+/// have parameters of their own. The part rustc points at, for name_line: `f` the signature, `p{i}` the `i`th
+/// parameter's type, `r` the result's
+fn sig_incompatible(p: &Program, ds: &FnSig, ms: &FnSig, tr: &str) -> Option<String> {
+    if ds.has_self != ms.has_self || ds.params.len() != ms.params.len() {
+        return None;
+    }
+    if ds.is_unsafe != ms.is_unsafe {
+        return Some("f".into());
+    }
+    let own = |g: &Vec<(String, Vec<String>)>| g.iter().all(|(n, _)| n == "Self");
+    if !own(&ds.generics) || !own(&ms.generics) || tr.contains('<') {
+        return None;
+    }
+    let concrete = |t: Ty| !p.has_param(t) && !p.tn(t).contains("Self");
+    let differ = |a: Ty, b: Ty| a != b && concrete(a) && concrete(b);
+    let k0 = usize::from(ds.has_self);
+    if let Some(i) = (k0..ds.params.len()).find(|&i| differ(ds.params[i], ms.params[i])) {
+        return Some(format!("p{i}"));
+    }
+    // (the result: not when the declaration's is `-> impl Trait` (kept as `()`, a placeholder) or the declaration is an
+    // `async fn` (kept as its output): the impl may return any type of those bounds, a future for an `async fn`)
+    (ds.ret != Ty::Unit && differ(ds.ret, ms.ret) && !p.implements(ms.ret, "Future")).then(|| "r".into())
 }
 
 /// An impl's method against the trait's declaration: E0195 when they have a different number of early-bound
@@ -7360,5 +7524,21 @@ fn alias_structs(t: &TySyn, index: &FxMap<String, u32>, out: &mut Vec<u32>) {
         TySyn::Ref(_, i) | TySyn::Ptr(_, i) | TySyn::Slice(i) | TySyn::Array(i, _) | TySyn::Assoc(i, _) => alias_structs(i, index, out),
         TySyn::Tuple(ts) | TySyn::FnPtr(ts) => ts.iter().for_each(|a| alias_structs(a, index, out)),
         _ => {}
+    }
+}
+
+/// E0185 / E0186: `fn foo(&self)` in the impl for the trait's `fn foo()`, or the other way round. s: the signature
+/// with the receiver
+#[cold]
+fn receiver_mismatch(line: &str, m: &str, s: &FnSig, in_impl: bool) -> String {
+    let recv = match s.params.first() {
+        Some(Ty::Ref(false, _)) => "&self",
+        Some(Ty::Ref(true, _)) => "&mut self",
+        _ => "self",
+    };
+    if in_impl {
+        format!("{line}method `{m}` has a `{recv}` declaration in the impl, but not in the trait (E0185)")
+    } else {
+        format!("{line}method `{m}` has a `{recv}` declaration in the trait, but not in the impl (E0186)")
     }
 }

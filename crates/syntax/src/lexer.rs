@@ -145,6 +145,74 @@ impl St<'_> {
 }
 
 pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
+    // (a closing delimiter that does not close the innermost open one is rustc's lexer's error, before any of the
+    // parser's: read for only when the split fails)
+    split_items(src).map_err(|e| mismatched_delim(src.as_bytes()).unwrap_or(e))
+}
+
+/// The line (from 1) of b's first merge diff marker, `<<<<<<<` at a line's start outside strings and comments
+#[cold]
+#[inline(never)]
+pub fn diff_marker_line(b: &[u8]) -> Option<usize> {
+    let at = tokenize(b).into_iter().find(|&(k, a, _)| k == 1 && b[a] == b'<' && (a == 0 || b[a - 1] == b'\n') && b[a..].starts_with(b"<<<<<<<"))?.1;
+    Some(b[..at].iter().filter(|&&x| x == b'\n').count() + 1)
+}
+
+/// The lexer's error of b's delimiters as rustc 1.100 reports it, outside strings, chars and comments. A closing
+/// delimiter that does not close the innermost open one takes that one away, and is read again for the next one
+/// down when one of those it would close is open (`fn f() { bar(baz( }`), as rustc recovers; else it is skipped. A
+/// closing delimiter with none open is "unexpected closing delimiter: `}`" there, which rustc reports in place of the
+/// mismatches before it; without one, the first mismatch is "mismatched closing delimiter: `)`" at that delimiter
+/// (where rustc labels it). None when every one matches (an unclosed one at the end is another error)
+#[cold]
+#[inline(never)]
+fn mismatched_delim(b: &[u8]) -> Option<String> {
+    let toks = tokenize(b);
+    let at = |a: usize, what: &str| {
+        let ls = b[..a].iter().rposition(|&x| x == b'\n').map_or(0, |p| p + 1);
+        let line = b[..a].iter().filter(|&&x| x == b'\n').count() + 1;
+        let col = std::str::from_utf8(&b[ls..a]).map_or(a - ls, |t| t.chars().count()) + 1;
+        format!("{line}:{col}: {what} closing delimiter: `{}`", b[a] as char)
+    };
+    let mut open: Vec<u8> = vec![];
+    let mut mismatch: Option<usize> = None;
+    let mut k = 0;
+    while k < toks.len() {
+        let (kind, a, _) = toks[k];
+        let want = match (kind, b[a]) {
+            (1, c @ (b'(' | b'[' | b'{')) => {
+                open.push(c);
+                k += 1;
+                continue;
+            }
+            (1, b')') => b'(',
+            (1, b']') => b'[',
+            (1, b'}') => b'{',
+            _ => {
+                k += 1;
+                continue;
+            }
+        };
+        match open.last() {
+            None => return Some(at(a, "unexpected")),
+            Some(&o) if o == want => {
+                open.pop();
+                k += 1;
+            }
+            Some(_) => {
+                mismatch.get_or_insert(a);
+                open.pop();
+                if !open.contains(&want) {
+                    k += 1;
+                }
+            }
+        }
+    }
+    mismatch.map(|a| at(a, "mismatched"))
+}
+
+#[inline(never)]
+fn split_items(src: &str) -> Result<Vec<SrcItem>, String> {
     let s = src.as_bytes();
     let n = s.len();
     let mut i = 0;
@@ -310,7 +378,13 @@ pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
         i += 1;
         // impl ブロックの閉じ括弧はどのアイテムにも属さない
         if c == b'}' && impl_header.is_some() && depth == 1 {
-            if st.cur.is_some() {
+            if let Some((sp, ..)) = st.cur {
+                // (attributes with no item after them, `impl Foo { #[stable(..)] }`: rustc's error at the first)
+                let sp = sp as usize;
+                if attrs_only(std::str::from_utf8(&s[sp..start]).unwrap_or("")) {
+                    let col = std::str::from_utf8(&s[s[..sp].iter().rposition(|&c| c == b'\n').map_or(0, |p| p + 1)..sp]).map_or(1, |l| l.chars().count() + 1);
+                    return Err(format!("{}:{col}: expected item after attributes", st.line_at(sp)));
+                }
                 return Err(format!(
                     "{}:1: unterminated item in impl block",
                     st.line_at(start)
@@ -431,6 +505,10 @@ pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
         if rest.is_empty() {
             return Ok(items);
         }
+        // (a literal or a comment the file ends in: rustc's lexer reports it, at its start, before the delimiters)
+        if let Some(e) = unterminated_literal(s) {
+            return Err(e);
+        }
         // (more delimiters opened than closed to the end: rustc's error at the end of the file, its last line)
         if unclosed_delims(rest.as_bytes()) {
             let src = std::str::from_utf8(s).unwrap_or("");
@@ -521,6 +599,121 @@ fn utf8_len(b: u8) -> usize {
         0xc0.. => 2,
         _ => 1,
     }
+}
+
+/// Whether a text is outer attributes alone (`#[..]` groups, whitespace and comments between), at least one
+#[cold]
+fn attrs_only(text: &str) -> bool {
+    let mut rest = text.trim_start();
+    if !rest.starts_with("#[") {
+        return false;
+    }
+    while let Some(r) = rest.strip_prefix("#[") {
+        let mut d = 1;
+        let Some(e) = r.char_indices().find_map(|(i, c)| {
+            match c {
+                '[' => d += 1,
+                ']' => d -= 1,
+                _ => {}
+            }
+            (d == 0).then_some(i)
+        }) else {
+            return false;
+        };
+        rest = r[e + 1..].trim_start();
+        while rest.starts_with("//") {
+            rest = rest[rest.find('\n').unwrap_or(rest.len())..].trim_start();
+        }
+    }
+    rest.is_empty()
+}
+
+/// rustc's lexer error for a string, a raw string or a block comment that the file ends in, at its start: E0765
+/// "unterminated double quote string" (E0766 for a byte string), E0748 "unterminated raw string", E0758
+/// "unterminated block comment". Read only when the items do not split (an error is reported anyway)
+#[cold]
+pub fn unterminated_literal(s: &[u8]) -> Option<String> {
+    let n = s.len();
+    let at = |i: usize, m: &str| {
+        let line = 1 + s[..i].iter().filter(|&&c| c == b'\n').count();
+        let col = std::str::from_utf8(&s[s[..i].iter().rposition(|&c| c == b'\n').map_or(0, |p| p + 1)..i]).map_or(1, |l| l.chars().count() + 1);
+        Some(format!("{line}:{col}: {m}"))
+    };
+    let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c >= 0x80;
+    let mut i = 0;
+    while i < n {
+        let c = s[i];
+        if c == b'/' && s.get(i + 1) == Some(&b'/') {
+            i += s[i..].iter().position(|&c| c == b'\n').unwrap_or(n - i);
+        } else if c == b'/' && s.get(i + 1) == Some(&b'*') {
+            let (st, mut d) = (i, 0u32);
+            loop {
+                if i + 1 >= n {
+                    return at(st, "unterminated block comment (E0758)");
+                }
+                if s[i] == b'/' && s[i + 1] == b'*' {
+                    d += 1;
+                    i += 2;
+                } else if s[i] == b'*' && s[i + 1] == b'/' {
+                    d -= 1;
+                    i += 2;
+                    if d == 0 {
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+        } else if c == b'\'' {
+            // (a char literal, `'x'` / `'\''`, or a lifetime)
+            let close = if s.get(i + 1) == Some(&b'\\') { s[i + 3.min(n - i)..].iter().position(|&c| c == b'\'').map(|p| i + 3 + p) } else { Some(i + 1 + s.get(i + 1).map_or(1, |&b| utf8_len(b))).filter(|&e| s.get(e) == Some(&b'\'')) };
+            i = match close {
+                Some(e) => e + 1,
+                None => i + 1,
+            };
+        } else if ident(c) {
+            let (st, raw) = (i, c == b'r' || ((c == b'b' || c == b'c') && s.get(i + 1) == Some(&b'r')));
+            let mut j = if raw && c != b'r' { i + 2 } else { i + 1 };
+            if raw && (s.get(j) == Some(&b'#') || s.get(j) == Some(&b'"')) {
+                let h = s[j..].iter().take_while(|&&c| c == b'#').count();
+                if s.get(j + h) == Some(&b'"') {
+                    j += h + 1;
+                    let end = (j..n).find(|&k| s[k] == b'"' && s.len() >= k + 1 + h && s[k + 1..k + 1 + h].iter().all(|&c| c == b'#'));
+                    match end {
+                        Some(k) => i = k + 1 + h,
+                        None => return at(st, "unterminated raw string (E0748)"),
+                    }
+                    continue;
+                }
+            }
+            if (c == b'b' || c == b'c') && s.get(i + 1) == Some(&b'"') {
+                i += 1;
+                continue;
+            }
+            if c == b'b' && s.get(i + 1) == Some(&b'\'') {
+                i += 1;
+                continue;
+            }
+            while j < n && ident(s[j]) {
+                j += 1;
+            }
+            i = j;
+        } else if c == b'"' {
+            let byte = i > 0 && s[i - 1] == b'b';
+            let st = if byte { i - 1 } else { i };
+            let mut j = i + 1;
+            while j < n && s[j] != b'"' {
+                j += if s[j] == b'\\' { 2 } else { 1 };
+            }
+            if j >= n {
+                return at(st, if byte { "unterminated double quote byte string (E0766)" } else { "unterminated double quote string (E0765)" });
+            }
+            i = j + 1;
+        } else {
+            i += 1;
+        }
+    }
+    None
 }
 
 /// 位置 i から文字列リテラルが始まっていればその終端を返す。
@@ -1228,8 +1421,8 @@ pub fn hoist_nested_items(src: &str) -> Option<String> {
 }
 
 /// What an item that hoist_parts_at may move starts with
-const HOIST_KWS: [&str; 21] = [
-    "fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "extern ", "unsafe extern ", "pub fn ", "pub struct ",
+const HOIST_KWS: [&str; 23] = [
+    "fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "extern ", "unsafe extern ", "unsafe fn ", "async ", "pub fn ", "pub struct ",
     "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ", "pub(crate) ",
 ];
 
@@ -1250,7 +1443,7 @@ pub fn has_inline_item(src: &str) -> bool {
             }
             t = rest[end + 1..].trim_start_matches([' ', '\t']);
         }
-        matches!(t.as_bytes().first(), Some(b'f' | b's' | b'e' | b'u' | b'c' | b'm' | b't' | b'i' | b'p')) && HOIST_KWS.iter().any(|k| t.starts_with(k))
+        matches!(t.as_bytes().first(), Some(b'f' | b's' | b'e' | b'u' | b'c' | b'm' | b't' | b'i' | b'p' | b'a')) && HOIST_KWS.iter().any(|k| t.starts_with(k))
     })
 }
 
@@ -1264,12 +1457,12 @@ pub fn hoist_nested_items_parts(src: &str) -> Option<(String, Vec<(usize, String
 /// depth: 名前を変えてやり直した回数 (壊れたソースで名前の変更が止まらないときは 8 回で止める)
 fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)> {
     // (速く飛ばす: 字下げした行頭の `fn ` などがなければ入れ子のアイテムはない)
-    const KWS: [&str; 21] = HOIST_KWS;
+    const KWS: [&str; 23] = HOIST_KWS;
     let indented = src.split('\n').any(|l| {
         let t = l.trim_start();
         // (the keywords' first letters first: most lines start with none of them)
         t.len() < l.len()
-            && matches!(t.as_bytes().first(), Some(b'f' | b's' | b'e' | b'u' | b'c' | b'm' | b't' | b'i' | b'p'))
+            && matches!(t.as_bytes().first(), Some(b'f' | b's' | b'e' | b'u' | b'c' | b'm' | b't' | b'i' | b'p' | b'a'))
             && KWS.iter().any(|k| t.starts_with(k))
     });
     // (a proc macro's output is one line, marked (PM_MARK): the items in its bodies, `{#[link(..)] extern "C" {..}`,
@@ -1286,20 +1479,42 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     let mut depth = 0i32;
     let mut fn_bodies: Vec<(i32, usize)> = vec![];
     let mut pending_fn = false;
+    // (a top-level `const` / `static` whose initializer is a block, `const F: fn() = { fn broken() {..} broken };`: the
+    // block's items are hoisted as a fn body's are. Set at the item's keyword, until its `;`)
+    let mut init_item = false;
+    // (the nesting of `(` / `[`: a `;` in them (`[u8; 4]`, `[(); 1]`) ends no item)
+    let mut nest = 0i32;
     let mut moves: Vec<(usize, usize)> = vec![];
     // 入れ子のアイテムの名前と、それを含む関数の本体 (開き括弧のトークン位置)。閉じた本体の (開き, 閉じ)
     let mut nested_names: Vec<(Vec<u8>, usize)> = vec![];
     let mut bodies: Vec<(usize, usize)> = vec![];
-    // (the open braces, innermost last, and each closed block's (open, close): a nested item's scope is the block it
-    // is written in, which may be a block inside its fn's body (`{ fn f() {} }` twice in one fn: two `f`s apart))
-    let mut open_braces: Vec<usize> = vec![];
-    let mut blocks: Vec<(usize, usize)> = vec![];
+    // (an item's scope is its innermost block, `{ struct Bar; } { struct Bar; }` two: the `{` before its statement,
+    // found back from it, as items in bodies are few)
+    let block_of = |k: usize| -> usize {
+        let mut d = 0u32;
+        let mut j = k;
+        while j > 0 {
+            j -= 1;
+            if toks[j].0 == 1 {
+                match s[toks[j].1] {
+                    b'}' => d += 1,
+                    b'{' if d == 0 => return j,
+                    b'{' => d -= 1,
+                    _ => {}
+                }
+            }
+        }
+        0
+    };
     // トップレベルのアイテムの名前 (入れ子のアイテムを外に出すとぶつかるもの)
     let mut top_names: Vec<Vec<u8>> = vec![];
     let mut k = 0;
     while k < toks.len() {
         let t = tok(k);
         if toks[k].0 == 0 {
+            if depth == 0 && matches!(t, b"const" | b"static") && k + 1 < toks.len() && !matches!(tok(k + 1), b"fn" | b"unsafe" | b"extern" | b"async") {
+                init_item = true;
+            }
             if depth == 0 && matches!(t, b"fn" | b"struct" | b"enum" | b"const" | b"static" | b"union" | b"trait" | b"type") && k + 1 < toks.len() {
                 let nk = if t == b"static" && tok(k + 1) == b"mut" { k + 2 } else { k + 1 };
                 if nk < toks.len() && toks[nk].0 == 0 {
@@ -1330,9 +1545,22 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 } else {
                     k
                 }
-            } else if t == b"unsafe" && k + 1 < toks.len() && tok(k + 1) == b"extern" {
-                // (`unsafe extern "C" { .. }`)
+            } else if t == b"unsafe" && k + 1 < toks.len() && matches!(tok(k + 1), b"extern" | b"fn") {
+                // (`unsafe extern "C" { .. }`, `unsafe fn f() { .. }`)
                 k + 1
+            } else if matches!(t, b"async" | b"const" | b"unsafe" | b"safe" | b"extern") && {
+                // (a fn's qualifiers, `async fn`, `const unsafe fn`, `extern "C" fn`: the item is the fn)
+                let mut j = k;
+                while j < toks.len() && (matches!(tok(j), b"async" | b"const" | b"unsafe" | b"safe" | b"extern") || (toks[j].0 == 2 && j > k && tok(j - 1) == b"extern")) {
+                    j += 1;
+                }
+                j < toks.len() && j > k && tok(j) == b"fn"
+            } {
+                let mut j = k;
+                while tok(j) != b"fn" {
+                    j += 1;
+                }
+                j
             } else {
                 k
             };
@@ -1422,16 +1650,15 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 }
                 moves.push((toks[st].1, toks[e].2));
                 let nk = if matches!(t, b"static") && tok(ik + 1) == b"mut" { ik + 2 } else { ik + 1 };
-                let scope = open_braces.last().copied().unwrap_or(fn_bodies.last().unwrap().1);
                 if nk < toks.len() && toks[nk].0 == 0 && t != b"use" && t != b"impl" && !extern_block {
-                    nested_names.push((tok(nk).to_vec(), scope));
+                    nested_names.push((tok(nk).to_vec(), block_of(k)));
                 }
                 // (an extern block's functions: names of the block's function, renamed like its other items when
                 // another function's block declares the name too; the declaration then keeps its symbol, link_name)
                 if extern_block {
                     for q in ik + 1..e {
                         if toks[q].0 == 0 && tok(q) == b"fn" && q + 1 < e && toks[q + 1].0 == 0 {
-                            nested_names.push((tok(q + 1).to_vec(), scope));
+                            nested_names.push((tok(q + 1).to_vec(), block_of(k)));
                         }
                     }
                 }
@@ -1449,22 +1676,27 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                     if pending_fn {
                         fn_bodies.push((depth, k));
                         pending_fn = false;
+                    } else if init_item && depth == 0 && k >= 1 && is_sym(k - 1, b"=") {
+                        fn_bodies.push((depth, k));
                     }
-                    open_braces.push(k);
                     depth += 1;
                 }
                 b"}" => {
-                    if let Some(o) = open_braces.pop() {
-                        blocks.push((o, k));
-                    }
                     depth -= 1;
                     if fn_bodies.last().is_some_and(|&(d, _)| d == depth) {
                         let (_, open) = fn_bodies.pop().unwrap();
                         bodies.push((open, k));
                     }
                 }
+                b"(" | b"[" => nest += 1,
+                b")" | b"]" => nest = (nest - 1).max(0),
                 // `fn f();` (宣言だけ) は本体なし
-                b";" => pending_fn = false,
+                b";" if nest == 0 => {
+                    pending_fn = false;
+                    if depth == 0 {
+                        init_item = false;
+                    }
+                }
                 _ => {}
             }
         }
@@ -1481,7 +1713,26 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
         if !dup {
             continue;
         }
-        if let Some(&(open, close)) = blocks.iter().find(|x| x.0 == *b).or_else(|| bodies.iter().find(|x| x.0 == *b)) {
+        // (the block's `}`: a fn body's is known, another block's is found forward from its `{`)
+        let close_of = |o: usize| -> Option<usize> {
+            let mut d = 0u32;
+            for j in o..toks.len() {
+                if toks[j].0 == 1 {
+                    match s[toks[j].1] {
+                        b'{' => d += 1,
+                        b'}' => {
+                            d -= 1;
+                            if d == 0 {
+                                return Some(j);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            None
+        };
+        if let Some((open, close)) = bodies.iter().find(|x| x.0 == *b).copied().or_else(|| close_of(*b).map(|c| (*b, c))) {
             let mut nn = n.clone();
             nn.extend_from_slice(format!("__h{i}").as_bytes());
             renames.push((open, close, n.clone(), nn));
@@ -1499,7 +1750,9 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 k += 1;
             }
         }
-        // (同じトークンに複数あれば、その位置を囲むいちばん内側の block のもの: Rust の名前の見え方と同じ)
+        // (同じトークンに複数あれば、その位置を囲むいちばん内側の block のもの: Rust の名前の見え方と同じ。
+        //  `fn m` in a fn's body beside another `fn m` in a block of it: the block's tokens take the block's name, or the
+        //  two would be renamed alike on each redo)
         at.sort_by(|x, y| x.0.cmp(&y.0).then(renames[y.1].0.cmp(&renames[x.1].0)));
         at.dedup_by_key(|x| x.0);
         // (a foreign function's declaration, `fn abs(x: i32) -> i32;` with no body, renamed: it keeps its symbol, a
@@ -2252,21 +2505,17 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         }
     }
     let in_crate = |m: usize| -> bool { m != usize::MAX && mods[m].0.first().is_some_and(|r| crates.iter().any(|c| c.as_bytes() == r.as_slice())) };
+    // (each name's scopes, read once (a scan of all the definitions per name is quadratic in a crate of many items):
+    // the first scope defining it, whether another scope does too, whether one that is not the root does)
+    let mut scopes_of: LMap<&[u8], (usize, bool, bool)> = LMap::default();
+    for d in &defs {
+        let e = scopes_of.entry(d.0.as_slice()).or_insert((d.1, false, false));
+        e.1 |= e.0 != d.1;
+        e.2 |= d.1 != usize::MAX;
+    }
+    // (a name two scopes define, or one a module defines that a `use` brings in from std too)
     let colliding = |n: &[u8]| -> bool {
-        if std_names.iter().any(|x| x.as_slice() == n) && defs.iter().any(|d| d.0.as_slice() == n && d.1 != usize::MAX) {
-            return true;
-        }
-        let mut first: Option<usize> = None;
-        for d in &defs {
-            if d.0.as_slice() == n {
-                match first {
-                    None => first = Some(d.1),
-                    Some(f) if f != d.1 => return true,
-                    _ => {}
-                }
-            }
-        }
-        false
+        scopes_of.get(n).is_some_and(|&(_, multi, inner)| multi || inner && std_names.iter().any(|x| x.as_slice() == n))
     };
     let new_name = |m: usize, n: &[u8]| -> Vec<u8> {
         let mut v = Vec::new();

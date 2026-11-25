@@ -240,8 +240,6 @@ test by test (`cratebench/test_result.md`). fnv, rustc-hash, cfg-if and adler2 m
   `impl<Target> AsMut<Target>` beside impls for unsized types, which rustc accepts because `Target` is `Sized`. Then
   serde_core, through the dev-dependency serde_json: #197, #198, and std types the prelude lacks (`CString` /
   `CStr`, net addresses, `SystemTime`, `LinkedList`, `RwLock`, `Weak`, `Bound`).
-- The fix for same-named fns in sibling blocks of one fn (either's `check_t!`) is commit e4833cca on branch
-  `claude/tender-sagan-iatvun`, without a PR yet.
 - hex and itoa: their dev-dependency criterion needs two versions of one crate (#28). The error message names
   `itoa v1.0.19` twice (#178).
 - Smaller gaps found on the way: inherent impls on instances of one type (associated fns, implicit `Sized`: #201),
