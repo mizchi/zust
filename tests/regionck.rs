@@ -4478,6 +4478,15 @@ fn g<'x>() -> &'x i32 { let x = 5; let b = Box::new(S(&x)); b.getb() }
 fn h<'x>() -> &'x i32 { let x = 5; Box::new(S(&x)).getb() }
 fn main() { let _ = (f(), g(), h()); }
 "#, &[(3, "E0515"), (4, "E0515"), (5, "E0515")], "b2");
+    // (`Self: 'static` of an impl whose self type is a type alias that drops its lifetime (`Erased<'a>` with
+    // `type Erased<'a> = ();`) implies nothing of 'a; of a struct's (`D<'a>`) it implies 'a: 'b)
+    errors_at(r#"type Erased<'a> = ();
+trait Leak<'a> { fn leak(x: &'a i32) -> &'static i32 where Self: 'static; }
+impl<'a> Leak<'a> for Erased<'a> { fn leak(x: &'a i32) -> &'static i32 where Self: 'static { x } }
+struct D<'a>(&'a i32);
+impl<'a> D<'a> { fn keep<'b>(self) -> &'b i32 where Self: 'b { self.0 } }
+fn main() {}
+"#, &[(3, "lifetime may not live long enough")], "sa");
     // (a bound on a generic associated type with lifetime arguments (`T::A<'a>: 'static`) is one component of its
     // own: it implies nothing of 'a)
     errors_at(r#"trait Tr { type A<'x>; }

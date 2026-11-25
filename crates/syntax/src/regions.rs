@@ -685,18 +685,24 @@ impl<'a> Slots<'a> {
             for b in bs {
                 let Bound::Lifetime(l) = b else { continue };
                 let c = me.code(Some(l));
-                // (`Self: 'b` in an impl's method: the lifetimes of the impl's self type outlive 'b)
-                if s.name == "Self" && c <= R_STATIC {
+                // (`Self: 'b` in an impl's method: the lifetimes of the impl's self type outlive 'b. Kept apart (paths
+                // `#self`): the program adds them where the self type names no type alias, which may drop one,
+                // `impl<'a> Tr for Erased<'a>` with `type Erased<'a> = ();`)
+                if s.name == "Self" && c <= R_STATIC && me.derived.is_some() {
                     let ss = me.self_slots;
+                    let mut found = vec![];
                     let mut i = 0;
                     while i < ss.len() {
                         let (from, to) = if ss[i] == R_DYN_ARGS { (i + 2, (i + 2 + ss.get(i + 1).copied().unwrap_or(0) as usize).min(ss.len())) } else { (i, i + 1) };
                         for &a in &ss[from..to] {
-                            if a < R_STATIC && a != c && !outlives.contains(&(a, c)) {
-                                outlives.push((a, c));
+                            if a < R_STATIC && a != c {
+                                found.push(("#self".to_string(), a, c));
                             }
                         }
                         i = to.max(i + 1);
+                    }
+                    if let Some((d, _)) = me.derived.as_mut() {
+                        d.extend(found);
                     }
                 }
                 if s.name.starts_with('\'') {
