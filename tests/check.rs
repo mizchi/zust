@@ -2795,3 +2795,15 @@ fn extern_statics_in_a_static_value() {
     assert_eq!(first("extern \"C\" {\n    static Q: [u8; 0];\n}\nstatic R: &'static [u8; 0] = unsafe { &Q };\nfn main() {}\n"), None, "its address");
     assert_eq!(first("extern \"C\" {\n    static Q: u32;\n}\npub static B: u32 = *&Q;\nfn main() {}\n").map(|d| d.0), Some(4), "a read through its address");
 }
+
+#[test]
+fn macro_parameters_no_matcher_binds() {
+    // (rustc 1.100, where the rule is used: at the `$name` in its body; an inner `macro_rules!`'s own `$x` is fine)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    assert_eq!(first("macro_rules! m {\n    (begin $ard:ident end) => {\n        [$arg]\n    };\n}\nfn main() {\n    let x = 1;\n    let _ = m![begin x end];\n}\n"), Some((3, "cannot find macro parameter `$arg` in this scope".to_string())), "a typo");
+    assert_eq!(first("macro_rules! m {\n    (begin $($ard:ident),* end) => {\n        [$($arg),*]\n    };\n}\nfn main() {\n    let x = 1;\n    let _ = m![begin x end];\n}\n"), Some((3, "attempted to repeat an expression containing no syntax variables matched as repeating at this depth".to_string())), "a repetition");
+    assert_eq!(first("macro_rules! outer {\n    ($n:ident) => {\n        macro_rules! $n {\n            ($x:expr) => { $x + 1 };\n        }\n    };\n}\nouter!(inner);\nfn main() {\n    let _ = inner!(2);\n}\n"), None, "an inner macro's own parameter");
+}

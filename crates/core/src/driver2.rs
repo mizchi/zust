@@ -898,6 +898,7 @@ impl Session2 {
         let cfg = self.opts.cfg_of(self.ctx.features.as_ref().unwrap_or(&self.opts.features), &self.ctx.cfgs, &self.ctx.env);
         crate::macros::BAD_FRAGMENT.with(|c| c.borrow_mut().take());
         crate::macros::BAD_DEF.with(|c| c.set(false));
+        crate::macros::UNBOUND.with(|c| c.borrow_mut().take());
         crate::macros::DUP_EXPORT.with(|c| c.borrow_mut().take());
         let (mut src, mut items, mut user, prelude_line0) = with_prelude_in(src0, &crates, &mut fix, Some(&cfg), &mut self.sel)?;
         self.ctx.map.colfix = fix;
@@ -981,6 +982,13 @@ impl Session2 {
                 if let Some((at, _)) = src0.match_indices(pat.as_str()).nth(1) {
                     let line = 1 + src0[..at].matches('\n').count();
                     return Err(format!("{line}:1: the name `{n}` is defined multiple times (E0428)"));
+                }
+            }
+            // (a rule's `$name` its matcher does not bind, left in the expansion: noted by the expansion, read from the
+            // text then)
+            if let Some((n, rep)) = crate::macros::UNBOUND.with(|c| c.borrow_mut().take()) {
+                if let Some(e) = crate::macros::unbound_err(&src, src0, &n, rep) {
+                    return Err(e);
                 }
             }
             // (a `macro_rules!` definition rustc rejects as it reads it: no rule, a matcher outside delimiters, a rule cut

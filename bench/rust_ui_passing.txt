@@ -4501,6 +4501,7 @@ compile-fail	macros/issue-46438.rs
 run-pass	macros/issue-5060.rs
 run-pass	macros/issue-52169.rs
 compile-fail	macros/issue-61033-1.rs
+compile-fail	macros/issue-6596-1.rs
 check-pass	macros/issue-68058.rs
 compile-fail	macros/issue-68060.rs
 check-pass	macros/issue-69838-mods-relative-to-included-path.rs
@@ -4615,6 +4616,10 @@ compile-fail	macros/suggest-enclosing-format-string.rs
 compile-fail	macros/tokenstream-ice-issue-149954.rs
 check-pass	macros/trait-bound-not-parsed-as-matcher.rs
 run-pass	macros/typeck-macro-interaction-issue-8852.rs
+compile-fail	macros/typo-in-norepeat-expr-2.rs
+compile-fail	macros/typo-in-norepeat-expr.rs
+compile-fail	macros/typo-in-repeat-expr-2.rs
+compile-fail	macros/typo-in-repeat-expr.rs
 compile-fail	macros/undefined-macro-in-impl.rs
 check-pass	macros/user-defined-macro-rules.rs
 compile-fail	macros/vec-macro-in-pattern.rs

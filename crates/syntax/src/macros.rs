@@ -125,6 +125,60 @@ pub fn macro_def_err(src: &str) -> Option<String> {
 }
 
 thread_local! {
+    /// A `$name` of a rule's body that its matcher does not bind, kept in the expansion (an inner `macro_rules!`'s, else
+    /// rustc's "cannot find macro parameter"): its name, and whether it is in a repetition of no variable bound there
+    pub static UNBOUND: std::cell::RefCell<Option<(String, bool)>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cold]
+fn unbound(n: &str, rep: bool) {
+    UNBOUND.with(|c| {
+        if c.borrow().is_none() {
+            *c.borrow_mut() = Some((n.to_string(), rep));
+        }
+    });
+}
+
+/// rustc's error for a rule's `$name` its matcher does not bind, when it is left in the expansion (`expanded`): at its
+/// first use in a rule's body in src (not a matcher's `$name:frag`), "cannot find macro parameter `$name` in this
+/// scope"; or, in a repetition (`rep`), "attempted to repeat an expression containing no syntax variables matched as
+/// repeating at this depth" at the repetition's `$`
+#[cold]
+pub fn unbound_err(expanded: &str, src: &str, name: &str, rep: bool) -> Option<String> {
+    let has = |s: &str| -> Option<(Vec<(u8, usize, usize)>, Vec<usize>)> {
+        let b = s.as_bytes();
+        let toks = crate::lexer::tokenize(b);
+        let at: Vec<usize> = (1..toks.len())
+            .filter(|&k| toks[k - 1].0 == 1 && b[toks[k - 1].1] == b'$' && toks[k].0 == 0 && &b[toks[k].1..toks[k].2] == name.as_bytes())
+            .filter(|&k| !(k + 1 < toks.len() && toks[k + 1].0 == 1 && b[toks[k + 1].1] == b':'))
+            .collect();
+        (!at.is_empty()).then_some((toks, at))
+    };
+    // (most expansions keep no `$`: one byte search first)
+    if !expanded.contains('$') {
+        return None;
+    }
+    has(expanded)?;
+    let (toks, at) = has(src)?;
+    let b = src.as_bytes();
+    let mut k = at[0] - 1;
+    if rep {
+        // (the `$(` around it)
+        let (close, _) = brackets(b, &toks);
+        let o = (1..k).rev().find(|&j| toks[j - 1].0 == 1 && b[toks[j - 1].1] == b'$' && toks[j].0 == 1 && b[toks[j].1] == b'(' && close[j] > k)?;
+        k = o - 1;
+    }
+    let off = toks[k].1;
+    let line = 1 + b[..off].iter().filter(|&&c| c == b'\n').count();
+    let col = src[..off].chars().rev().take_while(|&c| c != '\n').count() + 1;
+    Some(if rep {
+        format!("{line}:{col}: attempted to repeat an expression containing no syntax variables matched as repeating at this depth")
+    } else {
+        format!("{line}:{col}: cannot find macro parameter `${name}` in this scope")
+    })
+}
+
+thread_local! {
     /// The name of a `#[macro_export]` macro defined twice (E0428), met while the definitions are read
     pub static DUP_EXPORT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
@@ -864,6 +918,7 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
                     if name == "crate" {
                         out.push_str("crate");
                     } else {
+                        unbound(name, false);
                         out.push('$');
                         out.push_str(name);
                     }
@@ -876,6 +931,9 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
                 // (no variable of it bound here: a repetition of an inner `macro_rules!` that this body holds (a module
                 // file put in a macro's body, serde_core's `crate_root!`): kept as written, for that macro)
                 if names.iter().all(|v| binds.get(v).is_none()) {
+                    if let Some(n) = names.first() {
+                        unbound(n, true);
+                    }
                     out.push_str("$(");
                     transcribe(inner, binds, out, lets)?;
                     out.push_str(") ");
