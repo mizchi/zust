@@ -12397,21 +12397,6 @@ fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem]
             if sig.trait_of.is_some() || sig.is_extern || !sig.has_body {
                 continue;
             }
-            // (only a signature that may hold an unsized type: one of its own `?Sized` parameters, or a slice, `str` or
-            // `dyn` written in it)
-            fn writes_unsized(t: &crate::types::TySyn, depth: u32) -> bool {
-                use crate::types::TySyn as S;
-                depth < 16
-                    && match t {
-                        S::Slice(_) | S::Str | S::Dyn(_) => true,
-                        S::Ref(_, i) | S::Ptr(_, i) | S::Array(i, _) | S::Assoc(i, _) => writes_unsized(i, depth + 1),
-                        S::App(_, v) | S::Tuple(v) | S::FnPtr(v) => v.iter().any(|x| writes_unsized(x, depth + 1)),
-                        _ => false,
-                    }
-            }
-            if sig.own_unsized.is_empty() && !sig.params.iter().chain([&sig.ret]).any(|t| writes_unsized(t, 0)) {
-                continue;
-            }
             let gn: Vec<&str> = sig.generics.iter().map(|g| g.0.as_str()).collect();
             let gens: Vec<String> = gn.iter().map(|s| s.to_string()).collect();
             let param_may = |t: Ty| matches!(t, Ty::Param(i) if gens.get(i as usize).is_some_and(|n| sig.own_unsized.contains(n)) && !implies_sized(&sig.generics[i as usize].1));
