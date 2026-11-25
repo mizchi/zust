@@ -875,7 +875,9 @@ fn item_scope(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], depth: &[u
             return false;
         }
         // (`extern "C" { .. }`: foreign items. `extern "C" fn f() {` meets `fn` first, going back)
-        if toks[k].0 == 0 && (t == b"mod" || t == b"impl" || t == b"trait" || t == b"extern") {
+        // (an `impl` that starts an item: not `impl Trait` in a type, `fn f() -> impl Display { m!() * 3 }`)
+        let impl_head = || k == 0 || (toks[k - 1].0 == 1 && matches!(tk(k - 1), b";" | b"{" | b"}" | b"]")) || (toks[k - 1].0 == 0 && matches!(tk(k - 1), b"unsafe" | b"default"));
+        if toks[k].0 == 0 && (t == b"mod" || (t == b"impl" && impl_head()) || t == b"trait" || t == b"extern") {
             return true;
         }
         if toks[k].0 == 0 && (t == b"fn" || t == b"struct" || t == b"enum" || t == b"union" || t == b"let") {
@@ -1944,6 +1946,11 @@ fn find_calls(
                             TokenTree::Punct(q) if q.as_char() == ';' => break,
                             TokenTree::Group(pg) if pg.delimiter() == proc_macro2::Delimiter::Brace => break,
                             TokenTree::Ident(w) if matches!(w.to_string().as_str(), "fn" | "struct" | "enum" | "union" | "let") => break,
+                            // (an `impl` that starts an item, as item_scope: not `-> impl Display`)
+                            TokenTree::Ident(w) if w == "impl" && !(k == 0
+                                || matches!(&toks[k - 1], TokenTree::Punct(q) if q.as_char() == ';')
+                                || matches!(&toks[k - 1], TokenTree::Group(pg) if matches!(pg.delimiter(), proc_macro2::Delimiter::Brace | proc_macro2::Delimiter::Bracket))
+                                || matches!(&toks[k - 1], TokenTree::Ident(u) if u == "unsafe" || u == "default")) => {}
                             TokenTree::Ident(w) if matches!(w.to_string().as_str(), "mod" | "impl" | "trait" | "extern") => {
                                 found = true;
                                 break;
