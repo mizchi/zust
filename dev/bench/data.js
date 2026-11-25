@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795637415916,
+  "lastUpdate": 1795637418279,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -133691,6 +133691,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/72e35d186ad1822627ce9919619eca2c071d31ff"
         },
         "date": 1795637018851,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.61,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1913,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.82,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1556,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 72.87,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5382,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "12c872983f4a7ee16d08b3bfdac2dfda9943893f",
+          "message": "Merge pull request #219 from mizchi/claude/fix-178-zurgo-pkg-source\n\nzurgo: the duplicate-library error names each package's source (#178)",
+          "timestamp": "2026-11-26T04:57:34+09:00",
+          "tree_id": "b8b08cc80795c841c3f53eeebda5869c8ae8f086",
+          "url": "https://github.com/mizchi/zust/commit/12c872983f4a7ee16d08b3bfdac2dfda9943893f"
+        },
+        "date": 1795637418002,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
