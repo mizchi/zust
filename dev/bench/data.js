@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795597714951,
+  "lastUpdate": 1795598042524,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -54377,6 +54377,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 38.442,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4800476e169dae9582d701f72c42951dc993870b",
+          "message": "libc 0.2 runs: names through glob re-exports, C types and C strings (#147)\n\n* libc 0.2 compiles: names through glob re-exports, C types, std derives\n\nThe libc crate itself now builds with zustc (its users stop at C string\nliterals and CStr, next).\n\nModule renaming (lexer):\n- paths and bare names follow glob re-exports, globs of globs too\n  (libc's root `pub use unix::*;`, then `pub use self::linux_like::*;`\n  down to gnu/b64): `crate::gid_t`, `libc::passwd`, `time_t`\n- a named `use` of what a glob re-exports (`use crate::{size_t};` in\n  libc's prelude)\n- globs are resolved to a fixed point before the other `use`s, and a\n  path walks modules that globs or named imports bring in (`pub use\n  linux::types::*;` after `use linux_uapi::*;`, `crate::linux::can`,\n  `bits::types` imported by name)\n- two globs giving different items is ambiguous (E0659) and left as\n  written; a module's own item shadows its globs\n- types and fns are apart: in a type's place (`*mut stat`, `-> tm`,\n  `&stat`, `*mut crate::sysinfo`) a fn of the name is not taken; a value\n  parameter does not hide its own type (`fn mktime(tm: *mut tm)`), a\n  generic parameter still does\n- dependency pruning names an `extern` block by all its fns and statics\n  (`libc::getpid()` reached it only when it was the first)\n\nElsewhere:\n- core::ffi's C types in constants: `size_of::<c_int>()`, `c_int::MAX`\n- `#[::core::prelude::v1::derive(::core::clone::Clone, ::core::marker::\n  Copy)]` (libc's `s!`) derives as `#[derive(Clone, Copy)]`\n- `core::mem::MaybeUninit::<S>::uninit()`: std's modules before a prelude\n  type with type arguments are left out\n- `let S { field: _, .. };` (libc's offset_of!) declares nothing\n- the size_of error names the type\n\nTests: lexer unit tests for each case (58), stub's extern block test;\nprobes std_path_turbofish, derive_full_paths, ffi_c_types.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* Module renaming: a borrow or a call is a value, not a type's place\n\n`&pcg32(&mut state)` in rand_core's `seed_from_u64` was taken for a type\nafter `&` and skipped the module's fn pcg32 (\"cannot find value\"; rand_core\nand zurgo's registry_crates_run_like_cargo failed). `&` / `&mut` is a\ntype's place only after `:`, `->` or `<`, and a name a `(` follows is a\ncall.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* C strings: CString / CStr keep their 0, `c\"...\"` literals, as_ptr / from_ptr\n\nlibc 0.2's app now runs with rustc's output (`c\"hello libc\".as_ptr()`,\n`CStr::from_ptr(p).to_bytes()`).\n\n- CString / CStr store the 0 at the end, so `as_ptr()` is a C string; the\n  bytes without it (`as_bytes`, `to_bytes`, `to_str`), with it\n  (`as_bytes_with_nul`, `to_bytes_with_nul`), `into_bytes(_with_nul)`,\n  `count_bytes`, `is_empty`, `to_string_lossy`. The default (empty b) is\n  the empty C string\n- `CStr::from_ptr(p)` copies the C string at p; `c\"...\"` is\n  `__exr_cstr_lit(b\"...\\0\")`. Both give a `&'static CStr` that is never\n  freed (std borrows C's memory and the literal is static data)\n\nTests: probe c_strings (literal, const, strlen through as_ptr, from_ptr,\nCString's bytes, the default).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* Prelude: a C string literal is a token that starts with c\n\n`sc.has(\"c\\\"\")` also matched the end of `\"c\"` and `\"abc\"`: examples/shared\n.rs (`Node::new(\"c\", 4)`) took the C string helpers and went over its\ncache_bytes budget (105610 > 105297). A `c\"` / `cr\"` counts only where the\nc starts a token.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* Review of #147: one memoized glob resolver, namespaces and visibility\n\nFrom CodeRabbit's review. The module renaming's glob lookups are one\nresolver (Names): each (viewer, module, name, namespaces) and (viewer,\nmodule, segment) is worked out once, a lookup in progress stops a cycle,\nand there is no size or depth cut-off.\n\n- all of a module's globs are compared: two different items (or modules)\n  are ambiguous and left as written; the same one by two routes is one.\n  For bare names, module segments of a path, and named imports alike\n- globs resolve until no more do (no fixed number of passes); a path\n  walks from the crate root, and a qualified path's intermediate module\n  may come by a glob (`facade::api::T`)\n- namespaces: a definition is a type, a value or both (fn / const /\n  static are values), and a named import has its item's. A type's place\n  takes only types: `*mut stat` beside `fn stat`, `*const T` beside\n  `const T` or `use make as T`; `T()` is the value. A call after the whole\n  path (`0 < dep::f()`) is a value; `&'a stat`, `&'a mut stat` and a\n  parameter's `t: &t` are type places\n- visibility: a glob brings what is visible from where it is written\n  (`pub`, or anything to a module inside: `use super::*;`). srcmap writes\n  a private `mod x;` as `pub(self) mod x { .. }` (it wrote every file\n  module `pub`), so libc's private unix/linux_like `mod linux` does not\n  collide with new's `pub(crate) mod linux`\n- CString's default is the empty C string `[0]`, equal to\n  `CString::new(\"\")`; `c_float::MAX` / `c_double::MAX` are not taken for\n  integer bounds; a `c\"...\"` literal selects its prelude helper before the\n  `no_std` return\n\nTests: lexer tests for each case (a 70-glob facade, a 40-glob chain, a\nchain written in reverse, a 30-level lattice in under 5 s, ambiguity,\npaths from the root and a facade, namespaces, reference types, calls,\nvisibility); each fails or does not finish on the previous lexer.\nprobe c_strings checks the empty CString's equality.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* Review of #147 (2): value places, cycles, and CString without vec!\n\nFrom CodeRabbit's second review:\n- a braced struct (and a union) is a type only, so `T()` beside it calls\n  a globbed fn T; a tuple or unit struct is also its constructor\n- a call's name is looked for among values (`facade::T()` with a type\n  alias T and a fn T); a segment a path goes on after is a type or module\n- a type alias's right-hand side is a type's place (`type A = T;` beside\n  `fn T`)\n- a lookup that meets one in progress (a cycle) is not kept: its result\n  may lack what the unfinished one gives (a cached miss of `b::T` while\n  `a::T` was being worked out)\n- glob discovery goes on while a pass makes a glob visible, not only\n  while it adds one; the globs are indexed by the module they are\n  written in\n- `CString::default()` and `into_bytes_with_nul` build `[0]` without\n  vec!, whose helpers the prelude selects by the program's text\n- srcmap keeps `pub(self) mod x;` private too\n\nThe other eight points of that review are in #150.\n\nTests: lexer value_and_type_places and a_cycle_does_not_cache_a_miss,\nsrcmap file_modules_keep_their_privacy (each fails on e5e7c581); probe\ncstring_default.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* tests/ui baseline: three tests that passed through false errors\n\nThey are not regressions of behaviour: each passed because zustc gave an\nerror it should not, on an annotated line, and this PR removes that error.\nThe lints they test are not implemented.\n\n- lint/lint-qualification.rs: zustc rejected `std::vec::Vec::<String>::new()`;\n  the test expects unused_qualifications\n- lint/dangling-pointers-from-temporaries/calls.rs, cstring-as-ptr.rs:\n  `CString::as_ptr` did not exist; the tests expect\n  dangling_pointers_from_temporaries\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* Module renaming: a path names a module's private item; globs as their module sees them\n\ntests/ui test-attrs/issue-52557.rs (run-pass, --test) failed in CI: the\ntest harness calls `b::foo()` from the crate root for a private\n`#[test] fn foo`, and the visibility check left that path unrenamed. Only\nwhat a glob brings is filtered by visibility; a path to an item names it\n(whether it may is E0603's check). Each step of a path, and a named import\nthrough a module's globs, is resolved as that module sees it, so a glob\nbrings what the module that writes it imports.\n\nTest: lexer a_path_names_a_private_item (the issue-52557 shape).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n---------\n\nCo-authored-by: Claude Opus 5.5 <noreply@anthropic.com>",
+          "timestamp": "2026-11-25T18:09:07+09:00",
+          "tree_id": "73525e89dc438b202dc88b8c04b26d7b46ca7837",
+          "url": "https://github.com/mizchi/zust/commit/4800476e169dae9582d701f72c42951dc993870b"
+        },
+        "date": 1795598042187,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 127.716,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.736,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 19.139,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 40.943,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 21.043,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 131.491,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 784.951,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 572.582,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.688,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 69.433,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 182.626,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 53.859,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 623.188,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3868.966,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.583,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 88.542,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 42.024,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 53.515,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 94.984,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 143.95,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 38.236,
             "unit": "ms"
           }
         ]
