@@ -898,6 +898,8 @@ impl Session2 {
         let cfg = self.opts.cfg_of(self.ctx.features.as_ref().unwrap_or(&self.opts.features), &self.ctx.cfgs, &self.ctx.env);
         crate::macros::BAD_FRAGMENT.with(|c| c.borrow_mut().take());
         crate::macros::BAD_DEF.with(|c| c.set(false));
+        crate::macros::BAD_FOLLOW.with(|c| c.borrow_mut().take());
+        crate::macros::PAT_WITH_OR.with(|c| c.set(self.opts.edition >= 2021));
         crate::macros::UNBOUND.with(|c| c.borrow_mut().take());
         crate::macros::DUP_EXPORT.with(|c| c.borrow_mut().take());
         let (mut src, mut items, mut user, prelude_line0) = with_prelude_in(src0, &crates, &mut fix, Some(&cfg), &mut self.sel)?;
@@ -995,6 +997,12 @@ impl Session2 {
             // short; noted by the expansion, its place read from the text then)
             if crate::macros::BAD_DEF.with(|c| c.replace(false)) {
                 if let Some(e) = crate::macros::macro_def_err(src0) {
+                    return Err(e);
+                }
+            }
+            // (a fragment followed by a token rustc does not allow after it, `$e:expr +`)
+            if let Some((frag, msg)) = crate::macros::BAD_FOLLOW.with(|c| c.borrow_mut().take()) {
+                if let Some(e) = crate::macros::follow_err(src0, &frag, &msg) {
                     return Err(e);
                 }
             }

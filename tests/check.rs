@@ -2840,3 +2840,24 @@ fn renamed_groups_and_derives_by_std_paths() {
     assert_eq!(e.map(|e| (e.0, e.2)), Some((2, "cannot find `RustcDecodable` in `core`".to_string())));
     assert_eq!(first("#[derive(core::clone::Clone, ::std::marker::Copy)]\nstruct S;\nfn main() {}\n"), None);
 }
+
+#[test]
+fn macro_matchers_rustc_rejects_what_follows_a_fragment_in_and_names_bound_twice() {
+    // (rustc 1.100's check_matcher: `expr` is followed by `=>` `,` `;` only, `ty` / `path` by a few more, `pat` by
+    // `|` before edition 2021 only; a name bound twice in one matcher)
+    let first = |src: &str, edition: u16| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, m: &str| Some((l, m.to_string()));
+    assert_eq!(first("macro_rules! m {\n    ($e:expr +) => ()\n}\nfn main() {}\n", 2021), e(2, "`$e:expr` is followed by `+`, which is not allowed for `expr` fragments"));
+    assert_eq!(first("macro_rules! m {\n    ( $a:expr $($b:tt)* ) => { };\n}\nfn main() {}\n", 2021), e(2, "`$a:expr` is followed by `$b:tt`, which is not allowed for `expr` fragments"));
+    assert_eq!(first("macro_rules! m {\n    ($($ty:ty)-+) => ();\n}\nfn main() {}\n", 2021), e(2, "`$ty:ty` is followed by `-`, which is not allowed for `ty` fragments"));
+    let or = "macro_rules! m { ($x:pat | $y:pat) => {} }\nfn main() {}\n";
+    assert_eq!(first(or, 2021), e(1, "`$x:pat` is followed by `|`, which is not allowed for `pat` fragments"));
+    assert_eq!(first(or, 2018), None);
+    let ok = "macro_rules! m {\n    ($e:expr => $t:ty, $p:path { $b:block }) => {};\n    ($($e:expr),* ; $($t:ty)|*) => {};\n    ($($x:pat_param)|+ if $c:expr) => {};\n}\nfn main() {}\n";
+    assert_eq!(first(ok, 2021), None);
+    assert_eq!(first("macro_rules! m {\n    ($a:ident, $($a:ident),*) => {};\n}\nfn main() {}\n", 2021), e(2, "duplicate matcher binding"));
+    assert_eq!(first("macro_rules! m {\n    ($a:ident) => {};\n    ($a:path) => {};\n}\nfn main() {}\n", 2021), None);
+}

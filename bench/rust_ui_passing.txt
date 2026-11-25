@@ -4383,6 +4383,7 @@ check-pass	lint/unused/unused-braces-attrs-issue-141549.rs
 compile-fail	lint/unused/unused-doc-comments-edge-cases.rs
 check-pass	lint/unused/unused-field-in-pat-field.rs
 compile-fail	lint/unused/unused-macro-with-bad-frag-spec.rs
+compile-fail	lint/unused/unused-macro-with-follow-violation.rs
 compile-fail	lint/unused/unused-mut-warning-captured-var.rs
 check-pass	lint/unused/unused-never-binding-issue-158783.rs
 check-pass	lint/unused/unused-parens-issue-106413.rs
@@ -4553,12 +4554,14 @@ compile-fail	macros/macro-expansion-empty-span-147255.rs
 check-pass	macros/macro-expansion-module-structure-9110.rs
 compile-fail	macros/macro-expansion-tests.rs
 check-pass	macros/macro-follow-rpass.rs
+compile-fail	macros/macro-followed-by-seq-bad.rs
 check-pass	macros/macro-followed-by-seq.rs
 compile-fail	macros/macro-fragment-ident-underscore-error.rs
 compile-fail	macros/macro-hygiene-help-issue-149604.rs
 run-pass	macros/macro-in-array-len-expr.rs
 run-pass	macros/macro-in-or-pattern.rs
 run-pass	macros/macro-include-items.rs
+compile-fail	macros/macro-input-future-proofing.rs
 check-pass	macros/macro-invocation-in-count-expr-fixed-array-type.rs
 compile-fail	macros/macro-invocation-span-error-7970.rs
 check-pass	macros/macro-invocation-with-curly-braces-34418.rs
@@ -4572,6 +4575,7 @@ compile-fail	macros/macro-match-nonterminal.rs
 check-pass	macros/macro-meta-items-modern.rs
 run-pass	macros/macro-method-issue-4621.rs
 check-pass	macros/macro-multiple-items.rs
+compile-fail	macros/macro-multiple-matcher-bindings.rs
 compile-fail	macros/macro-name-typo.rs
 check-pass	macros/macro-named-default.rs
 run-pass	macros/macro-nested_definition_issue-31946.rs
@@ -4583,8 +4587,10 @@ compile-fail	macros/macro-paren-span-diagnostic.rs
 check-pass	macros/macro-pat-follow-2018.rs
 run-pass	macros/macro-pat-follow.rs
 run-pass	macros/macro-pat-neg-lit.rs
+compile-fail	macros/macro-pat-pattern-followed-by-or-in-2021.rs
 run-pass	macros/macro-pat-pattern-followed-by-or.rs
 run-pass	macros/macro-pat.rs
+compile-fail	macros/macro-pat2021-pattern-followed-by-or.rs
 compile-fail	macros/macro-path-prelude-fail-1.rs
 compile-fail	macros/macro-path-prelude-fail-2.rs
 compile-fail	macros/macro-path-prelude-fail-3.rs
