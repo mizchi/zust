@@ -4166,3 +4166,183 @@ fn part28_review() {
     let d = check("trait A<T> { fn get(&self) -> i32; }\nimpl<'a> A<&'a mut i32> for u8 { fn get(&self) -> i32 { 1 } }\nfn f<T>(x: &dyn A<&T>) -> i32 { x.get() }\nfn main() {\n    let b: &dyn A<&mut i32> = &1u8;\n    println!(\"{}\", f(b));\n}\n");
     assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
 }
+
+/// Each error of the program: its line, and a part of its message (one error for each fn)
+fn errors_at(src: &str, exp: &[(usize, &str)], what: &str) {
+    let d = check(src);
+    assert!(d.len() == exp.len() && d.iter().zip(exp).all(|(d, e)| d.0 == e.0 && d.1.contains(e.1)), "{what}\n{d:?}");
+}
+
+#[test]
+fn part29_drop_temporaries() {
+    // (a temporary whose type implements `Drop` lives to the end of its statement, also where it is a field access's
+    // base or a method's receiver (`D(&*v).0.len()`, `D(&*v).iter()`), and a loop's header's to the end of the loop
+    // (`for x in D(&*v).iter()`, `while let Some(_) = D(&*v).0.first()`). The condition of an `if` / `while` and a
+    // match guard end their temporaries: no false error for `if D(&*v).0.len() > 0 { v.push(1) }`. A temporary of the
+    // tail of a block outlives the block's locals (E0597). Each case was checked with rustc 1.97: zustc reports each
+    // fn's first error on rustc's line)
+    errors_at(r#"struct D<'a>(&'a [i32]);
+impl Drop for D<'_> { fn drop(&mut self) {} }
+impl D<'_> { fn iter(&self) -> std::slice::Iter<'_, i32> { self.0.iter() } }
+struct W<'a>(&'a [i32]);
+impl W<'_> { fn iter(&self) -> std::slice::Iter<'_, i32> { self.0.iter() } }
+fn a() { let mut v = vec![1, 2]; for x in D(&*v).iter() { v.push(*x); break; } }
+fn b() { let mut v = vec![1, 2]; for x in W(&*v).iter() { v.push(*x); break; } }
+fn c() { let mut v = vec![1, 2]; let n = D(&*v).0.len(); v.push(n as i32); }
+fn d() { let mut v = vec![1, 2]; match D(&*v).0.len() { n => v.push(n as i32) } }
+fn main() { a(); b(); c(); d(); }
+"#, &[(6, r#"cannot borrow `v` as mutable because it is also borrowed as immutable"#), (9, r#"`v` does not live long enough"#)], "dr1");
+    errors_at(r#"struct D<'a>(&'a [i32]);
+impl Drop for D<'_> { fn drop(&mut self) {} }
+fn e() { let mut v = vec![1, 2]; let _g = D(&*v); v.push(1); }
+fn f() { let mut v = vec![1, 2]; { let _n = D(&*v).0.len(); v.push(1); } }
+fn g() { let mut v = vec![1, 2]; if D(&*v).0.len() > 0 { v.push(1); } }
+fn h() { let mut v = vec![1, 2]; while D(&*v).0.len() < 5 { v.push(1); } }
+fn main() { e(); f(); g(); h(); }
+"#, &[(3, r#"cannot borrow `v` as mutable because it is also borrowed as immutable"#)], "dr2");
+    errors_at(r#"struct D<'a>(&'a [i32]);
+impl Drop for D<'_> { fn drop(&mut self) {} }
+impl D<'_> { fn iter(&self) -> std::slice::Iter<'_, i32> { self.0.iter() } fn len(&self) -> usize { self.0.len() } }
+fn a1() { let mut v = vec![1, 2]; for x in D(&*v).0.iter() { v.push(*x); break; } }
+fn a2() { let mut v = vec![1, 2]; for _ in 0..D(&*v).len() { v.push(1); break; } }
+fn a3() { let mut v = vec![1, 2]; for x in D(&*v).iter() { v.push(*x); break; } }
+fn a4() { let mut v = vec![1, 2]; while let Some(_) = D(&*v).0.first() { v.push(1); break; } }
+fn main() { a1(); a2(); a3(); a4(); }
+"#, &[(4, r#"cannot borrow `v` as mutable because it is also borrowed as immutable"#), (5, r#"cannot borrow `v` as mutable because it is also borrowed as immutable"#), (6, r#"cannot borrow `v` as mutable because it is also borrowed as immutable"#), (7, r#"cannot borrow `v` as mutable because it is also borrowed as immutable"#)], "dr3");
+    errors_at(r#"struct D<'a>(&'a [i32]);
+impl Drop for D<'_> { fn drop(&mut self) {} }
+fn b1() { let mut v = vec![1, 2]; while let Some(_) = D(&*v).0.first() { v.push(1); } }
+fn b2() { let mut v = vec![1, 2]; let n = D(&*v).0.len(); v.push(n as i32); }
+fn b3() { let mut v = vec![1, 2]; match D(&*v).0.len() { n => { v.push(n as i32); } } }
+fn b4() { let mut v = vec![1, 2]; if let Some(_) = D(&*v).0.first() { v.push(1); } }
+fn main() { b1(); b2(); b3(); b4(); }
+"#, &[(3, r#"cannot borrow `v` as mutable because it is also borrowed as immutable"#), (5, r#"`v` does not live long enough"#), (6, r#"`v` does not live long enough"#)], "dr4");
+    // (the scopes that end such temporaries, where rustc ends them: a statement, a block's tail, the condition of an
+    // `if` / `while`, a guard, a loop that is a statement or a tail; none of these is an error in rustc 1.97)
+    errors_at(r#"struct D<'a>(&'a [i32]);
+impl Drop for D<'_> { fn drop(&mut self) {} }
+impl D<'_> { fn iter(&self) -> std::slice::Iter<'_, i32> { self.0.iter() } }
+fn t1() { let mut v = vec![1]; for x in D(&*v).iter() { let _ = x; } v.push(1); }
+fn t2() -> usize { let mut v = vec![1]; let n = { for x in D(&*v).iter() { let _ = x; } 1 }; v.push(1); n }
+fn t3() { let v = vec![1]; while let Some(_) = D(&*v).0.first() { break; } }
+fn t4() { let v = vec![1]; while D(&*v).0.len() > 5 { } }
+fn t5() { let v = vec![1]; if D(&*v).0.len() > 5 { } }
+fn t6() { let v = vec![1]; loop { if D(&*v).0.len() > 0 { break; } } }
+fn t7() { let v = vec![1]; for x in D(&*v).iter() { let _ = x; } }
+fn t8() { let v = vec![1]; match 1 { n if D(&*v).0.len() > n => {} _ => {} } }
+fn t9() -> usize { let v = vec![1]; if D(&*v).0.len() > 5 { 1 } else { 2 } }
+fn main() { t1(); t2(); t3(); t4(); t5(); t6(); t7(); t8(); t9(); }
+"#, &[], "ts");
+    errors_at(r#"struct D<'a>(&'a [i32]);
+impl Drop for D<'_> { fn drop(&mut self) {} }
+fn c1() { let v = vec![1, 2]; for x in D(&*v).0.iter() { let _ = x; } }
+fn c2() { let v = vec![1, 2]; match D(&*v).0.len() { _ => {} } }
+fn c3() { let v = vec![1, 2]; while let Some(_) = D(&*v).0.first() { break; } }
+fn c4() { let v = vec![1, 2]; if let Some(_) = D(&*v).0.first() { } }
+fn c5() -> usize { let v = vec![1, 2]; D(&*v).0.len() }
+fn main() { c1(); c2(); c3(); c4(); c5(); }
+"#, &[(4, r#"`v` does not live long enough"#), (6, r#"`v` does not live long enough"#), (7, r#"`v` does not live long enough"#)], "dr5");
+}
+
+#[test]
+fn part29_returned_temporaries() {
+    // (a temporary's loan that the returned value holds is E0515 where it is returned, as in rustc, not E0716 where it
+    // goes away: `for ref x in xs { result.push(x) } result`, also where a loop over a `&mut Iter` makes the temporary
+    // in its header, after a use (`println!`) or an assignment of the returned local. One that no return holds stays
+    // E0716 (`*result[0]`, line 17))
+    errors_at(r#"fn f(xs: Vec<i32>) -> Vec<&'static i32> {
+    let mut result = Vec::new();
+    for ref x in xs {
+        result.push(x);
+    }
+    result
+}
+fn g<'a>(xs: &mut std::slice::Iter<'a, i32>) -> Vec<&'a &'a i32> {
+    let mut result = Vec::new();
+    for ref x in xs {
+        result.push(x);
+    }
+    result
+}
+fn h(xs: Vec<i32>) -> i32 {
+    let mut result = Vec::new();
+    for ref x in xs {
+        result.push(x);
+    }
+    *result[0]
+}
+fn main() {}
+"#, &[(6, r#"cannot return value referencing temporary value (E0515)"#), (13, r#"cannot return value referencing temporary value (E0515)"#), (17, r#"temporary value dropped while borrowed"#)], "p28/fr1");
+    errors_at(r#"fn f(xs: Vec<i32>) -> Vec<&'static i32> {
+    let mut result = Vec::new();
+    for ref x in xs {
+        result.push(x);
+    }
+    println!("{:?}", result);
+    result
+}
+fn g(xs: Vec<i32>) -> Vec<&'static i32> {
+    let mut result = Vec::new();
+    for ref x in xs {
+        result.push(x);
+    }
+    let r2 = result;
+    r2
+}
+fn main() {}
+"#, &[(7, r#"cannot return value referencing temporary value (E0515)"#), (15, r#"cannot return value referencing temporary value (E0515)"#)], "p28/fr2");
+    errors_at(r#"fn h<'a>(xs: &mut std::slice::Iter<'a, i32>) -> Vec<&'a &'a i32> {
+    let mut result = Vec::new();
+    for ref x in xs {
+        result.push(x);
+    }
+    println!("{}", result.len());
+    result = Vec::new();
+    result
+}
+fn h2(xs: Vec<i32>) -> Vec<&'static i32> {
+    let mut result = Vec::new();
+    for ref x in xs {
+        result.push(x);
+    }
+    println!("{}", result.len());
+    result = Vec::new();
+    result
+}
+fn main() {}
+"#, &[(8, r#"cannot return value referencing temporary value (E0515)"#), (17, r#"cannot return value referencing temporary value (E0515)"#)], "p29t/g3");
+}
+
+#[test]
+fn part29_positions() {
+    // (an error's earlier borrow at a node the lowering made (`&*v` of a Vec, read as `&v[..]`) is at its operand,
+    // not at the start of the fn ("(at 1:1)"), where rustc 1.97 points. A `&` has no position of its own, so `D(&v)`
+    // and `&*b` of a Box are at their operand (4:43, 1:45), one column after rustc's `&`, as on main)
+    errors_at(r#"struct D<'a>(&'a [i32]);
+fn k() { let mut v = vec![1]; let r = &*v; v.push(1); let _ = r; }
+fn k2() { let mut v = vec![1]; let r = D(&*v); v.push(1); let _ = r; }
+fn k3() { let mut v = vec![1]; let r = D(&v); v.push(1); let _ = r; }
+fn main() {}
+"#, &[(2, r#"cannot borrow `v` as mutable because it is also borrowed as immutable (at 2:41)"#), (3, r#"cannot borrow `v` as mutable because it is also borrowed as immutable (at 3:44)"#), (4, r#"cannot borrow `v` as mutable because it is also borrowed as immutable (at 4:43)"#)], "pos1");
+    errors_at(r#"fn k1() { let mut b = Box::new(5); let r = &*b; *b = 1; let _ = r; }
+fn k2() { let mut v = vec![1]; let r = &v[0]; v.push(1); let _ = r; }
+fn k3() { let mut v = vec![1]; let r = &*v; v.push(1); let _ = r; }
+fn k4() { let mut s = String::new(); let r = &*s; s.push('a'); let _ = r; }
+fn main() {}
+"#, &[(1, r#"cannot assign to `*b` because it is borrowed (at 1:45)"#), (2, r#"cannot borrow `v` as mutable because it is also borrowed as immutable (at 2:41)"#), (3, r#"cannot borrow `v` as mutable because it is also borrowed as immutable (at 3:42)"#), (4, r#"cannot borrow `s` as mutable because it is also borrowed as immutable (at 4:48)"#)], "pos2");
+}
+
+#[test]
+fn part29_review() {
+    // (a temporary receiver that a method takes by value (`consume(self)`) holds nothing of what it borrowed after
+    // the call: no E0506 for the assignment after it. One borrowed (`peek(&self)`) holds it to the end of the
+    // statement, E0506 as in rustc 1.97)
+    errors_at("struct D<'a>(&'a i32);\nimpl Drop for D<'_> { fn drop(&mut self) {} }\nimpl D<'_> { fn consume(self) -> i32 { *self.0 } }\nfn main() {\n    let mut x = 1;\n    let t = (D(&x).consume(), { x = 2; });\n    let _ = t;\n    println!(\"{}\", x);\n}\n", &[], "r3");
+    errors_at("struct D<'a>(&'a i32);\nimpl Drop for D<'_> { fn drop(&mut self) {} }\nimpl D<'_> { fn peek(&self) -> i32 { *self.0 } }\nfn main() {\n    let mut x = 1;\n    let t = (D(&x).peek(), { x = 2; });\n    let _ = t;\n}\n", &[(6, "cannot assign to `x` because it is borrowed")], "r4");
+    // (the call takes such a receiver after its arguments: an argument that writes what it borrows is E0506, as in
+    // rustc 1.97; a write after the call is not)
+    errors_at("struct D<'a>(&'a i32);\nimpl Drop for D<'_> { fn drop(&mut self) {} }\nimpl D<'_> {\n    fn consume(self, _: ()) -> i32 { *self.0 }\n}\nfn a() { let mut x = 1; let _ = D(&x).consume({ x = 2; }); }\nfn c() { let mut x = 1; let r = D(&x).consume(()); x = 2; println!(\"{} {}\", r, x); }\nfn main() { a(); c(); }\n", &[(6, "cannot assign to `x` because it is borrowed")], "r6");
+    // (a returned local assigned after the use of a temporary it borrowed: rustc 1.97 reports E0515 at the return,
+    // as zustc does)
+    errors_at("fn f() -> &'static str {\n    let mut r = String::new().as_str();\n    println!(\"{}\", r);\n    r = \"ok\";\n    r\n}\nfn main() { println!(\"{}\", f()); }\n", &[(5, "cannot return value referencing temporary value (E0515)")], "r2");
+}
