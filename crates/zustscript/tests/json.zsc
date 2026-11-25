@@ -1,0 +1,23 @@
+// tests/examples.rs json_checked_by_type: json_decode checks the JSON against the type (with the path of what is not), and
+// json_encode writes a value as the same JSON
+type Todo = { id: i32, title: String, done: bool, tags: Array<String>, due: Option<String> }
+enum Status { Open, Closed }
+enum Shape { Circle(f64), Rect(f64, f64) }
+type Doc = { todos: Array<Todo>, status: Status, shapes: Array<Shape>, meta: Map<String, i32>, ids: Set<i32>, pair: (i32, String) }
+type Tree = { v: i32, kids: Array<Tree> }
+
+export fn roundtrip(s: String) -> String {
+  let r: Result<Doc, String> = json_decode(s);
+  match r { Ok(d) => json_encode(d), Err(m) => `error: ${m}` }
+}
+export fn todo(s: String) -> String {
+  match json_decode(s) {
+    Ok(t) => { let t2: Todo = t; `${t2.id} ${t2.title} ${t2.due.unwrap_or("-")}` },
+    Err(m) => `error: ${m}`,
+  }
+}
+export fn tree(s: String) -> String {
+  let r: Result<Tree, String> = json_decode(s);
+  match r { Ok(t) => json_encode(t), Err(m) => m }
+}
+export fn plain() -> String { json_encode([1, 2]) + json_encode("a\"b") + json_encode(Todo { id: 1, title: "x", done: false, tags: [], due: None }) }

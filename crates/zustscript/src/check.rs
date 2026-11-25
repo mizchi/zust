@@ -53,6 +53,8 @@ pub enum Callee {
     TypedCtor(Ty, String),
     /// `Map::new()` / `Map::from(pairs)` / `Set::new()` / `Set::from(xs)` (a Set's, the constructor)
     Coll(bool, String),
+    /// `json_encode(x)` (false) / `json_decode(s)` (true): the type is checked, the value converted by it
+    Json(bool),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -146,6 +148,8 @@ pub struct Info {
     /// the numeric type of each arithmetic operator, unary minus and integer literal (decided once the function is
     /// inferred); a cast's (from, to)
     pub num: HashMap<Id, Ty>,
+    /// the type `json_encode` / `json_decode` converts, at its callee's id
+    pub json: HashMap<Id, Ty>,
     pub cast: HashMap<Id, (Ty, Ty)>,
     /// the effects each function performs and does not handle (empty: an ordinary function)
     pub effects: HashMap<String, BTreeSet<String>>,
@@ -205,6 +209,7 @@ pub struct Checker {
     intv: HashSet<u32>,
     /// (id, type) to resolve into `Info::num` when the function is done
     nums: Vec<(Id, Ty)>,
+    jsons: Vec<(Id, Ty)>,
     casts: Vec<(Id, Pos, Ty, Ty)>,
     /// the numeric bounds of the function being checked
     bounds: HashMap<String, String>,
@@ -390,6 +395,7 @@ impl Checker {
             generics: vec![],
             intv: HashSet::new(),
             nums: vec![],
+            jsons: vec![],
             casts: vec![],
             bounds: HashMap::new(),
             insts: vec![],
@@ -951,6 +957,10 @@ impl Checker {
             let r = self.resolve(&t);
             self.info.num.insert(id, r);
         }
+        for (id, t) in std::mem::take(&mut self.jsons) {
+            let r = self.resolve(&t);
+            self.info.json.insert(id, r);
+        }
         for (id, t) in std::mem::take(&mut self.tys) {
             let r = self.resolve(&t);
             self.info.ty.insert(id, r);
@@ -1011,6 +1021,7 @@ impl Checker {
                 }
                 "hole" => r == Ty::Str || r == Ty::Bool || self.numeric(&r),
                 "key" => self.key_type(&r),
+                "json" => self.jsonable(&r, &mut vec![]),
                 "child" => match &r {
                     Ty::Jsx | Ty::Str => true,
                     t if self.numeric(t) => true,
@@ -1031,6 +1042,7 @@ impl Checker {
                         _ => format!("cannot compare {s} with `<`"),
                     },
                     "hole" => format!("a `${{..}}` of a template string takes a String, a number or a bool, not {s}"),
+                    "json" => format!("JSON holds numbers (not i64: JSON.parse rounds past 2^53), strings, bools, and arrays, records, enums, Option, Map and Set of them, not {s}"),
                     "key" => match &r {
                         Ty::Param(p) => format!("a Map's key or a Set's element is an integer, a String, a bool or an enum without data, not {s}: add the bound `{p}: Hash`"),
                         _ => format!("a Map's key or a Set's element is an integer, a String, a bool or an enum without data, not {s}"),
@@ -1049,6 +1061,37 @@ impl Checker {
     /// A numeric type, or a generic parameter with a numeric bound
     fn numeric(&self, t: &Ty) -> bool {
         is_num(t) || matches!(t, Ty::Param(p) if self.bounds.get(p).is_some_and(|b| num_bound(b)))
+    }
+
+    /// A type `json_encode` / `json_decode` can convert (see js.rs `json_fn`)
+    fn jsonable(&self, t: &Ty, seen: &mut Vec<Ty>) -> bool {
+        match t {
+            Ty::I32 | Ty::U32 | Ty::F32 | Ty::F64 | Ty::Str | Ty::Bool => true,
+            Ty::Array(e) => self.jsonable(e, seen),
+            Ty::Tuple(ts) => ts.iter().all(|t| self.jsonable(t, seen)),
+            Ty::Named(n, a) if (n == "Map" && a.len() == 2 || n == "Set" && a.len() == 1) && self.builtin_coll(n) => a.iter().all(|t| self.jsonable(t, seen)),
+            Ty::Named(n, targs) => {
+                if seen.contains(t) {
+                    return true;
+                }
+                let (params, fields): (Vec<String>, Vec<Ty>) = if let Some(r) = self.info.records.get(n) {
+                    (r.params.clone(), r.fields.iter().map(|f| f.1.clone()).collect())
+                } else if let Some(e) = self.info.enums.get(n).filter(|e| !e.is_effect()) {
+                    (e.params.clone(), e.variants.iter().flat_map(|v| v.1.iter().cloned()).collect())
+                } else {
+                    return false;
+                };
+                if seen.len() > 64 {
+                    return false;
+                }
+                let m: HashMap<String, Ty> = params.into_iter().zip(targs.iter().cloned()).collect();
+                seen.push(t.clone());
+                let ok = fields.iter().all(|f| self.jsonable(&subst_named(f, &m), seen));
+                seen.pop();
+                ok
+            }
+            _ => false,
+        }
     }
 
     /// `Map` / `Set` are the built-in collections, unless the file declares a type of that name
@@ -1268,6 +1311,18 @@ impl Checker {
                 }
                 if self.info.variant_of.contains_key(n) {
                     return self.variant(e.id, pos, None, n);
+                }
+                if n == "json_encode" || n == "json_decode" {
+                    let dec = n == "json_decode";
+                    let t = self.fresh();
+                    self.info.callee.insert(e.id, Callee::Json(dec));
+                    self.jsons.push((e.id, t.clone()));
+                    self.deferred.push((pos, e.id, "json", t.clone()));
+                    return if dec {
+                        Ty::Fn(vec![Ty::Str], Box::new(Ty::Named("Result".into(), vec![t, Ty::Str])))
+                    } else {
+                        Ty::Fn(vec![t], Box::new(Ty::Str))
+                    };
                 }
                 if n == "range" {
                     self.info.callee.insert(e.id, Callee::Range);

@@ -413,7 +413,60 @@ fn parse_all(xs: Array<String>) -> Option<Array<i32>> { xs.try_map((x) => x.trim
 - `sort()` の NaN は、どの数とも等しい扱い(JS の比較と同じ)。NaN を含む配列の並びは決まらない
 - `@wasm` の数学関数(`pow` `sin` など)は、グルーが JS の `Math` を zustc に渡すので、JS 層とビット単位で同じ。`--emit-rust` では Rust の std(libm)の結果になり、最後の桁が違うことがある
 - 分かっている違い: サロゲートペアの途中で切る文字列の `slice` は、JS では孤立したサロゲート、wasm では U+FFFD になる
-- まだないもの: `Map` / `Set`、JSON、乱数、`enumerate`
+- まだないもの: 乱数、`enumerate`
+
+### 総称関数の bound: `Eq` / `Ord` / `Hash`
+
+```zsc
+fn dedupe<T: Eq>(xs: Array<T>) -> Array<T> {
+  xs.fold([], (acc: Array<T>, x) => if acc.includes(x) { acc } else { acc.push(x) })
+}
+fn max_of<T: Ord>(xs: Array<T>, d: T) -> T { xs.fold(d, (m, x) => if x > m { x } else { m }) }
+fn uniq<T: Hash>(xs: Array<T>) -> Array<T> { Set::from(xs).values() }
+```
+
+- `T: Eq` で `==`(中身で比べる。関数や JSX は渡せない)、`T: Ord` で `<`(数値と文字列)、`T: Hash` で `Map` のキー・`Set` の要素(整数、文字列、bool、データのない enum)。数値の bound(`Num` など)はどれも `Eq` を、`Integer` は `Hash` も満たす
+- 数値の bound と同じく、使われた型ごとに別の関数として書き出す(JS の `dedupe$P`、Rust の `zs_dedupe__P`)
+- `export fn` には付けられない(型を列挙できない): 使う型ごとの関数を `export` する
+
+### `Map` / `Set`
+
+```zsc
+fn words(s: String) -> Map<String, i32> {
+  let mut counts: Map<String, i32> = Map::new();
+  for w in s.split(" ") {
+    counts = counts.insert(w, counts.get(w).unwrap_or(0) + 1);   // JS: counts = counts.set(w, ..)(その場で)
+  }
+  counts
+}
+```
+
+- 生成: `Map::new()`、`Map::from([(k, v), ..])`、`Set::new()`、`Set::from(xs)`
+- `Map`: `len` `is_empty` `get(k)`(`Option`) `contains_key(k)` `insert(k, v)` `remove(k)` `keys()` `values()` `entries()`(`Array<(K, V)>`)。`Set`: `len` `is_empty` `contains(x)` `insert(x)` `remove(x)` `values()`
+- 配列と同じく不変: `insert` / `remove` は新しい値を返す。ほかから見えないローカル変数なら、その場で変える(`m = m.insert(k, f(m.get(k)))` の形も)
+- 順序は JS の Map / Set と同じ挿入順(既にあるキーを入れ直しても位置は変わらない)。JS では JS の `Map` / `Set` そのもので、`.d.ts` は `ReadonlyMap` / `ReadonlySet`
+- `@wasm` では、挿入順の配列と `HashMap` の索引を持つ型(`ZsMap` / `ZsSet`)。JS と同じ結果になる(`tests/collections.zsc`)。`Map::from` と `entries()`(タプル)、境界を越えることはまだできない
+- `==` では比べられない
+
+### JSON: `json_decode` / `json_encode`
+
+```zsc
+type Todo = { id: i32, title: String, due: Option<String> }
+
+fn load(s: String) -> Result<Array<Todo>, String> { json_decode(s) }   // 型どおりか確かめて読む
+fn save(ts: Array<Todo>) -> String { json_encode(ts) }
+```
+
+- `json_decode(s)` は、JSON が型どおりかを確かめて読む。違えば `Err("expected an i32 at $.todos[0].id, found 1.5")` のように場所を付けて返す(構文の誤りは JSON.parse のメッセージ)
+- 型は文脈から決まる(決まらなければ注釈を求める)。型ごとに確かめる関数を書き出す
+- JSON での形
+  - 数値(i32 / u32 は整数で範囲内のもの)、文字列、bool、配列、タプル(配列)
+  - レコードはオブジェクト(宣言にないフィールドは読み捨てる)
+  - `Option` は `null` か値(フィールドがなければ `None`)
+  - データのない enum は文字列、データのある enum は JS での値(`{ "TAG": "Circle", "_0": 1.5 }`、TS から読んだ union はその形)
+  - `Map<String, V>` はオブジェクト(他のキーは `[key, value]` の配列)、`Set` は配列
+- 使えない型: i64(JSON.parse が 2^53 を超える整数を丸める)、関数、JSX、`extern type`、総称の型引数
+- JS 層だけ(`@wasm` ではエラー)
 
 ### 代数的エフェクト(enum で宣言する)
 

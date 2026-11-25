@@ -971,6 +971,41 @@ fn collections_in_js() {
     assert!(js.contains("b = new Map(b).set(3, \"three\");"), "{js}");
 }
 
+/// tests/json.zsc: `json_decode` reads JSON as the type says, or gives where it is not; `json_encode` writes the same
+/// JSON back (an `Option` as `null`, a `Map<String, _>` as an object, a `Set` as an array, extra fields dropped)
+#[test]
+fn json_checked_by_type() {
+    let d = out_dir("json");
+    let o = zsc(&root().join("tests/json.zsc"), &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let out = node(
+        &d,
+        r#"const m = await import('./json.js');
+const doc = {todos:[{id:1,title:"a",done:false,tags:["x"],due:null},{id:2,title:"b",done:true,tags:[],extra:9}], status:"Open", shapes:[{TAG:"Circle",_0:1.5},{TAG:"Rect",_0:2,_1:3}], meta:{a:1,b:2}, ids:[3,1,3], pair:[7,"s"]};
+console.log(m.roundtrip(JSON.stringify(doc)));
+for (const bad of ['{"todos":[{"id":1.5}]}', '{"todos":[], "status":"Half"}', "[]", JSON.stringify({...doc, shapes:[{TAG:"Tri"}]}), JSON.stringify({...doc, pair:[1]}), JSON.stringify({...doc, meta:{a:"x"}})]) console.log(m.roundtrip(bad));
+console.log(m.todo('{"id":3,"title":"t","done":true,"tags":[],"due":"mon"}'), "|", m.todo('{"id":3,"title":"t","done":true,"tags":[]}'));
+console.log(m.tree('{"v":1,"kids":[{"v":2,"kids":[]}]}'), m.tree('{"v":1,"kids":[{"v":2}]}'));
+console.log(m.plain());"#,
+    );
+    assert_eq!(
+        out,
+        "{\"todos\":[{\"id\":1,\"title\":\"a\",\"done\":false,\"tags\":[\"x\"],\"due\":null},{\"id\":2,\"title\":\"b\",\"done\":true,\"tags\":[],\"due\":null}],\"status\":\"Open\",\"shapes\":[{\"TAG\":\"Circle\",\"_0\":1.5},{\"TAG\":\"Rect\",\"_0\":2,\"_1\":3}],\"meta\":{\"a\":1,\"b\":2},\"ids\":[3,1],\"pair\":[7,\"s\"]}\n\
+         error: expected an i32 at $.todos[0].id, found 1.5\n\
+         error: expected one of \"Open\", \"Closed\" at $.status, found \"Half\"\n\
+         error: expected an object at $, found an array\n\
+         error: expected a variant of Shape at $.shapes[0].TAG, found \"Tri\"\n\
+         error: expected an array of 2 at $.pair, found an array\n\
+         error: expected an i32 at $.meta.a, found \"x\"\n\
+         3 t mon | 3 t -\n\
+         {\"v\":1,\"kids\":[{\"v\":2,\"kids\":[]}]} expected an array at $.kids[0].kids, found nothing\n\
+         [1,2]\"a\\\"b\"{\"id\":1,\"title\":\"x\",\"done\":false,\"tags\":[],\"due\":null}\n"
+    );
+    // (not JSON at all: JSON.parse's message, which depends on the engine)
+    let out = node(&d, "const m = await import('./json.js'); console.log(m.roundtrip('{'));");
+    assert!(out.starts_with("error: ") && out.len() > 8, "{out}");
+}
+
 /// tests/js_values.zsc: extern types (properties, methods, a setter, a constructor, a module's), `null` from JS as
 /// `None` and `None` to JS as `undefined`, and what JS throws (or a Promise rejects with) as an `Err`
 #[test]

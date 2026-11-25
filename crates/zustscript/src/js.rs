@@ -54,6 +54,8 @@ pub struct Js<'a> {
     /// the comparators written for `==` by content (one per type, `$eq1` ..), and their definitions
     eqs: HashMap<Ty, String>,
     eq_defs: String,
+    /// the JSON converters written (`$dj1` decodes, `$ej1` encodes), by (type, decoding)
+    jsons: HashMap<(Ty, bool), String>,
     /// locals in scope: (source name, JS name), innermost last. Every JS name a function uses is unique in it
     /// (`x`, then `x$1` for a second `x`), so flattened blocks, shadowing and match arms never collide
     locals: Vec<(String, String)>,
@@ -200,6 +202,15 @@ const HELPERS: &[(&str, &str)] = &[
     ("$includes", "function $includes(xs, x, eq) {\n  for (let i = 0; i < xs.length; i++) if (eq ? eq(xs[i], x) : xs[i] === x) return true;\n  return false;\n}"),
     ("$find", "function $find(xs, f) {\n  for (let i = 0; i < xs.length; i++) if (f(xs[i])) return { TAG: \"Some\", _0: xs[i] };\n  return { TAG: \"None\" };\n}"),
     ("$find_index", "function $find_index(xs, f) {\n  for (let i = 0; i < xs.length; i++) if (f(xs[i])) return { TAG: \"Some\", _0: i };\n  return { TAG: \"None\" };\n}"),
+    // (JSON, checked by the type: `json_decode`'s converters throw `{ $json }` where the value is not the type's)
+    ("$json_fail", "function $json_fail(want, v, p) {\n  const found = v === null ? \"null\" : Array.isArray(v) ? \"an array\" : v === undefined ? \"nothing\" : typeof v === \"object\" ? \"an object\" : JSON.stringify(v).slice(0, 40);\n  throw { $json: \"expected \" + want + \" at \" + p + \", found \" + found };\n}"),
+    ("$json_decode", "function $json_decode(s, dec) {\n  let v;\n  try {\n    v = JSON.parse(s);\n  } catch (e) {\n    return { TAG: \"Err\", _0: String(e.message) };\n  }\n  try {\n    return { TAG: \"Ok\", _0: dec(v, \"$\") };\n  } catch (e) {\n    if (e !== null && typeof e === \"object\" && \"$json\" in e) return { TAG: \"Err\", _0: e.$json };\n    throw e;\n  }\n}"),
+    ("$dj_i32", "function $dj_i32(v, p) {\n  if (typeof v !== \"number\" || !Number.isInteger(v) || v < -2147483648 || v > 2147483647) $json_fail(\"an i32\", v, p);\n  return v | 0;\n}"),
+    ("$dj_u32", "function $dj_u32(v, p) {\n  if (typeof v !== \"number\" || !Number.isInteger(v) || v < 0 || v > 4294967295) $json_fail(\"a u32\", v, p);\n  return v >>> 0;\n}"),
+    ("$dj_f64", "function $dj_f64(v, p) {\n  if (typeof v !== \"number\") $json_fail(\"a number\", v, p);\n  return v;\n}"),
+    ("$dj_f32", "function $dj_f32(v, p) {\n  if (typeof v !== \"number\") $json_fail(\"a number\", v, p);\n  return Math.fround(v);\n}"),
+    ("$dj_str", "function $dj_str(v, p) {\n  if (typeof v !== \"string\") $json_fail(\"a string\", v, p);\n  return v;\n}"),
+    ("$dj_bool", "function $dj_bool(v, p) {\n  if (typeof v !== \"boolean\") $json_fail(\"a bool\", v, p);\n  return v;\n}"),
     ("$m_get", "function $m_get(m, k) {\n  return m.has(k) ? { TAG: \"Some\", _0: m.get(k) } : { TAG: \"None\" };\n}"),
     ("$m_remove", "function $m_remove(m, k) {\n  const r = new Map(m);\n  r.delete(k);\n  return r;\n}"),
     ("$s_remove", "function $s_remove(s, x) {\n  const r = new Set(s);\n  r.delete(x);\n  return r;\n}"),
@@ -262,6 +273,7 @@ impl<'a> Js<'a> {
             inplace: HashSet::new(),
             eqs: HashMap::new(),
             eq_defs: String::new(),
+            jsons: HashMap::new(),
             locals: vec![],
             declared: HashSet::new(),
             module_names: HashSet::new(),
@@ -1194,6 +1206,19 @@ impl<'a> Js<'a> {
                     let ctor = typed_js(&el);
                     return if c == "zeros" { format!("new {ctor}({})", a[0]) } else { format!("{ctor}.from({})", a[0]) };
                 }
+                // (checked and converted by its type: see `json_fn`)
+                if let Some(Callee::Json(dec)) = self.info.callee.get(&f.id).cloned() {
+                    let t = subst_ty(&self.info.json[&f.id], &self.subst);
+                    return if dec {
+                        let d = self.json_fn(&t, true).unwrap();
+                        format!("{}({}, {d})", self.helper_name("$json_decode"), a[0])
+                    } else {
+                        match self.json_fn(&t, false) {
+                            Some(e) => format!("JSON.stringify({e}({}))", a[0]),
+                            None => format!("JSON.stringify({})", a[0]),
+                        }
+                    };
+                }
                 // (JS's own Map / Set: a pair is a `[k, v]` array, as a tuple is)
                 if let Some(Callee::Coll(set, c)) = self.info.callee.get(&f.id).cloned() {
                     let ctor = if set { "Set" } else { "Map" };
@@ -1605,6 +1630,176 @@ impl<'a> Js<'a> {
             _ => unreachable!(),
         };
         let _ = write!(self.eq_defs, "function {f}(a, b) {{\n{body}}}\n\n");
+        Some(f)
+    }
+
+    fn helper_name(&mut self, h: &'static str) -> &'static str {
+        self.helpers.insert(h);
+        h
+    }
+
+    /// The JS value of `t` is JSON's as it is (encoding it needs no conversion): no Option, Map or Set in it
+    fn json_plain(&self, t: &Ty, seen: &mut Vec<Ty>) -> bool {
+        use crate::check::subst_named;
+        match t {
+            Ty::Array(e) => self.json_plain(e, seen),
+            Ty::Tuple(ts) => ts.iter().all(|t| self.json_plain(t, seen)),
+            Ty::Named(n, _) if n == "Option" || n == "Map" || n == "Set" => false,
+            Ty::Named(n, targs) => {
+                if seen.contains(t) {
+                    return true;
+                }
+                let (params, fields): (Vec<String>, Vec<Ty>) = match self.info.records.get(n) {
+                    Some(r) => (r.params.clone(), r.fields.iter().map(|f| f.1.clone()).collect()),
+                    None => {
+                        let e = &self.info.enums[n];
+                        (e.params.clone(), e.variants.iter().flat_map(|v| v.1.iter().cloned()).collect())
+                    }
+                };
+                let m: HashMap<String, Ty> = params.into_iter().zip(targs.iter().cloned()).collect();
+                seen.push(t.clone());
+                let ok = fields.iter().all(|f| self.json_plain(&subst_named(f, &m), seen));
+                seen.pop();
+                ok
+            }
+            _ => true,
+        }
+    }
+
+    /// The converter of values of `t` from JSON's (`dec`: it checks the value is `t`'s, and throws where it is not,
+    /// with the path) or to JSON's (None: the value is JSON's as it is). A record is an object of its fields
+    /// (others are ignored), an `Option` is `null` or the value (a field that is not there is `None`), an enum
+    /// without data a string, one with data its JS value (`{ TAG, _0, .. }`), a `Map` with String keys an object
+    /// (other keys: an array of `[key, value]` pairs), a `Set` an array
+    fn json_fn(&mut self, t: &Ty, dec: bool) -> Option<String> {
+        use crate::check::subst_named;
+        if let Some(f) = self.jsons.get(&(t.clone(), dec)) {
+            return Some(f.clone());
+        }
+        let prim = match t {
+            Ty::I32 => Some("$dj_i32"),
+            Ty::U32 => Some("$dj_u32"),
+            Ty::F32 => Some("$dj_f32"),
+            Ty::F64 => Some("$dj_f64"),
+            Ty::Str => Some("$dj_str"),
+            Ty::Bool => Some("$dj_bool"),
+            _ => None,
+        };
+        if let Some(h) = prim {
+            return dec.then(|| self.helper_name(h).to_string());
+        }
+        if !dec && self.json_plain(t, &mut vec![]) {
+            return None;
+        }
+        self.helpers.insert("$json_fail");
+        // (named before its body is written: a recursive type's converter calls itself)
+        let f = format!("${}j{}", if dec { "d" } else { "e" }, self.jsons.len() + 1);
+        self.jsons.insert((t.clone(), dec), f.clone());
+        // (`x` converted by `t`, with the path `p`)
+        let conv = |js: &mut Js, t: &Ty, x: &str, p: &str| match js.json_fn(t, dec) {
+            Some(g) if dec => format!("{g}({x}, {p})"),
+            Some(g) => format!("{g}({x})"),
+            None => x.to_string(),
+        };
+        let object = "  if (v === null || typeof v !== \"object\" || Array.isArray(v)) $json_fail(\"an object\", v, p);\n";
+        let array = |what: &str| format!("  if (!Array.isArray(v)) $json_fail(\"{what}\", v, p);\n");
+        let body = match t {
+            Ty::Array(e) if dec => {
+                let c = conv(self, e, "x", "p + \"[\" + i + \"]\"");
+                format!("{}  return v.map((x, i) => {c});\n", array("an array"))
+            }
+            Ty::Array(e) => format!("  return v.map((x) => {});\n", conv(self, e, "x", "")),
+            Ty::Tuple(ts) => {
+                let cs: Vec<String> = ts.iter().enumerate().map(|(k, t)| conv(self, t, &format!("v[{k}]"), &format!("p + \"[{k}]\""))).collect();
+                if dec {
+                    format!("  if (!Array.isArray(v) || v.length !== {}) $json_fail(\"an array of {}\", v, p);\n  return [{}];\n", ts.len(), ts.len(), cs.join(", "))
+                } else {
+                    format!("  return [{}];\n", cs.join(", "))
+                }
+            }
+            Ty::Named(n, a) if n == "Option" && a.len() == 1 => {
+                let c = conv(self, &a[0], "v", "p");
+                if dec {
+                    format!("  return v === null || v === undefined ? {{ TAG: \"None\" }} : {{ TAG: \"Some\", _0: {c} }};\n")
+                } else {
+                    let c = conv(self, &a[0], "v._0", "");
+                    format!("  return v.TAG === \"None\" ? null : {c};\n")
+                }
+            }
+            Ty::Named(n, a) if n == "Map" && a.len() == 2 && !self.info.records.contains_key(n) && !self.info.enums.contains_key(n) => {
+                let (k, v) = (&a[0], &a[1]);
+                if *k == Ty::Str {
+                    if dec {
+                        let c = conv(self, v, "v[k]", "p + \".\" + k");
+                        format!("{object}  const m = new Map();\n  for (const k of Object.keys(v)) m.set(k, {c});\n  return m;\n")
+                    } else {
+                        format!("  return Object.fromEntries(Array.from(v, ([k, x]) => [k, {}]));\n", conv(self, v, "x", ""))
+                    }
+                } else if dec {
+                    let ck = conv(self, k, "e[0]", "p + \"[\" + i + \"][0]\"");
+                    let cv = conv(self, v, "e[1]", "p + \"[\" + i + \"][1]\"");
+                    format!(
+                        "{}  return new Map(v.map((e, i) => {{\n    if (!Array.isArray(e) || e.length !== 2) $json_fail(\"a [key, value] pair\", e, p + \"[\" + i + \"]\");\n    return [{ck}, {cv}];\n  }}));\n",
+                        array("an array of [key, value] pairs")
+                    )
+                } else {
+                    format!("  return Array.from(v, ([k, x]) => [{}, {}]);\n", conv(self, k, "k", ""), conv(self, v, "x", ""))
+                }
+            }
+            Ty::Named(n, a) if n == "Set" && a.len() == 1 && !self.info.records.contains_key(n) && !self.info.enums.contains_key(n) => {
+                if dec {
+                    let c = conv(self, &a[0], "x", "p + \"[\" + i + \"]\"");
+                    format!("{}  return new Set(v.map((x, i) => {c}));\n", array("an array"))
+                } else {
+                    format!("  return Array.from(v, (x) => {});\n", conv(self, &a[0], "x", ""))
+                }
+            }
+            Ty::Named(n, targs) if self.info.records.contains_key(n) => {
+                let r = &self.info.records[n];
+                let m: HashMap<String, Ty> = r.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                let fields: Vec<(String, Ty)> = r.fields.iter().map(|(f, t)| (f.clone(), subst_named(t, &m))).collect();
+                let cs: Vec<String> = fields
+                    .iter()
+                    .map(|(f, t)| {
+                        let c = conv(self, t, &format!("v{}", member(f)), &format!("p + {}", js_str(&format!(".{f}"))));
+                        format!("{}: {c}", js_str(f))
+                    })
+                    .collect();
+                format!("{}  return {{ {} }};\n", if dec { object } else { "" }, cs.join(", "))
+            }
+            Ty::Named(n, targs) => {
+                let n = n.clone();
+                let e = &self.info.enums[&n];
+                let m: HashMap<String, Ty> = e.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                let vs: Vec<(String, Vec<Ty>)> = e.variants.iter().map(|(v, fs)| (v.clone(), fs.iter().map(|t| subst_named(t, &m)).collect())).collect();
+                if self.string_enum(&n) {
+                    let tags: Vec<String> = vs.iter().map(|(v, _)| self.tag_js(&n, v)).collect();
+                    format!("  if (typeof v !== \"string\" || ![{}].includes(v)) $json_fail({}, v, p);\n  return v;\n", tags.join(", "), js_str(&format!("one of {}", tags.join(", "))))
+                } else {
+                    let key = self.tag_key(&n);
+                    let mut s = if dec { object.to_string() } else { String::new() };
+                    let _ = writeln!(s, "  switch (v{}) {{", member(&key));
+                    for (v, fs) in &vs {
+                        let tag = self.tag_js(&n, v);
+                        let mut parts = vec![format!("{}: {tag}", js_str(&key))];
+                        for (k, ft) in fs.iter().enumerate() {
+                            let fk = self.field_key(&n, v, k);
+                            let c = conv(self, ft, &format!("v{}", member(&fk)), &format!("p + {}", js_str(&format!(".{fk}"))));
+                            parts.push(format!("{}: {c}", js_str(&fk)));
+                        }
+                        let _ = writeln!(s, "    case {tag}: return {{ {} }};", parts.join(", "));
+                    }
+                    s.push_str("  }\n");
+                    if dec {
+                        let _ = writeln!(s, "  $json_fail({}, v{}, p + {});", js_str(&format!("a variant of {n}")), member(&key), js_str(&format!(".{key}")));
+                    }
+                    s
+                }
+            }
+            _ => unreachable!(),
+        };
+        let ps = if dec { "v, p" } else { "v" };
+        let _ = write!(self.eq_defs, "function {f}({ps}) {{\n{body}}}\n\n");
         Some(f)
     }
 
