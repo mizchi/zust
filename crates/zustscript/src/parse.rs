@@ -299,6 +299,15 @@ impl Parser {
         } else {
             false
         };
+        let is_async = if self.is_kw("async")? {
+            let t = self.next()?;
+            if !self.is_kw("fn")? {
+                return Err((t.pos, "`async` goes on a `fn` (`async fn load() -> String { .. }`) or a closure (`async () => ..`)".into()));
+            }
+            true
+        } else {
+            false
+        };
         let (kw, pos) = self.ident()?;
         match kw.as_str() {
             _ if wasm_attr && kw != "fn" => Err((pos, "`@wasm` / `@simd` go on a `fn`".into())),
@@ -349,7 +358,7 @@ impl Parser {
                 }
                 let ret = if self.eat("->")? { Some(self.ty()?) } else { None };
                 let body = self.block()?;
-                Ok(Item::Fn { name, public, wasm, simd, relaxed, generics, bounds, args, ret, body, pos })
+                Ok(Item::Fn { name, public, wasm, simd, relaxed, is_async, generics, bounds, args, ret, body, pos })
             }
             // `import type { User, Post } from "./model.ts";` / `import { greet, Shape } from "./lib.zsc";`
             "import" => {
@@ -764,6 +773,12 @@ impl Parser {
 
     fn unary(&mut self, no_rec: bool) -> PResult<Expr> {
         let t = self.peek()?.clone();
+        // `await e` binds as the prefix operators do: `await f() + 1` is `(await f()) + 1`
+        if matches!(&t.t, T::Ident(k) if k == "await") {
+            self.next()?;
+            let e = self.unary(no_rec)?;
+            return Ok(self.mk(t.pos, EK::Await(Box::new(e))));
+        }
         if let T::P(op @ ("-" | "!")) = t.t {
             self.next()?;
             let e = self.unary(no_rec)?;
@@ -865,6 +880,14 @@ impl Parser {
                 self.mk(pos, EK::Jsx(Box::new(j)))
             }
             T::Ident(k) if k == "true" || k == "false" => self.mk(pos, EK::Lit(Lit::Bool(k == "true"))),
+            // `async (x) => e`
+            T::Ident(k) if k == "async" && self.is("(")? => {
+                let c = self.primary(no_rec)?;
+                if !matches!(c.kind, EK::Closure(..)) {
+                    return Err((pos, "`async` goes on a closure: `async (x) => ..`".into()));
+                }
+                self.mk(pos, EK::Async(Box::new(c)))
+            }
             T::Ident(k) if k == "if" => {
                 let c = self.expr(true)?;
                 let th = self.block()?;

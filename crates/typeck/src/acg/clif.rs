@@ -101,6 +101,10 @@ impl FunctionBuilder {
     pub fn value_type(&self, v: Value) -> Type {
         self.m.value_type(v)
     }
+    /// v is the address of a stack slot (no drop frees it)
+    pub fn is_stack_addr(&self, v: Value) -> bool {
+        self.m.is_stack_addr(v)
+    }
     pub fn create_block(&mut self) -> Block {
         self.m.create_block()
     }

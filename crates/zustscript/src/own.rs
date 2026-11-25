@@ -273,7 +273,7 @@ fn children(e: &Expr) -> Vec<&Expr> {
     match &e.kind {
         EK::Call(f, args) => std::iter::once(&**f).chain(args).collect(),
         EK::Method(r, _, args) => std::iter::once(&**r).chain(args).collect(),
-        EK::Field(x, _) | EK::Un(_, x) | EK::Cast(x, _) => vec![x],
+        EK::Field(x, _) | EK::Un(_, x) | EK::Cast(x, _) | EK::Await(x) | EK::Async(x) => vec![x],
         EK::Bin(_, l, r) | EK::Index(l, r) => vec![l, r],
         EK::Record(_, fs, base) => fs.iter().map(|f| &f.1).chain(base.as_deref()).collect(),
         EK::Array(xs) | EK::Tuple(xs) | EK::Perform(_, _, xs) | EK::Interp(_, xs) => xs.iter().collect(),

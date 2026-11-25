@@ -1,0 +1,6 @@
+// expect: `await` is only allowed in an `async fn`
+extern fn p() -> Promise<i32> = "p";
+enum Ask { Get -> i32 }
+export async fn f() -> i32 {
+  handle { let x = await p(); x + perform Get } { Get, k => k(1) }
+}

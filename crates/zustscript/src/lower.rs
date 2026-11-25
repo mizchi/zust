@@ -1479,6 +1479,7 @@ impl<'a> Lower<'a> {
                 val(format!("{} {{ {} }}", rs_type(n), parts.join(", ")))
             }
             EK::Tuple(_) => not_in_subset(pos, "a tuple"),
+            EK::Await(_) | EK::Async(_) => not_in_subset(pos, "`await` / an async closure (a Promise is JS's)"),
             // (appended piece by piece: `format!` would pull `core::fmt` into the wasm (about 10 KB). The holes are
             // borrowed through the arguments' path; an integer is written by `zs_push_int`, as JS writes it. A float
             // is written differently by JS and Rust)

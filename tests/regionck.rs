@@ -4528,3 +4528,93 @@ impl S { unsafe fn f(self: Box<Self>) -> i32 { 1 } }
 fn main() { let a = unsafe { Box::new(S).f() }; let b = Box::new(S).f(); println!("{} {}", a, b); }
 "#, &[(3, "call to unsafe function")], "u1");
 }
+
+#[test]
+fn part31_closure_error_position() {
+    // (an error with no position of its own in a closure's body (a move out of a reference by its parameter's
+    // pattern) is at the closure, on rustc 1.97's line, not at the line of the fn it is in)
+    errors_at("use std::collections::HashMap;\n\nfn main() {\n    let _ = HashMap::<String, i32>::new().iter().filter(|&(&_k, &_v)| { true });\n}\n", &[(4, "cannot move out of")], "cp");
+}
+
+#[test]
+fn part31_const_local_borrow() {
+    // (a const's or a static's initializer block that ends in a borrow of one of its own locals is E0597, the value
+    // being 'static: at rustc 1.97's line, also for one written inside a fn body (hoisted); a borrow of a literal is
+    // promoted and is not)
+    errors_at("const Z: &'static isize = {\n    let p = 3;\n    &p\n};\nfn main() { println!(\"{}\", Z); }\n", &[(3, "`p` does not live long enough")], "c1");
+    errors_at("fn main() {\n    static Y: &'static isize = { let q = 4; &q };\n    println!(\"{}\", Y);\n}\n", &[(2, "`q` does not live long enough")], "c2");
+    errors_at("const OK: &'static i32 = { let _p = 3; &5 };\nfn main() { println!(\"{}\", OK); }\n", &[], "c3");
+}
+
+#[test]
+fn part31_collect_and_temporary_scrutinee() {
+    // (a `collect` into a written `Vec<_>` yields the iterator's items (`&str`), as rustc selects `FromIterator` at the
+    // `let`: `&parts[0]` returned as a `&'a str` is a `&&str` coerced, no E0515 (borrowck/
+    // cannot-return-ref-to-fn-param-in-filter-map.rs's make_entry). Returning `&parts[0]` itself is E0515 (6))
+    errors_at(r#"fn e1<'a>(s: &'a String) -> Option<&'a str> {
+    let parts: Vec<_> = s.split('|').collect();
+    if let [commit, ..] = &parts[..] { Some(commit) } else { None }
+}
+fn e2<'a>(s: &'a String) -> &'a str { let parts: Vec<_> = s.split('|').collect(); let c = &parts[0]; c }
+fn bad<'a>(s: &'a String) -> &'a &'a str { let parts: Vec<_> = s.split('|').collect(); &parts[0] }
+fn main() { let s = "1|2".to_string(); let _ = (e1(&s), e2(&s), bad(&s)); }
+"#, &[(6, "cannot return")], "cl");
+    // (a temporary scrutinee matched by a `&` pattern that binds by value moves out through the reference: E0508 /
+    // E0507 at the scrutinee (2, 3, 4), as of a local; not by `ref` (1), nor a `Copy` binding (5). Lines as rustc 1.97's)
+    errors_at(r#"fn f1(l1: &[String], l2: &[String]) { match (l1, l2) { (&[], &[ref hd, ..]) => { let _ = hd; } _ => {} } }
+fn f2(l1: &[String], l2: &[String]) { match (l1, l2) { (&[], &[hd, ..]) => { drop(hd); } _ => {} } }
+fn f3(a: &String, b: &String) { match (a, b) { (_, &s) => { drop(s); } } }
+fn f4(a: &Option<String>) { match (1, a) { (_, &Some(s)) => { drop(s); } _ => {} } }
+fn f5(a: &Option<u32>) -> u32 { match (1, a) { (_, &Some(n)) => n, _ => 0 } }
+fn main() {}
+"#, &[(2, "cannot move out of"), (3, "cannot move out of"), (4, "cannot move out of")], "ts");
+    // (of the uses of what one move moved, the one rustc reports: after the loop the move is in, before its next
+    // iteration's, also of a loop over a range and of nested loops)
+    errors_at(r#"fn a(n: usize) {
+    let s = String::new();
+    for _ in 0..n { if s.len() > 0 { drop(s); continue; } }
+    drop(s);
+}
+fn b(v: Vec<String>, w: Vec<&str>) {
+    for foo in v { for bar in &w { if foo == *bar {
+        drop(foo);
+        continue;
+    } }
+    drop(foo);
+    }
+}
+fn main() {}
+"#, &[(4, "use of moved value"), (11, "use of moved value")], "mv");
+}
+
+#[test]
+fn part31_review() {
+    // (a `collect` in parentheses yields the iterator's items at its `let` too: no false E0515)
+    errors_at(r#"fn e2<'a>(s: &'a String) -> &'a str { let parts: Vec<_> = (s.split('|').collect()); let c = &parts[0]; c }
+fn main() { let s = "1|2".to_string(); println!("{}", e2(&s)); }
+"#, &[], "pc");
+    // (a `&&&u8` passed as a `&&u8` keeps its type: `***c` is a `u8`)
+    errors_at(r#"fn take(_: &&u8) {}
+fn main() { let x = 1u8; let c = &&&x; take(c); let y: u8 = ***c; println!("{}", y); }
+"#, &[], "dd");
+    // (a const's block that borrows through a local reference (`let p = &DATA; &p.0`) borrows DATA: no E0597 (2);
+    // of a local tuple's field it is E0597 (3), as in rustc 1.97)
+    errors_at(r#"static DATA: (i32,) = (3,);
+const OK: &'static i32 = { let p = &DATA; &p.0 };
+const BAD: &'static i32 = { let p = (3,); &p.0 };
+fn main() { println!("{} {}", OK, BAD); }
+"#, &[(3, "does not live long enough")], "cr");
+    // (nor through a local whose written type is an alias of a reference (3): the summary does not know aliases, so a
+    // written path counts as the local's own storage only where its value is built there (5))
+    errors_at(r#"static DATA: (i32,) = (3,);
+type Alias = &'static (i32,);
+const OK: &'static i32 = { let p: Alias = &DATA; &p.0 };
+type Pair = (i32,);
+const BAD: &'static i32 = { let p: Pair = (4,); &p.0 };
+fn main() { println!("{} {}", OK, BAD); }
+"#, &[(5, "does not live long enough")], "ca");
+    // (a move out through a `&mut` pattern of a temporary scrutinee is out of a mutable reference)
+    errors_at(r#"fn f(a: &mut Option<String>) { match (1, a) { (_, &mut Some(s)) => { drop(s); } _ => {} } }
+fn main() {}
+"#, &[(1, "cannot move out of a mutable reference")], "mr");
+}

@@ -1814,6 +1814,7 @@ check-pass	consts/const-eval/const_signed_pat.rs
 check-pass	consts/const-eval/double_check.rs
 check-pass	consts/const-eval/double_check2.rs
 compile-fail	consts/const-eval/field-access-after-const-eval-fail-in-ty.rs
+compile-fail	consts/const-eval/generic-slice.rs
 check-pass	consts/const-eval/ice-packed.rs
 compile-fail	consts/const-eval/ice-unhandled-type-122191.rs
 compile-fail	consts/const-eval/ice-unsized-struct-const-eval-123154.rs
@@ -1979,6 +1980,7 @@ run-pass	consts/issue-69532.rs
 check-pass	consts/issue-6991.rs
 run-pass	consts/issue-70773-mir-typeck-lt-norm.rs
 compile-fail	consts/issue-76064.rs
+compile-fail	consts/issue-78655.rs
 check-pass	consts/issue-79152-const-array-index.rs
 check-pass	consts/issue-88071.rs
 check-pass	consts/issue-88649.rs
@@ -4152,6 +4154,7 @@ compile-fail	liveness/liveness-closure-require-ret.rs
 check-pass	liveness/liveness-consts.rs
 check-pass	liveness/liveness-derive.rs
 compile-fail	liveness/liveness-forgot-ret.rs
+compile-fail	liveness/liveness-issue-2163.rs
 compile-fail	liveness/liveness-missing-ret2.rs
 compile-fail	liveness/liveness-move-call-arg-2.rs
 compile-fail	liveness/liveness-move-call-arg.rs
@@ -4422,6 +4425,7 @@ run-pass	match/overeager-sub-match-pruning-13027.rs
 run-pass	match/pattern-deref-miscompile.rs
 run-pass	match/range-arm-and-ref-arm.rs
 compile-fail	match/single-line.rs
+compile-fail	match/slice-move-out-error-12567.rs
 run-pass	match/struct-reference-patterns-12285.rs
 run-pass	match/tuple-usize-pattern-14393.rs
 compile-fail	match/uninhabited-granular-moves.rs
@@ -4635,6 +4639,7 @@ run-pass	modules/special_module_name_ignore.rs
 run-pass	modules/use-statement-duplicate-check-7663.rs
 compile-fail	moves/arc-consumed-in-looped-closure.rs
 compile-fail	moves/borrow-closures-instead-of-move.rs
+compile-fail	moves/do-not-suggest-removing-wrong-ref-pattern-issue-132806.rs
 compile-fail	moves/invalid-suggestions-destructuring-assignment-drop.rs
 run-pass	moves/issue-22536-copy-mustnt-zero.rs
 compile-fail	moves/issue-46099-move-in-macro.rs
@@ -4672,6 +4677,7 @@ compile-fail	moves/moves-based-on-type-match-bindings.rs
 compile-fail	moves/moves-based-on-type-tuple.rs
 compile-fail	moves/moves-sru-moved-field.rs
 compile-fail	moves/needs-clone-through-deref.rs
+compile-fail	moves/nested-loop-moved-value-wrong-continue.rs
 compile-fail	moves/no-capture-arc.rs
 compile-fail	moves/no-reuse-move-arc.rs
 compile-fail	moves/pin-mut-reborrow-infer-var-issue-107419.rs
@@ -5784,6 +5790,7 @@ run-pass	pattern/bindings-after-at/or-patterns-slice-patterns.rs
 run-pass	pattern/bindings-after-at/or-patterns.rs
 compile-fail	pattern/bindings-after-at/pat-at-same-name-both.rs
 run-pass	pattern/bindings-after-at/slice-patterns.rs
+compile-fail	pattern/by-move-pattern-binding.rs
 check-pass	pattern/byte-string-inference.rs
 check-pass	pattern/check-struct-pat-fields-stability-issue-138319.rs
 run-pass	pattern/const-pattern-str-match-lifetime.rs
@@ -5874,6 +5881,7 @@ run-pass	pattern/struct-wildcard-pattern-14308.rs
 compile-fail	pattern/struct_pattern_on_tuple_enum.rs
 compile-fail	pattern/suggest-adding-appropriate-missing-pattern-excluding-comments.rs
 run-pass	pattern/tuple-enum-match-15129.rs
+compile-fail	pattern/type-alias-as-variant-pattern.rs
 compile-fail	pattern/type_mismatch.rs
 compile-fail	pattern/uninit-trivial.rs
 run-pass	pattern/unit-pattern-matching-in-function-argument-7519.rs
@@ -5924,6 +5932,7 @@ run-pass	pattern/usefulness/nested-exhaustive-match.rs
 compile-fail	pattern/usefulness/non-exhaustive-match-nested.rs
 compile-fail	pattern/usefulness/non-exhaustive-match.rs
 compile-fail	pattern/usefulness/non-exhaustive-pattern-witness.rs
+compile-fail	pattern/usefulness/refutable-pattern-in-fn-arg.rs
 compile-fail	pattern/usefulness/slice-patterns-exhaustiveness.rs
 check-pass	pattern/usefulness/slice-patterns-irrefutable.rs
 compile-fail	pattern/usefulness/struct-like-enum-nonexhaustive.rs
@@ -6784,6 +6793,7 @@ compile-fail	static/duplicated-fields-issue-125842.rs
 compile-fail	static/extern-static-normalization-failure-issue-148161.rs
 compile-fail	static/global-variable-promotion-error-7364.rs
 run-pass	static/issue-1660.rs
+compile-fail	static/issue-18118.rs
 build-pass	static/issue-34194.rs
 compile-fail	static/issue-5216.rs
 compile-fail	static/missing-type.rs
@@ -7626,6 +7636,7 @@ run-pass	traits/trait-implementation-for-primitive-type-5280.rs
 run-pass	traits/trait-implementation-for-usize-5321.rs
 check-pass	traits/trait-implementation-generic-access-6898.rs
 run-pass	traits/trait-implementation-restriction-5988.rs
+compile-fail	traits/trait-object-destructure.rs
 run-pass	traits/trait-object-lifetime-bounds-7563.rs
 compile-fail	traits/trait-object-lifetime-default-note.rs
 run-pass	traits/trait-object-method-call-2935.rs
