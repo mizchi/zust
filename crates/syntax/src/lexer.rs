@@ -2099,8 +2099,9 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
             while q < toks.len() {
                 if toks[q].0 == 1 {
                     match tok(q) {
-                        // (a block in it that declares an item of the name: the item's there, `{ fn n() .. n() }`)
-                        b"{" if nested_names.iter().any(|(nm, b, _)| *b == q && nm.as_slice() == tok(nk)) => {
+                        // (a block in it that declares a value of the name, `{ fn n() .. n() }`: the item there. A
+                        // braced struct shadows no value)
+                        b"{" if nested_names.iter().any(|(nm, b, ns)| *b == q && *ns != HOIST_NS_TYPE && nm.as_slice() == tok(nk)) => {
                             let mut e = 0i32;
                             while q < toks.len() {
                                 if toks[q].0 == 1 && tok(q) == b"{" {

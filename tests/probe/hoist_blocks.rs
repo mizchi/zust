@@ -104,6 +104,11 @@ fn main() {
             println!("{}", n());
         }
         println!("{}", n());
+        // (a braced struct of the name shadows no value: the local's still called)
+        {
+            struct n {}
+            println!("{}", n());
+        }
     }
     struct t {
         v: u8,
