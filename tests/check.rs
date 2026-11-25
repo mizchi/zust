@@ -1,4 +1,4 @@
-//! check (LSP の診断) はエラーがあっても止まらず、全関数の診断を返す
+//! check (LSP diagnostics) does not stop on errors and returns the diagnostics of all fns
 use zustc::{Options2, Session2};
 
 #[test]
@@ -8,7 +8,7 @@ fn reports_all_errors_and_recovers() {
     let d = s.check(src);
     assert_eq!(d.len(), 2, "{d:?}");
     assert_eq!((d[0].line, d[1].line), (4, 8));
-    // 直した後は診断が消え、変わっていない関数は検査済みの印で飛ばされる
+    // After the fix the diagnostics disappear, and unchanged fns are skipped by their checked marks
     let fixed = src
         .replace("E::A(x, y)", "E::A(x)")
         .replace("-> bool { 1 }", "-> bool { true }");
@@ -16,8 +16,8 @@ fn reports_all_errors_and_recovers() {
     assert!(s.check(&fixed).is_empty());
 }
 
-/// 呼び出し元が「検査済み」でキャッシュに当たっても、ジェネリック関数の本体の型エラーは報告される
-/// (検査済みの印に、その関数が要求したインスタンスを保存して要求し直すため)
+/// Even if a caller hits the cache as "checked", type errors in a generic fn's body are reported
+/// (because the checked mark stores the instances that fn requested, and they are requested again)
 #[test]
 fn generic_body_errors_with_cached_callers() {
     let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/traits.rs"))
@@ -35,8 +35,8 @@ fn generic_body_errors_with_cached_callers() {
     assert!(s.check(&src).is_empty());
 }
 
-/// クロージャの本体のエラーは (呼ばれていなくても) 正しい行で報告され、直せば消える。
-/// 検査済みの印が付いた後も、編集したクロージャの本体だけが検査し直される
+/// Errors in a closure's body are reported on the right line (even if it is not called), and disappear once fixed.
+/// Even after the checked mark is set, only the edited closure body is checked again
 #[test]
 fn closure_and_dyn_errors() {
     let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/closures.rs"))
@@ -61,8 +61,8 @@ fn closure_and_dyn_errors() {
     assert!(d[0].msg.contains("not implemented for `u32`"), "{d:?}");
 }
 
-/// 編集をまたいだ check の記録 (ChkMemo) を使っても、毎回新しい Session2 で検査したものと診断が同じ。
-/// examples の関数の本体 (総称関数も) に、型エラーになる文・ならない文を足したり消したりを続ける
+/// Using the check record across edits (ChkMemo) gives the same diagnostics as checking with a new Session2 each time.
+/// Keeps adding and removing statements that do / do not cause type errors in the bodies of the examples' fns (generic fns too)
 #[test]
 fn check_memo_matches_fresh_check() {
     let root = env!("CARGO_MANIFEST_DIR");
@@ -87,7 +87,7 @@ fn check_memo_matches_fresh_check() {
             let f = |d: &[zustc::Diagnostic]| d.iter().map(|x| (x.line, x.col, x.msg.clone())).collect::<Vec<_>>();
             assert_eq!(f(&d1), f(&d2), "{}", p.display());
             compared += 1;
-            // (関数の本体の先頭 (`{\n` の後ろ) に文を足すか、足したものを消す)
+            // (Add a statement at the start of a fn body (after `{\n`), or remove one that was added)
             let at: Vec<usize> = cur.match_indices(") {\n").map(|(i, _)| i + 4).collect();
             if at.is_empty() {
                 break;

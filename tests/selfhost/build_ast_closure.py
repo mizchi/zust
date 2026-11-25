@@ -1,6 +1,6 @@
-"""zustc 自身の crates/syntax/src/parse.rs と crates/syntax/src/ast_closure.rs (自前の構文木の上のクロージャ解析) を 1 ファイルのプログラムにまとめる。
+"""Bundles zustc's own crates/syntax/src/parse.rs and crates/syntax/src/ast_closure.rs (closure analysis on our own syntax tree) into a single-file program.
 usage: python3 tests/selfhost/build_ast_closure.py > out/selfhost/ast_closure_main.rs
-main は引数のファイルごとに、関数の本体のクロージャの自由変数とキャプチャを値として使うかを出す。"""
+For each file given as an argument, main prints the free variables of the closures in fn bodies and whether each capture is used by value."""
 
 parse = open("crates/syntax/src/parse.rs").read()
 clo = open("crates/syntax/src/ast_closure.rs").read()

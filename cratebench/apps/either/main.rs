@@ -1,4 +1,4 @@
-// either: Either<L, R> の作り方・map・either・iter・into_iter・partition
+// either: making Either<L, R>, map, either, iter, into_iter, partition
 use either::{Either, Left, Right};
 
 fn parse(s: &str) -> Either<i64, String> {

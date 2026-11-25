@@ -1,4 +1,4 @@
-// 手書きの impl PartialEq / Eq / PartialOrd / Ord、ジェネリックな derive、String を持つ enum の sort、std::cmp::max
+// Handwritten impl PartialEq / Eq / PartialOrd / Ord, generic derive, sort of an enum holding a String, std::cmp::max
 use std::cmp::Ordering;
 struct Money { cents: i64 }
 impl PartialEq for Money {

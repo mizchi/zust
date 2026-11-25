@@ -1,4 +1,4 @@
-// std::borrow::Cow (スライスと str)、copy_from_slice / clone_from_slice、u64::from_le_bytes とスライス
+// std::borrow::Cow (slices and str), copy_from_slice / clone_from_slice, u64::from_le_bytes and slices
 use std::borrow::Cow;
 
 fn bytes(d: &[u8], double: bool) -> Cow<'_, [u8]> {

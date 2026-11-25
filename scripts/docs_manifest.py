@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""英語の文書と日本語訳の組から、jev-lint docs のマニフェスト (.jev-lint/documents*.json) を作る。
+"""Builds the jev-lint docs manifests (.jev-lint/documents*.json) from the pairs of English documents and their Japanese translations.
 
-usage: python3 scripts/docs_manifest.py          マニフェストを書き直す
-       python3 scripts/docs_manifest.py --check  組がそろっているか・マニフェストが最新かを確かめる (書かない)
+usage: python3 scripts/docs_manifest.py          rewrites the manifests
+       python3 scripts/docs_manifest.py --check  checks that the pairs are complete and the manifests are up to date (writes nothing)
 
-組: CONTRIBUTING.md / CONTRIBUTING.ja.md、docs/X.md / docs/ja/X.md (README.md は英語だけ)
-(docs/reports/ も含む)。jev-lint のマニフェストは 1 つに 100 ファイルまでなので、レポートは分けて書く。
+Pairs: CONTRIBUTING.md / CONTRIBUTING.ja.md, docs/X.md / docs/ja/X.md (README.md is English only)
+(docs/reports/ included). A jev-lint manifest holds up to 100 files, so the reports are written separately.
 """
 import glob, json, os, sys
 
@@ -15,7 +15,7 @@ REPORTS_PER_MANIFEST = 40
 
 
 def pairs():
-    """(英語, 日本語) の組と、相手のいないファイル"""
+    """The (English, Japanese) pairs, and the files without a counterpart"""
     out, missing = [], []
     top = [("CONTRIBUTING.md", "CONTRIBUTING.ja.md")]
     en_docs = sorted(p for p in glob.glob("docs/**/*.md", root_dir=ROOT, recursive=True) if not p.startswith("docs/ja/"))

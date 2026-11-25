@@ -1,15 +1,15 @@
-"""zustc / rustc / relax (makepad/relax、JIT で動かす Rust の実装) を、ソースから出力が出終わるまでの時間で比べる。
-usage: RELAX=<relax の checkout>/target/release/relax python3 bench/vs_relax.py [NAME ...]
-  (このディレクトリで実行。事前に cargo build --release。NAME は gen1000 か bench/rt/NAME.rs。省略するとすべて)
+"""Compares zustc / rustc / relax (makepad/relax, a Rust implementation run by JIT) by the time from the source until the output has been fully produced.
+usage: RELAX=<relax checkout>/target/release/relax python3 bench/vs_relax.py [NAME ...]
+  (run in this directory, after cargo build --release. NAME is gen1000 or bench/rt/NAME.rs; all when omitted)
 
-relax はビルドしてから実行するのではなく、実行しながら関数ごとにコンパイルする。だからビルドの時間だけを比べられない。
-ここでは 3 つとも「ソースを渡してから、プログラムが出力を出し終わるまで」を測る (時間は 3 回の中央値):
-  zustc   zustc でビルドし、出来たものを実行する
-  rustc   rustc -Cincremental (debug) でビルドし、実行する
-  relax   relax run --quiet (パッケージの target/relax にキャッシュを持つ)
-場面: cold (キャッシュなし) / no-op (何も変えずにもう一度) / edit (1 か所変えてもう一度。編集は vs_rustc.py と同じ)
-cache はキャッシュのディスク上の大きさ (zustc: キャッシュ + .o、rustc: incremental ディレクトリ、relax: target/relax)。
-出力は rustc -O の出力と一致するか確かめる"""
+relax does not build and then run; it compiles fn by fn while running. So build times alone cannot be compared.
+Here all three measure "from handing over the source until the program has finished its output" (times are the median of 3 runs):
+  zustc   builds with zustc and runs the result
+  rustc   builds with rustc -Cincremental (debug) and runs it
+  relax   relax run --quiet (keeps its cache in the package's target/relax)
+Scenarios: cold (no cache) / no-op (again with nothing changed) / edit (again with one place changed; the edit is the same as vs_rustc.py's)
+cache is the cache's size on disk (zustc: the cache + .o, rustc: the incremental directory, relax: target/relax).
+Checks that the output matches the output of rustc -O"""
 import os, shutil, statistics, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -87,7 +87,7 @@ def bench(name):
     exe, inc = os.path.join(d, "r"), os.path.join(d, "r-incr")
     scenario("rustc -Cincremental", write_file(src),
              build_run(["rustc", "--edition", "2021", "-Awarnings", "-Cincremental=" + inc, src, "-o", exe], exe), [inc])
-    # relax: Cargo パッケージにする (名前で渡す)
+    # relax: make it a Cargo package (passed by name)
     pkg = "p_" + name.replace("-", "_")
     pd = os.path.join(d, pkg)
     os.makedirs(os.path.join(pd, "src"))

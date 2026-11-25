@@ -1,6 +1,6 @@
-//! zustc の命令の列 (IR) の型: 型・値・ブロック・変数・スタックスロット・関数の参照・再配置と、記録した命令 (Op)。
-//! acg (型の検査とコード生成) は Recorder に命令を記録するだけで、機械語にするのはバックエンド (minclif / Cranelift) が
-//! 記録を読み直して行う。check (LSP) はバックエンドなしで記録を捨てる。外部クレートに依存しない (zustc 自身でもコンパイルできる)
+//! The types of zustc's instruction sequence (IR): types, values, blocks, variables, stack slots, fn references, relocations, and the recorded instructions (Op).
+//! acg (type checking and code generation) only records instructions into a Recorder; turning them into machine code is done by the backend (minclif / Cranelift),
+//! which replays the record. check (LSP) discards the record without a backend. Depends on no external crates (zustc itself can compile it)
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Type {
@@ -328,7 +328,7 @@ impl VOp {
     }
 }
 
-/// 浮動小数点の比較
+/// Floating-point comparisons
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FloatCC {
     Equal,
@@ -337,11 +337,11 @@ pub enum FloatCC {
     LessThanOrEqual,
     GreaterThan,
     GreaterThanOrEqual,
-    /// どちらかが NaN
+    /// Either is NaN
     Unordered,
 }
 
-/// 整数の比較
+/// Integer comparisons
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum IntCC {
     Equal,
@@ -363,7 +363,7 @@ impl IntCC {
             IntCC::SignedLessThan | IntCC::SignedLessThanOrEqual | IntCC::SignedGreaterThan | IntCC::SignedGreaterThanOrEqual
         )
     }
-    /// setcc の 2 byte 目
+    /// The 2nd byte of setcc
     pub fn setcc(self) -> u8 {
         match self {
             IntCC::Equal => 0x94,
@@ -388,22 +388,22 @@ pub struct Block(pub u32);
 pub struct Variable(pub u32);
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub struct StackSlot(pub u32);
-/// 呼び出す関数 (外部の名前)
+/// A fn to call (an external name)
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub struct FuncRef(pub u32);
 
-/// コードの中の再配置 (call の rel32 など)
+/// A relocation in the code (a call's rel32 etc.)
 #[derive(Clone, Debug, PartialEq)]
 pub struct Reloc {
     pub offset: u32,
-    /// 参照する名前 (FuncRef の番号の名前)
+    /// The name referred to (the name of the FuncRef's number)
     pub name: String,
     /// R_X86_64_PLT32 (4) / R_X86_64_PC32 (2)
     pub kind: u32,
     pub addend: i64,
 }
 
-/// FunctionBuilder の命令 (呼ばれた順に記録し、割り当てを決めてから本番の Emitter でもう一度呼ぶ)
+/// A FunctionBuilder instruction (recorded in call order, and called again on the real Emitter once the allocation is decided)
 #[derive(Clone, Debug)]
 pub enum Op {
     CreateBlock,
@@ -523,19 +523,19 @@ impl Op {
     }
 }
 
-// --- Recorder: 命令を記録するだけの組み立て (acg が使う) -----------------------------------------------
+// --- Recorder: a builder that only records instructions (used by acg) -----------------------------------------------
 
-/// 命令を記録するだけの組み立て (acg が使う)。値・ブロック・変数・スロット・関数の参照に番号を振り、値の型を覚える。
-/// 機械語にはしない: バックエンド (minclif / Cranelift) が ops を同じ順に読み直して組み立てる (番号は読み直す側で振り直す)。
-/// 値の型の決め方は minclif の FunctionBuilder と同じ (codegen の ZUSTC_IR_VERIFY=1 で読み直すときに確かめる)
+/// A builder that only records instructions (used by acg). Numbers the values, blocks, variables, slots and fn references, and remembers the types of values.
+/// It does not produce machine code: the backend (minclif / Cranelift) replays ops in the same order to build it (the numbers are reassigned by the replaying side).
+/// The types of values are determined the same way as in minclif's FunctionBuilder (checked on replay with codegen's ZUSTC_IR_VERIFY=1)
 
 pub struct Recorder {
     pub params: Vec<Type>,
     pub rets: Vec<Type>,
-    /// 記録した命令と、命令ごとの戻り値 (値・ブロック・変数・スロット・関数の参照の番号)
+    /// The recorded instructions, and the results of each instruction (the numbers of values / blocks / variables / slots / fn references)
     pub ops: Vec<Op>,
     pub res: Vec<Vec<u32>>,
-    /// 入口で 0 にするスロット
+    /// The slots zeroed at entry
     pub zero: Vec<u32>,
     vt: Vec<Type>,
     blocks: Vec<Vec<Value>>,
@@ -581,7 +581,7 @@ impl Recorder {
         }
         false
     }
-    /// 入口で 0 にするスロットを覚える
+    /// Remembers the slots to zero at entry
     pub fn set_zero(&mut self, z: &[StackSlot]) {
         self.zero = z.iter().map(|s| s.0).collect();
     }

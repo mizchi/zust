@@ -1,4 +1,4 @@
-// エラトステネスの篩 (Vec<bool> と while ループ、添字の範囲検査)
+// Sieve of Eratosthenes (Vec<bool> and a while loop, index bounds checks)
 fn main() {
     let n = 20_000_000usize;
     let mut is = vec![true; n + 1];

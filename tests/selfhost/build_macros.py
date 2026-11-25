@@ -1,12 +1,12 @@
-"""zustc 自身の crates/syntax/src/macros.rs (macro_rules! の展開と include_str!) を 1 ファイルのプログラムにまとめる。
-proc_macro2 クレートは使えないので、使う分だけの代わり (tests/selfhost/mini_pm2.rs) を付ける
-(rustc 版も同じ代わりを使う)。
+"""Puts zustc's own crates/syntax/src/macros.rs (the expansion of macro_rules! and include_str!) together into a program of 1 file.
+The proc_macro2 crate cannot be used, so a replacement for just the parts used (tests/selfhost/mini_pm2.rs) is attached
+(the rustc version uses the same replacement).
 usage: python3 tests/selfhost/build_macros.py > out/selfhost/macros_main.rs
-main は引数のファイルごとに macros::expand を呼び、展開した結果の長さ・行数・ハッシュ (とエラー) を出す。"""
+main calls macros::expand for each file in its arguments and prints the length, line count and hash of the expanded result (and errors)."""
 
 macros = open("crates/syntax/src/macros.rs").read()
 pm2 = open("tests/selfhost/mini_pm2.rs").read()
-# (expand は lexer::tokenize を使う。lexer は cache の Key / KeyHasher を使う)
+# (expand uses lexer::tokenize; lexer uses the cache's Key / KeyHasher)
 lexer = open("crates/syntax/src/lexer.rs").read()
 key = open("crates/base/src/key.rs").read()
 cfg = open("crates/syntax/src/cfg.rs").read()
@@ -55,5 +55,5 @@ fn main() {
     }
 }
 """)
-# (lexer は crate::key を使う: cache と同じもの)
+# (lexer uses crate::key: the same as cache)
 print("mod key {\n    pub use crate::cache::*;\n}")

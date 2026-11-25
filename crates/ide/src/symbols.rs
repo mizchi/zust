@@ -1,9 +1,9 @@
-//! ソースのシンボル (アイテムとその中のメンバ) の一覧: LSP の documentSymbol / workspace/symbol が使う。
-//! 構文木ではなく字句の列を読むので、編集の途中で構文が壊れていても読める所までは出す。位置はもとのテキストの byte
-//! (前処理の前: マクロの展開・`mod` を平らにする前の、エディタが持っているテキストそのもの)。
+//! The list of a source's symbols (items and the members in them): used by LSP documentSymbol / workspace/symbol.
+//! It reads the token sequence rather than the syntax tree, so even if the syntax is broken mid-edit it outputs as far as it can read. Positions are bytes of the original text
+//! (before preprocessing: the text the editor holds, as it is, before macro expansion / flattening `mod`).
 //!
-//! 出すもの: mod / struct / enum / union / trait / impl / fn / const / static / type / macro_rules!、
-//! struct のフィールド、enum のバリアント、impl / trait / mod / extern の中のアイテム。関数の本体の中は読まない。
+//! Output: mod / struct / enum / union / trait / impl / fn / const / static / type / macro_rules!,
+//! struct fields, enum variants, items inside impl / trait / mod / extern. The inside of fn bodies is not read.
 
 use zust_syntax::lexer::tokenize;
 
@@ -23,12 +23,12 @@ pub enum SymKind {
     Field,
     Variant,
     Macro,
-    /// `extern "C" { .. }` のブロック (中の宣言は子。名前は `extern "C"`)
+    /// An `extern "C" { .. }` block (the declarations inside are children; the name is `extern "C"`)
     Extern,
 }
 
 impl SymKind {
-    /// LSP の SymbolKind の番号
+    /// LSP SymbolKind number
     pub fn lsp(self) -> u32 {
         match self {
             SymKind::Module => 2,
@@ -38,7 +38,7 @@ impl SymKind {
             SymKind::Impl => 19,
             SymKind::Function | SymKind::Macro => 12,
             SymKind::Method => 6,
-            // (rust-analyzer と同じく static も Constant)
+            // (Like rust-analyzer, static is Constant too)
             SymKind::Const | SymKind::Static => 14,
             SymKind::Extern => 3,
             SymKind::TypeAlias => 26,
@@ -49,7 +49,7 @@ impl SymKind {
 }
 
 impl Symbol {
-    /// documentSymbol の SymbolKind: rust-analyzer と同じく、impl / trait の中の `self` を取らない関数 (`fn new() -> Self`) は
+    /// documentSymbol's SymbolKind: like rust-analyzer, a fn inside impl / trait that does not take `self` (`fn new() -> Self`) is
     /// Function
     pub fn lsp_kind(&self) -> u32 {
         if self.kind == SymKind::Method && !takes_self(&self.detail) {
@@ -59,7 +59,7 @@ impl Symbol {
     }
 }
 
-/// fn のシグネチャ (`fn f<T>(&mut self, ..)`) の最初の引数が self か
+/// Whether the first parameter of a fn signature (`fn f<T>(&mut self, ..)`) is self
 pub fn takes_self(sig: &str) -> bool {
     let Some(i) = sig.find('(') else { return false };
     let first = sig[i + 1..].split([',', ')']).next().unwrap_or("").trim();
@@ -73,15 +73,15 @@ pub fn takes_self(sig: &str) -> bool {
 pub struct Symbol {
     pub name: String,
     pub kind: SymKind,
-    /// 補足 (fn のシグネチャ、フィールドの型など。1 行にまとめたもの)
+    /// Extra info (the fn signature, the field type, etc.; put on one line)
     pub detail: String,
-    /// アイテム全体 (属性を含む) と名前の byte 範囲
+    /// Byte ranges of the whole item (including attributes) and of the name
     pub start: usize,
     pub end: usize,
     pub name_start: usize,
     pub name_end: usize,
     pub children: Vec<Symbol>,
-    /// マクロの中のもの (`thread_local! { static X .. }`): 定義には使うが、documentSymbol には出さない (rust-analyzer と同じ)
+    /// Something inside a macro (`thread_local! { static X .. }`): used for definitions, but not output in documentSymbol (same as rust-analyzer)
     pub in_macro: bool,
 }
 
@@ -106,8 +106,8 @@ impl Scan<'_> {
     fn ident(&self, k: usize) -> bool {
         k < self.t.len() && self.t[k].0 == 0
     }
-    /// k の開き括弧に対応する閉じ括弧。`{` は波括弧だけを数える (中の丸括弧が閉じていなくても本体の終わりがわかる)。
-    /// 閉じていなければ、次に行頭 (字下げなし) から始まるアイテムの前まで (なければ end - 1)
+    /// The closing bracket matching the opening bracket at k. For `{`, only braces are counted (the end of the body is found even if parentheses inside are unclosed).
+    /// If unclosed, up to before the next item that starts at a line start (no indentation) (end - 1 if none)
     fn close(&self, k: usize, end: usize) -> usize {
         let brace = self.sym(k, b'{');
         let mut d = 0i32;
@@ -147,7 +147,7 @@ impl Scan<'_> {
         end.saturating_sub(1)
     }
 
-    /// k から、括弧の外の `;` か (want_brace なら) 最初の括弧の外の `{ .. }` の終わり
+    /// From k, the `;` outside brackets or (if want_brace) the end of the first `{ .. }` outside brackets
     fn item_end(&self, k: usize, end: usize, want_brace: bool) -> usize {
         let mut j = k;
         while j < end {
@@ -158,7 +158,7 @@ impl Scan<'_> {
                     b'(' | b'[' | b'{' => {
                         j = self.close(j, end);
                     }
-                    // (次のアイテムの始まりの `}`: 閉じていない括弧)
+                    // (A `}` at the start of the next item: an unclosed bracket)
                     b'}' => return j.saturating_sub(1).max(k),
                     _ => {}
                 }
@@ -167,7 +167,7 @@ impl Scan<'_> {
         }
         end.saturating_sub(1)
     }
-    /// a..=b のトークンの範囲のテキストを、空白 (改行・コメントも) をつめて 1 行にしたもの (長ければ切る)
+    /// The text of the token range a..=b put on one line with whitespace (newlines, comments too) squeezed out (cut if long)
     fn join(&self, a: usize, b: usize) -> String {
         if a >= self.t.len() || b < a {
             return String::new();
@@ -180,7 +180,7 @@ impl Scan<'_> {
                 out.push(' ');
             }
             out.push_str(&String::from_utf8_lossy(&self.s[self.t[j].1..self.t[j].2]));
-            // (トークンの間の `'` (ライフタイム) は字句の列にないので、もとのテキストから足す)
+            // (A `'` (lifetime) between tokens is not in the token sequence, so add it from the original text)
             if j < b && self.t[j + 1].1 > self.t[j].2 {
                 let gap = &self.s[self.t[j].2..self.t[j + 1].1];
                 if gap.ends_with(b"'") {
@@ -201,8 +201,8 @@ impl Scan<'_> {
         out
     }
 
-    /// a..end のアイテムを読む。in_impl: impl / trait の中 (fn はメソッド)
-    /// 関数の本体 (トークン a..end) の中のアイテム: 文の始め (`{` / `}` / `;` / 属性の `]` の後) にあるキーワードのもの
+    /// Reads the items in a..end. in_impl: inside impl / trait (fns are methods)
+    /// Items inside a fn body (tokens a..end): the ones with a keyword at the start of a statement (after `{` / `}` / `;` / an attribute's `]`)
     fn nested_items(&self, a: usize, end: usize) -> Vec<Symbol> {
         let mut out = vec![];
         let mut j = a;
@@ -218,7 +218,7 @@ impl Scan<'_> {
                     b"pub" | b"unsafe" | b"async" | b"extern" => true,
                     _ => false,
                 }
-                // (`'static` などの寿命は字句では `'` の後の識別子)
+                // (A lifetime like `'static` is, lexically, an identifier after `'`)
                 && !(self.t[j].1 >= 1 && self.s[self.t[j].1 - 1] == b'\'');
             if !item {
                 j += 1;
@@ -227,7 +227,7 @@ impl Scan<'_> {
             let n = out.len();
             let e = self.item_end(j, end, !matches!(self.text(j), b"const" | b"static" | b"type"));
             self.items(j, (e + 1).min(end), false, &mut out);
-            // (アイテムでなかった `unsafe { .. }` / `async move { .. }` などのブロックは中も見る)
+            // (For blocks that were not items, like `unsafe { .. }` / `async move { .. }`, look inside too)
             j = if out.len() > n { e + 1 } else { j + 1 };
         }
         out
@@ -237,7 +237,7 @@ impl Scan<'_> {
         let mut k = a;
         while k < end {
             let start = k;
-            // 属性 `#[..]` / `#![..]`
+            // Attributes `#[..]` / `#![..]`
             let mut j = k;
             while self.sym(j, b'#') {
                 let mut o = j + 1;
@@ -249,7 +249,7 @@ impl Scan<'_> {
                 }
                 j = self.close(o, end) + 1;
             }
-            // 修飾 (pub / pub(crate) / unsafe / async / default / extern "C" (fn の前) / const (fn の前))
+            // Modifiers (pub / pub(crate) / unsafe / async / default / extern "C" (before fn) / const (before fn))
             loop {
                 if self.is(j, b"pub") {
                     j += 1;
@@ -285,12 +285,12 @@ impl Scan<'_> {
             let next = match kw.as_slice() {
                 b"fn" if self.ident(j + 1) => {
                     let e = self.item_end(j, end, true);
-                    // (シグネチャ: 本体の `{` か `;` の前まで)
+                    // (Signature: up to before the body's `{` or `;`)
                     let mut se = j;
                     while se < e && !self.sym(se + 1, b'{') && !self.sym(se + 1, b';') {
                         se += 1;
                     }
-                    // (本体の中のアイテム `fn helper() {}` / `struct S;` ..: rust-analyzer と同じく子に)
+                    // (Items inside the body `fn helper() {}` / `struct S;` ..: made children, like rust-analyzer)
                     let ch = if self.sym(se + 1, b'{') { self.nested_items(se + 2, e) } else { vec![] };
                     out.push(named(if in_impl { SymKind::Method } else { SymKind::Function }, j + 1, e, self.join(j, se), ch));
                     e + 1
@@ -298,11 +298,11 @@ impl Scan<'_> {
                 b"struct" | b"union" if self.ident(j + 1) => {
                     let e = self.item_end(j, end, true);
                     let mut fields = vec![];
-                    // `struct S { a: T, .. }` のフィールド
+                    // Fields of `struct S { a: T, .. }`
                     let mut b = j + 2;
                     while b < e && !self.sym(b, b'{') && !self.sym(b, b'(') && !self.sym(b, b';') {
                         if self.sym(b, b'<') {
-                            // (型引数の中の `{` は数えない: const 引数の式は無視してよい)
+                            // (A `{` inside type arguments is not counted: the expression of a const argument can be ignored)
                         }
                         b += 1;
                     }
@@ -349,7 +349,7 @@ impl Scan<'_> {
                     if self.sym(b, b'{') {
                         self.items(b + 1, self.close(b, end), true, &mut ch);
                     }
-                    // (名前: `impl<T> Tr for S<T>` の型引数を除いた `Tr for S<T>` / `S`)
+                    // (Name: `Tr for S<T>` / `S`, without the type params of `impl<T> Tr for S<T>`)
                     let mut h = j + 1;
                     if self.sym(h, b'<') {
                         let mut d = 0i32;
@@ -367,7 +367,7 @@ impl Scan<'_> {
                         }
                     }
                     let mut he = b.saturating_sub(1);
-                    // (`where` から後ろは名前に入れない)
+                    // (Nothing from `where` on goes into the name)
                     let mut w = h;
                     while w < b {
                         if self.is(w, b"where") {
@@ -401,7 +401,7 @@ impl Scan<'_> {
                     e + 1
                 }
                 b"extern" if self.sym(j + 1, b'{') || (j + 2 < end && self.t[j + 1].0 == 2 && self.sym(j + 2, b'{')) => {
-                    // `extern "C" { fn f(); }`: rust-analyzer と同じく `extern "C"` の子に (navigate はトップレベルのアイテムとして扱う)
+                    // `extern "C" { fn f(); }`: made children of `extern "C"`, like rust-analyzer (navigate treats them as top-level items)
                     let o = if self.sym(j + 1, b'{') { j + 1 } else { j + 2 };
                     let c = self.close(o, end);
                     let mut ch = vec![];
@@ -416,7 +416,7 @@ impl Scan<'_> {
                     if self.is(nk, b"_") {
                         e + 1
                     } else {
-                        // (型: `:` から `=` / `;` の前まで)
+                        // (Type: from `:` up to before `=` / `;`)
                         let mut ta = nk + 1;
                         let detail = if self.sym(ta, b':') {
                             ta += 1;
@@ -434,7 +434,7 @@ impl Scan<'_> {
                 }
                 b"type" if self.ident(j + 1) => {
                     let e = self.item_end(j, end, false);
-                    // (detail: `=` の右の型。型引数があれば `<K, V> = 右`)
+                    // (detail: the type to the right of `=`. With type params, `<K, V> = right`)
                     let mut q = j + 2;
                     let mut generics = String::new();
                     if self.sym(q, b'<') {
@@ -467,8 +467,8 @@ impl Scan<'_> {
                         e += 1;
                     }
                     out.push(named(SymKind::Macro, j + 2, e, String::from("macro_rules!"), vec![]));
-                    // (core の数の型のメソッドはマクロ `uint_impl!` / `int_impl!` の本体にある: その腕の中のアイテムを
-                    // `impl __uint` / `impl __int` のメンバにする (navigate が u8 .. / i8 .. の持ち主に足す))
+                    // (The methods of core's number types are in the bodies of the macros `uint_impl!` / `int_impl!`: the items in their arms are made
+                    // members of `impl __uint` / `impl __int` (navigate adds them to the owners u8 .. / i8 ..))
                     let mname = self.text(j + 2).to_vec();
                     if matches!(mname.as_slice(), b"uint_impl" | b"int_impl" | b"from_str_int_impl" | b"generate_pattern_iterators") && self.sym(j + 3, b'{') {
                         let mut ch = vec![];
@@ -478,7 +478,7 @@ impl Scan<'_> {
                                 let c = self.close(q + 2, e);
                                 let mut part = vec![];
                                 self.items(q + 3, c, true, &mut part);
-                                // (`$( impl $int_ty { fn .. } )+` の中の impl のメンバも)
+                                // (The members of the impl inside `$( impl $int_ty { fn .. } )+` too)
                                 part = self.nested_items(q + 3, c).into_iter().chain(part).collect();
                                 for s in part {
                                     if s.kind == SymKind::Impl {
@@ -501,7 +501,7 @@ impl Scan<'_> {
                         ch.dedup_by_key(|s| s.name_start);
                         for s in &mut ch {
                             s.in_macro = true;
-                            // (数の型の impl のメンバ)
+                            // (Members of the number types' impls)
                             if s.kind == SymKind::Function {
                                 s.kind = SymKind::Method;
                             }
@@ -509,7 +509,7 @@ impl Scan<'_> {
                         let owner = match mname.as_slice() {
                             b"uint_impl" => "__uint",
                             b"int_impl" => "__int",
-                            // (str の `Split<'a, P>` などの Iterator の impl: navigate がそれらの型の持ち主に足す)
+                            // (Iterator impls such as str's `Split<'a, P>`: navigate adds them to the owners of those types)
                             b"generate_pattern_iterators" => "__str_pat_iter",
                             _ => "__num",
                         };
@@ -518,7 +518,7 @@ impl Scan<'_> {
                     }
                     e + 1
                 }
-                // (宣言マクロ 2.0 `macro name(..) { .. }` / `macro name { .. }`: std の derive など)
+                // (Declarative macros 2.0 `macro name(..) { .. }` / `macro name { .. }`: std's derives, etc.)
                 b"macro" if self.ident(j + 1) => {
                     let mut b = j + 2;
                     if self.sym(b, b'(') {
@@ -530,16 +530,16 @@ impl Scan<'_> {
                 }
                 b"use" | b"extern" => self.item_end(j, end, false) + 1,
                 _ => {
-                    // (マクロの呼び出し `m! { .. }` / `m!(..);` などは読み飛ばす。わからないトークンは 1 つ進める)
+                    // (Macro calls like `m! { .. }` / `m!(..);` are skipped. An unknown token advances by one)
                     if self.ident(j) && self.sym(j + 1, b'!') && j + 2 < end && self.t[j + 2].0 == 1 {
                         let c = self.close(j + 2, end);
-                        // (`thread_local! { static X: T = ..; }` の static はアイテム: rust-analyzer はマクロを展開して見る)
+                        // (The static in `thread_local! { static X: T = ..; }` is an item: rust-analyzer expands the macro to see it)
                         if self.is(j, b"thread_local") && self.sym(j + 2, b'{') {
                             let n = out.len();
                             self.items(j + 3, c, false, out);
                             for s in &mut out[n..] {
                                 s.in_macro = true;
-                                // (thread_local の static の型は `LocalKey<T>`)
+                                // (The type of a thread_local static is `LocalKey<T>`)
                                 if s.kind == SymKind::Static {
                                     s.detail = format!("LocalKey<{}>", s.detail);
                                 }
@@ -557,7 +557,7 @@ impl Scan<'_> {
         }
     }
 
-    /// `{ a: T, pub b: U }` のフィールド
+    /// The fields of `{ a: T, pub b: U }`
     fn fields(&self, a: usize, end: usize, out: &mut Vec<Symbol>) {
         let mut k = a;
         while k < end {
@@ -572,7 +572,7 @@ impl Scan<'_> {
                     j = self.close(j, end) + 1;
                 }
             }
-            // (次の括弧の外の `,` まで)
+            // (Up to the next `,` outside brackets)
             let mut e = j;
             while e < end && !self.sym(e, b',') {
                 if self.sym(e, b'(') || self.sym(e, b'[') || self.sym(e, b'{') {
@@ -611,7 +611,7 @@ impl Scan<'_> {
         }
     }
 
-    /// `{ A, B(T), C { x: U } = 3 }` のバリアント
+    /// The variants of `{ A, B(T), C { x: U } = 3 }`
     fn variants(&self, a: usize, end: usize, out: &mut Vec<Symbol>) {
         let mut k = a;
         while k < end {
@@ -650,7 +650,7 @@ impl Scan<'_> {
     }
 }
 
-/// ソースのシンボルの木
+/// The tree of a source's symbols
 pub fn document_symbols(src: &str) -> Vec<Symbol> {
     let s = src.as_bytes();
     let t = tokenize(s);
@@ -661,7 +661,7 @@ pub fn document_symbols(src: &str) -> Vec<Symbol> {
     out
 }
 
-/// シンボルを平らにした列: (シンボル, 囲むものの名前)
+/// Symbols flattened into a list: (symbol, name of what encloses it)
 pub fn flatten(syms: &[Symbol]) -> Vec<(Symbol, String)> {
     fn go(syms: &[Symbol], parent: &str, out: &mut Vec<(Symbol, String)>) {
         for s in syms {
@@ -676,7 +676,7 @@ pub fn flatten(syms: &[Symbol]) -> Vec<(Symbol, String)> {
     out
 }
 
-/// byte 位置 → (行, 桁)。桁は UTF-16 の単位 (LSP と同じ)
+/// byte position → (line, column). Columns are in UTF-16 units (same as LSP)
 pub struct LineIndex {
     starts: Vec<usize>,
 }
@@ -713,8 +713,8 @@ impl LineIndex {
     }
 }
 
-/// 名前が問い合わせに合うかと、その良さ (小さいほど良い)。大文字小文字は区別しない。
-/// 0: 同じ、1: 前方一致、2: 部分一致 (語の頭)、3: 部分一致、4: 文字の順に含む (`fbar` → `foo_bar`)。空の問い合わせは全部 5
+/// Whether a name matches a query, and how good the match is (smaller is better). Case-insensitive.
+/// 0: equal, 1: prefix match, 2: substring match (at a word start), 3: substring match, 4: contains the characters in order (`fbar` → `foo_bar`). An empty query is 5 for everything
 pub fn match_score(query: &str, name: &str) -> Option<u32> {
     if query.is_empty() {
         return Some(5);
@@ -764,7 +764,7 @@ mod tests {
         assert_eq!(names(&s[2].children), ["Method m", "Const K"]);
         assert_eq!(s[2].children[0].detail, "fn m(&self) -> u32");
         assert_eq!(names(&s[3].children), ["Function f", "Macro mm"]);
-        // (範囲は属性から、名前は名前だけ)
+        // (The range starts at the attribute, the name covers only the name)
         assert_eq!(&src[s[0].start..s[0].start + 2], "#[");
         assert_eq!(&src[s[0].name_start..s[0].name_end], "P");
         assert!(src[s[5].start..s[5].end].ends_with('}'));
@@ -772,7 +772,7 @@ mod tests {
 
     #[test]
     fn broken_source() {
-        // (閉じていない fn の後ろも読めるところまで)
+        // (Past an unclosed fn too, as far as it can read)
         let s = document_symbols("fn a() {\n    let x = (1;\n}\nstruct S;\nfn b(");
         assert_eq!(names(&s), ["Function a", "Struct S", "Function b"]);
     }
@@ -785,7 +785,7 @@ mod tests {
         assert_eq!(match_score("oob", "foobar"), Some(3));
         assert_eq!(match_score("fbr", "foo_bar"), Some(4));
         assert_eq!(match_score("xyz", "foo"), None);
-        // 語の頭: camelCase の大文字・`::` の後・空白の後 (containerName の `impl Point`)。ほかは 3
+        // Word starts: a camelCase capital / after `::` / after whitespace (containerName's `impl Point`). Others are 3
         assert_eq!(match_score("bar", "fooBar"), Some(2));
         assert_eq!(match_score("bar", "a::bar"), Some(2));
         assert_eq!(match_score("point", "impl Point"), Some(2));

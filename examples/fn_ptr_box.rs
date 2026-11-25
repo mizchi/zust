@@ -1,5 +1,5 @@
-// 関数ポインタと Box のサンプル: 関数アイテムを値として渡す・返す・struct や配列に入れる、
-// ジェネリック関数の関数ポインタ化、Box<T> / Box<dyn Trait> / Box<dyn Fn>、再帰的なデータ構造
+// A sample of fn pointers and Box: passing / returning fn items as values, storing them in structs and arrays,
+// turning generic fns into fn pointers, Box<T> / Box<dyn Trait> / Box<dyn Fn>, recursive data structures
 unsafe extern "C" {
     fn putchar(c: i32) -> i32;
 }

@@ -1,4 +1,4 @@
-// struct と参照のサンプル (rustc でもそのままコンパイルできる)
+// A sample of structs and references (compiles with rustc as it is too)
 unsafe extern "C" {
     fn putchar(c: i32) -> i32;
 }
@@ -78,7 +78,7 @@ fn bump(n: &mut u32) {
     *n += 1;
 }
 
-// 値渡しした struct は呼び出し側のコピーなので、変更しても呼び出し元に影響しない
+// A struct passed by value is a copy made on the caller's side, so changing it does not affect the caller
 fn consume(mut v: Vec2) -> i64 {
     v.x = 1000;
     v.x + v.y
@@ -104,7 +104,7 @@ fn main() {
     println_i64(area(&r)); // 280
     println_i64(r.tag as i64); // 7
 
-    let r2 = r; // コピー
+    let r2 = r; // copy
     r.min.x = 100;
     println_i64(r2.min.x); // -1
     println_i64(r.min.x); // 100

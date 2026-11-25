@@ -1,19 +1,19 @@
-//! 記録した命令の列 (zust_ir::Recorder) を機械語にする: minclif の FunctionBuilder に組み立て直し、
-//! minclif のまま (レジスタ割り当て + x86-64) か、Cranelift のバックエンド (zust-clif) で機械語にする
+//! Turns a recorded instruction sequence (zust_ir::Recorder) into machine code: rebuilds it into minclif's FunctionBuilder, and
+//! makes machine code either with minclif as is (register allocation + x86-64) or with the Cranelift backend (zust-clif)
 
 use crate::ir::{Recorder, Reloc, StackSlot};
 
-/// minclif の記録から (機械語, 再配置, trap) を作るバックエンド (引数: 記録, 入口で 0 にするスロット, -O か)
+/// A backend that makes (machine code, relocations, traps) from a minclif recording (arguments: recording, slots zeroed at the entry, whether -O)
 pub type ClBackend = fn(&crate::minclif::FunctionBuilder, &[StackSlot], bool) -> Result<(Vec<u8>, Vec<Reloc>, Vec<(u32, u8)>), String>;
 
-/// 記録を機械語にする。cl が None なら minclif で
+/// Turns a recording into machine code. With minclif if cl is None
 pub fn lower(rec: &Recorder, late: &[StackSlot], opt: bool, cl: Option<ClBackend>) -> Result<(Vec<u8>, Vec<Reloc>, Vec<(u32, u8)>), String> {
     let (mut fb, sm) = crate::minclif::from_recording(rec);
-    // (記録のスロットの番号を minclif のものに)
+    // (Recording slot numbers to minclif ones)
     let late: Vec<StackSlot> = late.iter().map(|s| StackSlot(sm[s.0 as usize])).collect();
     let late = &late[..];
     match cl {
-        // (Cranelift のバックエンド: 記録した命令の列を Cranelift の IR にしてコンパイルする)
+        // (Cranelift backend: turns the recorded instruction sequence into Cranelift IR and compiles it)
         Some(cl) => cl(&fb, late, opt),
         None => {
             if fb.has_simd() {

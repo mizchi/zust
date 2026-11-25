@@ -1,4 +1,4 @@
-// fnv: FnvHasher を直接使う・FnvHashMap / FnvHashSet で数える
+// fnv: using FnvHasher directly, counting with FnvHashMap / FnvHashSet
 use std::hash::Hasher;
 
 use fnv::{FnvHashMap, FnvHashSet, FnvHasher};
@@ -16,7 +16,7 @@ fn main() {
     let mut keyed = FnvHasher::with_key(42);
     keyed.write_u32(7);
     println!("keyed {:x}", keyed.finish());
-    // (疑似乱数の単語を数える)
+    // (count pseudo-random words)
     let mut counts: FnvHashMap<u64, u32> = FnvHashMap::default();
     let mut seen: FnvHashSet<u32> = FnvHashSet::default();
     let mut x: u64 = 1;

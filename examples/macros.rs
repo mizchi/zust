@@ -1,6 +1,6 @@
-// macro_rules! のサンプル: 式の断片 (優先順位を保つ)、繰り返し $(..),* / $(..);* / $(..)+、再帰、
-// ident / ty / literal / tt / block の断片、アイテムを作るマクロ (型ごとの impl・関数)、マップのリテラル、
-// 定義の前にある呼び出しと、マクロの中からの println!
+// A sample of macro_rules!: expression fragments (keeping precedence), repetitions $(..),* / $(..);* / $(..)+, recursion,
+// ident / ty / literal / tt / block fragments, macros that make items (an impl / fn per type), map literals,
+// calls placed before the definition, and println! from inside a macro
 use std::collections::HashMap;
 
 macro_rules! square {

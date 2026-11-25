@@ -1,6 +1,6 @@
-//! prelude (src/prelude_lib.rs.in) のアイテム分割をビルド時に済ませる。
-//! 実行時に毎回 lexer で prelude 全体 (数千行) を分割すると、小さいプログラムのビルド時間の半分を占めるため。
-//! 分割には src/lexer.rs をそのまま使う (ハッシュは prelude のアイテムでは使わないので 0)。
+//! Does the item splitting of the prelude (src/prelude_lib.rs.in) at build time.
+//! Because splitting the whole prelude (thousands of lines) with the lexer on every run takes half the build time of a small program.
+//! The splitting uses src/lexer.rs as it is (the hash is 0, since it is not used for prelude items).
 
 use std::fmt::Write;
 
