@@ -1107,7 +1107,18 @@ impl Cx<'_> {
         let mut p = if is_place_expr(recv) {
             self.place(recv)?
         } else {
-            let r = self.expr(recv, None)?;
+            // (a temporary receiver whose drop may use what it borrows (`D(&*v).iter()` with `impl Drop for D`): it
+            // holds its loans until the end of the statement, as a field's base does (struct_base))
+            let watch = self.bk_on() && self.bk.level >= 2 && self.user_code;
+            if watch {
+                self.bk_frame();
+            }
+            let r = self.expr(recv, None);
+            let srcs = if watch { self.bk_frame_end() } else { vec![] };
+            let r = r?;
+            if !srcs.is_empty() && self.dropck(r.1, 0) {
+                self.bk_drop_temp(r.1, srcs);
+            }
             // 一時値の受け手は文の終わりまで所有する (値で受けるメソッドならムーブ)
             if let (Some(v), t) = r {
                 if t != Ty::Never {

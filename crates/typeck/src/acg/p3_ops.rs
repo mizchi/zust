@@ -1325,12 +1325,14 @@ impl Cx<'_> {
         }
         // (the condition is a scope of its own: its temporaries are dropped before either branch runs)
         let t0 = self.temps.len();
+        let bk0 = self.bk.stmt_temps.len();
         let (c, ct) = self.expr(cond, Some(Ty::Bool))?;
         self.same(SP, ct, Ty::Bool)?;
         let Some(c) = c else {
             return Ok((None, Ty::Never));
         };
         self.drop_temps(t0);
+        self.bk_temps_end(bk0);
         let then_blk = self.b.create_block();
         let else_blk = self.b.create_block();
         let merge = self.b.create_block();
