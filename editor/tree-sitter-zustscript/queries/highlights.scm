@@ -16,7 +16,7 @@
 
 [
   "type" "enum" "fn" "extern" "import" "from" "wasm" "let" "mut" "if" "else" "match" "while" "for" "in"
-  "as" "perform" "handle" "return"
+  "as" "perform" "handle" "return" "async" "await"
 ] @keyword
 (visibility) @keyword
 (mutable) @keyword

@@ -1,0 +1,3 @@
+// expect: performs ["Ask"]: handle the effects inside, in a function that is not async
+enum Ask { Get -> i32 }
+export async fn f() -> i32 { perform Get }
