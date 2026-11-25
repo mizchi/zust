@@ -725,16 +725,6 @@ impl Cx<'_> {
                 }
             }
         }
-        // `o.flatten()` (Option<Option<T>>): `o.unwrap_or(None)`
-        if method == "flatten" && margs.is_empty() {
-            if let Some(Ty::Struct(sid)) = self.peek(recv) {
-                let opt = |this: &Self, s: u32| this.prog.structs[this.prog.base_of(s) as usize].name == "Option";
-                if opt(self, sid) && matches!(self.prog.structs[sid as usize].args.first(), Some(Ty::Struct(i)) if opt(self, *i)) {
-                    let e = mcall(paren(recv.clone()), "unwrap_or", vec![path_expr("None")]);
-                    return self.expr(&e, expected);
-                }
-            }
-        }
         // `it.flatten()` (要素が &Vec<T> / &[T] / &[T; N]): `it.flat_map(|x| x.iter())`
         if method == "flatten" && margs.is_empty() {
             let item = self.peek(recv).filter(|&t| !self.prog.has_param(t)).and_then(|t| self.prog.assoc_of(t, "Item"));
