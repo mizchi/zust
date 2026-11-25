@@ -551,7 +551,7 @@ impl Solver<'_> {
                 let (name, tr) = crate::ast_types::split_trait_assoc(name);
                 let def = prog.assocs.iter().find(|a| {
                     a.name == name
-                        && tr.is_none_or(|tr| a.tr.as_deref().is_none_or(|t| t == tr))
+                        && tr.is_none_or(|tr| a.trait_name.as_deref().is_none_or(|t| t == tr))
                         && matches!(a.self_ty, Ty::Struct(sid) if prog.base_of(sid) == b)
                 })?;
                 let Ty::Struct(ssid) = def.self_ty else { return None };
