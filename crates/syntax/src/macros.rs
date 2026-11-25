@@ -1348,7 +1348,7 @@ fn item_scope(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], depth: &[u
 /// ソース全体は速い lexer::tokenize で見て、proc_macro2 の字句解析は定義と呼び出しの括弧の中だけにする
 /// (全体を proc_macro2 で読むと、大きなソース (zustc 自身) で遅い)。結果は expand_reference と同じ
 /// The line that separates a crate's own text from the `macro_rules!` of its dependencies appended for its
-/// expansion (driver2's workspace build)
+/// expansion (session's workspace build)
 pub const DEP_MACROS_MARKER: &str = "\n// __zustc_dep_macros__\n";
 
 /// How deep macro expansion may go: the crate's `#![recursion_limit = "N"]`, else rustc's default, 128

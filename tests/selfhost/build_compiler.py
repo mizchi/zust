@@ -1,6 +1,6 @@
-"""Bundles the whole compiler that uses neither syn nor Cranelift (driver2 + acg + minclif and the modules they use) into a single-file program.
+"""Bundles the whole compiler that uses neither syn nor Cranelift (session + acg + minclif and the modules they use) into a single-file program.
 usage: python3 tests/selfhost/build_compiler.py > out/selfhost/compiler_main.rs
-main calls driver2::build with `compiler <in.rs> -o <out> [-O]` (same as zustc's ZUSTC_DRIVER2=1).
+main calls session::build with `compiler <in.rs> -o <out> [-O]` (same as zustc --backend=minclif).
 Compiling this with zustc gives zustc compiled by zustc itself (its path that does not use syn).
 proc_macro2 is replaced with tests/selfhost/mini_pm2.rs (macros.rs uses it)."""
 import re, glob, os, re
@@ -35,11 +35,11 @@ acg = re.sub(r"^(pub )?mod (\w+);\n", inline, acg, flags=re.M)
 acg = re.sub(r"^#!\[allow\([^)]*\)\]\n", "", acg, flags=re.M)
 
 ir = body("crates/ir/src/lib.rs")
-# driver2: put the build part (driver2/build.rs) inside and remove the feature `build` conditions (the self-host builds too)
-driver2 = body("crates/core/src/driver2.rs").replace("mod build;\n", "mod build {\n" + body("crates/core/src/driver2/build.rs") + "\n}\n")
-driver2 = re.sub(r'^[ \t]*#\[cfg\(not\(feature = "build"\)\)\]\n.*\n', "", driver2, flags=re.M)
-driver2 = re.sub(r'^[ \t]*#\[cfg\(feature = "build"\)\]\n', "", driver2, flags=re.M)
-driver2 = driver2.replace('#[cfg(feature = "build")] ', "")
+# session: put the build part (session/build.rs) inside and remove the feature `build` conditions (the self-host builds too)
+session = body("crates/core/src/session.rs").replace("mod build;\n", "mod build {\n" + body("crates/core/src/session/build.rs") + "\n}\n")
+session = re.sub(r'^[ \t]*#\[cfg\(not\(feature = "build"\)\)\]\n.*\n', "", session, flags=re.M)
+session = re.sub(r'^[ \t]*#\[cfg\(feature = "build"\)\]\n', "", session, flags=re.M)
+session = session.replace('#[cfg(feature = "build")] ', "")
 
 parts = [("key", body("crates/base/src/key.rs")), ("fxhash", body("crates/base/src/fxhash.rs")), ("lexer", body("crates/syntax/src/lexer.rs")),
          ("prelude", prelude), ("types", body("crates/syntax/src/types.rs")), ("parse", body("crates/syntax/src/parse.rs")),
@@ -47,7 +47,7 @@ parts = [("key", body("crates/base/src/key.rs")), ("fxhash", body("crates/base/s
          ("ast_summary", body("crates/syntax/src/ast_summary.rs")), ("regions", body("crates/syntax/src/regions.rs")), ("wf", body("crates/syntax/src/wf.rs")), ("program", body("crates/sema/src/program.rs")),
          ("ast_consteval", body("crates/sema/src/ast_consteval.rs")), ("solver", body("crates/sema/src/solver.rs")), ("traits", body("crates/sema/src/traits.rs")), ("ctors", body("crates/syntax/src/ctors.rs")),
          ("ast_infer", body("crates/sema/src/ast_infer.rs")), ("simd_sig", body("crates/sema/src/simd_sig.rs")), ("ir", ir), ("minclif", body("crates/minclif/src/lib.rs").replace("zust_ir::", "crate::ir::")), ("lower", body("crates/codegen/src/lower.rs")), ("link", body("crates/codegen/src/link.rs")),
-         ("macros", body("crates/syntax/src/macros.rs") + "\nuse crate::proc_macro2;\n"), ("acg", acg), ("enc", body("crates/syntax/src/enc.rs")), ("types_enc", expand_enc_struct(body("crates/syntax/src/types_enc.rs"))), ("cache2", body("crates/typeck/src/cache2.rs")), ("cfg", body("crates/syntax/src/cfg.rs")), ("stub", body("crates/syntax/src/stub.rs")), ("srcmap", body("crates/syntax/src/srcmap.rs")), ("prep", body("crates/syntax/src/prep.rs")), ("prof", body("crates/base/src/prof.rs")), ("front", body("crates/syntax/src/front.rs")), ("driver2", driver2)]
+         ("macros", body("crates/syntax/src/macros.rs") + "\nuse crate::proc_macro2;\n"), ("acg", acg), ("enc", body("crates/syntax/src/enc.rs")), ("types_enc", expand_enc_struct(body("crates/syntax/src/types_enc.rs"))), ("build_cache", body("crates/typeck/src/build_cache.rs")), ("cfg", body("crates/syntax/src/cfg.rs")), ("stub", body("crates/syntax/src/stub.rs")), ("srcmap", body("crates/syntax/src/srcmap.rs")), ("prep", body("crates/syntax/src/prep.rs")), ("prof", body("crates/base/src/prof.rs")), ("front", body("crates/syntax/src/front.rs")), ("session", session)]
 out = ["// 自動生成: tests/selfhost/build_compiler.py (zustc の src/*.rs をそのまま含む)",
        "mod cache {\n    pub use crate::key::*;\n}\n", body("tests/selfhost/mini_pm2.rs")]
 for name, src in parts:
@@ -101,15 +101,15 @@ fn main() {
         }
     };
     let out = output.unwrap_or_else(|| input.trim_end_matches(".rs").to_string());
-    let mut o = driver2::Options2::default();
+    let mut o = session::Options::default();
     o.opt = opt;
     o.no_cache = no_cache;
     o.time = time;
     if jobs > 0 {
         o.jobs = jobs;
     }
-    let mut s = driver2::Session2::new(o);
-    let cp = format!("{out}.crcache2");
+    let mut s = session::Session::new(o);
+    let cp = format!("{out}.cache");
     s.load_cache(std::path::Path::new(&cp));
     if let Err(e) = s.build(&src, std::path::Path::new(&out)) {
         eprintln!("error: {input}: {e}");

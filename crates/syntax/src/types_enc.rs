@@ -1,5 +1,5 @@
 //! Serialization of type syntax (TySyn) and summaries (Summary) (for the cache). Split out of front.rs: since it does not depend on syn,
-//! driver2 (the driver that uses neither syn nor Cranelift) can use it too, and zustc itself can compile it.
+//! The session can use it too, and zustc itself can compile it.
 
 use crate::enc::{Enc, Rd};
 use crate::types::TYS;

@@ -1,15 +1,15 @@
 //! Region checking against signatures (crates/typeck/src/acg/regionck.rs): "lifetime may not live long enough" where
 //! the constraints that are known require it, and nothing on code rustc accepts
-use zustc::{Options2, Session2};
+use zustc::{Options, Session};
 
 fn check(src: &str) -> Vec<(usize, String)> {
-    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, no_cache: true, ..Options::default() });
     s.check(src).into_iter().map(|d| (d.line, d.msg)).collect()
 }
 
 /// check in an edition
 fn check_ed(src: &str, edition: u16) -> Vec<(usize, String)> {
-    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, no_cache: true, edition, ..Options::default() });
     s.check(src).into_iter().map(|d| (d.line, d.msg)).collect()
 }
 
@@ -90,7 +90,7 @@ fn main() {
 fn lifetime_only_change_rechecks_callers() {
     let v1 = "fn pick<'a>(x: &'a u32, _y: &u32) -> &'a u32 { x }\nfn g<'a, 'b>(x: &'a u32, y: &'b u32) -> &'a u32 {\n    pick(x, y)\n}\nfn main() {}\n";
     let v2 = v1.replace("fn pick<'a>(x: &'a u32, _y: &u32)", "fn pick<'a>(_y: &u32, x: &'a u32)");
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     assert!(s.check(v1).is_empty());
     let d = s.check(&v2);
     assert!(d.len() == 1 && d[0].line == 3 && d[0].msg.contains("lifetime may not live long enough"), "{d:?}");
@@ -2105,7 +2105,7 @@ fn part11_review_3() {
     assert_eq!(check("trait T {\n    fn get(&self) -> u8;\n    fn set(&mut self, v: u8);\n}\nfn f(x: &mut dyn T) {\n    x.set(x.get());\n}\nfn main() {}\n"), vec![]);
     let src = "struct D<T>(T);\nimpl<T> Drop for D<T> {\n    fn drop(&mut self) {}\n}\nimpl<T> D<T> {\n    fn end(&self) {}\n}\nfn f() {\n    let t = D(Box::new(1));\n    D(&t).end()\n}\nfn main() {\n    f();\n}\n";
     // (a successful check under 2024 is not reused under 2021)
-    let mut s = Session2::new(Options2 { jobs: 1, edition: 2024, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, edition: 2024, ..Options::default() });
     assert!(s.check(src).is_empty());
     s.opts.edition = 2021;
     assert_eq!(s.check(src).len(), 1);
@@ -2223,7 +2223,7 @@ fn reference_clone_of_an_unbounded_param() {
 #[test]
 fn part12_review() {
     let src = "fn main() {\n    let mut x: Vec<()> = Vec::new();\n    || {\n        || {\n            x.push(())\n        }\n    };\n}\n";
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     assert_eq!(s.check(src).len(), 1);
     assert_eq!(s.check(&format!("{src}fn other() {{}}\n")).len(), 1);
     assert_eq!(s.check(&format!("{src}fn other() {{\n    let _ = 1;\n}}\n")).len(), 1);
@@ -2531,7 +2531,7 @@ fn part14_rpit_captures_no_lifetime() {
     assert_eq!(check("use std::fmt::Display;\nfn a(x: &[u8]) -> impl Iterator<Item = u8> {\n    x.to_vec().into_iter()\n}\nfn b(x: &str) -> impl Display {\n    x.to_string()\n}\nfn c(x: &u8) -> impl Display {\n    *x\n}\nfn d(x: &[u8]) -> impl Iterator<Item = u8> + '_ {\n    x.iter().copied()\n}\nfn e<'a>(x: &'a [u8]) -> impl Iterator<Item = &'a u8> {\n    x.iter()\n}\nfn f(x: &[u8]) -> impl Fn() -> usize {\n    let n: usize = x.len();\n    move || n\n}\nfn main() {\n    println!(\"{} {} {} {} {} {}\", a(&[1]).count(), b(\"x\"), c(&1), d(&[2]).count(), e(&[3]).count(), f(&[4])());\n}\n"), vec![]);
     // (a parameter whose regions are 'static: `x: &'static u8`, `'a: 'static`)
     assert_eq!(check("use std::fmt::Display;\nfn a(x: &'static u8) -> impl Display {\n    x\n}\nfn b<'a: 'static>(x: &'a [u8]) -> impl Iterator<Item = u8> {\n    x.iter().copied()\n}\nfn c(_y: &u8, x: &'static str) -> impl Display {\n    x\n}\nfn main() {}\n"), vec![]);
-    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2024, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, no_cache: true, edition: 2024, ..Options::default() });
     assert!(s.check("use std::fmt::Display;\nfn s(x: &[u8]) -> impl Iterator<Item = u8> {\n    x.iter().copied()\n}\nfn t(x: &u8) -> impl Display {\n    x\n}\nfn main() {}\n").is_empty());
 }
 
@@ -4138,11 +4138,11 @@ fn part28_review() {
     // (#154's review: a trait's name behind a pointer in a 2015 edition's signature and struct field is its trait
     // object (the edition is known when they are resolved); a closure for `Box<dyn Fn(T) -> U>` coerced where T is known
     // and U not yet; a program's own type named like a mark (`__S0`) is that type)
-    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2015, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, no_cache: true, edition: 2015, ..Options::default() });
     let d: Vec<(usize, String)> = s.check("trait X { fn v(&self) -> i32; }\nimpl X for i32 { fn v(&self) -> i32 { *self } }\nstruct H<'a> { x: &'a X }\nfn take(x: &X) -> i32 { x.v() }\nfn main() { let h = H { x: &5 }; println!(\"{} {}\", take(&3), h.x.v()); }\n").into_iter().map(|d| (d.line, d.msg)).collect();
     assert_eq!(d, vec![], "v1");
     // (the `bare_trait_objects` lint denied: such an object is an error, at the line that names it)
-    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2018, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, no_cache: true, edition: 2018, ..Options::default() });
     let d: Vec<(usize, String)> = s.check("#[deny(bare_trait_objects)]\nfn function(x: &SomeTrait) {\n    let _ = x;\n}\ntrait SomeTrait {}\nfn main() {}\n").into_iter().map(|d| (d.line, d.msg)).collect();
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("trait objects without an explicit `dyn` are deprecated"), "{d:?}");
     assert_eq!(check("fn f<T, U>(a: T, cb: Box<dyn Fn(T) -> U>, b: U) -> U { let _ = b; cb(a) }\nstruct S2<T, U> { a: T, cb: Box<dyn Fn(T) -> U>, b: U }\nfn main() {\n    println!(\"{}\", f(1i32, Box::new(|x: i32| x), 2i32));\n    let s = S2 { a: 1i32, cb: Box::new(|x: i32| x + 10), b: 2i32 };\n    println!(\"{} {}\", (s.cb)(s.a), s.b);\n}\n"), vec![], "v2");
@@ -4153,15 +4153,15 @@ fn part28_review() {
     assert_eq!(check("#[allow(non_camel_case_types)]\ntrait A<X> { fn get(&self) -> X; }\nimpl A<u8> for u8 { fn get(&self) -> u8 { *self } }\n#[allow(non_camel_case_types)]\nfn f<T, __zp0_U>(_t: T, x: &dyn A<__zp0_U>) -> __zp0_U { x.get() }\nfn main() { let y: u8 = f(1i32, &7u8 as &dyn A<u8>); println!(\"{}\", y); }\n"), vec![], "v4b");
     let d = check("fn main() { let _x: __zs0 = todo!(); }\n");
     assert!(d.len() == 1 && d[0].1.contains("cannot find type `__zs0`"), "{d:?}");
-    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2018, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, no_cache: true, edition: 2018, ..Options::default() });
     let d: Vec<(usize, String)> = s.check("#![deny(bare_trait_objects)]\n#![allow(bare_trait_objects)]\ntrait X {}\nimpl X for i32 {}\nfn take(_x: &X) {}\nfn main() { take(&1); }\n").into_iter().map(|d| (d.line, d.msg)).collect();
     assert_eq!(d, vec![], "v5");
     // (an item's deny of the lint with others before it; a trait object's argument `&mut i32` is no `&T`)
-    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2018, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, no_cache: true, edition: 2018, ..Options::default() });
     let d: Vec<(usize, String)> = s.check("#[deny(unused, bare_trait_objects)]\nfn function(x: &SomeTrait) {\n    let _ = x;\n}\ntrait SomeTrait {}\nfn main() {}\n").into_iter().map(|d| (d.line, d.msg)).collect();
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("trait objects without an explicit `dyn` are deprecated"), "{d:?}");
     // (such an attribute inside a string or a comment is none)
-    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2018, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, no_cache: true, edition: 2018, ..Options::default() });
     let d: Vec<(usize, String)> = s.check("const NOTE: &str = r\"#[deny(unused, bare_trait_objects)]\";\n// #[deny(bare_trait_objects)]\ntrait X {}\nimpl X for i32 {}\nfn take(_x: &X) {}\nfn main() { take(&1); println!(\"{}\", NOTE.len()); }\n").into_iter().map(|d| (d.line, d.msg)).collect();
     assert_eq!(d, vec![], "v6");
     let d = check("trait A<T> { fn get(&self) -> i32; }\nimpl<'a> A<&'a mut i32> for u8 { fn get(&self) -> i32 { 1 } }\nfn f<T>(x: &dyn A<&T>) -> i32 { x.get() }\nfn main() {\n    let b: &dyn A<&mut i32> = &1u8;\n    println!(\"{}\", f(b));\n}\n");

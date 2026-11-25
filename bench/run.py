@@ -42,16 +42,16 @@ def bench(n):
         edit = measure(build)
         r1 = subprocess.run([out], capture_output=True, text=True).stdout.strip()
         # (zustc's cache takes the machine code from the .o, so the .o is counted too)
-        extra = du(out + ".o") if store.endswith(".crcache2") else 0
+        extra = du(out + ".o") if store.endswith(".cache") else 0
         rows.append((tool, cold, noop, edit, os.path.getsize(out), du(store) + extra, r1))
 
     exe = os.path.join(d, "exr")
-    scenario("zustc (auto)", [EXR, src, "-o", exe], exe, exe + ".crcache2")
+    scenario("zustc (auto)", [EXR, src, "-o", exe], exe, exe + ".cache")
     for lk in ["bfd", "lld", "wild"]:
         if lk == "wild" and not shutil.which("wild"):
             continue
         exe2 = os.path.join(d, "exr-" + lk)
-        scenario(f"zustc (--linker={lk})", [EXR, src, "-o", exe2, f"--linker={lk}"], exe2, exe2 + ".crcache2")
+        scenario(f"zustc (--linker={lk})", [EXR, src, "-o", exe2, f"--linker={lk}"], exe2, exe2 + ".cache")
     for name, flags in [("rustc -Cincremental dbg=0", ["-Cdebuginfo=0"]),
                         ("rustc -Cincremental dbg=2", ["-Cdebuginfo=2"])][: 1 if n > 1000 else 2]:
         inc = os.path.join(d, "inc-" + flags[0][-1])

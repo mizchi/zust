@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Final self-host step: compiles the whole compiler without syn / Cranelift (combined into one file by tests/selfhost/build_compiler.py)
-# with both rustc and zustc (driver2), compiles tests/probe / examples / tests/acg with the 2 resulting compilers, and checks
+# with both rustc and zustc (session), compiles tests/probe / examples / tests/acg with the 2 resulting compilers, and checks
 #   - whether the .o files the 2 compilers output are the same bytes
 #   - whether the outputs of running them are the same
 # Further, the zustc-built compiler compiles itself (compiler_main.rs) once more (stage 2),

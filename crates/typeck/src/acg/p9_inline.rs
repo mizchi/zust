@@ -7,7 +7,7 @@
 //!
 //! What is expanded is small fns: those that contain no closures or macros, whose body syntax tree is small, and that are not special bodies (drop glue etc.) or
 //! panics that report the caller's location (unwrap etc.). A caller that expanded a user fn puts the hash and line of the callee's item into its cache key
-//! (driver2::fn_key). Fns of dependency crates are not expanded (their bodies are not in the interface hash).
+//! (session::fn_key). Fns of dependency crates are not expanded (their bodies are not in the interface hash).
 //! Inside an expansion, expansion goes one more level deep
 
 use super::*;
@@ -27,7 +27,7 @@ pub struct Inline {
 
 type Inferred = (crate::ast_infer::LetTypes, crate::ast_infer::MacroArgs, crate::ast_infer::TextTypes);
 
-/// The upper limit on the size of the body syntax tree (the length of its Debug string; the size is usually checked by driver2 as the number of source tokens)
+/// The upper limit on the size of the body syntax tree (the length of its Debug string; the size is usually checked by session as the number of source tokens)
 const MAX_BODY: usize = 6000;
 /// The upper limit on the number of tokens in an item's source
 pub const MAX_TOKENS: usize = 110;

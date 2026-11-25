@@ -82,7 +82,7 @@ def bench_build(n, reps, work, vg, out):
         (f"{name} check", statistics.median(checks), "ms"),
         (f"{name} build cold peak RSS", statistics.median(rss), "MiB"),
         (f"{name} binary", du(exe) / 1024, "KiB"),
-        (f"{name} cache", du(exe + ".crcache2") / 1024, "KiB"),
+        (f"{name} cache", du(exe + ".cache") / 1024, "KiB"),
     ]
     if vg:
         out.append((f"{name} build noop instructions", instructions(build), "M instr"))

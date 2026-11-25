@@ -1,7 +1,7 @@
-//! driver2's cache and parallelism: a second build reads everything from the cache and gives the same .o,
+//! session's cache and parallelism: a second build reads everything from the cache and gives the same .o,
 //! a change to one fn recompiles only that fn, and compiling in parallel with fork gives the same .o as one process.
 #![cfg(feature = "acg")]
-use zustc::driver2::{Options2, Session2};
+use zustc::session::{Options, Session};
 
 fn program(k: u32) -> String {
     let mut s = String::new();
@@ -22,9 +22,9 @@ fn cache_and_parallel() {
     let dir = std::env::temp_dir().join(format!("d2cache_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let out = dir.join("p");
-    let cp = dir.join("p.crcache2");
+    let cp = dir.join("p.cache");
     let run = |src: &str, jobs: usize, cache: bool| {
-        let mut s = Session2::new(Options2 { jobs, no_cache: !cache, ..Default::default() });
+        let mut s = Session::new(Options { jobs, no_cache: !cache, ..Default::default() });
         if cache {
             s.load_cache(&cp);
         }
@@ -61,9 +61,9 @@ fn alias_in_a_constant_invalidates() {
     let dir = std::env::temp_dir().join(format!("d2cache_alias_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let out = dir.join("p");
-    let cp = dir.join("p.crcache2");
+    let cp = dir.join("p.cache");
     let run = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, ..Default::default() });
+        let mut s = Session::new(Options { jobs: 1, ..Default::default() });
         s.load_cache(&cp);
         s.build(src, &out).unwrap();
         s.save_cache(&cp).unwrap();
@@ -86,9 +86,9 @@ fn associated_type_invalidates() {
     let dir = std::env::temp_dir().join(format!("d2cache_assoc_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let out = dir.join("p");
-    let cp = dir.join("p.crcache2");
+    let cp = dir.join("p.cache");
     let run = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, ..Default::default() });
+        let mut s = Session::new(Options { jobs: 1, ..Default::default() });
         s.load_cache(&cp);
         let r = s.build(src, &out);
         s.save_cache(&cp).unwrap();

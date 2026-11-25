@@ -1,4 +1,4 @@
-//! Builds a multi-crate, multi-file workspace (tests/workspace) with `Session2::build_workspace`, and checks whether
+//! Builds a multi-crate, multi-file workspace (tests/workspace) with `Session::build_workspace`, and checks whether
 //! the output, exit code and panic messages (locations across crates and files) are the same as those of the one built with rustc (rlib + link).
 //! Also, whether changing only a fn body in a crate that others depend on recompiles only that crate
 #![cfg(feature = "acg")]
@@ -41,9 +41,9 @@ fn workspace_matches_rustc_and_rebuilds_incrementally() {
     std::fs::create_dir_all(&rs).unwrap();
     let st = Command::new("bash").arg(dir.join("build_rustc.sh")).arg(&rs).status().unwrap();
     assert!(st.success());
-    let crates = zustc::driver2::read_workspace(&dir.join("workspace.txt")).unwrap();
+    let crates = zustc::session::read_workspace(&dir.join("workspace.txt")).unwrap();
     let out = dir.join("target");
-    let mut s = zustc::driver2::Session2::new(zustc::driver2::Options2::default());
+    let mut s = zustc::session::Session::new(zustc::session::Options::default());
     let r = s.build_workspace(&crates, &out).unwrap();
     assert_eq!(r.linked, 1);
     // (by the number of arguments: 0 = division by 0 inside a dependency crate, 1 = normal, 2 = an index in a file of a bin's module, 3 = unwrap)
@@ -114,7 +114,7 @@ fn exe_moved_between_crates_relinks() {
     std::fs::write(dir.join("a.rs"), "fn main() {\n    println!(\"a\");\n}\n").unwrap();
     std::fs::write(dir.join("b.rs"), "fn main() {\n    println!(\"b\");\n}\n").unwrap();
     let out = dir.join("t");
-    let spec = |name: &str| zustc::driver2::CrateSpec {
+    let spec = |name: &str| zustc::session::CrateSpec {
         name: name.to_string(),
         root: dir.join(format!("{name}.rs")),
         display: format!("{name}.rs"),
@@ -127,7 +127,7 @@ fn exe_moved_between_crates_relinks() {
         proc_macro: None,
         test: false,
     };
-    let mut s = zustc::driver2::Session2::new(zustc::driver2::Options2::default());
+    let mut s = zustc::session::Session::new(zustc::session::Options::default());
     for (name, want) in [("a", "a\n"), ("b", "b\n"), ("a", "a\n")] {
         s.build_workspace(&[spec(name)], &out).unwrap();
         let (got, _, code) = run(&out.join("one"), &dir, 0);
@@ -161,12 +161,12 @@ fn crate_cfgs_and_env() {
         "fn main() {\n    println!(\"{} {} {} {:?} {:?}\", lib::hi(), lib::SIZE, lib::gen(), option_env!(\"APP_NOTE\"), option_env!(\"ZUST_SURELY_UNSET\"));\n    println!(\"{} {} {}\", lib::gen_name(), lib::RAW, m::is_big());\n    println!(\"{} {} {}\", m::big_of::<u8>(), m::label(), m::spaced());\n}\n",
     );
     let ws = |big: bool, m_big: bool| {
-        let out = zustc::driver2::ws_escape(dir.join("out").to_str().unwrap());
+        let out = zustc::session::ws_escape(dir.join("out").to_str().unwrap());
         let cfg = if big { " cfg=big" } else { "" };
         let m_cfg = if m_big { " cfg=big" } else { "" };
         format!(
             "lib lib lib/lib.rs cfg=kind={}{cfg} env=OUT_DIR={out} env=CARGO_PKG_NAME=my%20lib\nlib m m/lib.rs{m_cfg} env=M_LABEL=m%20label\nbin app app/main.rs lib m env=APP_NOTE=a%23b\n",
-            zustc::driver2::ws_escape("x y")
+            zustc::session::ws_escape("x y")
         )
     };
     let target = dir.join("target");
@@ -183,9 +183,9 @@ fn crate_cfgs_and_env() {
         (false, true, format!("my lib kind small generated Some(\"a#b\") {unset}\nmy lib {raw} true\ntrue m label m label\n")),
     ] {
         put("ws.txt", &ws(big, m_big));
-        let crates = zustc::driver2::read_workspace(&dir.join("ws.txt")).unwrap();
+        let crates = zustc::session::read_workspace(&dir.join("ws.txt")).unwrap();
         // (no forked workers: the other tests of this file run in threads beside this one)
-        let mut s = zustc::driver2::Session2::new(zustc::driver2::Options2 { jobs: 1, ..Default::default() });
+        let mut s = zustc::session::Session::new(zustc::session::Options { jobs: 1, ..Default::default() });
         s.build_workspace(&crates, &target).unwrap();
         let (out, err, code) = run(&target.join("app"), &dir, 0);
         assert_eq!((out.as_str(), code), (want.as_str(), Some(0)), "{err}");

@@ -1,9 +1,9 @@
 //! A minimal LSP server (stdio). Supported: initialize / didOpen / didChange (full sync) / didClose /
 //! shutdown / exit / textDocument/documentSymbol / workspace/symbol / textDocument/definition / textDocument/references /
 //! textDocument/hover / textDocument/completion.
-//! Runs [`Session2::check`] on every open / change and returns publishDiagnostics.
+//! Runs [`Session::check`] on every open / change and returns publishDiagnostics.
 //!
-//! Holds one Session2 per document and keeps the cache in memory only.
+//! Holds one Session per document and keeps the cache in memory only.
 //! Unchanged fns are skipped by their "checked" mark, so the response time is proportional to the amount of change.
 //! Symbols are read from the token stream by zust_ide::symbols (as far as can be read even when the syntax is broken). workspace/symbol, definitions and references are
 //! looked up in the index of the open documents and of the .rs files under the workspace root (remembered by modification time and size)
@@ -19,13 +19,13 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use zust_core::driver2::{Options2, Session2};
+use zust_core::session::{Options, Session};
 use zust_ide::navigate::{self, FileIndex, Loc};
 use zust_ide::symbols::{self, LineIndex, Symbol};
 
 /// An open document
 struct Doc {
-    s: Session2,
+    s: Session,
     /// The text, and the diagnostics / symbols for it (the symbols are built when asked for)
     text: String,
     diags: Vec<Value>,
@@ -217,7 +217,7 @@ impl Server {
         let doc = self
             .docs
             .entry(uri.clone())
-            .or_insert_with(|| Doc { s: Session2::new(Options2 { jobs: 1, ..Default::default() }), text: String::new(), diags: vec![], syms: None, idx: None });
+            .or_insert_with(|| Doc { s: Session::new(Options { jobs: 1, ..Default::default() }), text: String::new(), diags: vec![], syms: None, idx: None });
         // If the text is the same (just saved, etc.), return the previous diagnostics as they are. The comparison is a memcmp, so cheaper than a hash
         if !doc.text.is_empty() && doc.text == text {
             return publish(&uri, version, doc.diags.clone());

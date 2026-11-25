@@ -1,11 +1,11 @@
-//! Size budget test: fails if the binaries, objects or cache (driver2 + Cranelift) exceed the budget (bench/budget.txt).
+//! Size budget test: fails if the binaries, objects or cache (session + Cranelift) exceed the budget (bench/budget.txt).
 //! When they were increased on purpose, rewrite the budget with `UPDATE_BUDGET=1 cargo test --release --test budget`
 //! (it is written as the current values + a 5% margin). If you only added new examples, `UPDATE_BUDGET=new` adds them without changing the existing limits.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use zustc::{Options2, Session2, testgen::program};
+use zustc::{Options, Session, testgen::program};
 
 const BUDGET: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/bench/budget.txt");
 
@@ -25,14 +25,14 @@ fn measure() -> BTreeMap<String, u64> {
     for (name, src) in &cases {
         let out = dir.join(name);
         // The size changes with the linker, so use the default (automatic choice), not bfd. In CI it is fixed with ZUSTC_BENCH_LINKER
-        let o = Options2 {
+        let o = Options {
             linker: std::env::var("ZUSTC_BENCH_LINKER").ok(),
             backend: Some(zustc::clif_backend::compile),
-            ..Options2::default()
+            ..Options::default()
         };
-        let mut s = Session2::new(o);
+        let mut s = Session::new(o);
         let r = s.build(src, &out).unwrap_or_else(|e| panic!("{name}: {e}"));
-        let cache = s.save_cache(&dir.join(format!("{name}.crcache2"))).unwrap();
+        let cache = s.save_cache(&dir.join(format!("{name}.cache"))).unwrap();
         m.insert(format!("{name}.binary_bytes"), std::fs::metadata(&out).unwrap().len());
         m.insert(format!("{name}.object_bytes"), r.object_bytes as u64);
         m.insert(format!("{name}.cache_bytes"), cache as u64);

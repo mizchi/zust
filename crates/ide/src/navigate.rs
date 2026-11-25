@@ -1660,7 +1660,7 @@ fn use_module(here: &[String], path: &[String]) -> (Vec<String>, bool) {
             m.extend(path[i..].iter().cloned());
             (m, true)
         }
-        // (another crate `std::sync` / `zust_core::driver2`: strips the crate name)
+        // (another crate `std::sync` / `zust_core::session`: strips the crate name)
         Some(_) => (path[1..].to_vec(), false),
         None => (vec![], true),
     }

@@ -13,16 +13,16 @@ use std::time::Duration;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use zust_analyzer::Server;
 use zustc::testgen::program;
-use zustc::{Options2, Session2};
+use zustc::{Options, Session};
 use serde_json::json;
 
 const N: usize = 1000;
 
-fn opts() -> Options2 {
-    Options2 {
+fn opts() -> Options {
+    Options {
         linker: std::env::var("ZUSTC_BENCH_LINKER").ok(),
         backend: Some(zustc::clif_backend::compile),
-        ..Options2::default()
+        ..Options::default()
     }
 }
 
@@ -89,8 +89,8 @@ fn cold(c: &mut Criterion) {
     let out = tmpdir().join("cold");
     g.bench_function(format!("build/{N}"), |b| {
         b.iter_batched(
-            || Session2::new(opts()),
-            |mut s: Session2| s.build(&v, &out).unwrap(),
+            || Session::new(opts()),
+            |mut s: Session| s.build(&v, &out).unwrap(),
             BatchSize::PerIteration,
         )
     });
@@ -104,8 +104,8 @@ fn build(c: &mut Criterion) {
 
     // The same flow as the CLI: build → save_cache (keeps only the entries used this time)
     let out = dir.join("noop");
-    let cp = out.with_extension("crcache2");
-    let mut s = Session2::new(opts());
+    let cp = out.with_extension("cache");
+    let mut s = Session::new(opts());
     s.build(&v[0], &out).unwrap();
     s.save_cache(&cp).unwrap();
     g.bench_function(format!("noop/{N}"), |b| {
@@ -117,8 +117,8 @@ fn build(c: &mut Criterion) {
     });
 
     let out = dir.join("edit");
-    let cp = out.with_extension("crcache2");
-    let mut s = Session2::new(opts());
+    let cp = out.with_extension("cache");
+    let mut s = Session::new(opts());
     s.build(&v[1], &out).unwrap();
     s.save_cache(&cp).unwrap();
     let mut k = false;
