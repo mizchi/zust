@@ -408,6 +408,11 @@ fn hoist_macro_mods(text: String, path: &Path, mod_dir: &Path, disp_dir: &str, s
     let mut calls: Vec<(String, Vec<String>)> = vec![];
     let mut k = 0;
     while k + 3 < toks.len() {
+        // (a token that is no identifier of `macro_rules`'s length: one test passes it)
+        if toks[k].0 != 0 || toks[k].2 - toks[k].1 != 11 {
+            k += 1;
+            continue;
+        }
         if toks[k].0 == 0 && tk(k) == b"macro_rules" && is_sym(k + 1, b'!') && toks[k + 2].0 == 0 && opens(k + 3) {
             let name = String::from_utf8_lossy(tk(k + 2)).into_owned();
             let (mut d, mut j) = (0i32, k + 3);
@@ -637,6 +642,13 @@ fn blank_mod_decls(src: &str, cfg: &crate::cfg::CfgSet) -> Result<(String, Vec<(
     let mut inline: Vec<(i32, Result<String, String>)> = vec![];
     let mut k = 0;
     while k < toks.len() {
+        // (most tokens are none of `{`, `}`, `mod` and `macro_rules`, which the branches below look for: one test of
+        //  the kind and the length passes them)
+        let (kind, a, e) = toks[k];
+        if !(kind == 1 && e == a + 1 && (s[a] == b'{' || s[a] == b'}')) && !(kind == 0 && (e - a == 3 || e - a == 11)) {
+            k += 1;
+            continue;
+        }
         // (the body of `macro_rules! name { .. }` (or `( .. );` / `[ .. ];`) defined at the file's own level is tokens,
         //  not items: a `mod x;` there is declared where the macro is invoked (hoist_macro_mods). A macro inside an
         //  inline module is invoked there too, as far as zustc follows: its `mod x;` is read in that module, as before)
