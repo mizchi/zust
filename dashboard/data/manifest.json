@@ -1,8 +1,8 @@
 {
  "contract": "repo-retrospective/v1",
  "repo": "mizchi/zust",
- "head": "6d999029",
- "generated_at": "2026-11-25T17:51:40Z",
+ "head": "f4c5e2fe",
+ "generated_at": "2026-11-25T18:06:40Z",
  "generator": "scripts/retro/extract.py",
  "phases": [
   {
@@ -398,6 +398,154 @@
     }
    },
    "file": "milestones.json"
+  },
+  "pending": {
+   "title": "Open pull requests' tests/ui gains",
+   "grain": "one open pull request",
+   "provenance": "derived",
+   "source": "the open pull requests (GitHub API, pages.yml) and bench/rust_ui_ratchet.txt at each one's head and at its merge base with its base branch; empty when no list was given",
+   "columns": {
+    "pr": {
+     "type": "int",
+     "description": "pull request number"
+    },
+    "title": {
+     "type": "string",
+     "description": ""
+    },
+    "head": {
+     "type": "string",
+     "description": "head branch"
+    },
+    "base": {
+     "type": "string",
+     "description": "base branch: main, or the PR it is stacked on"
+    },
+    "draft": {
+     "type": "bool",
+     "description": "a draft"
+    },
+    "commit": {
+     "type": "commit",
+     "description": "the head, first 8 hex digits"
+    },
+    "run_pass_gain": {
+     "type": "int",
+     "description": "run_pass tests its ratchet adds to its base's",
+     "unit": "tests"
+    },
+    "check_pass_gain": {
+     "type": "int",
+     "description": "check_pass tests its ratchet adds to its base's",
+     "unit": "tests"
+    },
+    "build_pass_gain": {
+     "type": "int",
+     "description": "build_pass tests its ratchet adds to its base's",
+     "unit": "tests"
+    },
+    "compile_fail_gain": {
+     "type": "int",
+     "description": "compile_fail tests its ratchet adds to its base's",
+     "unit": "tests"
+    }
+   },
+   "file": "pending.json"
+  },
+  "forecast": {
+   "title": "tests/ui now, with the open pull requests, and the way to 90%",
+   "grain": "one kind, and all kinds",
+   "provenance": "derived",
+   "source": "the ui and pending datasets",
+   "columns": {
+    "kind": {
+     "type": "enum",
+     "description": "",
+     "values": [
+      "run-pass",
+      "check-pass",
+      "build-pass",
+      "compile-fail",
+      "all"
+     ]
+    },
+    "time": {
+     "type": "time",
+     "description": "the CI run the numbers are from"
+    },
+    "commit": {
+     "type": "commit",
+     "description": "first 8 hex digits"
+    },
+    "applicable": {
+     "type": "int",
+     "description": "tests zustc can be asked to handle (the README's table, else passing / rate)",
+     "unit": "tests"
+    },
+    "passing": {
+     "type": "int",
+     "description": "passing in that run",
+     "unit": "tests"
+    },
+    "rate": {
+     "type": "number",
+     "description": "",
+     "unit": "%"
+    },
+    "pending": {
+     "type": "int",
+     "description": "what the open pull requests add (the pending dataset)",
+     "unit": "tests"
+    },
+    "rate_with_pending": {
+     "type": "number",
+     "description": "the rate once they are merged",
+     "unit": "%"
+    },
+    "target_rate": {
+     "type": "number",
+     "description": "the target",
+     "unit": "%"
+    },
+    "target_passing": {
+     "type": "int",
+     "description": "tests passing at the target",
+     "unit": "tests"
+    },
+    "needed": {
+     "type": "int",
+     "description": "tests still needed for the target after the open pull requests",
+     "unit": "tests"
+    },
+    "pace_from": {
+     "type": "time",
+     "description": "the run the pace is measured from: the earliest in the two days before the last"
+    },
+    "pace_days": {
+     "type": "number",
+     "description": "days between the two runs",
+     "unit": "days"
+    },
+    "pace_per_day": {
+     "type": "number",
+     "description": "passing tests gained a day between them; null with no earlier run in the window",
+     "unit": "tests/day",
+     "nullable": true
+    },
+    "days_linear": {
+     "type": "number",
+     "description": "days to the target at pace_per_day; null when the pace is not positive",
+     "unit": "days",
+     "nullable": true
+    },
+    "days_geometric": {
+     "type": "number",
+     "description": "days to the target gaining the same share of the remaining tests a day",
+     "unit": "days",
+     "nullable": true
+    }
+   },
+   "file": "forecast.json"
   }
  }
 }
