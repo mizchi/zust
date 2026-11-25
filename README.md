@@ -220,7 +220,7 @@ Known differences from rust-analyzer are listed in [CONTRIBUTING.md](CONTRIBUTIN
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-25, ce9b7b6<!-- /measured --> by CI on each push to main. Details:
+Numbers measured <!-- measured -->2026-11-25, c8d7b59<!-- /measured --> by CI on each push to main. Details:
 [SUPPORT.md](SUPPORT.md) (what is supported) and [PERFORMANCE.md](PERFORMANCE.md) (speed, size, memory, and
 comparisons with rustc and others).
 
@@ -248,10 +248,10 @@ table, with instruction counts, cache and binary sizes and memory, is in [PERFOR
 <!-- auto:kpi-summary -->
 | | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 172 ms | 741 ms |
-| no-op build | 1.0 ms | 0.9 ms |
-| build after editing one function | 25.3 ms | 89.5 ms |
-| `check` | 67 ms | 316 ms |
+| cold build | 126 ms | 571 ms |
+| no-op build | 0.6 ms | 0.6 ms |
+| build after editing one function | 16.4 ms | 66.3 ms |
+| `check` | 40 ms | 181 ms |
 <!-- /auto:kpi-summary -->
 
 Against `rustc -C incremental` on gen1000 (a snapshot measured by hand): about 6x faster cold, 15x faster after an
