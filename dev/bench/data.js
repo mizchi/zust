@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795638323171,
+  "lastUpdate": 1795639579130,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -57875,6 +57875,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 61.639,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c8d7b59df5f4f39a01d0e08afe68dd419d8ae816",
+          "message": "lexer: E0758 for a block comment the file ends in, also after the last item (#181) (#223)\n\n`fn main() {}\\n/*x` was accepted by `zustc check` and `zustc build`; rustc\n1.100 reports \"unterminated block comment\" (E0758) at 2:1. The lexer's E0758\ncheck (`unterminated_literal`) runs only when the items do not split, and a\ncomment after the last item leaves none unsplit.\n\nThe item splitter now asks unterminated_literal when a block comment runs to\nthe end of the file. It scans from the start, so an unterminated literal\nbefore the comment is reported instead, as rustc's lexer does\n(`const S: &str = \"abc /* x` is E0765 at the string).\n\nA doc comment (`/**`, `/*!`; not `/***` or `/**/`) is \"unterminated block\ndoc-comment\", as rustc names it, also inside an item.\n\nTests: tests/check.rs `literals_and_comments_a_file_ends_in`, with rustc's\nline and column for each: after the last item, with a non-ASCII character,\nnested, `/**` and `/*!` and `/***`, a doc comment in a body, a string before\nit, and two closed comments after the last item (no error).\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T05:40:53+09:00",
+          "tree_id": "4cd5ce1e601d943fc47c7e88397f7c00239e18e6",
+          "url": "https://github.com/mizchi/zust/commit/c8d7b59df5f4f39a01d0e08afe68dd419d8ae816"
+        },
+        "date": 1795639578484,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 126.094,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.631,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 16.429,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 39.65,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.211,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 133.371,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 800.157,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 570.851,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.638,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 66.264,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 180.721,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.074,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 633.563,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3938.753,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 53.99,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 84.823,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 42.671,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 52.353,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 92.438,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 120.97,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 37.889,
             "unit": "ms"
           }
         ]
