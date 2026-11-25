@@ -5110,3 +5110,56 @@ fn n() {
 fn main() { a(); b(); c(); n(); }
 "#, &[(6, "`d2` does not live long enough"), (10, "`d` does not live long enough"), (15, "`c2` does not live long enough")], "cs1");
 }
+
+#[test]
+fn part34_review_of_161() {
+    // (#161's review, each checked with rustc 1.97: an `impl Trait + 'static` inside a parameter's type requires what
+    // the argument borrows to be 'static, as a top-level one does (E0597 at 5, the fn's first); `let _ = d;` is no drop,
+    // so a value with no Drop holding a loan of itself is accepted there (13); a move of a Drop value on one path does
+    // not hide a loan of itself on another (E0597 at 20))
+    errors_at(r#"fn take(_: Option<impl Copy + 'static>) {}
+fn take2(_: impl Copy + 'static) {}
+fn a() {
+    let x = 1;
+    take(Some(&x));
+    take2(&x);
+}
+use std::cell::Cell;
+struct N<'a>(Cell<Option<&'a N<'a>>>);
+fn b() {
+    let d = N(Cell::new(None));
+    d.0.set(Some(&d));
+    let _ = d;
+}
+struct D<'a>(Cell<Option<&'a D<'a>>>);
+impl Drop for D<'_> { fn drop(&mut self) {} }
+fn c(k: bool) {
+    let d = D(Cell::new(None));
+    if k {
+        d.0.set(Some(&d));
+    } else {
+        drop(d);
+    }
+}
+fn main() { a(); b(); c(true); }
+"#, &[(5, "`x` does not live long enough"), (20, "`d` does not live long enough")], "rv1");
+    // (a cell reached through a deref (`Rc<Cell<..>>`) stores the borrow in the local it is rooted at (E0597 at 7);
+    // an array's element coerced from a `&mut &mut i32` reborrows `**rr`, which the array holds (E0506 at 13))
+    errors_at(r#"use std::rc::Rc;
+use std::cell::Cell;
+fn a() {
+    let c: Rc<Cell<Option<&i32>>> = Rc::new(Cell::new(None));
+    {
+        let x = 1;
+        c.set(Some(&x));
+    }
+    let _ = c.get();
+}
+fn b(rr: &mut &mut i32) {
+    let a: [&mut i32; 1] = [rr];
+    **rr = 1;
+    println!("{}", *a[0]);
+}
+fn main() { a(); let mut v = 0; let mut r = &mut v; b(&mut r); }
+"#, &[(7, "`x` does not live long enough"), (13, "cannot assign to `**rr` because it is borrowed")], "rv2");
+}

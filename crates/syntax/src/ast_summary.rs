@@ -694,7 +694,8 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
             }
         }
     }
-    for (_, t) in &sig.params {
+    let mut lifted_params: Vec<(usize, PTy)> = vec![];
+    for (k, (_, t)) in sig.params.iter().enumerate() {
         // (E0277: a parameter's value needs a size; a trait's declaration without a body does not)
         if !owner.is_some_and(|o| o.is_trait) && !is_extern {
             if let Some(u) = unsized_value(t) {
@@ -719,10 +720,28 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
             // (`Option<&[impl AsRef<str>]>`: each `impl Trait` inside is a type parameter without a name, too)
             let lifted = lift_impls(t, &mut generics, &mut impl_lts)?;
             params.push(tysyn(&lifted, self_ty)?);
+            lifted_params.push((k, lifted));
         } else {
             params.push(tysyn(t, self_ty)?);
         }
     }
+    // (the regions of a parameter with an `impl Trait` inside are those of the type it is lifted to, with the hidden
+    // type parameter in place of the `impl`: `Option<impl Copy + 'static>` holds what its `__impl0` does, which the
+    // bound requires to be 'static at the call (`take(Some(&x))`, E0597))
+    let lifted_sig = (!lifted_params.is_empty()).then(|| {
+        let mut rs = sig.clone();
+        for (k, t) in std::mem::take(&mut lifted_params) {
+            rs.params[k].1 = t;
+        }
+        // (with their lifetime bounds, which the lifted type no longer writes: the signature names a lifetime)
+        for (g, _) in generics.iter().filter(|g| g.0.starts_with("__impl")) {
+            if !rs.generics.params.iter().any(|p| matches!(p, GParam::Ty(n, ..) if n == g)) {
+                let bs = impl_lts.iter().filter(|(n, _)| n == g).map(|(_, l)| Bound::Lifetime(l.clone())).collect();
+                rs.generics.params.push(GParam::Ty(g.clone(), bs, None));
+            }
+        }
+        rs
+    });
     let ret = match &sig.ret {
         None => TySyn::Prim(Ty::Unit),
         // (`-> impl ?Sized` with no other trait: a return value must have a size)
@@ -790,7 +809,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         ret_from: ret_from(sig),
         regions: {
             let otp: Vec<&str> = owner.map(|o| o.generics.iter().map(|g| g.0.as_str()).collect()).unwrap_or_default();
-            crate::regions::sig_regions(sig, owner.and_then(|o| o.regions.as_deref()), &otp, &impl_lts)
+            crate::regions::sig_regions(lifted_sig.as_ref().unwrap_or(sig), owner.and_then(|o| o.regions.as_deref()), &otp, &impl_lts)
         },
         is_unsafe: sig.quals.iter().any(|q| q == "unsafe") || (is_extern && !sig.quals.iter().any(|q| q == "safe")),
         preds: preds,

@@ -295,6 +295,9 @@ pub struct Bk {
     /// through boxes and fields (`Box<Scribble>`: `*`; `Wrapper(Scribble)`: `.0`): its `drop` may use what a `&mut`
     /// field points to, so a borrow through it must not outlive the local (E0713)
     pub drop_owners: Vec<(u32, Vec<Proj>)>,
+    /// The locals whose drop at the end of their scope may see what they borrow (dropck): a loan of itself one holds
+    /// there is in use while it is dropped
+    pub dropck_locals: Vec<u32>,
     /// A `*x` through an overloaded `Deref` with no `DerefMut` (`Rc`, `Arc`, a `Ref` guard, the program's): (the
     /// local, the place of its `Shr` in the projection) → the type's name, for the errors of writing through it
     /// (bk_place records them: it reads `self` only)
@@ -1788,17 +1791,18 @@ impl Bk {
                 Ev::Acc(p, Acc::Drop, _) => {
                     // (a value whose drop may see what it borrows, holding a loan of itself (`d.0.set(Some(&d))` with
                     // D: Drop): the loan is in use while d is dropped, E0597 at the borrow)
-                    if let (Some(errs), true, true) = (errs.as_deref_mut(), loans_on, p.proj.is_empty()) {
-                        if !st.moved.iter().any(|m| m.place.local == p.local) {
-                            let own = st.held(p.local).iter().copied().find(|&ln| {
-                                let lo = &self.loans[ln as usize];
-                                lo.place.local == p.local && lo.place.owned_len() == lo.place.proj.len()
-                            });
-                            if let Some(ln) = own {
-                                let name = path_str(&self.locals, &BPlace { local: p.local, proj: vec![] });
-                                if name != TEMP {
-                                    errs.push(BkError { sp: self.loans[ln as usize].sp, msg: format!("`{name}` does not live long enough (dropped while still borrowed)") });
-                                }
+                    // (only a local dropped at its scope's end with such a drop: not `let _ = d;`, a fake read. A move
+                    // of it on another path does not take the loan away: one that held a loan of itself cannot be
+                    // moved, rustc's E0505)
+                    if let (Some(errs), true, true) = (errs.as_deref_mut(), loans_on, p.proj.is_empty() && self.dropck_locals.contains(&p.local)) {
+                        let own = st.held(p.local).iter().copied().find(|&ln| {
+                            let lo = &self.loans[ln as usize];
+                            lo.place.local == p.local && lo.place.owned_len() == lo.place.proj.len()
+                        });
+                        if let Some(ln) = own {
+                            let name = path_str(&self.locals, &BPlace { local: p.local, proj: vec![] });
+                            if name != TEMP {
+                                errs.push(BkError { sp: self.loans[ln as usize].sp, msg: format!("`{name}` does not live long enough (dropped while still borrowed)") });
                             }
                         }
                     }
@@ -2923,6 +2927,9 @@ impl Cx<'_> {
             // (drop check: a value whose `Drop` may see what it borrows is used when it is dropped)
             if self.bk.locals[id as usize].refs && self.bk.level >= 2 && self.dropck(t, 0) {
                 self.bk_ev(Ev::Acc(BPlace { local: id, proj: vec![] }, Acc::Drop, sp));
+                if !self.bk.dropck_locals.contains(&id) {
+                    self.bk.dropck_locals.push(id);
+                }
             }
             self.bk_ev(Ev::Dead(id, sp));
         }
@@ -2949,6 +2956,9 @@ impl Cx<'_> {
         for (id, t) in ids {
             if self.bk.locals[id as usize].refs && self.bk.level >= 2 && self.dropck(t, 0) {
                 self.bk_ev(Ev::Acc(BPlace { local: id, proj: vec![] }, Acc::Drop, sp));
+                if !self.bk.dropck_locals.contains(&id) {
+                    self.bk.dropck_locals.push(id);
+                }
             }
             self.bk_ev(Ev::Dead(id, sp));
         }

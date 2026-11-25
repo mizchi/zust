@@ -1976,6 +1976,11 @@ impl Cx<'_> {
             if t == Ty::Never {
                 return Ok((None, Ty::Never));
             }
+            // (a coercion site, as a struct literal's field: a place of a `&mut` is reborrowed, and the array holds the
+            // loan (`[rr]` of rr: `&mut &mut i32` as a `[&mut i32; 1]`, then `**rr = 1` while it lives, E0506))
+            if let (true, Some(w @ Ty::Ref(..))) = (given, elem) {
+                self.bk_reborrow_let(e, w);
+            }
             let (v, t) = match elem {
                 Some(et) if given && t != et && matches!(t, Ty::Ref(_, Ty::Ref(..))) => self.deref_coerce(v, t, et),
                 _ => (v, t),
@@ -2056,7 +2061,10 @@ impl Cx<'_> {
         if elem == Ty::Never {
             return Ok((None, Ty::Never));
         }
-        // (coerced to the expected element type by deref, as array_lit's elements)
+        // (coerced to the expected element type by deref, as array_lit's elements, and reborrowed as they are)
+        if let Some(w @ Ty::Ref(..)) = exp {
+            self.bk_reborrow_let(x, w);
+        }
         let (v, elem) = match exp {
             Some(et @ Ty::Ref(..)) if elem != et && matches!(elem, Ty::Ref(_, Ty::Ref(..))) => self.deref_coerce(v, elem, et),
             _ => (v, elem),
