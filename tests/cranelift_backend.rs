@@ -1,4 +1,4 @@
-//! Builds tests/probe, examples and tests/acg with driver2's Cranelift backend (compiles the instruction sequence recorded by minclif with Cranelift)
+//! Builds tests/probe, examples and tests/acg with session's Cranelift backend (compiles the instruction sequence recorded by minclif with Cranelift)
 //! and checks whether the output (stdout, stderr, exit code) is the same as the one built with minclif (without -O and with -O).
 //! (-O does no overflow checks, so the ones with overflow in their names are not compared with -O)
 #![cfg(feature = "acg")]
@@ -7,12 +7,12 @@ use std::path::PathBuf;
 #[path = "common/par.rs"]
 mod par;
 
-fn build(src: &str, out: &PathBuf, opt: bool, cl: bool) -> Result<zustc::driver2::Report2, String> {
-    let mut o = zustc::driver2::Options2 { opt, no_cache: true, jobs: 1, ..Default::default() };
+fn build(src: &str, out: &PathBuf, opt: bool, cl: bool) -> Result<zustc::session::BuildReport, String> {
+    let mut o = zustc::session::Options { opt, no_cache: true, jobs: 1, ..Default::default() };
     if cl {
         o.backend = Some(zustc::clif_backend::compile);
     }
-    zustc::driver2::Session2::new(o).build(src, out)
+    zustc::session::Session::new(o).build(src, out)
 }
 
 #[test]

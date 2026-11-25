@@ -1,7 +1,10 @@
-//! syn と Cranelift を使わないドライバ: ソース → (lexer / macros / prelude) → ast_summary → Program →
-//! acg (自前の構文木のコード生成) → minclif の ELF の .o → リンク。
-//! driver.rs と同じ手順を、外部クレートに依存しないモジュールだけで行う (zustc 自身でもコンパイルできる)。
-//! キャッシュと並列化はまだない。
+//! コンパイルのセッション ([`Session`]): ソース → (lexer / macros / prelude) → ast_summary → Program →
+//! acg (自前の構文木のコード生成) → 機械語 (Cranelift か minclif) → ELF の .o → リンク。
+//! セッションはキャッシュ (メモリと、ディスクの `<出力>.cache`) と、編集をまたいで覚えるもの (前処理の差分・check の記録) を
+//! 持ち、同じセッションで何度でも build / check できる (zust-analyzer はドキュメントごとに 1 つ持つ)。数の多い部分 (アイテムの
+//! 要約、check と機械語の wave) は fork した子に分ける。解析と check はここ、機械語・オブジェクト・リンク・ワークスペースは
+//! feature `build` の session/build.rs。外部クレートに依存しないモジュールだけで書く (zustc 自身でもコンパイルできる)。
+//! (2026-11-25 までの名前は driver2: 2 つ目のドライバだったため。それより前のレポートはその名前で書いている)
 
 use crate::cfg::{attr_entries, cfg_pred, lit_end, malformed_cfg, str_lit, str_value};
 use std::sync::Mutex;
@@ -580,7 +583,7 @@ impl Analysis {
 }
 
 pub fn analyze(src0: &str, opt: bool) -> R<Analysis> {
-    Session2::new(Options2 { opt, no_cache: true, jobs: 1, ..Default::default() }).analyze(src0)
+    Session::new(Options { opt, no_cache: true, jobs: 1, ..Default::default() }).analyze(src0)
 }
 
 /// 機械語にするバックエンド (Cranelift: zust-clif の compile)。feature `build` なしでは使わない
@@ -591,7 +594,7 @@ pub type Backend = fn();
 
 /// ドライバの設定
 #[derive(Clone, Debug)]
-pub struct Options2 {
+pub struct Options {
     pub opt: bool,
     /// 関数のコンパイルに使うプロセスの数 (fork する)
     pub jobs: usize,
@@ -620,13 +623,13 @@ pub struct Options2 {
 /// Writes the output from the functions and data build.rs lays out (in place of the ELF object)
 pub type ModuleWriter = fn(&[(String, Vec<u8>, Vec<crate::ir::Reloc>, bool)], &[(String, Vec<u8>, Vec<(u32, String, i64)>, bool)]) -> Result<Vec<u8>, String>;
 
-impl Default for Options2 {
+impl Default for Options {
     fn default() -> Self {
-        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None, edition: 2021, cfgs: vec![], test: false }
+        Options { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None, edition: 2021, cfgs: vec![], test: false }
     }
 }
 
-impl Options2 {
+impl Options {
     /// キャッシュのキーに入れるバックエンドの印 (Cranelift なら 1)
     pub fn backend_id(&self) -> u8 {
         // (wasm: the address checks are part of the code, so a build without them (ZUSTC_WASM_NO_ADDR_CHECK, for
@@ -674,7 +677,7 @@ pub struct CrateCtx {
     pub map: crate::srcmap::SrcMap,
     /// 依存するクレート (推移的に全部。実行ファイルの panic の表がそれらの表を指す)
     pub deps: Vec<String>,
-    /// このクレートの feature (ワークスペース。None なら Options2 の features)
+    /// このクレートの feature (ワークスペース。None なら Options の features)
     pub features: Option<Vec<String>>,
     /// このクレートの cfg と `env!` の環境 (ワークスペース: CrateSpec の cfgs / env)
     pub cfgs: Vec<(String, Option<String>)>,
@@ -685,7 +688,7 @@ pub struct CrateCtx {
 
 /// ビルドの結果
 #[derive(Clone, Debug, Default)]
-pub struct Report2 {
+pub struct BuildReport {
     pub items_parsed: usize,
     pub fns_compiled: usize,
     pub fns_hit: usize,
@@ -734,7 +737,7 @@ fn compiler_id() -> Key {
     // SAFETY: "/proc/self/exe" は NUL で終わる。buf は struct stat (144 byte) より大きい
     let r = unsafe { c_stat(b"/proc/self/exe\0".as_ptr(), buf.as_mut_ptr()) };
     let mut h = KeyHasher::new();
-    h.add("driver2-1");
+    h.add("session-1");
     if r == 0 {
         // (x86-64: st_size は 48、st_mtim は 88 / 96)
         h.add(&buf[48..56]);
@@ -745,11 +748,11 @@ fn compiler_id() -> Key {
 
 /// 時間の計測 (-time)
 
-/// キャッシュを持つドライバ (driver.rs の Session と同じ使い方)
-pub struct Session2 {
-    pub opts: Options2,
+/// コンパイルのセッション: キャッシュと、編集をまたいで覚えるものを持ち、build / check / analyze を何度でも呼べる
+pub struct Session {
+    pub opts: Options,
     cid: Key,
-    disk: crate::cache2::Cache2,
+    disk: crate::build_cache::BuildCache,
     mem: FxMap<Key, Vec<u8>>,
     used: FxSet<Key>,
     /// put したキー (ワークスペースの子プロセスが、作ったエントリを親に返す)
@@ -777,14 +780,14 @@ pub struct Session2 {
     const_fn: String,
 }
 
-impl Session2 {
-    pub fn new(opts: Options2) -> Session2 {
-        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new() }
+impl Session {
+    pub fn new(opts: Options) -> Session {
+        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new() }
     }
 
     pub fn load_cache(&mut self, path: &std::path::Path) {
         if !self.opts.no_cache {
-            self.disk = crate::cache2::Cache2::open(path);
+            self.disk = crate::build_cache::BuildCache::open(path);
         }
     }
 
@@ -802,7 +805,7 @@ impl Session2 {
         }
         let n = self.save_cache_keep(path)?;
         self.mem.retain(|k, _| used.contains(k));
-        self.disk = crate::cache2::Cache2::empty();
+        self.disk = crate::build_cache::BuildCache::empty();
         Ok(n)
     }
 
@@ -825,7 +828,7 @@ impl Session2 {
             entries.push((k, v));
         }
         let refs: Vec<(Key, &[u8])> = entries.iter().map(|(k, v)| (*k, &v[..])).collect();
-        let n = crate::cache2::Cache2::save(path, &refs)?;
+        let n = crate::build_cache::BuildCache::save(path, &refs)?;
         self.used.clear();
         Ok(n)
     }
@@ -1081,8 +1084,8 @@ impl Session2 {
                             if let Ok(sm) = crate::ast_summary::parse_and_summarize(&src, it, ow.as_ref()) {
                                 let mut e = vec![];
                                 sm.encode(&mut e);
-                                crate::cache2::put_uv(&mut buf, j as u64);
-                                crate::cache2::put_uv(&mut buf, e.len() as u64);
+                                crate::build_cache::put_uv(&mut buf, j as u64);
+                                crate::build_cache::put_uv(&mut buf, e.len() as u64);
                                 buf.extend_from_slice(&e);
                             }
                             j += jobs;
@@ -1103,7 +1106,7 @@ impl Session2 {
                     unsafe { c_close(fd) };
                     let mut st = 0i32;
                     unsafe { c_waitpid(pid, &mut st, 0) };
-                    let mut r = crate::cache2::Rd { d: &d, pos: 0 };
+                    let mut r = crate::build_cache::Rd { d: &d, pos: 0 };
                     while r.pos < d.len() {
                         let (Some(j), Some(n)) = (r.uv(), r.uv()) else { break };
                         let Some(body) = r.take(n as usize) else { break };
@@ -9569,7 +9572,7 @@ fn write_all(fd: i32, mut d: &[u8]) {
     }
 }
 
-impl Session2 {
+impl Session {
     /// 関数 id のキャッシュのキー: 本体のハッシュ + 自分と参照先のシグネチャ + 名前で現れる struct (レイアウトごと) + const
 
     /// closed: prelude の関数で、ユーザの関数を呼びえないもの (総称でないか、型引数が prelude の型だけ)。参照の
@@ -10108,7 +10111,7 @@ fn sendable(a: &Analysis, g: &Insts, ids: &[u32]) -> bool {
 }
 
 /// Whether this process has one thread: a fork copies only the calling thread, and a lock another thread holds (an
-/// interner's) would stay held in the child. A host that runs Session2 beside other threads checks in process
+/// interner's) would stay held in the child. A host that runs Session beside other threads checks in process
 pub(crate) fn single_threaded() -> bool {
     std::fs::read_to_string("/proc/self/status")
         .ok()
@@ -10165,7 +10168,7 @@ fn syn_sendable(t: &crate::types::TySyn) -> bool {
 /// A checked fn: the instances it requested and its Blob as the cache keeps it (None when nothing needs it), or its error
 type Checked = R<(Vec<u32>, Option<Vec<u8>>)>;
 
-impl Session2 {
+impl Session {
     /// Checks ids, in forked children when there are many (#101): child k checks ids[i] with i % jobs == k and sends
     /// back each one's Blob (encoded by name, as a parallel build's children do) or its error. The parent reads them
     /// back in the order of ids, which requests again the instances each one requested, so what follows (the
@@ -10180,7 +10183,7 @@ impl Session2 {
             let mut e = vec![];
             {
                 let g = insts.lock().unwrap();
-                crate::cache2::encode_blob(&b, &a.prog, &*g, &mut e);
+                crate::build_cache::encode_blob(&b, &a.prog, &*g, &mut e);
             }
             Ok((req, Some(e)))
         };
@@ -10209,7 +10212,7 @@ impl Session2 {
                 let mut buf = vec![];
                 let mut i = k;
                 while i < ids.len() {
-                    crate::cache2::put_uv(&mut buf, i as u64);
+                    crate::build_cache::put_uv(&mut buf, i as u64);
                     let (p0, l0) = {
                         let g = insts.lock().unwrap();
                         (g.pending.len(), g.fx_log.len())
@@ -10225,18 +10228,18 @@ impl Session2 {
                                 let mut all: Vec<u32> = g.pending[p0..].to_vec();
                                 all.extend(req.iter().filter(|i| !all.contains(i)).copied().collect::<Vec<u32>>());
                                 if sendable(a, &*g, &all) {
-                                    crate::cache2::encode_blob(&check_blob(b, &all), &a.prog, &*g, &mut e);
+                                    crate::build_cache::encode_blob(&check_blob(b, &all), &a.prog, &*g, &mut e);
                                 }
                             }
                             // (what cannot be sent is checked again by the parent)
                             if e.is_empty() {
                                 buf.push(2);
-                                crate::cache2::put_uv(&mut buf, 0);
+                                crate::build_cache::put_uv(&mut buf, 0);
                                 i += jobs;
                                 continue;
                             }
                             buf.push(0);
-                            crate::cache2::put_uv(&mut buf, e.len() as u64);
+                            crate::build_cache::put_uv(&mut buf, e.len() as u64);
                             buf.extend_from_slice(&e);
                         }
                         Err(m) => {
@@ -10248,19 +10251,19 @@ impl Session2 {
                                 let made = g.pending[p0..].to_vec();
                                 if sendable(a, &*g, &made) {
                                     let b = Blob { clo_facts: g.facts_since(l0), ..acg::Compiled::empty_blob() };
-                                    crate::cache2::encode_blob(&check_blob(b, &made), &a.prog, &*g, &mut e);
+                                    crate::build_cache::encode_blob(&check_blob(b, &made), &a.prog, &*g, &mut e);
                                 }
                             }
                             if e.is_empty() {
                                 buf.push(2);
-                                crate::cache2::put_uv(&mut buf, 0);
+                                crate::build_cache::put_uv(&mut buf, 0);
                                 i += jobs;
                                 continue;
                             }
                             buf.push(1);
-                            crate::cache2::put_uv(&mut buf, m.len() as u64);
+                            crate::build_cache::put_uv(&mut buf, m.len() as u64);
                             buf.extend_from_slice(m.as_bytes());
-                            crate::cache2::put_uv(&mut buf, e.len() as u64);
+                            crate::build_cache::put_uv(&mut buf, e.len() as u64);
                             buf.extend_from_slice(&e);
                         }
                     }
@@ -10278,7 +10281,7 @@ impl Session2 {
             let d = read_all(fd);
             unsafe { c_close(fd) };
             wait_child(pid);
-            let mut r = crate::cache2::Rd { d: &d, pos: 0 };
+            let mut r = crate::build_cache::Rd { d: &d, pos: 0 };
             while r.pos < d.len() {
                 let (Some(i), Some(fail), Some(n)) = (r.uv(), r.u8(), r.uv()) else { break };
                 let Some(body) = r.take(n as usize) else { break };
@@ -10302,7 +10305,7 @@ impl Session2 {
         got.into_iter()
             .zip(ids)
             .map(|(g, &id)| match g {
-                Some(Ok(d)) => match crate::cache2::decode_blob(&d, &a.prog, insts) {
+                Some(Ok(d)) => match crate::build_cache::decode_blob(&d, &a.prog, insts) {
                     Some(b) => {
                         let req = b.relocs.iter().filter_map(|r| match r.target { acg::Target::Func(i) => Some(i), _ => None }).collect();
                         Ok((req, if self.opts.no_cache { None } else { Some(d) }))
@@ -10312,7 +10315,7 @@ impl Session2 {
                 // (what the failed fn left behind, read back; when it cannot be (a name only the child knows), the fn is
                 // checked here, which leaves it as the serial check does: requests are made once, so what the reading
                 // requested before it failed is not requested twice)
-                Some(Err((m, made))) => match crate::cache2::decode_blob(&made, &a.prog, insts) {
+                Some(Err((m, made))) => match crate::build_cache::decode_blob(&made, &a.prog, insts) {
                     Some(_) => Err(m),
                     None => one(id),
                 },
@@ -10326,7 +10329,7 @@ impl Session2 {
 #[cfg(not(feature = "build"))]
 fn lower_blob(_: &Analysis, _: acg::Compiled, _: Vec<u32>) -> R<(Blob, Vec<u32>)> { Err("internal: zust-core was built without the backend (feature `build`)".into()) }
 
-impl Session2 {
+impl Session {
     /// An error of the analysis at a line past the program's own (an item hoisted out of a fn body, prep::HOIST_MARK):
     /// at the line it was written on. The text is preprocessed again for it, only when there is such an error
     #[cold]
@@ -11700,7 +11703,7 @@ impl Diagnostic {
     }
 }
 
-impl Session2 {
+impl Session {
     /// 型検査だけを行い、全診断を返す (`zustc check` と LSP)。到達しない関数も、総称関数は要求されたインスタンスごとに
     /// 検査する (コード生成までしてエラーを集め、結果はキャッシュに入れる: 次の検査・ビルドはそれを使う)。prelude の中の診断は出さない
     pub fn check(&mut self, src: &str) -> Vec<Diagnostic> {
@@ -11789,7 +11792,7 @@ impl Session2 {
                                         memo.ents.insert(c, ce.clone());
                                     } else {
                                         // (本体が変わったインスタンス: 要求し直して検査する)
-                                        let _ = crate::cache2::decode_blob(&ce.me, &a.prog, &insts);
+                                        let _ = crate::build_cache::decode_blob(&ce.me, &a.prog, &insts);
                                     }
                                 }
                                 continue;
@@ -11800,9 +11803,9 @@ impl Session2 {
                     let kc = k ^ CHECK_SALT;
                     n_keys += 1;
                     // (キャッシュにあれば検査済み: 読み戻すと要求していたインスタンスも要求し直す)
-                    let hit = match self.get(k).and_then(|d| crate::cache2::decode_blob(&d, &a.prog, &insts)) {
+                    let hit = match self.get(k).and_then(|d| crate::build_cache::decode_blob(&d, &a.prog, &insts)) {
                         Some(b) => Some(b),
-                        None if check_only => self.get(kc).and_then(|d| crate::cache2::decode_blob(&d, &a.prog, &insts)),
+                        None if check_only => self.get(kc).and_then(|d| crate::build_cache::decode_blob(&d, &a.prog, &insts)),
                         None => None,
                     };
                     match hit {
@@ -11876,7 +11879,7 @@ impl Session2 {
                             let bo = g.body_of(id);
                             let clo_facts = if g.kind_free.contains(&bo) || g.closure_rg.contains_key(&bo) { g.facts_of(bo) } else { vec![] };
                             let b = Blob { align: 1, code: vec![], relocs: vec![acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(id) }], datas: vec![], vtables: vec![], traps: vec![], line_base: None, code_ref: None, clo_facts };
-                            crate::cache2::encode_blob(&b, &a.prog, &*g, &mut me);
+                            crate::build_cache::encode_blob(&b, &a.prog, &*g, &mut me);
                         }
                         memo.ents.insert(name, ChkEnt { body, body_hash: bh, children, me, ok });
                     }

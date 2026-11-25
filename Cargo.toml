@@ -10,7 +10,7 @@ autoexamples = false
 members = ["crates/ir", "crates/minclif", "crates/base", "crates/syntax", "crates/sema", "crates/typeck", "crates/codegen", "crates/core", "crates/clif", "crates/wasm", "crates/ide", "crates/analyzer", "crates/zurgo"]
 
 [features]
-# (formerly the feature that enabled driver2; it is always in now: kept for the tests' cfg)
+# (formerly the feature that enabled the second driver (now the session); it is always in now: kept for the tests' cfg)
 default = ["acg"]
 acg = []
 

@@ -1,5 +1,5 @@
 //! Whether the locations in panic messages (`panicked at <file>:<line>:<col>:`) are the same as rustc's.
-//! Builds tests/panic_loc/cases.rs with rustc and with driver2 (the path that uses neither syn nor Cranelift) and compares the cases for arguments 0 to 6
+//! Builds tests/panic_loc/cases.rs with rustc and with zustc (the session, minclif) and compares the cases for arguments 0 to 6
 //! (out-of-range indexing (Vec / array), overflow, unwrap, assert!, division by 0, expect inside a format macro's arguments).
 #![cfg(feature = "acg")]
 
@@ -62,14 +62,14 @@ fn panic_locations_like_rustc() {
     let st = std::process::Command::new("rustc").args(["-Awarnings", "--edition", "2024", src_path, "-o"]).arg(&r).status().unwrap();
     assert!(st.success());
     let d = dir.join("d");
-    zustc::driver2::build(&src, &d, false, None).unwrap();
+    zustc::session::build(&src, &d, false, None).unwrap();
     let mut bad = vec![];
     for k in 0..7 {
         let a = std::process::Command::new(&r).arg(k.to_string()).output().unwrap();
         let b = std::process::Command::new(&d).arg(k.to_string()).output().unwrap();
         let (la, lb) = (location(&a.stderr), location(&b.stderr));
         if la.is_none() || la != lb || a.status.code() != b.status.code() {
-            bad.push(format!("case {k}: rustc {la:?} (exit {:?}) vs driver2 {lb:?} (exit {:?})", a.status.code(), b.status.code()));
+            bad.push(format!("case {k}: rustc {la:?} (exit {:?}) vs session {lb:?} (exit {:?})", a.status.code(), b.status.code()));
         }
     }
     assert!(bad.is_empty(), "{}", bad.join("\n"));

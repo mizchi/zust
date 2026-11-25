@@ -1,9 +1,9 @@
-//! The cache of driver2 (the driver that uses neither syn nor Cranelift). The same idea as cache.rs, without external crates (zstd):
+//! The session's cache (on disk, `<output>.cache`), without external crates (zstd):
 //! - key: a 128-bit hash (the low 64 bits are written to the file)
 //! - value: an item's summary, or a fn's machine code + symbolic relocations (acg::Blob; callee instances are written as (original fn name, type arguments))
 //! - saving writes only the entries this build used (old ones disappear naturally)
 //!
-//! The serialization of Blob is also used to receive compilation results from forked child processes (driver2's parallelization).
+//! The serialization of Blob is also used to receive compilation results from forked child processes (session's parallelization).
 
 use std::sync::Mutex;
 
@@ -23,7 +23,7 @@ unsafe extern "C" {
 }
 
 /// The cache file: MAGIC, number of entries (varint), (low 64 bits of the key, length (varint), contents) *
-pub struct Cache2 {
+pub struct BuildCache {
     data: Vec<u8>,
     index: FxMap<u64, (usize, usize)>,
 }
@@ -94,15 +94,15 @@ fn put_bytes(out: &mut Vec<u8>, b: &[u8]) {
     out.extend_from_slice(b);
 }
 
-impl Cache2 {
-    pub fn empty() -> Cache2 {
-        Cache2 { data: vec![], index: FxMap::default() }
+impl BuildCache {
+    pub fn empty() -> BuildCache {
+        BuildCache { data: vec![], index: FxMap::default() }
     }
 
     /// Reads the file (empty if it cannot be read or has a different format)
-    pub fn open(path: &std::path::Path) -> Cache2 {
+    pub fn open(path: &std::path::Path) -> BuildCache {
         let data = std::fs::read(path).unwrap_or_default();
-        let mut c = Cache2::empty();
+        let mut c = BuildCache::empty();
         if data.len() < 8 || &data[..8] != MAGIC {
             return c;
         }
@@ -422,25 +422,25 @@ pub fn decode_blob(d: &[u8], prog: &Program, insts: &Mutex<Insts>) -> Option<Blo
 
 #[cfg(test)]
 mod save_tests {
-    use super::Cache2;
+    use super::BuildCache;
 
     /// save writes through a tmp file of this process's own and leaves none behind; open reads back what was saved.
     /// (Two processes saving at once each rename their own complete file: formal/tla/CacheSave.tla)
     #[test]
     fn save_then_open() {
-        let dir = std::env::temp_dir().join(format!("cache2_save_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("build_cache_save_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("p.crcache2");
+        let path = dir.join("p.cache");
         // (a tmp file of the name every process used before: it is not ours, and is left alone)
-        std::fs::write(dir.join("p.crcache2.tmp"), b"partial").unwrap();
-        Cache2::save(&path, &[(1, b"one".as_slice()), (2, b"two".as_slice())]).unwrap();
-        let c = Cache2::open(&path);
+        std::fs::write(dir.join("p.cache.tmp"), b"partial").unwrap();
+        BuildCache::save(&path, &[(1, b"one".as_slice()), (2, b"two".as_slice())]).unwrap();
+        let c = BuildCache::open(&path);
         assert_eq!(c.get(1), Some(b"one".as_slice()));
         assert_eq!(c.get(2), Some(b"two".as_slice()));
         let mut names: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         names.sort();
-        assert_eq!(names, ["p.crcache2", "p.crcache2.tmp"]);
+        assert_eq!(names, ["p.cache", "p.cache.tmp"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

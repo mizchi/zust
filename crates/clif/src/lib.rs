@@ -1,4 +1,4 @@
-//! driver2's Cranelift backend: rebuilds the instruction sequence recorded by minclif's FunctionBuilder (in the order acg called it)
+//! session's Cranelift backend: rebuilds the instruction sequence recorded by minclif's FunctionBuilder (in the order acg called it)
 //! as Cranelift IR and compiles it. acg, the cache and .o writing are the same ones minclif uses, so
 //! the backends alone can be compared with "the same frontend, the same instruction sequence" (minclif and Cranelift).
 //!

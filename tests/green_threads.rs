@@ -13,7 +13,7 @@ fn green_threads_like_rustc() {
         let src = std::fs::read_to_string(format!("tests/green_threads/{name}.rs")).unwrap();
         let want = std::fs::read_to_string(format!("tests/green_threads/{name}.out")).unwrap();
         let exe = dir.join(name);
-        if let Err(e) = zustc::driver2::build(&src, &exe, false, None) {
+        if let Err(e) = zustc::session::build(&src, &exe, false, None) {
             bad.push(format!("{name}: build: {e}"));
             continue;
         }

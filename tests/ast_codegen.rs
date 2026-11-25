@@ -1,4 +1,4 @@
-//! Builds tests/acg/*.rs with the path that uses neither syn nor Cranelift (driver2 + acg + minclif) and compares the output with the rustc build.
+//! Builds tests/acg/*.rs with the session (acg + minclif) and compares the output with the rustc build.
 #![cfg(feature = "acg")]
 
 /// A new directory only this user can enter, made where nothing was: a directory that is there already (another
@@ -55,7 +55,7 @@ fn acg_like_rustc() {
     let bad: Vec<String> = par::par_map(&files, |p| -> Result<(), String> {
         let name = p.file_stem().unwrap().to_string_lossy().to_string();
         let src = std::fs::read_to_string(p).unwrap();
-        let obj = match zustc::driver2::build_object(&src, false) {
+        let obj = match zustc::session::build_object(&src, false) {
             Ok(o) => o,
             Err(e) => return Err(format!("{name}: {e}")),
         };

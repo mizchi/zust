@@ -425,7 +425,7 @@ def main():
 
 def target(tn, tmp):
     """Targets: synth (40 generated modules), fixture (the fixture workspace of the ide tests), zustc (opens this repository's
-    driver2.rs), ide (opens this repository's navigate.rs: a file in a different style, with many lexical parts)"""
+    session.rs), ide (opens this repository's navigate.rs: a file in a different style, with many lexical parts)"""
     if tn == "synth":
         return make_synth(os.path.join(tmp, "synth"))
     if tn == "fixture":

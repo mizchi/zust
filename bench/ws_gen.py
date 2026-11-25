@@ -1,4 +1,4 @@
-"""Generates a multi-crate, multi-file workspace (for comparing driver2's `zustc build` with rustc).
+"""Generates a multi-crate, multi-file workspace (for comparing session's `zustc build` with rustc).
 
 usage: python3 bench/ws_gen.py <dir> [--crates K] [--files F] [--fns N]
 

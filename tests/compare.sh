@@ -11,11 +11,11 @@ check() {
   local src=$1 name rflags c0 c1 c2
   name=$(basename "$src" .rs)
   # Check both without a cache (cold) and a rebuild from the cache (warm)
-  rm -f "$out/$name.crcache2" "$out/$name.cold.crcache2"
+  rm -f "$out/$name.cache" "$out/$name.cold.cache"
   if ! ./target/release/zustc "$src" -o "$out/$name.cold" >"$out/$name.log" 2>&1; then
     echo "FAIL $name (zustc)"; cat "$out/$name.log"; return 1
   fi
-  cp "$out/$name.cold.crcache2" "$out/$name.crcache2" 2>/dev/null
+  cp "$out/$name.cold.cache" "$out/$name.cache" 2>/dev/null
   if ! ./target/release/zustc "$src" -o "$out/$name" >"$out/$name.log" 2>&1; then
     echo "FAIL $name (zustc, warm)"; cat "$out/$name.log"; return 1
   fi
