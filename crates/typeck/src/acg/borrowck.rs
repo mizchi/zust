@@ -1785,7 +1785,24 @@ impl Bk {
                     // (what it holds stays: a value read from it before it went away may flow into a local after
                     // (`let a = match y { (ref mut a, _) => a };`). A local not live holds no live loan)
                 }
-                Ev::Acc(_, Acc::Drop, _) => {}
+                Ev::Acc(p, Acc::Drop, _) => {
+                    // (a value whose drop may see what it borrows, holding a loan of itself (`d.0.set(Some(&d))` with
+                    // D: Drop): the loan is in use while d is dropped, E0597 at the borrow)
+                    if let (Some(errs), true, true) = (errs.as_deref_mut(), loans_on, p.proj.is_empty()) {
+                        if !st.moved.iter().any(|m| m.place.local == p.local) {
+                            let own = st.held(p.local).iter().copied().find(|&ln| {
+                                let lo = &self.loans[ln as usize];
+                                lo.place.local == p.local && lo.place.owned_len() == lo.place.proj.len()
+                            });
+                            if let Some(ln) = own {
+                                let name = path_str(&self.locals, &BPlace { local: p.local, proj: vec![] });
+                                if name != TEMP {
+                                    errs.push(BkError { sp: self.loans[ln as usize].sp, msg: format!("`{name}` does not live long enough (dropped while still borrowed)") });
+                                }
+                            }
+                        }
+                    }
+                }
                 Ev::Acc(p, a, sp) => {
                     if let Some(errs) = errs.as_deref_mut() {
                         if *a == Acc::Write && p.proj.is_empty() {
@@ -3092,12 +3109,20 @@ impl Cx<'_> {
                 p.proj.push(Proj::Index);
                 let et = match t {
                     Ty::Array(e, _) | Ty::Slice(e) => Some(*e),
+                    // (the prelude's Vec, whose `Index` gives an element: `c.v[0].cell` is a place in c)
+                    Ty::Struct(sid) if self.prelude_vec(sid) => self.prog.structs[sid as usize].args.first().copied(),
                     _ => None,
                 };
                 Some((p, et))
             }
             _ => None,
         }
+    }
+
+    /// sid is the prelude's Vec
+    fn prelude_vec(&self, sid: u32) -> bool {
+        let b = self.prog.base_of(sid);
+        self.prog.structs[b as usize].name == "Vec" && self.prog.struct_item.get(b as usize).is_some_and(|&i| i >= self.prog.prelude_from)
     }
 
     /// Record an access of the place e

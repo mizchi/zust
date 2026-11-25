@@ -5039,3 +5039,74 @@ fn f() {
 fn main() { e(); f(); }
 "#, &[(4, "cannot borrow `y` as mutable, as it is immutable for the pattern guard"), (12, "cannot assign to `y`, as it is immutable for the pattern guard")], "rv2");
 }
+
+#[test]
+fn part34_static_bounds_of_impl_args_and_fields() {
+    // (an `impl Trait + 'static` argument's bound reaches the caller, as a written `T: 'static` does: E0310 at 2,
+    // named `impl Debug` as rustc names it; one bounded so itself passes it on (4). Each checked with rustc 1.97)
+    errors_at(r#"use std::fmt::Debug;
+fn foo(d: impl Debug) { bar(d); }
+fn bar(d: impl Debug + 'static) { let _ = d; }
+fn ok(d: impl Debug + 'static) { bar(d); }
+fn main() {}
+"#, &[(2, "the parameter type `impl Debug` may not live long enough")], "sb1");
+    // (a field that passes a type parameter to a type of the program that bounds it by 'static: rustc does not infer
+    // `U: 'static` from it (RFC 2093), E0310 at the field; also in an enum's variant, through a Vec)
+    errors_at(r#"struct Bar<T: 'static> { x: T }
+struct Foo<U> { bar: Bar<U> }
+fn main() {}
+"#, &[(2, "the parameter type `U` may not live long enough")], "sb2");
+    errors_at(r#"struct Bar<T: 'static> { x: T }
+enum E<U> { A(Vec<Bar<U>>) }
+fn main() {}
+"#, &[(2, "the parameter type `U` may not live long enough")], "sb3");
+    // (declared inline, in a where clause, through a trait that implies it (Any), or of 'static data: accepted; a
+    // fn's parameter type is implied well formed)
+    errors_at(r#"struct Bar<T: 'static> { x: T }
+struct Ok1<U: 'static> { bar: Bar<U> }
+struct Ok2<U> where U: 'static { bar: Bar<U> }
+struct Ok3<U: std::any::Any> { bar: Bar<U> }
+struct Ok4 { b: Bar<&'static str> }
+fn f<T>(x: Bar<T>) { let _ = x; }
+fn main() {}
+"#, &[], "sb4");
+}
+
+#[test]
+fn part34_array_element_coercions_and_cell_stores() {
+    // (an array's and a repeat's element coerced by deref to the element type the context gives: `[&x, x]` with x:
+    // `&[u8]` as `[&[u8]; 2]`, `[&s, "b"]` of a String as `[&str; 2]`. Checked with rustc 1.97)
+    errors_at(r#"fn g(x: &[u8]) -> [&[u8]; 2] { [&x, x] }
+fn h(x: &[u8]) -> [&[u8]; 1] { [&x; 1] }
+fn main() { let s = String::from("a"); let a: [&str; 2] = [&s, "b"]; let _ = a; let v = vec![1u8]; g(&v); h(&v); }
+"#, &[], "ac1");
+    // (a Cell's `set` stores what its argument borrows in the cell: a value whose Drop may see it, holding a borrow
+    // of one dropped before it (6), or of itself (10), also through a Vec's element (15), is E0597 at the borrow; a
+    // type with no Drop is accepted (19-23))
+    errors_at(r#"use std::cell::Cell;
+struct D<'a>(Cell<Option<&'a D<'a>>>);
+impl Drop for D<'_> { fn drop(&mut self) {} }
+fn a() {
+    let (d1, d2) = (D(Cell::new(None)), D(Cell::new(None)));
+    d1.0.set(Some(&d2));
+}
+fn b() {
+    let d = D(Cell::new(None));
+    d.0.set(Some(&d));
+}
+struct C<'a> { v: Vec<D<'a>> }
+fn c() {
+    let (c1, c2) = (C { v: vec![D(Cell::new(None))] }, C { v: vec![] });
+    c1.v[0].0.set(Some(&c2.v[0]));
+}
+struct N<'a>(Cell<Option<&'a N<'a>>>);
+fn n() {
+    let d = N(Cell::new(None));
+    d.0.set(Some(&d));
+    let (n1, n2) = (N(Cell::new(None)), N(Cell::new(None)));
+    n1.0.set(Some(&n2));
+    n2.0.set(Some(&n1));
+}
+fn main() { a(); b(); c(); n(); }
+"#, &[(6, "`d2` does not live long enough"), (10, "`d` does not live long enough"), (15, "`c2` does not live long enough")], "cs1");
+}
