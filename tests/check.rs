@@ -2728,3 +2728,16 @@ fn literals_and_comments_a_file_ends_in() {
     assert_eq!(first("fn main() {\n    /* a /* b */\n}\n"), e(2, 5, "unterminated block comment (E0758)"), "a block comment");
     assert_eq!(first("fn main() {\n    let c = '\"'; let l: &'static str = \"}\"; let r = r#\"\"\"#;\n").map(|d| d.2), Some("this file contains an unclosed delimiter".to_string()), "closed literals: the delimiter's error");
 }
+
+#[test]
+fn a_struct_field_without_its_comma() {
+    // (rustc 1.100: right after the field, where the comma goes)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(first("pub struct S {\n    pub foo: u32\n    pub bar: u32\n}\nfn main() {}\n"), Some((2, 17, "expected `,`, or `}`, found keyword `pub`".to_string())));
+    assert_eq!(first("struct F {\n    owo: bool\n    #[allow(unused)]\n    uwu: bool,\n}\nfn main() {}\n"), Some((2, 14, "expected `,`, or `}`, found `#`".to_string())));
+    assert_eq!(first("struct G { a: u8 b: u8 }\nfn main() {}\n"), Some((1, 17, "expected `,`, or `}`, found `b`".to_string())));
+    assert_eq!(first("struct H { a: u8, b: Vec<u8> }\nfn main() {}\n"), None);
+}

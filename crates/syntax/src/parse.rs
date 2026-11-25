@@ -2968,6 +2968,14 @@ impl Parser {
                 }
                 v.push((n, ft));
                 if !self.eat_punct(",") {
+                    // (no `,` before another field: rustc's error is right after the field, where the comma goes)
+                    if !self.is_close() && self.i > 0 {
+                        if let Some(nt) = self.tok(0) {
+                            let found = if nt.kind == TokKind::Ident && reserved_kw(&nt.text, true) { format!("keyword `{}`", nt.text) } else { format!("`{}`", nt.text) };
+                            let pt = &self.toks[self.i - 1];
+                            return Err(format!("{}:{}: expected `,`, or `}}`, found {found}", pt.line, pt.col as usize + pt.text.chars().count() + 1));
+                        }
+                    }
                     break;
                 }
             }
