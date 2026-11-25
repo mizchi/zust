@@ -799,6 +799,8 @@ pub(crate) fn addr_taken(b: &crate::parse::Block, mut_methods: &crate::fxhash::F
 /// エラーの場所にする位置: メソッド呼び出しはメソッド名 (rustc・syn 版と同じ)、ほかは式の先頭
 pub fn err_pos(e: &Expr) -> Sp {
     match e {
+        // (one the lowering made has no position: its receiver's)
+        Expr::MethodCall(r, _, _, _, s) | Expr::Field(r, _, s) if s.at.line == 0 => expr_start(r),
         Expr::MethodCall(_, _, _, _, s) | Expr::Field(_, _, s) => s.at,
         e => expr_start(e),
     }
@@ -895,6 +897,8 @@ pub fn block_end_pos(b: &crate::parse::Block) -> Sp {
 /// 式の先頭のソース上の位置 (syn の `e.span()` の始まり)。位置を持つ式か、その一番左の子から。分からなければ SP
 pub fn expr_start(e: &Expr) -> Sp {
     match e {
+        // (one the lowering made has no position (`&v[..]` for `&*v`): that of its first operand)
+        Expr::Unary(_, x, s) | Expr::Binary(_, x, _, s) | Expr::AssignOp(_, x, _, s) | Expr::MethodCall(x, _, _, _, s) | Expr::Index(x, _, s) if s.start.line == 0 => expr_start(x),
         Expr::Unary(_, _, s) | Expr::Binary(_, _, _, s) | Expr::AssignOp(_, _, _, s) | Expr::MethodCall(_, _, _, _, s) | Expr::Index(_, _, s) | Expr::Macro(_, _, s) => s.start,
         Expr::Field(_, _, s) => s.start,
         Expr::Call(x, _) | Expr::Cast(x, _) | Expr::Try(x) | Expr::Paren(x) | Expr::Assign(x, _) => expr_start(x),
