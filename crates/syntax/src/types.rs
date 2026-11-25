@@ -372,6 +372,10 @@ pub struct RImplSyn {
     /// The codes of the lifetimes an impl's trait path writes as its arguments (`impl<'a, 'd: 'a> Visitor<'d> for
     /// &'a ()`: 'd's), in order: a projection that selects the impl gives them those it writes there
     pub trait_lts: Vec<u8>,
+    /// For each region of the self type, the names of the types around it (comma separated, outermost first):
+    /// `Self: 'b` in a method implies what `'a: 'b` it may only where none of them is a type alias, which may drop
+    /// the lifetime (`impl<'a> Tr for Erased<'a>` with `type Erased<'a> = ();`)
+    pub self_paths: Vec<(String, u8)>,
 }
 
 /// enum のバリアント (要約に保存する形)

@@ -1776,19 +1776,9 @@ impl Program {
                         // (what bounds on types imply of their parts, where no path the part is in is a type alias
                         // (`Erased<'a>: 'static` with `type Erased<'a> = ();` says nothing of 'a))
                         if !r.derived.is_empty() || !r.derived_ty.is_empty() {
-                            // (`#self`: of the impl's self type, any type alias it names)
-                            fn names_alias(t: &crate::types::TySyn, al: &FxMap<String, (Vec<String>, crate::types::TySyn)>, d: u32) -> bool {
-                                use crate::types::TySyn as T;
-                                d < 16 && match t {
-                                    T::Named(n) => al.contains_key(n),
-                                    T::App(n, a) => al.contains_key(n) || a.iter().any(|x| names_alias(x, al, d + 1)),
-                                    T::Ref(_, i) | T::Ptr(_, i) | T::Slice(i) | T::Array(i, _) => names_alias(i, al, d + 1),
-                                    T::Tuple(ts) => ts.iter().any(|x| names_alias(x, al, d + 1)),
-                                    _ => false,
-                                }
-                            }
-                            let self_alias = ss.self_ty.as_ref().is_some_and(|t| names_alias(t, &p.aliases, 0));
-                            let alias = |paths: &str| if paths == "#self" { self_alias } else { paths.split(',').any(|n| p.aliases.contains_key(n)) };
+                            // (a path names only types with lifetime arguments, so never a type parameter, even one
+                            // that shadows a type alias's name)
+                            let alias = |paths: &str| paths.split(',').any(|n| p.aliases.contains_key(n));
                             for (paths, a, c) in std::mem::take(&mut r.derived) {
                                 if !alias(&paths) && !r.outlives.contains(&(a, c)) {
                                     r.outlives.push((a, c));

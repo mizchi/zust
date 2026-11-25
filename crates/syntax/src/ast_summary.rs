@@ -2274,7 +2274,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 let (lts, self_slots) = ow.regions.as_deref().map(|r| (r.lts.clone(), r.self_slots.as_slice())).unwrap_or_default();
                 {
                     let tps: Vec<&str> = ow.generics.iter().map(|g| g.0.as_str()).collect();
-                    let mut s = crate::regions::Slots { lts, tparams: tps, self_slots, any: false, in_fn: 0, derived: None };
+                    let mut s = crate::regions::Slots { lts, tparams: tps, self_slots, self_paths: &[], any: false, in_fn: 0, derived: None };
                     let mut v = vec![];
                     s.slots(t, false, &mut v);
                     // (a value the codes do not follow (`<() as Base>::Out`) keeps the header's outlives all the same:
@@ -2739,7 +2739,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             // (an impl's whose type names the impl's lifetimes: its codes against them)
             if let Some(r) = owner.and_then(|o| o.regions.as_deref()).filter(|r| !r.lts.is_empty() && crate::regions::names_lt(t)) {
                 let tps: Vec<&str> = owner.map(|o| o.generics.iter().map(|g| g.0.as_str()).collect()).unwrap_or_default();
-                let mut s = crate::regions::Slots { lts: r.lts.clone(), tparams: tps, self_slots: &r.self_slots, any: false, in_fn: 0, derived: None };
+                let mut s = crate::regions::Slots { lts: r.lts.clone(), tparams: tps, self_slots: &r.self_slots, self_paths: &[], any: false, in_fn: 0, derived: None };
                 let mut v = vec![];
                 s.slots(t, false, &mut v);
                 if s.any && !v.contains(&crate::types::R_UNKNOWN) && v.iter().any(|&c| (c as usize) < r.lts.len()) {

@@ -4487,6 +4487,28 @@ struct D<'a>(&'a i32);
 impl<'a> D<'a> { fn keep<'b>(self) -> &'b i32 where Self: 'b { self.0 } }
 fn main() {}
 "#, &[(3, "lifetime may not live long enough")], "sa");
+    // (what `Self: 'b` implies of the self type's lifetimes is dropped only for those inside a type alias's arguments:
+    // not for an impl's type parameter `T` that shadows a `type T`, nor `D<'a, T>` naming the alias `T` beside 'a,
+    // nor 'a also written outside `Erased<'a>`, nor a trait object's lifetime; `W<Erased<'a>>` is an error (9))
+    errors_at(r#"type T = ();
+struct D<'a, X>(&'a i32, X);
+impl<'a, T> D<'a, T> { fn keep<'b>(&self, x: &'a i32) -> &'b i32 where Self: 'b { x } }
+fn f<'a, 'b, T>(x: E<'a, T>) -> &'b i32 where E<'a, T>: 'b { x.0 }
+struct E<'a, X>(&'a i32, X);
+fn g<'a, 'b>(x: &'a i32) -> &'b i32 where D<'a, T>: 'b { x }
+fn main() { let n = 1; let d = D(&n, ()); println!("{} {} {}", d.keep(&n), f(E(&n, 0u8)), g(&n)); let _: T = (); }
+"#, &[], "sh");
+    errors_at(r#"type T = ();
+type Erased<'a> = ();
+struct D<'a, X>(&'a i32, X);
+impl<'a> D<'a, T> { fn k1<'b>(&self, x: &'a i32) -> &'b i32 where Self: 'b { x } }
+impl<'a> D<'a, Erased<'a>> { fn k2<'b>(&self, x: &'a i32) -> &'b i32 where Self: 'b { x } }
+trait Tr {}
+impl<'a> dyn Tr + 'a { fn k3<'b>(&self, x: &'a i32) -> &'b i32 where Self: 'b { x } }
+struct W<X>(X);
+impl<'a> W<Erased<'a>> { fn k4<'b>(&self, x: &'a i32) -> &'b i32 where Self: 'b { x } }
+fn main() {}
+"#, &[(9, "lifetime may not live long enough")], "sh2");
     // (a bound on a generic associated type with lifetime arguments (`T::A<'a>: 'static`) is one component of its
     // own: it implies nothing of 'a)
     errors_at(r#"trait Tr { type A<'x>; }
