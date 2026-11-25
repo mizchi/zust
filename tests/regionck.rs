@@ -4673,6 +4673,8 @@ fn main() { let t = Task { pri: 1, name: "a".into() }; println!("{:?} {} {}", c1
 fn part32_const_nested_block_borrow() {
     // (a block in a const's initializer whose value borrows one of its own locals, also inside a call in an `unsafe`
     // block: E0597 (1), as in rustc 1.97; a block whose value copies its local out is not (2, 3))
+    // (of a raw pointer's type, a borrow of the block's own local is no E0597 but a dangling pointer, at the item)
+    errors_at("const FOO: *const u32 = { let x = 42; &x };\nfn main() {}\n", &[(1, "encountered dangling pointer")], "dp");
     errors_at(r#"const A: &'static [i32; 3] = unsafe { std::mem::transmute({ let _ = 1; { let s = [0i32; 3]; &s } }) };
 const B: usize = { let v = [1, 2]; v.len() };
 const C: &'static i32 = &{ let q = 5; q };

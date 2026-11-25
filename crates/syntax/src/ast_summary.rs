@@ -2269,13 +2269,18 @@ fn anon_bound_err(item: &Item) -> Option<String> {
 /// (`const Z: &isize = { let p = 3; &p };`, also of a field or an element of it): the value lives for 'static, the
 /// local only to the end of the block (`\u{3}line\u{3}msg`, at the local's line)
 fn const_local_borrow_err(item: &Item) -> Option<String> {
-    let (e, what) = match &item.kind {
-        ItemKind::Const(_, _, Some(e)) => (e, "constant"),
-        ItemKind::Static(_, _, _, e) => (e, "static"),
+    let (e, what, ty) = match &item.kind {
+        ItemKind::Const(_, t, Some(e)) => (e, "constant", t.as_ref()),
+        ItemKind::Static(_, _, t, e) => (e, "static", Some(t)),
         _ => return None,
     };
     // (the initializer's own block, or one in it whose value it uses: `mem::transmute({ .. { let s = [0; 10]; &s } })`)
     let (line, name) = block_borrowing_own_local(e, 0)?;
+    // (of a raw pointer's type (`const FOO: *const u32 = { let x = 42; &x };`): no borrow check error, as a pointer
+    // has no lifetime, but rustc's evaluation of the constant finds the pointer dangling, at the item)
+    if matches!(ty, Some(PTy::Ptr(..))) {
+        return Some(format!("\u{3}1\u{3}encountered dangling pointer in final value of {what}"));
+    }
     Some(format!("\u{3}{line}\u{3}`{name}` does not live long enough (borrowed value must outlive the {what}) (E0597)"))
 }
 
