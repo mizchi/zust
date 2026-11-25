@@ -271,10 +271,12 @@ run-pass	associated-types/associated-types-sugar-path.rs
 compile-fail	associated-types/associated-types-unconstrained.rs
 run-pass	associated-types/associated-types-where-clause-impl-ambiguity.rs
 compile-fail	associated-types/avoid-getting-associated-items-of-undefined-trait.rs
+compile-fail	associated-types/bogus-constraint-on-bogus-type-param-in-where-clause.rs
 check-pass	associated-types/bound-references-sibling-assoc-type.rs
 check-pass	associated-types/cache/chrono-scan.rs
 check-pass	associated-types/cache/elision.rs
 compile-fail	associated-types/cache/poison-copy-via-projection.rs
+compile-fail	associated-types/constraint-on-bogus-type-param-in-where-clause.rs
 compile-fail	associated-types/dyn-impl-missing-assoc-type-ice-152668.rs
 check-pass	associated-types/enum-variant-with-assoc-type-and-lifetimes.rs
 compile-fail	associated-types/hr-associated-type-bound-object.rs
@@ -2280,6 +2282,7 @@ run-pass	drop/dst-coerce-unsized-drop.rs
 run-pass	drop/enum-drop-impl-15063.rs
 compile-fail	drop/explicit-call-to-dtor.rs
 compile-fail	drop/explicit-call-to-supertrait-dtor.rs
+compile-fail	drop/explicit-drop-call-error.rs
 compile-fail	drop/explicit-drop-call-named-ref.rs
 check-pass	drop/field-replace-in-struct-with-drop.rs
 run-pass	drop/for-expr-temporary-drop-scope.rs
@@ -2396,6 +2399,7 @@ run-pass	editions/edition-specific-identifier-shadowing-53333.rs
 build-pass	entry-point/hello-world.rs
 compile-fail	entry-point/imported_main_conflict.rs
 check-pass	entry-point/imported_main_conflict_lib.rs
+compile-fail	entry-point/main-where-fn-bound.rs
 compile-fail	entry-point/main-with-invalid-signature.rs
 compile-fail	entry-point/main-with-lifetime-param.rs
 compile-fail	entry-point/return-ty-has-bound-vars.rs
@@ -2479,6 +2483,7 @@ compile-fail	error-codes/E0027.rs
 compile-fail	error-codes/E0029.rs
 compile-fail	error-codes/E0033.rs
 compile-fail	error-codes/E0038.rs
+compile-fail	error-codes/E0040.rs
 compile-fail	error-codes/E0044.rs
 compile-fail	error-codes/E0050.rs
 compile-fail	error-codes/E0054.rs
@@ -2492,13 +2497,20 @@ compile-fail	error-codes/E0069.rs
 compile-fail	error-codes/E0070.rs
 compile-fail	error-codes/E0071.rs
 compile-fail	error-codes/E0081.rs
+compile-fail	error-codes/E0091.rs
 compile-fail	error-codes/E0106.rs
 compile-fail	error-codes/E0107.rs
+compile-fail	error-codes/E0109.rs
+compile-fail	error-codes/E0110.rs
+compile-fail	error-codes/E0116.rs
 compile-fail	error-codes/E0117.rs
+compile-fail	error-codes/E0118.rs
 compile-fail	error-codes/E0119.rs
 compile-fail	error-codes/E0120.rs
 compile-fail	error-codes/E0121.rs
 compile-fail	error-codes/E0124.rs
+compile-fail	error-codes/E0128.rs
+compile-fail	error-codes/E0130.rs
 compile-fail	error-codes/E0131.rs
 compile-fail	error-codes/E0133.rs
 compile-fail	error-codes/E0161.rs
@@ -2511,6 +2523,7 @@ compile-fail	error-codes/E0207.rs
 compile-fail	error-codes/E0214.rs
 compile-fail	error-codes/E0220.rs
 compile-fail	error-codes/E0223.rs
+compile-fail	error-codes/E0229.rs
 compile-fail	error-codes/E0252.rs
 compile-fail	error-codes/E0254.rs
 compile-fail	error-codes/E0255.rs
@@ -2610,6 +2623,7 @@ compile-fail	error-codes/E0620.rs
 compile-fail	error-codes/E0621-does-not-trigger-for-closures.rs
 compile-fail	error-codes/E0624.rs
 compile-fail	error-codes/E0637.rs
+compile-fail	error-codes/E0646.rs
 compile-fail	error-codes/E0658.rs
 compile-fail	error-codes/E0659.rs
 compile-fail	error-codes/E0746.rs
@@ -2687,6 +2701,7 @@ run-pass	extern/extern-prelude-std.rs
 run-pass	extern/extern-pub.rs
 check-pass	extern/extern-rust-trait-method.rs
 run-pass	extern/extern-rust.rs
+compile-fail	extern/foreign-fn-pattern-error-10877.rs
 run-pass	extern/issue-10025.rs
 build-pass	extern/issue-10763.rs
 run-pass	extern/issue-10764-rpass.rs
@@ -3137,6 +3152,7 @@ compile-fail	generics/generic-impl-more-params-with-defaults.rs
 run-pass	generics/generic-ivec-leak.rs
 compile-fail	generics/generic-lifetime-trait-impl.rs
 run-pass	generics/generic-newtype-struct.rs
+compile-fail	generics/generic-non-trailing-defaults.rs
 run-pass	generics/generic-object.rs
 compile-fail	generics/generic-params-nested-fn-scope-error.rs
 run-pass	generics/generic-recursive-tag.rs
@@ -3150,12 +3166,14 @@ run-pass	generics/generic-temporary.rs
 check-pass	generics/generic-trait-method-params-2311.rs
 run-pass	generics/generic-tup.rs
 compile-fail	generics/generic-type-more-params-with-defaults.rs
+compile-fail	generics/generic-type-params-forward-mention.rs
 compile-fail	generics/generic-type-params-name-repr.rs
 run-pass	generics/generic-type-synonym.rs
 run-pass	generics/generic-type.rs
 run-pass	generics/generic-unique.rs
 compile-fail	generics/impl-block-params-declared-in-wrong-spot-issue-113073.rs
 run-pass	generics/impl-generic-struct-with-concrete-types.rs
+compile-fail	generics/invalid-type-param-default.rs
 compile-fail	generics/issue-106694.rs
 run-pass	generics/issue-1112.rs
 run-pass	generics/issue-2936.rs
@@ -3177,6 +3195,8 @@ compile-fail	generics/single-colon-path-not-const-generics.rs
 compile-fail	generics/slightly-nice-generic-literal-messages.rs
 build-pass	generics/ssa-rval-monomorphization-issue-157922.rs
 compile-fail	generics/trait-incorrect-generic-args.rs
+compile-fail	generics/type-args-on-module-in-bound.rs
+compile-fail	generics/type-param-self-reference.rs
 run-pass	generics/type-params-in-for-each.rs
 compile-fail	generics/unclosed-generics-in-impl-def.rs
 compile-fail	generics/unconstrained-param-default-available.rs
@@ -3615,6 +3635,8 @@ compile-fail	include-macros/mismatched-types.rs
 run-pass	include-macros/normalization.rs
 compile-fail	include-macros/shebang-in-expr-ctxt.rs
 check-pass	include-macros/shebang-in-item-ctxt.rs
+compile-fail	incoherent-inherent-impls/insufficient-suggestion-issue-141679.rs
+compile-fail	incoherent-inherent-impls/no-other-unrelated-errors.rs
 compile-fail	indexing/index-bot.rs
 compile-fail	indexing/index-help.rs
 compile-fail	indexing/index-with-wrong-type.rs
@@ -5625,6 +5647,7 @@ compile-fail	parser/item-free-const-no-body-semantic-fail.rs
 check-pass	parser/item-free-const-no-body-syntactic-pass.rs
 compile-fail	parser/item-free-static-no-body-semantic-fail.rs
 check-pass	parser/item-free-static-no-body-syntactic-pass.rs
+compile-fail	parser/item-free-type-bounds-semantic-fail.rs
 check-pass	parser/item-free-type-bounds-syntactic-pass.rs
 compile-fail	parser/item-kw-case-mismatch.rs
 compile-fail	parser/item-needs-block.rs
@@ -7915,6 +7938,7 @@ run-pass	traits/trait-object-method-call-2935.rs
 compile-fail	traits/trait-object-method-receiver-rules.rs
 run-pass	traits/trait-object-mut-to-shared-coercion.rs
 run-pass	traits/trait-object-type-alias-3052.rs
+compile-fail	traits/trait-or-new-type-instead.rs
 compile-fail	traits/trait-selection-ice-84727.rs
 compile-fail	traits/trait-upcasting/cyclic-trait-resolution.rs
 check-pass	traits/trait-upcasting/deref-upcast-shadowing-lint.rs
@@ -8000,6 +8024,7 @@ compile-fail	type-alias/issue-62364-self-ty-arg.rs
 compile-fail	type-alias/missing-associated-type-in-trait-object-22434.rs
 run-pass	type-alias/static-method-type-alias-11047.rs
 run-pass	type-alias/type-param.rs
+compile-fail	type-alias/unused_type_parameter.rs
 check-pass	type-alias/where-clause-on-generic-type-alias.rs
 compile-fail	type-inference/ambiguous-num-type-method-call.rs
 run-pass	type-inference/diverging-expr-unconstrained-type-param.rs
@@ -8231,6 +8256,7 @@ compile-fail	typeck/typeck_type_placeholder_mismatch.rs
 run-pass	typeck/ufcs-type-params.rs
 compile-fail	typeck/unconstrained-impl-extra-parameter.rs
 run-pass	typeck/unify-return-ty.rs
+compile-fail	typeck/unused-type-parameter-span-30236.rs
 compile-fail	typeck/while-loop-block-cond.rs
 compile-fail	typeck/while-type-error.rs
 compile-fail	typeck/wrong-ret-type.rs

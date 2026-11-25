@@ -3947,6 +3947,12 @@ impl Cx<'_> {
 
     fn call_inner(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Call(func, cargs) = c else { return err(SP, "internal: expected a call") };
+        // (E0040: `Drop::drop(&mut x)`, `<S as Drop>::drop(..)`)
+        if let (true, Expr::Path(_, p)) = (self.user_code, &**func) {
+            if p.segs.len() >= 2 && p.segs[p.segs.len() - 1].name == "drop" && p.segs[p.segs.len() - 2].name == "Drop" {
+                return Err(self.at(p.pos, "explicit use of destructor method (E0040)".to_string()));
+            }
+        }
         // (`f1(x)` after `let f1 = f;` (f generic): `f(x)`)
         if let (false, Expr::Path(None, p)) = (self.fn_aliases.is_empty(), strip_paren(func)) {
             if let Some(&(_, target)) = ident_of(p).and_then(|n| self.fn_aliases.iter().rev().find(|a| a.0 == n)) {

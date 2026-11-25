@@ -2329,3 +2329,45 @@ fn derive_on_an_item_of_another_kind() {
     assert_eq!(first("extern \"C\" {\n    #[derive(Copy)]\n    fn f();\n}\nfn main() {}\n"), e(2), "an extern block's item");
     assert_eq!(first("#[derive(Clone, Copy)]\nunion U { f: i32 }\n#[derive(Debug)]\nenum E {}\nfn main() {}\n"), None, "a union and an enum");
 }
+
+#[test]
+fn item_declarations_rustc_rejects() {
+    // (E0646, E0128, E0109, E0116, E0091, E0130, E0118, E0229, E0040: errors of an item's own declaration or a call, at the lines rustc 1.100
+    // reports them)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, m: &str| Some((l, m.to_string()));
+    assert_eq!(first("fn main() where (): Copy {}\n"), e(1, "`main` function is not allowed to have a `where` clause (E0646)"), "main's where clause");
+    let fwd = "generic parameter defaults cannot reference parameters before they are declared (E0128)";
+    assert_eq!(first("struct Foo<T = U, U = ()> {\n    a: T,\n    b: U,\n}\nfn main() {}\n"), e(1, fwd), "a later parameter");
+    assert_eq!(first("pub struct Foo<Bar = Bar>(Bar);\nfn main() {}\n"), e(1, fwd), "the parameter itself");
+    assert_eq!(first("struct Foo<T, U = Vec<T>>(T, U);\nfn main() {}\n"), None, "an earlier parameter");
+    assert_eq!(first("type X = u32<i32>;\nfn main() {}\n"), e(1, "type arguments are not allowed on builtin type `u32` (E0109)"), "a builtin type");
+    assert_eq!(first("type X = u32<'static>;\nfn main() {}\n"), e(1, "lifetime arguments are not allowed on builtin type `u32` (E0109)"), "a builtin type's lifetime");
+    assert_eq!(first("fn is_copy<T: ::std::marker<i32>::Copy>() {}\nfn main() {}\n"), e(1, "type arguments are not allowed on module `marker` (E0109)"), "a module of std");
+    let foreign = "cannot define inherent `impl` for a type outside of the crate where the type is defined (E0116)";
+    assert_eq!(first("impl Vec<u8> {}\nfn main() {}\n"), e(1, foreign), "a type of std");
+    assert_eq!(first("use std::rc::Rc;\npub struct Foo;\npub type Function = Rc<Foo>;\nimpl Function {}\nfn main() {}\n"), e(4, foreign), "through an alias");
+    assert_eq!(first("struct Vec<T>(T);\nimpl<T> Vec<T> {\n    fn get(&self) -> &T {\n        &self.0\n    }\n}\nfn main() {}\n"), None, "the crate's own type of that name");
+    assert_eq!(first("type Foo<T> = u32;\nfn main() {}\n"), e(1, "type parameter `T` is never used (E0091)"), "an unused parameter");
+    assert_eq!(first("type Foo<\n    Unused\n> = u8;\nfn main() {}\n"), e(2, "type parameter `Unused` is never used (E0091)"), "at the parameter's line");
+    assert_eq!(first("fn main() {\n    type E<T> = u8;\n}\n"), e(2, "type parameter `T` is never used (E0091)"), "in a fn body");
+    assert_eq!(first("type Foo<'a, T: 'a, const N: usize> = [&'a T; 2];\nfn main() {}\n"), None, "lifetimes and consts may go unused");
+    let pat = "patterns aren't allowed in foreign function declarations (E0130)";
+    assert_eq!(first("extern \"C\" {\n    fn foo((a, b): (u32, u32));\n}\nfn main() {}\n"), e(2, pat), "a tuple pattern");
+    assert_eq!(first("extern \"C\" {\n    fn foo(mut a: u32);\n}\nfn main() {}\n"), e(2, pat), "a `mut` binding");
+    assert_eq!(first("extern \"C\" {\n    fn foo(a: usize, _: u8);\n}\nfn main() {}\n"), None, "names and `_`");
+    assert_eq!(first("impl<T> T {\n    fn get(&self) {}\n}\nfn main() {}\n"), e(1, "no nominal type found for inherent implementation (E0118)"), "a type parameter");
+    assert_eq!(first("type A<T> = B;\ntype B = _;\nfn main() {}\n").map(|d| d.0), Some(2), "an alias of an alias rustc rejects");
+    let cons = "associated item constraints are not allowed here (E0229)";
+    assert_eq!(first("trait A {}\nstruct Foo;\npub trait D {\n    fn f<T>(self)\n        where T<Bogus = Foo>: A;\n}\nfn main() {}\n"), e(5, cons), "on a type parameter");
+    assert_eq!(first("trait Foo {\n    type A;\n}\nstruct Bar;\nfn baz<I: Foo>(x: &<I as Foo<A = Bar>>::A) {}\nfn main() {}\n"), e(5, cons), "in a qualified path");
+    assert_eq!(first("fn f<I: Iterator<Item = u8>>(i: I) where I: Clone {}\nfn main() {}\n"), None, "in a bound");
+    let dtor = "explicit use of destructor method (E0040)";
+    let foo = "struct Foo;\nimpl Drop for Foo {\n    fn drop(&mut self) {}\n}\n";
+    assert_eq!(first(&format!("{foo}fn main() {{\n    let mut x = Foo;\n    x.drop();\n}}\n")), e(7, dtor), "a method call");
+    assert_eq!(first(&format!("{foo}fn main() {{\n    Drop::drop(&mut Foo);\n}}\n")), e(6, dtor), "a path call");
+    assert_eq!(first(&format!("{foo}fn main() {{\n    let x = Foo;\n    drop(x);\n}}\n")), None, "std's drop");
+}

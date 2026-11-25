@@ -551,6 +551,9 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
     if is_main && !generics.is_empty() {
         return err("`main` cannot be generic");
     }
+    if is_main && !sig.generics.preds.is_empty() {
+        return err("`main` function is not allowed to have a `where` clause (E0646)");
+    }
     let self_ty = owner.map(|o| &o.self_ty);
     let mut params = Vec::new();
     let mut has_self = false;

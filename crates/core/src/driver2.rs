@@ -948,6 +948,10 @@ impl Session2 {
         if let Some(e) = duplicate_impl_item(&src, &items[..user_src]) {
             return Err(e);
         }
+        // (E0116, E0118, E0091: an inherent impl's self type, a type alias's parameters)
+        if let Some(e) = item_decl_err(&src, &items[..user_src], self.ctx.deps.is_empty()) {
+            return Err(e);
+        }
         if self.ctx.map.inputs.is_empty() {
             if let Some(e) = unresolved_import(src0, &src, &items[..user_src], &self.ctx.deps) {
                 return Err(e);
@@ -9450,7 +9454,7 @@ fn hoisted_err_holds(msg: &str) -> bool {
         "expected `:` (found `", "expected `,` (found `",
         // (an item's written types: an unsized type where a Sized one is needed, sized_error)
         "the size for values of type `"];
-    let unused = msg.starts_with("function `") && msg.contains("is never used");
+    let unused = msg.starts_with("function `") && msg.contains("is never used") || msg.starts_with("type parameter `") && msg.ends_with("is never used (E0091)");
     // (an impl's associated type against its trait's bound (E0477): an impl in a fn body is hoisted)
     let unmet = msg.starts_with("the type `") && msg.contains("does not fulfill the required lifetime");
     // (a derive's field or a field's type without the bound it needs (derive_field_error, wf_error): a local
@@ -9644,6 +9648,257 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize)
 /// Two items of one name in one impl block, in one namespace (a fn's and a const's are values, a type's is a type):
 /// "duplicate definitions with name `bar`:" (E0201) in a trait's impl, "duplicate definitions with name `bar`"
 /// (E0592) in an inherent one, at the second item's start (rustc 1.100). Read from the items' own identifiers
+/// Types of std that a crate's inherent impl cannot name (E0116), unless the crate has a type of that name
+const STD_ADTS: &[&str] = &[
+    "Arc", "BTreeMap", "BTreeSet", "BinaryHeap", "Box", "Cell", "Cow", "Duration", "HashMap", "HashSet", "LinkedList", "Mutex", "NonNull",
+    "Option", "PhantomData", "Pin", "Rc", "RefCell", "Result", "RwLock", "String", "Vec", "VecDeque", "Weak",
+];
+
+/// Errors of an item's declaration, read from its text: an inherent impl of a type of std (E0116: `impl Vec<u8> {}`,
+/// named or through a type alias of the crate, which only std can have; `foreign`: when the crate has no
+/// dependencies) or of a type parameter (E0118), a type parameter of a type alias that the alias's type does not
+/// name (E0091: `type Foo<T> = u32;`; a lifetime or a const parameter may go unused, and so may the parameters of an
+/// `impl Trait` alias)
+fn item_decl_err(src: &str, items: &[SrcItem], foreign: bool) -> Option<String> {
+    use crate::lexer::ItemKind as K;
+    let mut aliases = None;
+    let sb = src.as_bytes();
+    for it in items {
+        if !matches!(it.kind, K::ImplHeader | K::Normal) {
+            continue;
+        }
+        // (by the first byte: an attribute, a visibility, `impl` or `type`; `pub fn` and the like by the fifth)
+        let b = &sb[it.start.min(sb.len())..it.end.min(sb.len())];
+        if !matches!(b.first(), Some(b'i' | b't' | b'p' | b'#')) || b.get(3) == Some(&b' ') && b.get(4) != Some(&b't') && b[0] == b'p' {
+            continue;
+        }
+        let text = src.get(it.start..it.end).unwrap_or("");
+        let t = item_text(text);
+        if let Some(rest) = t.strip_prefix("impl") {
+            if let Some(e) = inherent_impl_err(src, items, it, rest, foreign, &mut aliases) {
+                return Some(e);
+            }
+        } else if it.kind == K::Normal && t.starts_with("type") {
+            let at = text.len() - t.len();
+            let Some(lt) = t.find(['<', '=', ';']).filter(|&k| t.as_bytes()[k] == b'<') else { continue };
+            if let Some(e) = unused_alias_param_in(src, items, it, at + lt) {
+                return Some(e);
+            }
+        }
+    }
+    None
+}
+
+/// E0118 / E0116 of an impl whose text past `impl` is `rest`: none for a trait impl (a `for` in its header)
+fn inherent_impl_err<'a>(src: &'a str, items: &[SrcItem], it: &SrcItem, rest: &str, foreign: bool, aliases: &mut Option<crate::fxhash::FxSet<&'a str>>) -> Option<String> {
+    let head_end = it.end - rest.len() + rest.find('{').unwrap_or(rest.len());
+    if it.idents.iter().take_while(|&&(a, _)| (a as usize) < head_end).any(|&(a, b)| src.get(a as usize..b as usize) == Some("for")) {
+        return None;
+    }
+    let name = impl_self_name(rest);
+    if name.is_empty() {
+        return None;
+    }
+    // (E0118: `impl<T> T {}`, the self type one of the impl's type parameters)
+    if rest.trim_start().starts_with('<') && impl_param_self(rest, name) {
+        let off = src.get(it.start..it.end)?.len() - rest.len();
+        let line = it.line + src[it.start..it.start + off].matches('\n').count();
+        return Some(format!("{line}:1: no nominal type found for inherent implementation (E0118)"));
+    }
+    if !foreign {
+        return None;
+    }
+    if !STD_ADTS.contains(&name) {
+        // (the crate's type aliases, read once: one of them may name a type of std)
+        let al = aliases.get_or_insert_with(|| items.iter().filter_map(|a| alias_name(src, a)).collect());
+        if !al.contains(name) {
+            return None;
+        }
+    }
+    foreign_inherent_impl_err(src, items, it, rest, name)
+}
+
+/// The last name of the self type's path of an inherent impl (the text past `impl`): `<T> a::B<T> {` -> `B`; ""
+/// for a type that is no path
+fn impl_self_name(rest: &str) -> &str {
+    let b = rest.as_bytes();
+    let mut i = 0;
+    while b.get(i).is_some_and(|c| c.is_ascii_whitespace()) {
+        i += 1;
+    }
+    if b.get(i) == Some(&b'<') {
+        let mut d = 0;
+        while i < b.len() {
+            match b[i] {
+                b'<' => d += 1,
+                b'>' if b[i - 1] != b'-' => d -= 1,
+                _ => {}
+            }
+            i += 1;
+            if d == 0 {
+                break;
+            }
+        }
+    }
+    let r = rest[i..].trim_start();
+    let end = r.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == ':')).unwrap_or(r.len());
+    let path = &r[..end];
+    path.rsplit("::").next().unwrap_or("")
+}
+
+/// Whether the self type of an inherent impl (the text past `impl`, its generics first) is the single name of one of
+/// its type parameters: `<T: Tr> T {`
+fn impl_param_self(rest: &str, name: &str) -> bool {
+    let r = rest.trim_start();
+    let b = r.as_bytes();
+    let (mut d, mut i, mut start) = (0i32, 0, true);
+    let mut found = false;
+    while i < b.len() {
+        match b[i] {
+            b'<' | b'(' | b'[' => d += 1,
+            b'>' if i > 0 && b[i - 1] == b'-' => {}
+            b'>' | b')' | b']' => {
+                d -= 1;
+                if d == 0 {
+                    i += 1;
+                    break;
+                }
+            }
+            b',' if d == 1 => start = true,
+            c if start && d == 1 && !c.is_ascii_whitespace() => {
+                start = false;
+                found |= r[i..].starts_with(name) && !r[i + name.len()..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_');
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    // (the self type is that name alone, not a path through it (`T::Assoc`) nor a type it is an argument of)
+    let t = r[i.min(r.len())..].trim_start();
+    found && t.starts_with(name) && t[name.len()..].trim_start().starts_with(['{', 'w'])
+}
+
+/// An item's text past its attributes and visibility (`#[cfg(x)] pub(crate) type A = u8;` -> `type A = u8;`)
+fn item_text(text: &str) -> &str {
+    let t = if text.starts_with('#') { &text[leading_attrs(text).len()..] } else { text };
+    let b = t.as_bytes();
+    if !b.starts_with(b"pub") {
+        return t;
+    }
+    let mut i = 3;
+    while b.get(i).is_some_and(|c| c.is_ascii_whitespace()) {
+        i += 1;
+    }
+    if b.get(i) == Some(&b'(') {
+        i += b[i..].iter().position(|&c| c == b')').map_or(b.len() - i, |k| k + 1);
+        while b.get(i).is_some_and(|c| c.is_ascii_whitespace()) {
+            i += 1;
+        }
+    }
+    &t[i..]
+}
+
+/// Whether an item's text may start with `kw` past its attributes and visibility: by its first byte, before
+/// item_text reads it
+fn may_start(text: &str, kw: u8) -> bool {
+    matches!(text.as_bytes().first(), Some(&c) if c == kw || c == b'#' || c == b'p')
+}
+
+/// The name of a type alias item (`pub type Function = ..;`)
+fn alias_name<'a>(src: &'a str, a: &SrcItem) -> Option<&'a str> {
+    let text = src.get(a.start..a.end)?;
+    if a.kind != crate::lexer::ItemKind::Normal || !may_start(text, b't') {
+        return None;
+    }
+    let t = item_text(text).strip_prefix("type")?;
+    let t = t.trim_start();
+    Some(&t[..t.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).unwrap_or(t.len())])
+}
+
+/// Whether item `a` is `kw name` (`struct Vec`, `type Function`), past its attributes and visibility
+fn item_named(src: &str, a: &SrcItem, kw: &str, name: &str) -> bool {
+    let mut w = a.idents.iter().map(|&(x, y)| src.get(x as usize..y as usize).unwrap_or(""));
+    while let Some(x) = w.next() {
+        if x == kw {
+            return w.next() == Some(name);
+        }
+    }
+    false
+}
+
+#[cold]
+fn foreign_inherent_impl_err(src: &str, items: &[SrcItem], it: &SrcItem, rest: &str, name: &str) -> Option<String> {
+    use crate::lexer::ItemKind as K;
+    // (a type alias of the crate: what it names)
+    let mut name = name;
+    if let Some(a) = items.iter().find(|a| a.kind == K::Normal && item_named(src, a, "type", name)) {
+        let t = src.get(a.start..a.end).unwrap_or("");
+        let rhs = t[t.find('=')? + 1..].trim_start().trim_end_matches(';');
+        let end = rhs.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == ':')).unwrap_or(rhs.len());
+        name = rhs[..end].rsplit("::").next().unwrap_or("");
+    }
+    let own = |a: &&SrcItem| a.kind == K::Normal && ["struct", "enum", "union", "trait"].iter().any(|kw| item_named(src, a, kw, name));
+    let no_core = |a: &&SrcItem| a.kind == K::InnerAttr && src.get(a.start..a.end).is_some_and(|t| t.contains("no_core"));
+    if !STD_ADTS.contains(&name) || items.iter().any(|a| own(&a) || no_core(&a)) {
+        return None;
+    }
+    let off = src.get(it.start..it.end)?.len() - rest.len();
+    let line = it.line + src[it.start..it.start + off].matches('\n').count();
+    Some(format!("{line}:1: cannot define inherent `impl` for a type outside of the crate where the type is defined (E0116)"))
+}
+
+/// item_decl_err's E0091 for an alias whose generics start at byte `lt` of its text
+#[cold]
+fn unused_alias_param_in(src: &str, items: &[SrcItem], it: &SrcItem, lt: usize) -> Option<String> {
+    let text = src.get(it.start..it.end)?;
+    let b = text.as_bytes();
+    // (the parameters: the name each one starts with, past the `<` or a `,` at depth 1)
+    let mut params: Vec<usize> = vec![];
+    let (mut d, mut i, mut start) = (0i32, lt, true);
+    while i < b.len() {
+        match b[i] {
+            b'<' | b'(' | b'[' => d += 1,
+            b'>' if i > 0 && b[i - 1] == b'-' => {}
+            b'>' | b')' | b']' => {
+                d -= 1;
+                if d == 0 {
+                    i += 1;
+                    break;
+                }
+            }
+            b',' if d == 1 => start = true,
+            c if start && d == 1 && !c.is_ascii_whitespace() => {
+                start = false;
+                if c.is_ascii_alphabetic() || c == b'_' {
+                    params.push(i);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    let eq = i + text[i..].find('=')?;
+    let used = |n: &str| it.idents.iter().any(|&(x, y)| x as usize >= it.start + eq && src.get(x as usize..y as usize) == Some(n));
+    if used("impl") {
+        return None;
+    }
+    // (not when the type may not resolve: rustc reports that instead. `type A<T> = B;` of another alias of the crate
+    // (`type B = _;`), a path through modules (`<m::Alias as n::Trait>::Archived`, m and n unknown))
+    let rhs = text[eq + 1..].trim().trim_end_matches(';').trim_end();
+    if rhs.contains("::") || !rhs.is_empty() && rhs.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_') && items.iter().any(|a| alias_name(src, a) == Some(rhs)) {
+        return None;
+    }
+    for p in params {
+        let n = &text[p..p + text[p..].find(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).unwrap_or(0)];
+        if n.is_empty() || n == "const" || used(n) {
+            continue;
+        }
+        let line = it.line + text[..p].matches('\n').count();
+        return Some(format!("{line}:1: type parameter `{n}` is never used (E0091)"));
+    }
+    None
+}
+
 fn duplicate_impl_item(src: &str, items: &[SrcItem]) -> Option<String> {
     use crate::lexer::ItemKind as K;
     let mut seen: crate::fxhash::FxSet<(u32, bool, &str)> = Default::default();

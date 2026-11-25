@@ -89,6 +89,12 @@ impl Cx<'_> {
             || self.prog.structs[sid as usize].args.iter().any(|&a| matches!(a, Ty::Struct(x) if self.copies_items(x, depth + 1)))
     }
 
+    /// Whether the type of `r` (past its references) is one with a Drop impl
+    #[cold]
+    fn has_drop_impl(&mut self, r: &Expr) -> bool {
+        matches!(self.peek(r).map(|t| self.strip_refs(t)), Some(Ty::Struct(sid)) if self.prog.drop_impls.contains(&self.prog.base_of(sid)))
+    }
+
     pub(crate) fn method_call(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         // (invalid_atomic_ordering, deny by default: an atomic's load / store / failure ordering it cannot have)
         if let Expr::MethodCall(r, m, _, args, sp) = e {
@@ -104,6 +110,10 @@ impl Cx<'_> {
             // need `fn_traits`)
             if self.user_code && !self.prog.fn_traits && m.starts_with("call") && matches!(m.as_str(), "call" | "call_mut" | "call_once") && self.fn_like(r) {
                 return Err(self.at(sp.at, "use of unstable library feature `fn_traits` (E0658)".to_string()));
+            }
+            // (E0040: `x.drop()` of a value whose type has a Drop impl)
+            if self.user_code && args.is_empty() && m == "drop" && self.has_drop_impl(r) {
+                return Err(self.at(sp.at, "explicit use of destructor method (E0040)".to_string()));
             }
         }
         // (a call that named its trait: set while this call is resolved, and the outer call's back after)

@@ -1223,11 +1223,27 @@ impl Parser {
             seg.text = self.tokens_text(st, self.i);
             segs.push(seg);
             if self.punct_at(0, "::") && self.tok(2).is_some_and(|t| t.kind == TokKind::Ident) {
+                if !segs[segs.len() - 1].args.is_empty() {
+                    self.module_args(&segs, st)?;
+                }
                 self.i += 2;
                 continue;
             }
             return Ok(Path { global: global, segs: segs, pos });
         }
+    }
+
+    /// E0109: `std::marker<i32>::Copy`, generic arguments on a module of std (a path of lowercase names from
+    /// `std` / `core` / `alloc` that goes on). st: the segment's first token
+    #[cold]
+    fn module_args(&self, segs: &[Seg], st: usize) -> R<()> {
+        let last = &segs[segs.len() - 1];
+        if matches!(segs[0].name.as_str(), "std" | "core" | "alloc") && segs.iter().all(|s| s.name.starts_with(|c: char| c.is_ascii_lowercase())) {
+            let kind = if last.args.iter().any(|a| matches!(a, GArg::Ty(_) | GArg::Const(_))) { "type" } else { "lifetime" };
+            let t = &self.toks[st];
+            return Err(format!("{}:{}: {kind} arguments are not allowed on module `{}` (E0109)", t.line, t.col + 1, last.name));
+        }
+        Ok(())
     }
 
     fn bounds(&mut self) -> R<Vec<Bound>> {
@@ -1456,7 +1472,9 @@ impl Parser {
             let q = self.ty()?;
             let mut path = Path { global: false, segs: Vec::new(), pos: self.pos() };
             if self.eat_ident("as") {
+                let st = self.i;
                 path = self.path(true)?;
+                constraint_check(&self.toks, &path, st)?;
             }
             if !self.eat_close_angle() {
                 return Err(self.err("expected `>`"));
@@ -2253,7 +2271,9 @@ impl Parser {
                     let mut path = Path { global: false, segs: Vec::new(), pos: self.pos() };
                     let mut had_as = None;
                     if self.eat_ident("as") {
+                        let st = self.i;
                         path = self.path(true)?;
+                        constraint_check(&self.toks, &path, st)?;
                         had_as = Some(());
                     }
                     if !self.eat_close_angle() {
@@ -2658,6 +2678,7 @@ impl Parser {
             return Ok(g);
         }
         self.i += 1;
+        let mut defaults = Vec::new();
         loop {
             if self.eat_close_angle() {
                 break;
@@ -2680,7 +2701,14 @@ impl Parser {
             } else {
                 let n = self.ident()?;
                 let bs = if self.eat_punct(":") { self.bounds()? } else { Vec::new() };
-                let d = if self.eat_punct("=") { Some(self.ty()?) } else { None };
+                let d = if self.eat_punct("=") {
+                    let s = self.i;
+                    let t = self.ty()?;
+                    defaults.push((g.params.len(), s, self.i));
+                    Some(t)
+                } else {
+                    None
+                };
                 g.params.push(GParam::Ty(n, bs, d));
             }
             if !self.eat_punct(",") {
@@ -2690,7 +2718,28 @@ impl Parser {
                 break;
             }
         }
+        if !defaults.is_empty() {
+            self.forward_default(&g, &defaults)?;
+        }
         Ok(g)
+    }
+
+    /// E0128: the default of a type parameter names that parameter or one declared after it (`<T = U, U>`). The
+    /// defaults: (the parameter's index, the tokens of its default)
+    #[cold]
+    fn forward_default(&self, g: &Generics, defaults: &[(usize, usize, usize)]) -> R<()> {
+        for &(pi, s, e) in defaults {
+            for k in s..e {
+                let t = &self.toks[k];
+                if t.kind == TokKind::Ident
+                    && !(k > 0 && self.toks[k - 1].text == ":")
+                    && g.params[pi..].iter().any(|p| matches!(p, GParam::Ty(n, ..) | GParam::Const(n, _) if *n == t.text))
+                {
+                    return Err(format!("{}:{}: generic parameter defaults cannot reference parameters before they are declared (E0128)", t.line, t.col + 1));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn where_clause(&mut self, g: &mut Generics) -> R<()> {
@@ -2712,7 +2761,11 @@ impl Parser {
                     binder = self.generic_args()?;
                 }
                 // (`dyn A + 'static: B`: a trait object type takes its bounds)
+                let st = self.i;
                 let t = if self.is_ident("dyn") { self.ty()? } else { self.ty_no_bounds()? };
+                if let Ty::Path(None, p) = &t {
+                    constraint_check(&self.toks, p, st)?;
+                }
                 self.expect_punct(":")?;
                 let at = self.i;
                 let mut bs = self.bounds()?;
@@ -2881,6 +2934,11 @@ impl Parser {
                     }
                 }
             };
+            // (E0130: a foreign fn's parameters are names, `_` or plain)
+            if self.in_extern && !matches!(&p, Pat::Wild | Pat::Ident(false, false, _, None)) && !matches!(&p, Pat::Path(q) if q.segs.len() == 1) {
+                let t = &self.toks[save];
+                return Err(format!("{}:{}: patterns aren't allowed in foreign function declarations (E0130)", t.line, t.col + 1));
+            }
             self.expect_punct(":")?;
             let t = if self.punct_at(0, "...") {
                 self.i += 3;
@@ -3212,6 +3270,23 @@ impl Parser {
 }
 
 // ---------------------------------------------------------------- 表示 (確かめる用)
+
+/// E0229: `<I as Foo<A = Bar>>::A`, `where T<Bogus = Foo>: A`, an associated item's constraint where a path names a
+/// type, or a trait it is not a bound of. st: the path's first token
+fn constraint_check(toks: &[Tok], p: &Path, st: usize) -> R<()> {
+    if p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Bind(..)))) {
+        return Err(constraint_err(toks, st));
+    }
+    Ok(())
+}
+
+#[cold]
+fn constraint_err(toks: &[Tok], st: usize) -> String {
+    match toks.get(st) {
+        Some(t) => format!("{}:{}: associated item constraints are not allowed here (E0229)", t.line, t.col + 1),
+        None => "associated item constraints are not allowed here (E0229)".to_string(),
+    }
+}
 
 pub fn path_text(p: &Path) -> String {
     let mut s = String::new();
