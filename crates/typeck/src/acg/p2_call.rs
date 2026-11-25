@@ -1461,7 +1461,11 @@ impl Cx<'_> {
                 if let Some(bv) = bv {
                     match recv_temp {
                         Some(f) => self.clear_flag(f),
-                        None => self.mark_moved(recv),
+                        None => {
+                            self.mark_moved(recv);
+                            // (the Box moves into the call: a use of it after is E0382)
+                            self.bk_acc(recv, borrowck::Acc::Move);
+                        }
                     }
                     // (the receiver is the Box: of its type also where p0 is what a temporary Box points to,
                     // `Box::new(S).f()`; an `unsafe fn` is so here too, E0133 outside `unsafe`)
@@ -1492,6 +1496,11 @@ impl Cx<'_> {
             if self.prog.structs[self.prog.base_of(ps) as usize].name == "Pin" && p0t == Ty::Struct(ps) {
                 if let Place::Mem(a0, o0, _) = p0 {
                     let v0 = self.addr_plus(a0, o0);
+                    // (a `Pin<&mut Self>` moves into the call, as it is no `&mut` a call reborrows: a use of it after is
+                    // E0382 (moves/pin-mut-reborrow.rs))
+                    if recv_temp.is_none() && (!self.bk_ty(p0t).0 || super::p6_match_drop::holds_mut_ref(self.prog, p0t, 0)) {
+                        self.bk_acc(recv, borrowck::Acc::Move);
+                    }
                     return self.call_fn(id, Some((v0, p0t)), &margs.iter().collect::<Vec<_>>(), tf, expected, SP);
                 }
             }
