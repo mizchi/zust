@@ -88,7 +88,10 @@ fn main() {
         let mut c: t;
         c = t { v: 2 };
         c.v += 1;
+        let read = |x: t| x.v;
+        let add = |x: t, y: u8| x.v + y;
         println!("{} {} {} {} {}", t(), a.v, b.v, c.v, h(t { v: 4 }, 5));
+        println!("{} {}", read(t { v: 21 }), add(t { v: 1 }, 22));
     }
     // (a type's path and return type, `u::mk()` / `-> u`, beside a fn of its name in a block)
     struct u {

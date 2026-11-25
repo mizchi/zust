@@ -130,6 +130,12 @@ rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
   items are not supported". Nested items written in a body are hoisted; those of an expression macro's expansion are
   not. Also `is_x86_feature_detected!` is `true` only for sse / sse2 (no detection at run time), and the vector types
   `__m128` / `__m128i` / `__m128d` / `v128` are one type, so impls of a trait for two of them conflict.
+- Hoisting renames a nested item that another block or the top level also names (`crates/syntax/src/lexer.rs`,
+  `hoist_parts_at`). Where a fn and a type of one name are both renamed, a use takes the innermost rename of the
+  namespace its neighbouring tokens tell (`m(`, `m::<u8>(`, `fn m` a value; `m::`, `m<`, `-> m`, `impl m`,
+  `let a: m`, `(x: m`, `|x: m|`, a struct literal a type). A struct literal's field value (`S { f: m, .. }`) and a
+  middle parameter (`fn h(a: u8, x: m, b: u8)`) look alike to it and take the innermost rename of either namespace,
+  which may be the wrong one. Resolving the names on the parsed AST would settle these.
 - Incremental preprocessing (`prep` with a `PrepMemo`) can differ from `prep_full` on unbalanced input: an item in a
   brace that an edit leaves open (`println!("{}", std::mem::size_o{ fn inner() {} }` inside `fn main`) is hoisted to
   the top level by the full pass but left in place by the chunked one. Found by `tests/prep_inc.rs` when
