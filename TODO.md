@@ -230,8 +230,34 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
 - Serialized const arguments drop a local's type annotation (`{ let x: u8 = !0; ... }` in `Buf<{ .. }>`), and a const
   fn's return type through an alias (`type Id<T> = T; const fn f() -> Id<u8>`) is not applied.
 
+## zurgo test against cargo test (cratebench)
+
+`cratebench/test.py` runs each cratebench crate's own tests under `cargo test` and `zurgo test`, and compares them
+test by test (`cratebench/test_result.md`). fnv, rustc-hash, cfg-if and adler2 match, and CI keeps them so
+(`--check`). Tracking issue for the rest: #200.
+
+- either does not build under zurgo yet. The first error is `conflicting implementations of trait AsMut`: a blanket
+  `impl<Target> AsMut<Target>` beside impls for unsized types, which rustc accepts because `Target` is `Sized`. Then
+  serde_core, through the dev-dependency serde_json: #197, #198, and std types the prelude lacks (`CString` /
+  `CStr`, net addresses, `SystemTime`, `LinkedList`, `RwLock`, `Weak`, `Bound`).
+- The fix for same-named fns in sibling blocks of one fn (either's `check_t!`) is commit e4833cca on branch
+  `claude/tender-sagan-iatvun`, without a PR yet.
+- hex and itoa: their dev-dependency criterion needs two versions of one crate (#28). The error message names
+  `itoa v1.0.19` twice (#178).
+- Smaller gaps found on the way: inherent impls on instances of one type (associated fns, implicit `Sized`: #201),
+  an integer literal's type from a later use (#202), a Cursor seek past `i64::MAX` (#203), `Read` / `BufRead`
+  through `&mut &[u8]` (#173), and items the hoister misses (#198).
+
 ## Tooling
 
 - `tests/selfhost_compiler.sh` fails on main: rustc does not build the combined source
   (`tests/selfhost/build_compiler.py`), with 6 errors E0277 "can't compare `Ident` with `&str`" (e.g.
   `*i == *l.as_str()`).
+- `bench/rust_ui.py --check` checks nothing without `--baseline`: it exits 0 whatever passes. CI runs
+  `python3 bench/rust_ui.py --baseline bench/rust_ui_passing.txt --check`, which compares test by test and against
+  `bench/rust_ui_ratchet.txt`; run that locally before pushing a change to the compiler.
+- `tests/parse.rs` (`parses_like_syn`) compares zust's parse of the repository's own sources with syn's. zust counts a
+  destructuring assignment (`(a, b) = (c, d);`) as a `let`, so writing one in zust's sources fails the test; assign
+  the parts one by one.
+- `scripts/docs_check.sh --update` may leave the pair `docs/language.md` / `docs/ja/language.md` unjudged
+  (`excerpt-budget`), and then fails with 3: the pair is large. A change there may need to be made smaller.
