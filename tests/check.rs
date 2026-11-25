@@ -2284,3 +2284,22 @@ fn unstable_items_of_std() {
     assert_eq!(first("use std::intrinsics::transmute;\nfn main() {}\n"), None, "a stable item");
     assert_eq!(first("#![feature(reborrow)]\nuse std::marker::Reborrow;\nfn main() {}\n"), None, "enabled");
 }
+
+#[test]
+fn calls_of_the_fn_traits_methods() {
+    // (E0658: `call` / `call_mut` / `call_once` of a closure or an `F: Fn..` parameter need `fn_traits`; each expected
+    // line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize| Some((l, c, "use of unstable library feature `fn_traits` (E0658)".to_string()));
+    assert_eq!(first("fn main() {\n    let f = || ();\n    f.call(());\n}\n"), e(3, 7), "a closure's method");
+    assert_eq!(first("fn main() {\n    let f = || ();\n    Fn::call(&f, ());\n}\n"), e(3, 5), "by its trait's path");
+    assert_eq!(first("fn foo<F: Fn()>(mut f: F) {\n    f.call_mut(());\n}\nfn main() {}\n"), e(2, 7), "a parameter's");
+    // (the feature enabled (zustc does not call a closure's `call` yet: another error, not this one); a method of the
+    // program's of the name)
+    assert_ne!(first("#![feature(fn_traits)]\nfn main() {\n    let f = || ();\n    f.call(());\n}\n").map(|d| d.2), e(4, 7).map(|d| d.2), "enabled");
+    assert_eq!(first("trait Call { fn call(&self, _x: ()) {} }\nimpl Call for u8 {}\nfn main() {\n    1u8.call(());\n}\n"), None, "the program's");
+    assert_eq!(first("trait FnLike { fn call(&self); }\nfn c<F: FnLike>(f: F) {\n    f.call();\n}\nfn main() {}\n"), None, "a trait of the program's named Fn..");
+}

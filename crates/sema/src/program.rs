@@ -459,6 +459,9 @@ pub struct Program {
     /// The names a `use` of the program's has a path through (`E` of `use E::*;` / `use m::E::{A, B};`): an enum of
     /// one of these names may have its variants in scope, so a binding of a variant's name may be the variant
     pub use_prefixes: Vec<String>,
+    /// The crate enables `fn_traits` (`#![feature(fn_traits)]`): a call of a closure's `call` / `call_mut` /
+    /// `call_once` is allowed
+    pub fn_traits: bool,
     /// `#![deny(trivial_casts)]` / `#![deny(trivial_numeric_casts)]`: a cast a coercion or nothing would do
     pub deny_trivial_casts: (bool, bool),
     /// the program's `#[must_use]` fns (by name), for unused_must_use
@@ -1158,6 +1161,7 @@ impl Program {
             deny_unused_mut: false,
             allow_overflowing_literals: false,
             use_prefixes: Vec::new(),
+            fn_traits: false,
             deny_trivial_casts: (false, false),
             must_use_fns: vec![],
             prim_mut_methods: HashSet::default(),

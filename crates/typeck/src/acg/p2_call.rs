@@ -91,7 +91,7 @@ impl Cx<'_> {
 
     pub(crate) fn method_call(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         // (invalid_atomic_ordering, deny by default: an atomic's load / store / failure ordering it cannot have)
-        if let Expr::MethodCall(r, m, _, args, _) = e {
+        if let Expr::MethodCall(r, m, _, args, sp) = e {
             if self.user_code
                 && matches!(m.as_bytes().first(), Some(b'l' | b's' | b'c' | b'f'))
                 && matches!(m.as_str(), "load" | "store" | "compare_exchange" | "compare_exchange_weak" | "fetch_update")
@@ -99,6 +99,11 @@ impl Cx<'_> {
                 if let Some(er) = self.atomic_ordering(r, m, args) {
                     return Err(er);
                 }
+            }
+            // (E0658: a closure's, a fn pointer's or an `F: Fn..` parameter's `call` / `call_mut` / `call_once`, which
+            // need `fn_traits`)
+            if self.user_code && !self.prog.fn_traits && m.starts_with("call") && matches!(m.as_str(), "call" | "call_mut" | "call_once") && self.fn_like(r) {
+                return Err(self.at(sp.at, "use of unstable library feature `fn_traits` (E0658)".to_string()));
             }
         }
         // (a call that named its trait: set while this call is resolved, and the outer call's back after)
@@ -179,6 +184,23 @@ impl Cx<'_> {
         self.caller_locs.truncate(n);
         self.explicit_trait = prev;
         r
+    }
+
+    /// The receiver of a `call` is a closure, a fn pointer or a fn item, or a type parameter one of whose bounds is an
+    /// `Fn` trait (behind references)
+    #[cold]
+    #[inline(never)]
+    fn fn_like(&self, r: &Expr) -> bool {
+        match self.peek(r).map(|t| self.strip_refs(t)) {
+            Some(Ty::Struct(sid)) => {
+                let sd = &self.prog.structs[sid as usize];
+                // (std's `Fn` traits by name, not one of the program's that starts so (`FnLike`))
+                let fn_trait = |b: &String| matches!(b.split(['<', '(']).next().map(str::trim), Some("Fn" | "FnMut" | "FnOnce"));
+                sd.name.contains("{closure") || sd.placeholder.as_ref().is_some_and(|bs| bs.iter().any(fn_trait))
+            }
+            Some(Ty::Fn(..)) => true,
+            _ => false,
+        }
     }
 
     /// invalid_atomic_ordering (rustc 1.100's messages, at the ordering): a std atomic's `load` with `Release` /

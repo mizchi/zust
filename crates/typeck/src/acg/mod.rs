@@ -103,7 +103,10 @@ pub fn borrow_error(e: &str) -> bool {
 /// `impl Debug` returned as a String (a placeholder is `T#`)
 pub fn placeholder_mismatch(e: &str, bound_eqs: &[&str], free: &[String]) -> bool {
     // (a local where a constant goes (E0435), a binding of a variant's name (E0170): hold whatever the parameters are)
-    if e.ends_with("attempt to use a non-constant value in a constant (E0435)") || (e.ends_with("(E0170)") && e.contains("pattern binding `")) {
+    if e.ends_with("attempt to use a non-constant value in a constant (E0435)")
+        || (e.ends_with("(E0170)") && e.contains("pattern binding `"))
+        || e.ends_with("use of unstable library feature `fn_traits` (E0658)")
+    {
         return true;
     }
     // (an operator a type parameter's bounds do not give, p3_ops: holds whatever the parameter is)

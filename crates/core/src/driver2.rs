@@ -1865,6 +1865,8 @@ impl Session2 {
             ["allow(", "warn(", "expect("].iter().any(|a| head.trim_start().starts_with(a)) && !in_text(i)
         });
         prog.deny_trivial_casts = deny_trivial_casts;
+        // (`#![feature(fn_traits)]`, from the crate's attributes)
+        prog.fn_traits = items[..user].iter().any(|it| it.kind == crate::lexer::ItemKind::InnerAttr && src.get(it.start..it.end).is_some_and(|t| t.contains("fn_traits")));
         // (bindings_with_variant_name (E0170): the names the program's `use`s go through, for which a variant of the
         // name may be in scope)
         for it in &items[..user] {

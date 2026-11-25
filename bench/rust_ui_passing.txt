@@ -2824,6 +2824,8 @@ compile-fail	feature-gates/feature-gate-try_blocks.rs
 compile-fail	feature-gates/feature-gate-try_blocks_heterogeneous.rs
 compile-fail	feature-gates/feature-gate-type_alias_impl_trait.rs
 compile-fail	feature-gates/feature-gate-type_ascription.rs
+compile-fail	feature-gates/feature-gate-unboxed-closures-method-calls.rs
+compile-fail	feature-gates/feature-gate-unboxed-closures-ufcs-calls.rs
 check-pass	feature-gates/feature-gate-unqualified-local-imports.rs
 compile-fail	feature-gates/feature-gate-unsized_locals.rs
 compile-fail	feature-gates/feature-gate-with_negative_coherence.rs
