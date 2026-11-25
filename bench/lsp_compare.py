@@ -222,14 +222,19 @@ def make_synth(dir, mods=40):
 
 def zustc_target():
     # (ZUST_LSP_ROOT: another copy of the sources, e.g. a fixed snapshot, so that the target does not change with the code)
+    root = os.environ.get("ZUST_LSP_ROOT") or HERE
+    # (a tree from before the session was renamed (driver2.rs, Session2), as the KPIs' snapshot (bench/kpi_track.py
+    # REF_COMMIT) is: the same file and names as then, so its numbers stay comparable)
+    old = not os.path.exists(os.path.join(root, "crates/core/src/session.rs"))
+    session = "Session2" if old else "Session"
     return {
-        "root": os.environ.get("ZUST_LSP_ROOT") or HERE,
-        "open": "crates/core/src/session.rs",
+        "root": root,
+        "open": "crates/core/src/driver2.rs" if old else "crates/core/src/session.rs",
         "ready": ("build_workspace", "build_workspace"),
-        "queries": ["Session", "check", "split_inc", "Recorder", "lower"],
+        "queries": [session, "check", "split_inc", "Recorder", "lower"],
         "expect_doc": "check",
         "edit_after": "pub struct Diagnostic",
-        "refs": "Session",
+        "refs": session,
     }
 
 
