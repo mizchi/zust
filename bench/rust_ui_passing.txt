@@ -1922,6 +1922,8 @@ run-pass	consts/const-int-sign-rpass.rs
 compile-fail	consts/const-int-sign.rs
 run-pass	consts/const-int-wrapping-rpass.rs
 compile-fail	consts/const-int-wrapping.rs
+compile-fail	consts/const-item-no-type/dont-suggest-type-error.rs
+compile-fail	consts/const-item-no-type/empty-array.rs
 compile-fail	consts/const-item-no-type/with-colon.rs
 run-pass	consts/const-labeled-break.rs
 compile-fail	consts/const-len-underflow-subspans.rs
@@ -7450,6 +7452,7 @@ compile-fail	suggestions/for-i-in-vec.rs
 compile-fail	suggestions/for-loop-missing-in.rs
 compile-fail	suggestions/for-loop-no-spurious-in-suggestion.rs
 compile-fail	suggestions/format-borrow.rs
+compile-fail	suggestions/function-local-item-type-suggestion-issue-146786.rs
 compile-fail	suggestions/ice-unwrap-probe-many-result-125876.rs
 compile-fail	suggestions/if-let-typo.rs
 compile-fail	suggestions/if-then-neeing-semi.rs

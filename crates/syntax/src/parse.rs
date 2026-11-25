@@ -2866,6 +2866,20 @@ impl Parser {
         }
     }
 
+    /// "missing type for `const` item" (or `static`), right after the name or its colon (the token before the current
+    /// one, or the current `:`); the parse goes on as if the type were `_`
+    #[cold]
+    fn missing_item_type(&mut self, kw: &str) {
+        let (k, len) = if self.is_punct(":") { (self.i, 1) } else { (self.i - 1, self.toks[self.i - 1].text.chars().count()) };
+        if self.deferred.is_none() {
+            let t = &self.toks[k];
+            self.deferred = Some(format!("{}:{}: missing type for `{kw}` item", t.line, t.col as usize + len + 1));
+        }
+        if self.is_punct(":") {
+            self.i += 1;
+        }
+    }
+
     /// E0128: the default of a type parameter names that parameter or one declared after it (`<T = U, U>`). The
     /// defaults: (the parameter's index, the tokens of its default)
     #[cold]
@@ -3335,6 +3349,11 @@ impl Parser {
             "const" => {
                 self.i += 1;
                 let n = if self.eat_ident("_") { "_".to_string() } else { self.ident()? };
+                // (no type before the value, `const FOO = 1;` / `const FOO: = 1;`: rustc's error after the name or the
+                // colon, reported after the parse as its type check reports it)
+                if self.is_punct("=") || (self.is_punct(":") && self.punct_at(1, "=")) {
+                    self.missing_item_type("const");
+                }
                 let t = if self.eat_punct(":") { Some(self.ty()?) } else { None };
                 if t.as_ref().is_some_and(ty_has_infer) {
                     return Err(self.err_plain("the placeholder `_` is not allowed within types on item signatures for constants (E0121)"));
@@ -3354,9 +3373,15 @@ impl Parser {
                 self.i += 1;
                 let m = self.eat_ident("mut");
                 let n = self.decl_ident()?;
-                self.expect_punct(":")?;
-                let t = self.ty()?;
-                if ty_has_infer(&t) {
+                let missing = self.is_punct("=") || (self.is_punct(":") && self.punct_at(1, "="));
+                let t = if missing {
+                    self.missing_item_type("static");
+                    Ty::Infer
+                } else {
+                    self.expect_punct(":")?;
+                    self.ty()?
+                };
+                if !missing && ty_has_infer(&t) {
                     return Err(self.err_plain("the placeholder `_` is not allowed within types on item signatures for statics (E0121)"));
                 }
                 // (`static X: T;` in an extern block: a symbol of the program it links with, no initializer)

@@ -9771,6 +9771,8 @@ fn hoisted_err_holds(msg: &str) -> bool {
         "expected `:` (found `", "expected `,` (found `", "free static item without body",
         // (`#[test]` on an item in a fn body)
         "the `test` attribute may only be used on a free function",
+        // (`const FOO = 1;` in a fn body)
+        "missing type for `",
         // (an item's written types: an unsized type where a Sized one is needed, sized_error)
         "the size for values of type `"];
     let unused = msg.starts_with("function `") && msg.contains("is never used") || msg.starts_with("type parameter `") && msg.ends_with("is never used (E0091)")

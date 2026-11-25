@@ -2741,3 +2741,18 @@ fn a_struct_field_without_its_comma() {
     assert_eq!(first("struct G { a: u8 b: u8 }\nfn main() {}\n"), Some((1, 17, "expected `,`, or `}`, found `b`".to_string())));
     assert_eq!(first("struct H { a: u8, b: Vec<u8> }\nfn main() {}\n"), None);
 }
+
+#[test]
+fn const_and_static_items_without_a_type() {
+    // (rustc 1.100: right after the name, or after its colon)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, kw: &str| Some((l, c, format!("missing type for `{kw}` item")));
+    assert_eq!(first("const A = 1;\nfn main() {}\n"), e(1, 8, "const"), "no colon");
+    assert_eq!(first("const _A: = 123;\nfn main() {}\n"), e(1, 10, "const"), "a colon");
+    assert_eq!(first("static B = 2;\nfn main() {}\n"), e(1, 9, "static"), "a static");
+    assert_eq!(first("fn main() {\n    const FOO = \"hello\";\n    let _ = FOO;\n}\n").map(|d| (d.0, d.2)), e(2, 0, "const").map(|d| (d.0, d.2)), "in a fn body, at its line");
+    assert_eq!(first("const A: u8 = 1;\nstatic B: u8 = 2;\nfn main() {}\n"), None, "with types");
+}
