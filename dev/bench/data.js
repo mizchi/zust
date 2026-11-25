@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795638320309,
+  "lastUpdate": 1795638323171,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -134433,6 +134433,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/ce9b7b6a5f09bb904309b619c83536fd19886ac3"
         },
         "date": 1795637963130,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.61,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1913,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.82,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1556,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 72.87,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5382,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a61fb67713e4c94091cb4fdb294032a9ed4ea39e",
+          "message": "macros: a macro_rules! call inside stringify!(..) stays text (#199) (#222)\n\n`stringify!(m!())` printed `({ 1 + 2 })`; rustc prints `m!()`: stringify's\ninput is tokens, not code to expand. Both expanders expanded it, so\ntests/macros_expand.rs, which compares them, could not catch it.\n\n- expand_with (the fast one): the builtin `stringify!` (unqualified, or\n  `std::` / `core::`) marks its arguments inert for every program, not only\n  when proc macros are in scope, and a `macro_rules!` call inside them is\n  left as written.\n- expand_reference: find_calls does not go into the arguments of a\n  `stringify!(..)`.\n\nA crate's own `macro_rules! stringify` still expands as before.\n`concat!` and the other builtins still expand their arguments.\n\ntests/probe/stringify_macro_call.rs, checked against rustc: `( )`, `[ ]`\nand `{ }` calls, `std::stringify!`, `stringify! { .. }`, and a call of m\nbeside it that expands.\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T05:16:04+09:00",
+          "tree_id": "b91cfa6573ae23620aaa776c80551ea9889c2851",
+          "url": "https://github.com/mizchi/zust/commit/a61fb67713e4c94091cb4fdb294032a9ed4ea39e"
+        },
+        "date": 1795638322668,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
