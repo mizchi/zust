@@ -364,7 +364,7 @@ Markdown を変えたコミットでは、フックが `scripts/docs_check.sh --
 | `ZUSTC_CLIF_VERIFY=1` / `ZUSTC_CLIF_DUMP=1` | Cranelift の IR を検証する / 出す |
 | `ZUSTC_PREP_VERIFY=1` | 前処理の差分の結果を、全部やり直した結果と比べる |
 | `ZUSTC_CHECK_FORK_MIN=N` | `check` が関数の wave を子プロセスに分けるのは、子 1 つあたり N 個以上あるときだけ (既定 32)。`1` にするとほぼすべての wave で fork し、診断が `-j 1` と同じかを試せる |
-| `ZUSTC_PAR=fork\|threads\|off` | 並列の部分 (アイテムの要約、`check`、機械語) の動かし方: fork した子 (既定。1 スレッドのプロセスでだけ)、ワーカースレッド (どのプロセスでも。[docs/ja/reports/2026-11-25-06-parallel-frontend.md](docs/ja/reports/2026-11-25-06-parallel-frontend.md) のプロトタイプ)、または 1 スレッド |
+| `ZUSTC_PAR=fork\|threads\|off` | 並列の部分 (アイテムの要約、`check`、機械語) の動かし方: fork した子 (既定。1 スレッドのプロセスでだけ)、ワーカースレッド (どのプロセスでも。[docs/ja/reports/2026-11-25-10-parallel-frontend.md](docs/ja/reports/2026-11-25-10-parallel-frontend.md) のプロトタイプ)、または 1 スレッド |
 | `ZUSTC_SUMMARY_PAR_MIN=N` | `ZUSTC_PAR=threads` のとき、アイテムの要約をスレッドに分けるのは、スレッド 1 つあたり N 個以上あるときだけ (既定 32) |
 | `ZUSTC_BUILD_PAR_MIN=N` | ビルドが wave の関数を並列にコンパイルするのは、子 (またはスレッド) 1 つあたり N 個以上あるときだけ (既定 16)。`1` にするとほぼすべての wave を分け、.o が `-j 1` と同じかを試せる |
 | `ZUSTC_NO_POLONIUS=1` | Polonius Alpha と違うところで borrow check を NLL の規則にする (#1): 返される reborrow は関数の終わりまで生き、ローカルの一部への代入は借用を kill しない |

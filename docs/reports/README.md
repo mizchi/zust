@@ -118,7 +118,6 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-25 | [Region (lifetime) checking, part 31: errors in closures at the closure, a const's block that borrows its own local, moves out of a temporary scrutinee, the use rustc reports of a moved value, a block's value read before its drops](2026-11-25-03-region-check-31.md) |
 | 2026-11-25 | [Region (lifetime) checking, part 32: a shared reference a closure uses through a deref, held by value; closure patterns that test nothing; E0596 for `&mut &T`; more of const initializers](2026-11-25-04-region-check-32.md) |
 | 2026-11-25 | [Region (lifetime) checking, part 33: `ref mut` through a `&`, moves out of what a reference gives, a guard's bindings, `Box` and `Pin` receivers, a closure returned from a local, borrows held in returned aggregates](2026-11-25-05-region-check-33.md) |
-| 2026-11-25 | [A front end on threads: rustc's parallel front end, what zustc has, a prototype, and a design](2026-11-25-06-parallel-frontend.md) |
 | 2026-11-23 | [A trait solver for the program's traits, modeled and proved in Lean first](2026-11-23-04-trait-solver.md) |
 | 2026-11-23 | [The trait solver, part 2: coherence, supertraits, dyn coercions, impl selection, auto traits](2026-11-23-05-trait-solver-2.md) |
 | 2026-11-23 | [The trait solver, part 3: associated types](2026-11-23-06-trait-solver-3.md) |
@@ -132,3 +131,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-25 | [Region (lifetime) checking, part 35: the drop of a type that holds no reference](2026-11-25-07-region-check-35.md) |
 | 2026-11-25 | [Region (lifetime) checking, part 36: `x @ sub` patterns, items in constant initializers, `Fn` parameters boxed as trait objects, lifetime bounds of impl methods](2026-11-25-08-region-check-36.md) |
 | 2026-11-25 | [`Sized`: where only a sized type may be (E0277)](2026-11-25-09-sized.md) |
+| 2026-11-25 | [A front end on threads: rustc's parallel front end, what zustc has, a prototype, and a design](2026-11-25-10-parallel-frontend.md) |

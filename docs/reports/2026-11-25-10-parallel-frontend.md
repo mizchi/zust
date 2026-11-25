@@ -2,6 +2,9 @@
 
 Date: 2026-11-25
 
+The code's names are those after that day's rename (#206): `session.rs`, `Session` and `Options` were `driver2.rs`,
+`Session2` and `Options2` when this was written and measured.
+
 rustc's nightly has run its front end on threads by default since `nightly-2026-11-14`
 ([blog](https://blog.rust-lang.org/2026/11/16/enabling-parallel-frontend-on-nightly/)): 2 threads by default,
 `-Zunstable-options --jobs-frontend=N` for more. The blog gives the mean wall-time change of `check` builds as −22% /
@@ -67,9 +70,9 @@ zustc already runs three parts of the work in parallel. All three use `fork()`:
 
 | part | where | unit | when |
 |---|---|---|---|
-| item summaries | `Session2::analyze` (driver2.rs) | an item | cold: at least 32 misses per child |
-| `check` | `check_many` (driver2.rs) | a function of a wave | at least 32 per child (`ZUSTC_CHECK_FORK_MIN`) |
-| machine code | `compile_many` (driver2/build.rs) | a function of a wave | at least 16 per child |
+| item summaries | `Session::analyze` (session.rs) | an item | cold: at least 32 misses per child |
+| `check` | `check_many` (session.rs) | a function of a wave | at least 32 per child (`ZUSTC_CHECK_FORK_MIN`) |
+| machine code | `compile_many` (session/build.rs) | a function of a wave | at least 16 per child |
 
 The workspace build also forks a child per crate.
 
@@ -110,7 +113,7 @@ refs (3 ms) come to about 52 ms of about 260 ms.
   - With `jobs` 1 it is a plain loop on the calling thread.
   - Stacks are 8 MiB.
 
-  The mode comes from `ZUSTC_PAR=fork|threads|off` (default `fork`), or per session from `Options2::par` for a
+  The mode comes from `ZUSTC_PAR=fork|threads|off` (default `fork`), or per session from `Options::par` for a
   host that runs the driver in process.
 - **Item summaries on threads.** The summaries come back as values, not encoded.
 - **`check_many` on threads.**
@@ -227,13 +230,13 @@ identical across `-j` and across runs, as the self-host fixpoint already checks.
 ### 4.3 One binary, mode chosen at run time
 
 As in rustc, one binary does all three modes, and with `jobs` 1 it runs a plain loop. zustc already uses `std` mutexes
-everywhere: a compile-time probe while writing this confirmed that `Analysis`, `Program` and `Session2` are `Sync`
+everywhere: a compile-time probe while writing this confirmed that `Analysis`, `Program` and `Session` are `Sync`
 and `Insts` is `Send`. An
 uncontended mutex is cheap, so rustc's `DynSync` / `Lock` mode machinery is not needed.
 
 The default should follow the host:
 
-- **in a process with threads:** threads. This covers zust-analyzer, which should set `Options2::par`, and with
+- **in a process with threads:** threads. This covers zust-analyzer, which should set `Options::par`, and with
   2 jobs, rustc's choice for memory and for the editor's own threads;
 - **in a single-threaded process:** fork, until threads match it on memory.
 
@@ -303,7 +306,7 @@ and hand a freed token straight to a waiting thread.
 zustc's own threads are green threads (one OS thread) with no `thread::scope`. `par.rs` is therefore outside the
 self-host set: the self-host build would put a sequential `map_with` in its place.
 
-Separately, `tests/selfhost/build_compiler.py` does not inline `driver2/dead.rs` (added in d9e104a), so at HEAD
+Separately, `tests/selfhost/build_compiler.py` does not inline `session/dead.rs` (added in d9e104a), so at HEAD
 building the self-host compiler fails with "file not found for module `dead`". That is unrelated to this change.
 
 ## 5. Order of the work

@@ -2,6 +2,9 @@
 
 Date: 2026-11-25
 
+コードの名前は同じ日のリネーム (#206) の後のもの: `session.rs`、`Session`、`Options` は、これを書いて測ったときは
+`driver2.rs`、`Session2`、`Options2` だった。
+
 rustc の nightly は `nightly-2026-11-14` から、フロントエンドを既定でスレッドで動かしている
 ([ブログ](https://blog.rust-lang.org/2026/11/16/enabling-parallel-frontend-on-nightly/))。既定は 2 スレッドで、
 `-Zunstable-options --jobs-frontend=N` で増やせる。ブログによると、`check` ビルドの壁時計時間の平均の変化は 2 / 4 / 8
@@ -68,9 +71,9 @@ zustc はすでに仕事の 3 か所を並列に動かしている。3 つとも
 
 | 部分 | 場所 | 単位 | 条件 |
 |---|---|---|---|
-| アイテムの要約 | `Session2::analyze` (driver2.rs) | アイテム | cold: 子 1 つあたり 32 個以上のミス |
-| `check` | `check_many` (driver2.rs) | wave の関数 | 子 1 つあたり 32 個以上 (`ZUSTC_CHECK_FORK_MIN`) |
-| 機械語 | `compile_many` (driver2/build.rs) | wave の関数 | 子 1 つあたり 16 個以上 |
+| アイテムの要約 | `Session::analyze` (session.rs) | アイテム | cold: 子 1 つあたり 32 個以上のミス |
+| `check` | `check_many` (session.rs) | wave の関数 | 子 1 つあたり 32 個以上 (`ZUSTC_CHECK_FORK_MIN`) |
+| 機械語 | `compile_many` (session/build.rs) | wave の関数 | 子 1 つあたり 16 個以上 |
 
 ワークスペースのビルドも、クレートごとに子を fork する。
 
@@ -110,7 +113,7 @@ fork の方式の限界:
   - スタックは 8 MiB
 
   モードは `ZUSTC_PAR=fork|threads|off` (既定は `fork`) で決まる。ドライバをプロセスの中で動かすホストは
-  セッションごとに `Options2::par` でも決められる。
+  セッションごとに `Options::par` でも決められる。
 - **アイテムの要約をスレッドで。** 要約は encode せず、値のまま戻る。
 - **`check_many` をスレッドで。**
   - 子が関数ごとにしていた仕事を `send_checked` に移し、fork した子とスレッドで共有する。
@@ -223,12 +226,12 @@ id の規則は、rustc が #163495 と DefId の振り直しから得た教訓�
 ### 4.3 バイナリは 1 つで、モードは実行時に決める
 
 rustc と同じく、1 つのバイナリが 3 つのモードを持ち、`jobs` が 1 ならただのループで動く。zustc はすでにどこでも `std` の
-mutex を使っている: これを書きながらのコンパイル時の確認で、`Analysis`、`Program`、`Session2` が `Sync`、`Insts` が
+mutex を使っている: これを書きながらのコンパイル時の確認で、`Analysis`、`Program`、`Session` が `Sync`、`Insts` が
 `Send` であることを確かめた。競合しない mutex は安いので、rustc の `DynSync` / `Lock` のモードの仕組みは要らない。
 
 既定はホストに合わせるのがよい:
 
-- **スレッドのあるプロセスでは:** スレッド。zust-analyzer もこれに当たり、`Options2::par` を設定する。jobs は 2 にする
+- **スレッドのあるプロセスでは:** スレッド。zust-analyzer もこれに当たり、`Options::par` を設定する。jobs は 2 にする
   (rustc がメモリとエディタ自身のスレッドのために選んだもの)。
 - **1 スレッドのプロセスでは:** メモリでスレッドが追いつくまでは fork。
 
@@ -296,7 +299,7 @@ jobserver の `Proxy` には、真似する価値のある規則が 2 つある:
 zustc 自身のスレッドは green thread (OS のスレッドは 1 つ) で、`thread::scope` がない。そのため `par.rs` は self-host の
 対象の外に置く: self-host のビルドでは、逐次の `map_with` をその代わりに置く。
 
-別件として、`tests/selfhost/build_compiler.py` は `driver2/dead.rs` (d9e104a で追加) を中に入れないので、HEAD では
+別件として、`tests/selfhost/build_compiler.py` は `session/dead.rs` (d9e104a で追加) を中に入れないので、HEAD では
 self-host のコンパイラのビルドが "file not found for module `dead`" で失敗する。今回の変更とは関係がない。
 
 ## 5. 作業の順番
