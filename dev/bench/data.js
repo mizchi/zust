@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795635383581,
+  "lastUpdate": 1795635386586,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -132618,6 +132618,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 5381,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "528c96d2183fc7e16298256bdf66075191de2244",
+          "message": "Merge pull request #204 from mizchi/claude/tender-sagan-iatvun\n\nHoisting: a use inside a block takes the innermost block's rename; TODO.md handoff for zurgo test vs cargo test",
+          "timestamp": "2026-11-26T04:29:47+09:00",
+          "tree_id": "e2f1cbe43f9ef8beef27d4c072071897f79955d2",
+          "url": "https://github.com/mizchi/zust/commit/528c96d2183fc7e16298256bdf66075191de2244"
+        },
+        "date": 1795635386070,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.61,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1913,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.82,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1556,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 72.87,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5382,
             "unit": "tests"
           }
         ]
