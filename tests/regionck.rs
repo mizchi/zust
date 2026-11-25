@@ -4146,4 +4146,12 @@ fn part28_review() {
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("trait objects without an explicit `dyn` are deprecated"), "{d:?}");
     assert_eq!(check("fn f<T, U>(a: T, cb: Box<dyn Fn(T) -> U>, b: U) -> U { let _ = b; cb(a) }\nstruct S2<T, U> { a: T, cb: Box<dyn Fn(T) -> U>, b: U }\nfn main() {\n    println!(\"{}\", f(1i32, Box::new(|x: i32| x), 2i32));\n    let s = S2 { a: 1i32, cb: Box::new(|x: i32| x + 10), b: 2i32 };\n    println!(\"{} {}\", (s.cb)(s.a), s.b);\n}\n"), vec![], "v2");
     assert_eq!(check("struct A;\n#[allow(non_camel_case_types)]\nstruct __S0(i32);\nfn main() { let x: __S0 = __S0(4); let _a: A = A; println!(\"{}\", x.0); }\n"), vec![], "v3");
+    // (a generic parameter named like a mark is that parameter; a name like a struct's mark that names nothing is
+    // no type; a crate's `allow` after its `deny` of bare_trait_objects allows them)
+    assert_eq!(check("#[allow(non_camel_case_types)]\nfn f<T: Copy, __zp0_U>(_a: T, x: __zp0_U) -> __zp0_U { x }\nfn main() { let y: u8 = f(1i32, 7u8); println!(\"{}\", y); }\n"), vec![], "v4");
+    let d = check("fn main() { let _x: __zs0 = todo!(); }\n");
+    assert!(d.len() == 1 && d[0].1.contains("cannot find type `__zs0`"), "{d:?}");
+    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2018, ..Options2::default() });
+    let d: Vec<(usize, String)> = s.check("#![deny(bare_trait_objects)]\n#![allow(bare_trait_objects)]\ntrait X {}\nimpl X for i32 {}\nfn take(_x: &X) {}\nfn main() { take(&1); }\n").into_iter().map(|d| (d.line, d.msg)).collect();
+    assert_eq!(d, vec![], "v5");
 }

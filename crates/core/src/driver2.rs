@@ -1510,9 +1510,11 @@ impl Session2 {
                 _ => false,
             };
             deny_ctypes = (ffi("improper_ctypes"), ffi("improper_ctypes_definitions"));
-            // (a trait object without `dyn` before 2021: the lint warns, as rust_2018_idioms does. An item's
-            // `#[deny(bare_trait_objects)]` is taken for the crate: lint levels below it are not followed)
-            deny_bare = c.contains("deny(bare_trait_objects") || c.contains("forbid(bare_trait_objects") || match last_level(&["bare_trait_objects", "rust_2018_idioms"]) {
+            // (a trait object without `dyn` before 2021: the lint warns, as rust_2018_idioms does. The crate's level
+            // is its attributes' last one; an item's `#[deny(bare_trait_objects)]` is taken for the crate, as lint
+            // levels below it are not followed)
+            let item_deny = c.contains("#[deny(bare_trait_objects") || c.contains("#[forbid(bare_trait_objects");
+            deny_bare = item_deny || match last_level(&["bare_trait_objects", "rust_2018_idioms"]) {
                 Some("forbid" | "deny") => true,
                 Some("warn") | None => matches!(last_level(&["warnings"]), Some("forbid" | "deny")),
                 _ => false,

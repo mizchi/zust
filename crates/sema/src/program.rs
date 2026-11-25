@@ -3317,17 +3317,19 @@ impl Program {
                 Ty::Array(intern(r(inner)?), n as u32)
             }
             TySyn::Named(n) => {
-                // (the marks of a `dyn` type's text: dyn_canon. Not a program's own type of the name)
-                if n.starts_with("__") && !self.struct_index.contains_key(n) && !self.aliases.contains_key(n) {
+                if let Some(t) = names(n) {
+                    return Ok(t);
+                }
+                // (the marks of a `dyn` type's text: dyn_canon. Not a generic parameter's name, nor a program's own
+                // type's)
+                if n.starts_with("__z") && !self.struct_index.contains_key(n) && !self.aliases.contains_key(n) {
                     if let Some((i, _)) = dyn_param_mark(n) {
                         return Ok(Ty::Param(i));
                     }
-                    if let Some(id) = dyn_struct_mark(n).filter(|&id| (id as usize) < self.structs.len()) {
+                    // (only a struct dyn_src writes so: a placeholder or a closure, which the program cannot name)
+                    if let Some(id) = dyn_struct_mark(n).filter(|&id| (id as usize) < self.structs.len() && (self.is_placeholder(id) || self.closure_of_struct.contains_key(&self.base_of(id)))) {
                         return Ok(Ty::Struct(id));
                     }
-                }
-                if let Some(t) = names(n) {
-                    return Ok(t);
                 }
                 if let Some((g, t)) = self.aliases.get(n) {
                     if g.is_empty() {
@@ -4756,7 +4758,7 @@ impl Program {
             // 関連型は具体型ではない (型パラメータを含むときだけ現れる)
             Ty::Assoc(_) => true,
             // (`dyn A<T>`: its marks, dyn_canon)
-            Ty::Dyn(s) => s.contains("__P"),
+            Ty::Dyn(s) => s.contains(PMARK) && dyn_marks(s).next().is_some(),
             _ => false,
         }
     }
@@ -4897,7 +4899,7 @@ impl Program {
             Ty::Struct(sid) => self.structs[sid as usize].args.iter().any(|&a| self.uses_params_from(a, from)),
             Ty::Assoc(a) => self.uses_params_from(a.base, from),
             Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&p| self.uses_params_from(p, from)),
-            Ty::Dyn(s) => s.contains("__P") && dyn_marks(s).any(|i| i >= from),
+            Ty::Dyn(s) => s.contains(PMARK) && dyn_marks(s).any(|i| i >= from),
             _ => false,
         }
     }
@@ -4935,7 +4937,7 @@ impl Program {
             })),
             // (`dyn A<T>`: each parameter's mark becomes its argument's text, or the parameter's name where the
             // program cannot write it, as before the marks)
-            Ty::Dyn(s) if s.contains("__P") => {
+            Ty::Dyn(s) if s.contains(PMARK) => {
                 let r = crate::parse::rewrite_tokens(s, &mut |k, toks| {
                     let (i, n) = dyn_param_mark(&toks[k].text)?;
                     Some(match *args.get(i as usize)? {
@@ -5017,8 +5019,8 @@ impl Program {
             // (`dyn A<T>` against `dyn A<i32>`: their type arguments)
             // (or the same with its parameters' names, the ones known given: a value coerced to the type with them
             // (dyn_unmarked), `Fn(i32) -> U` for `Fn(T) -> U` with T = i32)
-            (Ty::Dyn(p), Ty::Dyn(a)) if p != a && p.contains("__P") && self.dyn_named_as(p, a, sol) => true,
-            (Ty::Dyn(p), Ty::Dyn(a)) if p != a && p.contains("__P") => match (self.dyn_parts(p), self.dyn_parts(a)) {
+            (Ty::Dyn(p), Ty::Dyn(a)) if p != a && p.contains(PMARK) && self.dyn_named_as(p, a, sol) => true,
+            (Ty::Dyn(p), Ty::Dyn(a)) if p != a && p.contains(PMARK) => match (self.dyn_parts(p), self.dyn_parts(a)) {
                 (Some((n1, x)), Some((n2, y))) => n1 == n2 && x.len() == y.len() && x.iter().zip(&y).all(|(p, q)| p.0 == q.0 && self.match_ty(p.1, q.1, sol)),
                 _ => false,
             },
@@ -5136,7 +5138,7 @@ impl Program {
     }
 
     /// The text of a `dyn` type written with names (a type parameter's, or `Self`), each of them that names gives
-    /// a type replaced: a type parameter by its mark `__P{i}_{name}`, another type by its text (dyn_src). So the
+    /// a type replaced: a type parameter by its mark `__zp{i}_{name}`, another type by its text (dyn_src). So the
     /// type is the same where it is written in a generic fn's or type's declaration and where it is used, its
     /// parameters given (Program::subst) or named in the env of an instance. None where nothing is replaced
     fn dyn_canon(&self, s: &str, names: &dyn Fn(&str) -> Option<Ty>) -> Option<String> {
@@ -5154,20 +5156,20 @@ impl Program {
             }
             match names(&t.text)? {
                 Ty::Param(HOLE) => None,
-                Ty::Param(i) => Some(format!("__P{i}_{}", t.text)),
+                Ty::Param(i) => Some(format!("{PMARK}{i}_{}", t.text)),
                 ty => self.dyn_src(ty, &t.text),
             }
         })
     }
 
     /// t as text that resolves to t again, in a `dyn` type's text: a type parameter as its mark (named `name`, or
-    /// `T{i}` where empty), a struct the program cannot name (a placeholder) as `__S{id}`. None for an associated type
+    /// `T{i}` where empty), a struct the program cannot name (a placeholder) as `__zs{id}`. None for an associated type
     fn dyn_src(&self, t: Ty, name: &str) -> Option<String> {
         let r = |t: Ty| self.dyn_src(t, "");
         Some(match t {
             Ty::Param(HOLE) => "_".into(),
-            Ty::Param(i) if name.is_empty() => format!("__P{i}_T{i}"),
-            Ty::Param(i) => format!("__P{i}_{name}"),
+            Ty::Param(i) if name.is_empty() => format!("{PMARK}{i}_T{i}"),
+            Ty::Param(i) => format!("{PMARK}{i}_{name}"),
             Ty::Ref(m, i) => format!("&{}{}", if m { "mut " } else { "" }, r(*i)?),
             Ty::Ptr(m, i) => format!("*{} {}", if m { "mut" } else { "const" }, r(*i)?),
             Ty::Slice(i) => format!("[{}]", r(*i)?),
@@ -5194,7 +5196,12 @@ impl Program {
                     Some(b) => named(b).and_then(|n| Some(format!("{n}<{}>", args()?.join(", ")))),
                     None => named(sid).cloned(),
                 };
-                text.unwrap_or_else(|| format!("__S{sid}"))
+                // (a placeholder or a closure as its mark; another struct the program does not name, not at all)
+                match text {
+                    Some(t) => t,
+                    None if self.is_placeholder(sid) || self.closure_of_struct.contains_key(&self.base_of(sid)) => format!("{SMARK}{sid}"),
+                    None => return None,
+                }
             }
             t => {
                 let n = self.tn(t);
@@ -5645,7 +5652,7 @@ impl Program {
     /// A `dyn` type's text with its marks (dyn_canon) as the program writes them: a struct's by its name, and (params)
     /// a type parameter's by the parameter's name
     fn dyn_shown(&self, s: &str, params: bool) -> String {
-        if !s.contains("__") {
+        if !s.contains(PMARK) && !s.contains(SMARK) {
             return s.to_string();
         }
         crate::parse::rewrite_tokens(s, &mut |k, toks| {
@@ -6078,15 +6085,20 @@ fn syn_unify(a: &TySyn, ga: &[String], b: &TySyn, gb: &[String], sub: &mut Vec<(
     go(a, false, b, true, [ga, gb], sub, 0)
 }
 
-/// A type parameter's mark in a `dyn` type's text (Program::dyn_canon): `__P{i}_{name}`, the parameter i written name
+/// The prefix of a type parameter's mark in a `dyn` type's text (`__zp{i}_{name}`), and of a struct's (`__zs{id}`):
+/// names of the compiler's own, as the prelude's `__core_*` are
+const PMARK: &str = "__zp";
+const SMARK: &str = "__zs";
+
+/// A type parameter's mark in a `dyn` type's text (Program::dyn_canon): `__zp{i}_{name}`, the parameter i written name
 fn dyn_param_mark(n: &str) -> Option<(u8, &str)> {
-    let (i, name) = n.strip_prefix("__P")?.split_once('_')?;
+    let (i, name) = n.strip_prefix(PMARK)?.split_once('_')?;
     Some((i.parse().ok()?, name))
 }
 
-/// A struct's mark in a `dyn` type's text (Program::dyn_src): `__S{id}`, struct id
+/// A struct's mark in a `dyn` type's text (Program::dyn_src): `__zs{id}`, struct id
 fn dyn_struct_mark(n: &str) -> Option<u32> {
-    n.strip_prefix("__S")?.parse().ok()
+    n.strip_prefix(SMARK)?.parse().ok()
 }
 
 /// The type parameters a `dyn` type's text marks
