@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795629061746,
+  "lastUpdate": 1795629064105,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -108295,6 +108295,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 92.927,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6c36b05619ef47653c33b0a81631635eacc314a3",
+          "message": "W1 of #38: wasm-bindgen 0.2.130 type-checks through convert/ (#139)\n\nwasm-bindgen 0.2.130, built for wasm32 with zurgo, now type-checks through nullable.rs, rt/, closure.rs and all of convert/, and stops at externref.rs:130 (\"expected a function\"); it stopped at nullable.rs:256 before.\n\n- Names through chains of glob re-exports (main's resolver since #147), `__rt`, const generic parameters in modules.\n- Items in bodies: qualified fns, `unsafe impl` / `unsafe trait`, and the items of a one-line anonymous const a macro writes, with its consts, statics and types kept inside; doc comments move with an item, and a moved item's syntax error is at its own line.\n- Impls and traits: inherent impls for disjoint instances, numbers' TryFrom / From, E0119 for std's blanket impls, each impl's own associated types, overloads told apart by bounds, arguments and qualified self types, impls for references and trait objects, blanket by-value methods.\n- Calls and operators: qualified paths on references and associated types, operators' impls for references, a generic method's parameter from a match's arms.\n- Macros: `let` hygiene in field names and struct shorthand.\n- Prelude: Vec::from_raw_parts, String::from_utf8_unchecked, char::from_u32_unchecked.\n- #128's supertrait and associated type bound checks skip impls with a where clause on another type (wasm-bindgen's `impl<T> IntoWasmAbi for Vec<T> where Box<[T]>: ..`).\n- srcmap's two token loops pass the tokens they do not look at with one test (\"crates no-op\" KPI).\n\nTests: cargo test --release --workspace 679 passed; tests/ui 0 regressions; every KPI within +1%. Known limits are in TODO.md (W1 of #38).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9hDiRLf4kwKxcyPQ7u",
+          "timestamp": "2026-11-26T02:45:52+09:00",
+          "tree_id": "7281f876a22eb8dc7df756ede4a40ec0b4f387eb",
+          "url": "https://github.com/mizchi/zust/commit/6c36b05619ef47653c33b0a81631635eacc314a3"
+        },
+        "date": 1795629063760,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 72.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 55.172,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 92.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 85.714,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 89.724,
             "unit": "%"
           }
         ]
