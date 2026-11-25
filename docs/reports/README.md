@@ -114,3 +114,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-24 | [Region (lifetime) checking, part 28: the type arguments of generic trait objects, bare trait objects before 2021, E0223](2026-11-24-14-region-check-28.md) |
 | 2026-11-25 | [Region (lifetime) checking, part 29: temporaries whose drop uses what they borrow, the scopes that end them, a returned temporary's E0515](2026-11-25-01-region-check-29.md) |
 | 2026-11-25 | [Region (lifetime) checking, part 30: a by-value binding's move at its arm, outlives bounds on types, a trait's own bound for an object's lifetime, `self: Box<Self>` on a temporary](2026-11-25-02-region-check-30.md) |
+| 2026-11-25 | [Region (lifetime) checking, part 31: errors in closures at the closure, a const's block that borrows its own local, moves out of a temporary scrutinee, the use rustc reports of a moved value, a block's value read before its drops](2026-11-25-03-region-check-31.md) |
