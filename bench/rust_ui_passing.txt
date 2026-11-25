@@ -6360,6 +6360,7 @@ run-pass	pattern/usefulness/integer-ranges/regression-switchint-sorting-with-ran
 run-pass	pattern/usefulness/irrefutable-let-patterns.rs
 run-pass	pattern/usefulness/irrefutable-unit.rs
 compile-fail	pattern/usefulness/issue-105479-str-non-exhaustiveness.rs
+compile-fail	pattern/usefulness/issue-12369.rs
 compile-fail	pattern/usefulness/issue-13727.rs
 compile-fail	pattern/usefulness/issue-15129.rs
 compile-fail	pattern/usefulness/issue-2111.rs
@@ -6392,6 +6393,7 @@ compile-fail	pattern/usefulness/match-byte-array-patterns-2.rs
 compile-fail	pattern/usefulness/match-non-exhaustive.rs
 compile-fail	pattern/usefulness/match-ref-ice.rs
 compile-fail	pattern/usefulness/match-vec-fixed.rs
+compile-fail	pattern/usefulness/match-vec-unreachable.rs
 run-pass	pattern/usefulness/nested-exhaustive-match.rs
 compile-fail	pattern/usefulness/non-exhaustive-match-nested.rs
 compile-fail	pattern/usefulness/non-exhaustive-match.rs
@@ -6399,6 +6401,7 @@ compile-fail	pattern/usefulness/non-exhaustive-pattern-witness.rs
 compile-fail	pattern/usefulness/refutable-pattern-in-fn-arg.rs
 compile-fail	pattern/usefulness/slice-patterns-exhaustiveness.rs
 check-pass	pattern/usefulness/slice-patterns-irrefutable.rs
+compile-fail	pattern/usefulness/slice-patterns-reachability.rs
 compile-fail	pattern/usefulness/struct-like-enum-nonexhaustive.rs
 compile-fail	pattern/usefulness/struct-pattern-match-useless.rs
 compile-fail	pattern/usefulness/top-level-alternation.rs

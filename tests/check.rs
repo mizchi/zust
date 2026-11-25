@@ -3200,3 +3200,17 @@ fn no_rules_expected_at_the_furthest_token_a_rule_reaches() {
     let d = s.check("macro_rules! outer {\n    (#[$outer:meta]) => ()\n}\nouter! {\n    //! Inner\n}\nfn main() {}\n");
     assert_eq!(d.first().map(|d| (d.line, d.msg.as_str())), Some((5, "no rules expected `!`")), "{d:?}");
 }
+
+#[test]
+fn unreachable_slice_patterns() {
+    // (rustc 1.100 under deny(unreachable_patterns): a slice pattern of `[T]` covered by the arms before it, by length
+    // and elements; `[x, ..]` covers every length from 1 on)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let un = |l: usize| Some((l, "unreachable pattern".to_string()));
+    assert_eq!(first("#![deny(unreachable_patterns)]\nfn f(s: &[bool]) {\n    match s {\n        [true, ..] => {}\n        [true] => {}\n        [..] => {}\n    }\n}\nfn main() { f(&[]); }\n"), un(5));
+    assert_eq!(first("#![deny(unreachable_patterns)]\nfn f(s: &[u8]) {\n    match *s {\n        [] => {}\n        [_, ..] => {}\n        _ => {}\n    }\n}\nfn main() { f(&[]); }\n"), un(6));
+    assert_eq!(first("#![deny(unreachable_patterns)]\nfn f(s: &[u8]) {\n    match s {\n        [1, ..] => {}\n        [.., 2] => {}\n        [_, _] => {}\n        _ => {}\n    }\n}\nfn main() { f(&[]); }\n"), None);
+}
