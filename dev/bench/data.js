@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795629059212,
+  "lastUpdate": 1795629061746,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -80416,6 +80416,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 125.641,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6c36b05619ef47653c33b0a81631635eacc314a3",
+          "message": "W1 of #38: wasm-bindgen 0.2.130 type-checks through convert/ (#139)\n\nwasm-bindgen 0.2.130, built for wasm32 with zurgo, now type-checks through nullable.rs, rt/, closure.rs and all of convert/, and stops at externref.rs:130 (\"expected a function\"); it stopped at nullable.rs:256 before.\n\n- Names through chains of glob re-exports (main's resolver since #147), `__rt`, const generic parameters in modules.\n- Items in bodies: qualified fns, `unsafe impl` / `unsafe trait`, and the items of a one-line anonymous const a macro writes, with its consts, statics and types kept inside; doc comments move with an item, and a moved item's syntax error is at its own line.\n- Impls and traits: inherent impls for disjoint instances, numbers' TryFrom / From, E0119 for std's blanket impls, each impl's own associated types, overloads told apart by bounds, arguments and qualified self types, impls for references and trait objects, blanket by-value methods.\n- Calls and operators: qualified paths on references and associated types, operators' impls for references, a generic method's parameter from a match's arms.\n- Macros: `let` hygiene in field names and struct shorthand.\n- Prelude: Vec::from_raw_parts, String::from_utf8_unchecked, char::from_u32_unchecked.\n- #128's supertrait and associated type bound checks skip impls with a where clause on another type (wasm-bindgen's `impl<T> IntoWasmAbi for Vec<T> where Box<[T]>: ..`).\n- srcmap's two token loops pass the tokens they do not look at with one test (\"crates no-op\" KPI).\n\nTests: cargo test --release --workspace 679 passed; tests/ui 0 regressions; every KPI within +1%. Known limits are in TODO.md (W1 of #38).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9hDiRLf4kwKxcyPQ7u",
+          "timestamp": "2026-11-26T02:45:52+09:00",
+          "tree_id": "7281f876a22eb8dc7df756ede4a40ec0b4f387eb",
+          "url": "https://github.com/mizchi/zust/commit/6c36b05619ef47653c33b0a81631635eacc314a3"
+        },
+        "date": 1795629061372,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.886,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.762,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.655,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 9.81,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.937,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.029,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 2.64,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 271.478,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 128.023,
             "unit": "MiB"
           }
         ]
