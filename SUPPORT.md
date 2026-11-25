@@ -4,7 +4,7 @@ The percentages are rustc's own UI tests that pass in that area: run-pass + chec
 directories named in the comment next to the number (`ui:`), or compile-fail (`cf:`). They count only the tests
 `bench/rust_ui.py` can ask zustc to handle (no nightly features, auxiliary crates, special flags or targets other than
 Linux x86-64), so 100% does not mean every test of a directory passes. They were measured
-<!-- measured -->2026-11-24, c34ea94<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
+<!-- measured -->2026-11-25, 3f59152<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
 `scripts/update_readme.py` writes them here). The totals for each kind of test are in the
 [README](README.md#coverage-of-rustcs-test-suite), the subset of the language in prose is in
 [docs/language.md](docs/language.md), and the [reports](docs/reports/) explain each step.
@@ -37,7 +37,7 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
 - [x] qualified paths: `<T as Tr>::C` for a trait's default constant (its `Self::` is the qualified type), `<() as Tr>::f()`, associated functions through a type alias (`type Ham = m::Qux; Ham::new()`)
 - [x] let chains (`if let A = x && cond`), also in match guards (`P if let Q = e =>`); inline `const { .. }`, `&raw const` / `&raw mut`
 - [x] parser: <!-- ui:parser -->90.9%
-- [x] closures (capture, `Fn` traits, `move`; with no captures also as fn pointers): <!-- ui:closures,unboxed-closures,functions-closures -->80.2%
+- [x] closures (capture, `Fn` traits, `move`; with no captures also as fn pointers): <!-- ui:closures,unboxed-closures,functions-closures -->80.7%
 - [x] derives: `Debug`, `Clone`, `Copy`, `PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`: <!-- ui:derives,deriving -->90.9%
 - [x] imports, `use`: <!-- ui:imports -->87.5%
 - [x] associated types: <!-- ui:associated-types -->82.5%
@@ -45,7 +45,7 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
   parameter known only from the expected type is not inferred)
 - [ ] consts: <!-- ui:consts -->78.4% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
 - [ ] drop: <!-- ui:drop -->68.1% (the drop order of some temporaries differs)
-- [ ] traits: <!-- ui:traits -->72.2% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
+- [ ] traits: <!-- ui:traits -->72.6% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
 - [ ] `macro_rules!`: <!-- ui:macros -->77.9% (hygiene for `let`, labels, arm bindings; not every fragment kind)
 - [ ] unions: <!-- ui:union -->76.9% (no `repr(packed)`)
 - [ ] const generics: <!-- ui:const-generics -->66.3% (no `generic_const_exprs`)
@@ -75,7 +75,7 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
   must outlive the fn live to its end, closures that are not general enough or let borrowed data escape, generic fns
   that are never called (checked with placeholder types). Not yet: what a closure's body requires of its fn,
   higher-ranked trait selection, the requirements of the impl a coercion selects, the prelude's iterators (their types
-  hold no lifetimes). regions <!-- cf:regions -->84.5%, lifetimes <!-- cf:lifetimes -->82.0%
+  hold no lifetimes). regions <!-- cf:regions -->88.8%, lifetimes <!-- cf:lifetimes -->82.0%
   ([issue #1](https://github.com/mizchi/zust/issues/1))
 - [ ] coherence, bounds of blanket impls, dyn compatibility (E0038), the bindings of `dyn Tr<A = T>` against the associated type's bounds (done when T is a primitive, `str` or a struct name)
 - [ ] lints and warnings: lint <!-- cf:lint -->39.9%

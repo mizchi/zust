@@ -687,6 +687,72 @@ fn bin_prec(op: &str) -> u32 {
     }
 }
 
+/// The text of the tokens toks, after (the token that follows them, if any) only telling whether the last one is
+/// joint: a token apart from the next by one space, a joint punctuation's next and a group's contents not (as
+/// proc_macro2's Display)
+pub fn join_tokens(toks: &[Tok], after: Option<&Tok>) -> String {
+    let mut s = String::new();
+    let mut prev_joint = true;
+    let mut prev_open = false;
+    for (k, t) in toks.iter().enumerate() {
+        if t.kind == TokKind::Close {
+            // (`{ .. }` は中身の両側に空白: proc_macro2 と同じ)
+            if t.text == "}" && !prev_open {
+                s.push(' ');
+            }
+            s.push_str(&t.text);
+            prev_joint = false;
+            prev_open = false;
+            continue;
+        }
+        if !s.is_empty() && !prev_joint && !prev_open {
+            s.push(' ');
+        }
+        if prev_open && s.ends_with('{') {
+            s.push(' ');
+        }
+        s.push_str(&t.text);
+        prev_open = t.kind == TokKind::Open;
+        // (記号の Joint は次も記号のとき (`,` は続けない)。ライフタイムは 1 つのトークン)
+        prev_joint = t.kind == TokKind::Punct
+            && t.joint
+            && toks.get(k + 1).or(if k + 1 == toks.len() { after } else { None }).is_some_and(|n| n.kind == TokKind::Punct && n.text != ",");
+    }
+    s
+}
+
+/// Source text with its tokens joined as join_tokens does (`A<&i32>` is `A <& i32 >`, as a `dyn` type's text)
+pub fn norm_tokens(s: &str) -> Option<String> {
+    Some(join_tokens(&tokenize(s).ok()?, None))
+}
+
+/// A `dyn` type's text (`A < T >`, the tokens joined as join_tokens does) with some of its identifiers replaced by
+/// source text: f gives an identifier token's replacement, from the tokens around it. The replaced text is read as
+/// if written without spaces (`A<&i32>` is `A <& i32 >`). None where nothing was replaced, or the text does not lex
+pub fn rewrite_tokens(s: &str, f: &mut dyn FnMut(usize, &[Tok]) -> Option<String>) -> Option<String> {
+    let toks = tokenize(s).ok()?;
+    let mut out = String::new();
+    let mut any = false;
+    for (k, t) in toks.iter().enumerate() {
+        let piece = match t.kind {
+            TokKind::Ident => f(k, &toks).inspect(|_| any = true).unwrap_or_else(|| t.text.clone()),
+            _ => t.text.clone(),
+        };
+        let word = |c: char| c.is_alphanumeric() || c == '_' || c == '\'' || c == '"';
+        // (two punctuations apart in the text stay apart: `/ *` is no comment, `- >` no arrow)
+        let apart = k > 0 && toks[k - 1].kind == TokKind::Punct && !toks[k - 1].joint && piece.starts_with(|c: char| !word(c) && !c.is_whitespace());
+        if (out.ends_with(word) && piece.starts_with(word)) || apart {
+            out.push(' ');
+        }
+        out.push_str(&piece);
+    }
+    if !any {
+        return None;
+    }
+    let toks = tokenize(&out).ok()?;
+    Some(join_tokens(&toks, None))
+}
+
 pub fn parse_file(src: &str) -> R<File> {
     let toks = tokenize(src)?;
     let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base: Pos::default(), async_on: true, in_async: false, in_extern: false, no_dup_check: false };
@@ -1038,35 +1104,7 @@ impl Parser {
     /// トークン a..b のテキスト (proc_macro2 の Display と同じ: トークンの間に空白 1 つ、Joint の記号の後ろは詰める、
     /// 括弧は中身を詰めて囲む)
     fn tokens_text(&self, a: usize, b: usize) -> String {
-        let mut s = String::new();
-        let mut prev_joint = true;
-        let mut prev_open = false;
-        for k in a..b {
-            let t = &self.toks[k];
-            if t.kind == TokKind::Close {
-                // (`{ .. }` は中身の両側に空白: proc_macro2 と同じ)
-                if t.text == "}" && !prev_open {
-                    s.push(' ');
-                }
-                s.push_str(&t.text);
-                prev_joint = false;
-                prev_open = false;
-                continue;
-            }
-            if !s.is_empty() && !prev_joint && !prev_open {
-                s.push(' ');
-            }
-            if prev_open && s.ends_with('{') {
-                s.push(' ');
-            }
-            s.push_str(&t.text);
-            prev_open = t.kind == TokKind::Open;
-            // (記号の Joint は次も記号のとき (`,` は続けない)。ライフタイムは 1 つのトークン)
-            prev_joint = t.kind == TokKind::Punct
-                && t.joint
-                && self.toks.get(k + 1).is_some_and(|n| n.kind == TokKind::Punct && n.text != ",");
-        }
-        s
+        join_tokens(&self.toks[a..b.min(self.toks.len())], self.toks.get(b))
     }
 
     fn attr(&mut self) -> R<String> {
