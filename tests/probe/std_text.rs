@@ -1,6 +1,6 @@
-// セルフホスト第 3 段階で足した std: rsplit / rsplit_once / match_indices / クロージャの starts_with、
-// &str の要素の contains、参照の列の flatten、OnceLock、const のパターン、matches! の中のメソッドの連鎖、
-// `||` の右辺の一時値
+// std added in self-hosting stage 3: rsplit / rsplit_once / match_indices / starts_with with a closure,
+// contains on &str elements, flatten of a sequence of references, OnceLock, const patterns, method chains inside matches!,
+// temporaries on the right-hand side of `||`
 use std::collections::HashMap;
 use std::sync::OnceLock;
 

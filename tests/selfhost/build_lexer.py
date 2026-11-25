@@ -1,6 +1,6 @@
-"""zustc 自身の crates/syntax/src/lexer.rs (と key.rs の KeyHasher) を 1 ファイルのプログラムにまとめる。
+"""Bundles zustc's own crates/syntax/src/lexer.rs (and the KeyHasher of key.rs) into a single-file program.
 usage: python3 tests/selfhost/build_lexer.py > out/selfhost/lexer_main.rs
-main は引数のファイルを split / hoist_nested_items / flatten_modules に通し、アイテムの種類・位置・ハッシュを出す。"""
+main runs the files given as arguments through split / hoist_nested_items / flatten_modules and prints the items' kinds, positions and hashes."""
 import re
 
 lexer = open("crates/syntax/src/lexer.rs").read()
@@ -34,5 +34,5 @@ fn main() {
     }
 }
 """)
-# (lexer は crate::key を使う: cache と同じもの)
+# (lexer uses crate::key: the same thing as cache)
 print("mod key {\n    pub use crate::cache::*;\n}")

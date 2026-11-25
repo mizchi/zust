@@ -1,4 +1,4 @@
-// 整数の sort / sort_by_key (基数ソートになる大きさ) が std と同じ順になるか: 符号つき・幅・安定性
+// Whether integer sort / sort_by_key (at sizes where it becomes a radix sort) gives the same order as std: signedness, width, stability
 fn lcg(x: &mut u64) -> u64 {
     *x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
     *x >> 33

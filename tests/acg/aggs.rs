@@ -1,4 +1,4 @@
-// ast_codegen v1: struct / enum / match / 配列 / スライス / 文字列 / メソッド
+// ast_codegen v1: struct / enum / match / arrays / slices / strings / methods
 #![no_std]
 #![no_main]
 

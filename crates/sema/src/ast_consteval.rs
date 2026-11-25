@@ -1,18 +1,18 @@
-//! static の初期値をデータのバイト列 (+ リロケーション) にする定数評価: consteval.rs (syn 版) の移植。
-//! 自前の構文木 (src/parse.rs) の上で動き、外部クレートに依存しないので zustc 自身でもコンパイルできる。
-//! tests/ast_consteval.rs が全ファイルの static で syn 版と同じ結果になることを確かめる。
+//! Constant evaluation that turns a static's initial value into data bytes (+ relocations): a port of consteval.rs (the syn version).
+//! It works on our own syntax tree (src/parse.rs) and depends on no external crate, so zustc itself can compile it too.
+//! tests/ast_consteval.rs checks that it gives the same results as the syn version for the statics of all files.
 
 use crate::parse::{Expr, Path};
 use crate::program::{Program, R};
 use crate::types::Ty;
 
-/// データの中から別のデータを指す参照
+/// A reference from within data to other data
 pub enum DRef {
-    /// 無名データ
+    /// Anonymous data
     Anon(DataVal),
-    /// static (Program::consts の index)
+    /// A static (an index into Program::consts)
     Static(u32),
-    /// a function (`static F: fn() = f;`: Program::sigs の index)
+    /// a function (`static F: fn() = f;`: an index into Program::sigs)
     Func(u32),
 }
 
@@ -32,11 +32,11 @@ pub fn fn_of(prog: &Program, e: &Expr) -> Option<u32> {
 pub struct DataVal {
     pub bytes: Vec<u8>,
     pub align: u32,
-    /// (オフセット, 参照先)。ポインタ 1 語 (8 byte) を書く
+    /// (offset, target). Writes one pointer word (8 bytes)
     pub relocs: Vec<(u32, DRef)>,
 }
 
-/// 初期値の式のソースを評価する
+/// Evaluates the source of an initializer expression
 pub fn eval_src(prog: &Program, src: &str, ty: Ty) -> R<DataVal> {
     let e = crate::parse::parse_expr(src)?;
     eval(prog, &e, ty)
@@ -54,7 +54,7 @@ fn put_int(v: &mut DataVal, off: u32, size: u32, x: i128) {
     v.bytes[off as usize..(off + size) as usize].copy_from_slice(&b[..size as usize]);
 }
 
-/// 1 つの識別子だけのパス
+/// A path that is just one identifier
 fn ident(p: &Path) -> Option<&str> {
     if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() && p.segs[0].fn_args.is_none() {
         Some(&p.segs[0].name)
@@ -63,7 +63,7 @@ fn ident(p: &Path) -> Option<&str> {
     }
 }
 
-/// 文字列・バイト文字列のリテラル (`"a\n"` / `r#"x"#` / `b"\x01"` / `br"y"`) の中身。(バイト列か, 中身)
+/// The contents of a string / byte string literal (`"a\n"` / `r#"x"#` / `b"\x01"` / `br"y"`). (whether it is bytes, contents)
 pub fn str_lit(t: &str) -> Option<(bool, Vec<u8>)> {
     let (byte, rest) = match t.strip_prefix('b') {
         Some(r) => (true, r),
@@ -77,7 +77,7 @@ pub fn str_lit(t: &str) -> Option<(bool, Vec<u8>)> {
         return Some((byte, body.as_bytes().to_vec()));
     }
     let body = rest.strip_prefix('"')?.strip_suffix('"')?;
-    // (エスケープのない文字列はそのまま: 大きな文字列で 1 文字ずつ文字列を作らない)
+    // (a string without escapes stays as is: do not build up a large string one char at a time)
     if !body.as_bytes().contains(&b'\\') {
         return Some((byte, body.as_bytes().to_vec()));
     }
@@ -117,7 +117,7 @@ pub fn str_lit(t: &str) -> Option<(bool, Vec<u8>)> {
                 let ch = char::from_u32(u32::from_str_radix(&h, 16).ok()?)?;
                 out.extend_from_slice(ch.to_string().as_bytes());
             }
-            // 行末の `\`: 改行と次の行の先頭の空白を読み飛ばす
+            // A `\` at the end of a line: skip the newline and the whitespace at the start of the next line
             '\n' | '\r' => {
                 while cs.peek().is_some_and(|c| c.is_whitespace()) {
                     cs.next();
@@ -156,7 +156,7 @@ fn write(prog: &Program, e: &Expr, ty: Ty, v: &mut DataVal, off: u32, depth: u32
             }
         }
     }
-    // 他の const / static は名前で辿る
+    // Other consts / statics are followed by name
     if let Expr::Path(None, p) = e {
         if let Some(id) = ident(p) {
             if let Some(&ci) = prog.const_index.get(id) {
@@ -202,14 +202,14 @@ fn write(prog: &Program, e: &Expr, ty: Ty, v: &mut DataVal, off: u32, depth: u32
                     v.bytes[off as usize..off as usize + bs.len()].copy_from_slice(&bs);
                     Ok(())
                 }
-                // (`*b"..."`: バイト列リテラルを配列の値として)
+                // (`*b"..."`: a byte string literal as an array value)
                 Expr::Unary(op, x, _) if op == "*" => write(prog, x, ty, v, off, depth + 1),
                 Expr::Paren(x) => write(prog, x, ty, v, off, depth + 1),
                 _ => Err("unsupported array constant".to_string()),
             }
         }
         Ty::Ref(_, inner) => {
-            // 参照: 指す先を無名データにする。&[T] / &str は (ポインタ, 長さ)
+            // A reference: make the pointee anonymous data. &[T] / &str are (pointer, length)
             let lit = match e {
                 Expr::Lit(t, _) => str_lit(t),
                 _ => None,
@@ -325,7 +325,7 @@ fn write(prog: &Program, e: &Expr, ty: Ty, v: &mut DataVal, off: u32, depth: u32
                     put_int(v, off, tag_bytes, sd.variants[vi].discr as i128);
                     Ok(())
                 }
-                // unit struct (`static K: Key = Key;`): 中身はない
+                // A unit struct (`static K: Key = Key;`): no contents
                 Expr::Path(None, _) if !sd.is_enum && sd.fields.is_empty() => Ok(()),
                 _ => Err("unsupported struct / enum constant".to_string()),
             }
@@ -388,7 +388,7 @@ fn write(prog: &Program, e: &Expr, ty: Ty, v: &mut DataVal, off: u32, depth: u32
     }
 }
 
-/// データ (と中の参照先) を 1 行ずつの文字列にする (テスト・セルフホストの比較用)
+/// Turns data (and the referenced data in it) into strings, one per line (for comparisons in tests / self-hosting)
 pub fn dump(dv: &DataVal, indent: usize, out: &mut Vec<String>) {
     let hex: String = dv.bytes.iter().map(|b| format!("{b:02x}")).collect();
     out.push(format!("{}align={} {hex}", " ".repeat(indent), dv.align));

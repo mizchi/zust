@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
-# セルフホストの確認: zustc 自身のソースの一部 (外部クレートに依存しないもの) を zustc でコンパイルし、
-# rustc でコンパイルしたものと同じ入力で同じ出力になるかを確かめる。
-#   lexer: crates/syntax/src/lexer.rs と crates/base/src/key.rs の KeyHasher (SipHash) → zustc 自身のソースを字句解析してアイテムとハッシュを出す
-#   prelude: crates/syntax/src/prelude.rs (prelude の項目を名前で選ぶ。lexer / fxhash / KeyHasher と、build.rs が作る表を含む)
-#            → probe / examples をユーザのソースとして、選ばれた prelude の長さとハッシュを出す
-#   link:  crates/codegen/src/link.rs (リンカを探して直接起動する) と crates/core/src/testgen.rs → C の .o をリンクして実行する (std::path / process::Command)
-#   macros: crates/syntax/src/macros.rs (macro_rules! の展開と include_str!。proc_macro2 の代わりに tests/selfhost/mini_pm2.rs を付ける)
-#           → probe / examples / src を展開して、結果の長さとハッシュを出す
-#   parse: crates/syntax/src/parse.rs (syn を使わない構文解析) → probe / examples / src を解析して節の数とアイテムを出す
-#   ast_closure: crates/syntax/src/parse.rs + crates/syntax/src/ast_closure.rs (自前の構文木の上のクロージャ解析) → 全関数のクロージャの自由変数
-#   ast_types: crates/syntax/src/types.rs + crates/syntax/src/parse.rs + crates/syntax/src/ast_types.rs (型の表現・intern と、型の構文 → TySyn。front.rs から分けたもの)
-#   ast_summary: crates/syntax/src/ast_summary.rs (front.rs の summarize の移植) + lexer / types / parse / ast_types / ast_closure → 全アイテムの要約
-#   program: crates/sema/src/program.rs (全体の表: シグネチャ・レイアウト・trait 実装) + 要約までのモジュール + prelude
-#            + ast_consteval / solver / ctors → probe / examples / src の Program を作り、関数・型 (サイズ・オフセット・深いハッシュ)・
-#            impl・const とそのデータ・パスの検索・型推論の単一化の結果を出す
-#   minclif: crates/minclif/src/lib.rs (Cranelift の代わりの最小のバックエンド) → 関数を組み立てた ELF の .o が rustc 版と同じバイト列か。
-#            zustc 版が書いた .o を C の main とリンクして動かす
-#   enc:   crates/syntax/src/enc.rs (キャッシュの直列化。マクロ・trait の静的呼び出し) と crates/base/src/fxhash.rs (FxHasher / FxMap)
+# Self-host check: compiles part of zustc's own source (the parts that depend on no external crates) with zustc,
+# and checks that it gives the same output for the same input as the build compiled with rustc.
+#   lexer: crates/syntax/src/lexer.rs and the KeyHasher (SipHash) of crates/base/src/key.rs → lexes zustc's own source and prints the items and hashes
+#   prelude: crates/syntax/src/prelude.rs (picks prelude entries by name; includes lexer / fxhash / KeyHasher and the tables build.rs generates)
+#            → with probe / examples as the user source, prints the length and hash of the selected prelude
+#   link:  crates/codegen/src/link.rs (finds a linker and runs it directly) and crates/core/src/testgen.rs → links C .o files and runs them (std::path / process::Command)
+#   macros: crates/syntax/src/macros.rs (macro_rules! expansion and include_str!; tests/selfhost/mini_pm2.rs is attached in place of proc_macro2)
+#           → expands probe / examples / src and prints the length and hash of the result
+#   parse: crates/syntax/src/parse.rs (parsing without syn) → parses probe / examples / src and prints the node counts and items
+#   ast_closure: crates/syntax/src/parse.rs + crates/syntax/src/ast_closure.rs (closure analysis on our own syntax tree) → the free variables of the closures of all fns
+#   ast_types: crates/syntax/src/types.rs + crates/syntax/src/parse.rs + crates/syntax/src/ast_types.rs (type representation / interning, and type syntax → TySyn; split out of front.rs)
+#   ast_summary: crates/syntax/src/ast_summary.rs (a port of front.rs's summarize) + lexer / types / parse / ast_types / ast_closure → the summaries of all items
+#   program: crates/sema/src/program.rs (the whole-program tables: signatures, layouts, trait impls) + the modules up to summaries + prelude
+#            + ast_consteval / solver / ctors → builds the Program of probe / examples / src, and prints fns, types (size, offsets, deep hash),
+#            impls, consts and their data, path lookups, and the results of type inference unification
+#   minclif: crates/minclif/src/lib.rs (the minimal backend in place of Cranelift) → whether the ELF .o with assembled fns is the same bytes as the rustc version's.
+#            The .o written by the zustc version is linked with a C main and run
+#   enc:   crates/syntax/src/enc.rs (cache serialization; macros, static trait calls) and crates/base/src/fxhash.rs (FxHasher / FxMap)
 set -uo pipefail
 cd "$(dirname "$0")/.."
-# zustc 側のバックエンドは SELFHOST_BACKEND (既定 minclif: 外部クレートを使わない経路。cranelift も可)
+# The backend on the zustc side is SELFHOST_BACKEND (default minclif: the path that uses no external crates; cranelift also works)
 cargo build --release -q || exit 1
 zustc_cmd() { target/release/zustc --backend="${SELFHOST_BACKEND:-minclif}" "$@"; }
 out=out/selfhost

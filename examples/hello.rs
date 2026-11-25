@@ -1,4 +1,4 @@
-// rustc でもそのままコンパイルできる zustc サブセットのサンプル
+// A sample of the zustc subset that rustc can also compile as is
 unsafe extern "C" {
     fn putchar(c: i32) -> i32;
 }
@@ -68,7 +68,7 @@ fn collatz(mut n: u64) -> u32 {
     steps
 }
 
-// main から呼ばれないので、型検査もコード生成もされない
+// Not called from main, so it is neither type-checked nor code-generated
 fn unused_helper(x: i64) -> i64 {
     x * 2
 }

@@ -1,4 +1,4 @@
-// no_std: バイト列の字句解析と、固定長スタックで後置記法の式を評価する電卓
+// no_std: a calculator that tokenizes a byte string and evaluates postfix expressions with a fixed-size stack
 #![no_std]
 #![no_main]
 

@@ -1,19 +1,19 @@
-# cargo-mutants の設定 (bench/mutants.sh から使う。直接 `cargo mutants ...` でも読まれる)
-# 変異は 1 万 8 千個ほどあるので、全部は回さない: bench/mutants.sh で差分・ファイル・クレート・shard に絞る
+# cargo-mutants settings (used by bench/mutants.sh; also read by a direct `cargo mutants ...`)
+# There are about 18,000 mutants, so not all of them are run: bench/mutants.sh narrows them by diff / file / crate / shard
 
-# 変異ごとのビルドは release の設定で (テストの多くは zustc でプログラムをコンパイルして動かすので、debug だと遅い)。
-# 増分ビルドを入れ、デバッグ情報は付けない
+# The build per mutant uses the release settings (many tests compile and run programs with zustc, so debug is slow).
+# Incremental builds are on, and no debug info is added
 profile = "mutants"
 
-# 変異を入れないもの: CLI の引数の処理・ビルドスクリプト・テストとベンチのコード
+# Not mutated: CLI argument handling, build scripts, test and bench code
 exclude_globs = ["src/main.rs", "crates/syntax/build.rs", "benches/**", "tests/**", "crates/*/tests/**", "crates/*/benches/**", "crates/*/src/*_tests.rs"]
-# 表示と見積もりだけの関数 (結果に効かない)
+# Fns only for display and estimates (they do not affect results)
 exclude_re = ["impl (fmt::)?Debug", "impl (fmt::)?Display", "<impl Debug", "<impl Display", "heap_bytes", "::fmt$"]
 
-# テストの時間切れ: 変異でできた無限ループを打ち切る (基準のテストの時間の 3 倍か、180 秒の大きい方。
-# ワークスペース全部のテストは 1 回 1 分ほどかかるので、60 秒では変異でないものまで切れる)
+# Test timeout: cuts off infinite loops made by mutants (3 times the baseline test time or 180 seconds, whichever is larger.
+# A test of the whole workspace takes about 1 minute per run, so 60 seconds would cut off even non-mutants)
 timeout_multiplier = 3.0
 minimum_test_timeout = 180
 
-# 警告で落ちないように (変異で使わなくなった変数など)
+# So that warnings do not fail the build (variables left unused by a mutation, etc.)
 cap_lints = true

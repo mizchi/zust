@@ -1,4 +1,4 @@
-// 型の違う PartialOrd (`impl PartialOrd<Feet> for Meters`)、手書きの partial_cmp の None、f64 の partial_cmp
+// PartialOrd between different types (`impl PartialOrd<Feet> for Meters`), None from a handwritten partial_cmp, partial_cmp of f64
 use std::cmp::Ordering;
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 struct Meters(f64);

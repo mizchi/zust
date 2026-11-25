@@ -1,4 +1,4 @@
-// adler2: Adler-32 (一度に・分けて・Hasher として・BufRead から)
+// adler2: Adler-32 (at once, in pieces, as a Hasher, from a BufRead)
 use std::hash::Hasher;
 
 fn main() {
@@ -11,7 +11,7 @@ fn main() {
     h.write(b"hello");
     println!("{:x}", h.finish());
     println!("{:08x}", adler2::adler32(&b"from a reader"[..]).unwrap());
-    // (1 MiB を 64 回)
+    // (1 MiB, 64 times)
     let data: Vec<u8> = (0..1 << 20).map(|i: u32| (i.wrapping_mul(2654435761) >> 13) as u8).collect();
     let mut acc = 0u32;
     for r in 0..64 {

@@ -1,4 +1,4 @@
-// オーバーフロー検査: 途中まで出力して、足し算のあふれで panic (終了コード 101)
+// Overflow check: prints part of the output, then panics on addition overflow (exit code 101)
 fn fact(n: u32) -> u32 { if n == 0 { 1 } else { n * fact(n - 1) } }
 fn main() {
     for n in [5, 10, 12] { println!("{}! = {}", n, fact(n)); }

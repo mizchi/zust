@@ -1,5 +1,5 @@
-//! macros::expand (速い版: 全体は lexer::tokenize で見る) が、前の版 (expand_reference: 全体を proc_macro2 で読む) と
-//! 同じ結果になるか。macro_rules! を含むテスト・例・zustc 自身のソースと、セルフホスト用にまとめたコンパイラで比べる
+//! Whether macros::expand (the fast version: looks at the whole with lexer::tokenize) and the previous version (expand_reference: reads the whole with proc_macro2)
+//! give the same results. Compared on the tests, examples and zustc's own sources that contain macro_rules!, and on the compiler combined for self-hosting
 
 fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
@@ -29,7 +29,7 @@ fn fast_expand_matches_reference() {
         n += 1;
         let a = zustc::macros::expand(&src);
         let b = zustc::macros::expand_reference(&src);
-        // (どちらも失敗するもの (読めないソース) は数えない。メッセージが違っても場所が同じならよい)
+        // (Ones where both fail (unreadable sources) are not counted. Different messages are fine if the location is the same)
         match (&a, &b) {
             (Ok(x), Ok(y)) if x == y => {}
             (Err(x), Err(y)) if x.split(':').take(2).eq(y.split(':').take(2)) => {}

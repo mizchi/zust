@@ -1,4 +1,4 @@
-// hex: encode / decode / ToHex / FromHex / エラー
+// hex: encode / decode / ToHex / FromHex / errors
 use hex::{FromHex, ToHex};
 
 fn main() {
@@ -13,7 +13,7 @@ fn main() {
     println!("{:?}", Vec::<u8>::from_hex("0g"));
     let mut buf = [0u8; 8];
     println!("{:?} {:?}", hex::encode_to_slice(b"\x01\x02\x03\x04", &mut buf), std::str::from_utf8(&buf));
-    // (往復を何度も)
+    // (round trips many times)
     let data: Vec<u8> = (0..4096u32).map(|i| (i * 31 + 7) as u8).collect();
     let mut sum = 0u64;
     for _ in 0..300 {

@@ -1,7 +1,7 @@
-//! 最小のバックエンド (crates/minclif/src/lib.rs) で関数を組み立て、ELF の .o にして cc でリンクし、動かして出力を確かめる。
+//! Assembles fns with the minimal backend (crates/minclif/src/lib.rs), makes an ELF .o, links it with cc, runs it and checks the output.
 use zustc::minclif::{FunctionBuilder, IntCC, Type, write_object};
 
-/// sum(n) = 0 + 1 + .. + (n - 1) (ブロック引数のループ)
+/// sum(n) = 0 + 1 + .. + (n - 1) (a loop with block params)
 fn sum() -> (String, Vec<u8>, Vec<zustc::minclif::Reloc>, bool) {
     let mut b = FunctionBuilder::new(vec![Type::I64], vec![Type::I64]);
     let n = b.func_params()[0];
@@ -25,7 +25,7 @@ fn sum() -> (String, Vec<u8>, Vec<zustc::minclif::Reloc>, bool) {
     ("mc_sum".into(), c, r, true)
 }
 
-/// fib(n) (再帰)
+/// fib(n) (recursive)
 fn fib() -> (String, Vec<u8>, Vec<zustc::minclif::Reloc>, bool) {
     let mut b = FunctionBuilder::new(vec![Type::I32], vec![Type::I32]);
     let n = b.func_params()[0];
@@ -47,7 +47,7 @@ fn fib() -> (String, Vec<u8>, Vec<zustc::minclif::Reloc>, bool) {
     ("mc_fib".into(), c, r, true)
 }
 
-/// 変数・スタックスロット・読み書き・割り算・符号つきの比較・select・8 個の引数
+/// Variables, stack slots, loads and stores, division, signed comparison, select, 8 arguments
 fn misc() -> (String, Vec<u8>, Vec<zustc::minclif::Reloc>, bool) {
     let ps = vec![Type::I64; 8];
     let mut b = FunctionBuilder::new(ps, vec![Type::I64]);
@@ -60,7 +60,7 @@ fn misc() -> (String, Vec<u8>, Vec<zustc::minclif::Reloc>, bool) {
         let s = b.iadd(cur, x);
         b.def_var(v, s);
     }
-    // スロットに i32 と i8 を書いて読む
+    // Write an i32 and an i8 to a slot and read them
     let ss = b.create_stack_slot(16, 8);
     let p = b.stack_addr(ss, 0);
     let k = b.iconst(Type::I32, -5);
@@ -85,7 +85,7 @@ fn misc() -> (String, Vec<u8>, Vec<zustc::minclif::Reloc>, bool) {
     ("mc_misc".into(), c, r, true)
 }
 
-/// main: printf で結果を出す (外部関数の呼び出し・文字列は呼び出し側の C から渡す)
+/// main: prints the results with printf (external fn calls; strings are passed from the calling C)
 #[test]
 fn link_and_run() {
     let funcs = vec![sum(), fib(), misc()];
@@ -109,7 +109,7 @@ fn link_and_run() {
     assert!(st.success(), "link failed");
     let out = std::process::Command::new(dir.join("a.out")).output().unwrap();
     let s = String::from_utf8_lossy(&out.stdout).to_string();
-    // misc: 合計 36、36 % 7 = 1、(200 + 1 + 0) * -5 = -1005
+    // misc: sum 36, 36 % 7 = 1, (200 + 1 + 0) * -5 = -1005
     assert_eq!(s.trim(), "45 6765 -1005");
 }
 
@@ -119,7 +119,7 @@ fn ext() -> (Vec<(String, Vec<u8>, Vec<zustc::minclif::Reloc>, bool)>, Vec<zustc
     let mut b = FunctionBuilder::new(vec![], vec![Type::I64]);
     let printf = b.import_function("printf");
     let mut want: Vec<String> = vec![];
-    // 出す: 整数は %ld、ビット列は %lx
+    // Output: integers with %ld, bit patterns with %lx
     macro_rules! pr_d {
         ($v:expr, $w:expr) => {{
             let f = b.symbol_addr("mc_fmt_d");
@@ -141,7 +141,7 @@ fn ext() -> (Vec<(String, Vec<u8>, Vec<zustc::minclif::Reloc>, bool)>, Vec<zustc
             want.push(format!("{:x}", $w));
         }};
     }
-    // 浮動小数点
+    // Floating point
     let x = b.f64const(1.5);
     let y = b.f64const(2.25);
     let four = b.f64const(4.0);
@@ -177,7 +177,7 @@ fn ext() -> (Vec<(String, Vec<u8>, Vec<zustc::minclif::Reloc>, bool)>, Vec<zustc
     pr_d!(nen, 1);
     let le = b.fcmp(FloatCC::LessThanOrEqual, nan, x);
     pr_d!(le, 0);
-    // 変換
+    // Conversions
     let k = b.iconst(Type::I32, -7);
     let kf = b.fcvt_from_sint(Type::F64, k);
     pr_x!(kf, (-7.0f64).to_bits());
@@ -258,7 +258,7 @@ fn ext() -> (Vec<(String, Vec<u8>, Vec<zustc::minclif::Reloc>, bool)>, Vec<zustc
     let rem = b.srem128(e128, w7);
     let remr = b.reduce128(Type::I64, rem);
     pr_d!(remr, -9i128 % 7);
-    // オーバーフロー
+    // Overflow
     let a200 = b.iconst(Type::I8, 200);
     let a100 = b.iconst(Type::I8, 100);
     let (v, of) = b.uadd_overflow(a200, a100);
@@ -298,7 +298,7 @@ fn ext() -> (Vec<(String, Vec<u8>, Vec<zustc::minclif::Reloc>, bool)>, Vec<zustc
     pr_d!(of, 1);
     let (_, of) = b.smul_overflow(a3, a5);
     pr_d!(of, 0);
-    // ビット演算
+    // Bit operations
     let i1 = b.iconst(Type::I32, 1);
     let cz = b.clz(i1);
     pr_d!(cz, 31);
@@ -345,7 +345,7 @@ fn ext() -> (Vec<(String, Vec<u8>, Vec<zustc::minclif::Reloc>, bool)>, Vec<zustc
     pr_d!(ushr, ((-5i64) as u64 >> 3) as i64);
     let sshr = b.sshr(mn5, sh8);
     pr_d!(sshr, -5i64 >> 3);
-    // 間接呼び出し・データ (表の中のポインタ)
+    // Indirect calls / data (pointers in a table)
     let fp = b.symbol_addr("mc_sum");
     let ten = b.iconst(Type::I64, 10);
     let r = b.call_indirect(fp, &[ten], &[Type::I64])[0];

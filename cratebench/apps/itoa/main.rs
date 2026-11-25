@@ -1,4 +1,4 @@
-// itoa: 整数を文字列に (各幅・符号・境界値)
+// itoa: integers to strings (each width, sign, boundary values)
 fn main() {
     let mut b = itoa::Buffer::new();
     println!("{}", b.format(0u8));

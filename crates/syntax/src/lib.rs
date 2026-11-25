@@ -1,8 +1,8 @@
-//! zustc の構文の層 (コンパイラと LSP・解析で共有する)。
-//! ソース → cfg / マクロの展開 / `mod` を平らに / 入れ子のアイテムの移動 (prep) → アイテムへの分割 (lexer::split) →
-//! 構文木 (parse) → アイテムの要約 (ast_summary)。prelude はコンパイラが付ける標準ライブラリの代わり。
-//! (ファイルの中は `crate::fxhash` のように書く: 下の層のモジュールをここで公開し直す。zustc 自身でコンパイルするときは
-//! 全部を 1 つのクレートのモジュールに並べるので、同じパスで引ける)
+//! zustc's syntax layer (shared by the compiler and LSP / analysis).
+//! Source → cfg / macro expansion / flattening `mod` / moving nested items (prep) → splitting into items (lexer::split) →
+//! syntax tree (parse) → item summaries (ast_summary). The prelude is the stand-in for the standard library that the compiler appends.
+//! (inside the files, write paths like `crate::fxhash`: the lower layers' modules are re-exported here. When zustc compiles itself,
+//! everything is laid out as modules of one crate, so the same paths resolve)
 
 pub use zust_base::*;
 

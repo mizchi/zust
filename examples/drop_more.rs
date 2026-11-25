@@ -1,5 +1,5 @@
-// Drop のサンプル (続き): return / ? での drop、enum の中の Box、ジェネリック関数、値で受ける self、
-// Option::replace、FnMut の中の一時値、ブロックから返す Box<dyn Fn>、配列の要素への代入
+// A Drop sample (continued): drop on return / ?, a Box inside an enum, generic fns, self taken by value,
+// Option::replace, temporaries inside an FnMut, a Box<dyn Fn> returned from a block, assignment to array elements
 unsafe extern "C" {
     fn putchar(c: i32) -> i32;
 }

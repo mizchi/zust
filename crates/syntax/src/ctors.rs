@@ -1,16 +1,16 @@
-//! 値として使われたタプルのバリアント / タプル struct (`.map(Some)` / `.map(Ty::Struct)` / `.map(Wrapper)`) を
-//! クロージャ (`|a0| Some(a0)`) に書き換える。クロージャなら型推論・持ち上げが手で書いたものと同じに扱える。
-//! 書き換えは同じ行の中で行い、後ろの行番号は変えない。
-//! 外部クレートに依存しない (lexer の字句解析だけ) ので zustc 自身でもコンパイルできる。
+//! Rewrites tuple variants / tuple structs used as values (`.map(Some)` / `.map(Ty::Struct)` / `.map(Wrapper)`)
+//! into closures (`|a0| Some(a0)`). As closures, type inference and lifting treat them the same as hand-written ones.
+//! The rewriting is done within the same line and does not change the line numbers after it.
+//! It depends on no external crates (only the lexer's tokenizing), so zustc itself can compile it too.
 
 use crate::lexer::tokenize;
 
-/// 定義から読んだタプルのバリアント / タプル struct の要素数: (enum の名前 (struct なら空), 名前, 要素数)
+/// Element counts of tuple variants / tuple structs read from definitions: (enum name (empty for a struct), name, element count)
 fn arities(s: &[u8], toks: &[(u8, usize, usize)], defs: &mut Vec<(usize, usize)>) -> Vec<(String, String, usize)> {
     let tok = |k: usize| -> &[u8] { &s[toks[k].1..toks[k].2] };
     let is_sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && toks[k].2 == toks[k].1 + 1 && s[toks[k].1] == c;
     let name = |k: usize| String::from_utf8_lossy(tok(k)).into_owned();
-    // 括弧 (k は開き) の中の、トップレベルのカンマ区切りの要素数と閉じ括弧の位置
+    // The number of top-level comma-separated elements inside the brackets (k is the opening one) and the position of the closing bracket
     let count = |k: usize| -> (usize, usize) {
         let mut d = 0i32;
         let mut n = 0usize;
@@ -66,7 +66,7 @@ fn arities(s: &[u8], toks: &[(u8, usize, usize)], defs: &mut Vec<(usize, usize)>
             }
             let end = count(j).1;
             defs.push((j, end));
-            // 波括弧の直下の `V ( .. )`
+            // `V ( .. )` directly inside the braces
             let mut m = j + 1;
             let mut d = 0i32;
             while m < end {
@@ -91,10 +91,10 @@ fn arities(s: &[u8], toks: &[(u8, usize, usize)], defs: &mut Vec<(usize, usize)>
     out
 }
 
-/// 書き換えたソース (書き換えるものがなければ None)
+/// The rewritten source (None if there is nothing to rewrite)
 pub fn rewrite_ctor_values(src: &str) -> Option<String> {
     let s = src.as_bytes();
-    // (速く飛ばす: 候補になる `(Some)` / `::X)` のような形がなければ何もしない)
+    // (Skip fast: do nothing if no candidate shape like `(Some)` / `::X)` is present)
     let quick = src.contains("(Some)") || src.contains("(Ok)") || src.contains("(Err)") || src.contains("::") || src.contains("struct");
     if !quick {
         return None;
@@ -104,7 +104,7 @@ pub fn rewrite_ctor_values(src: &str) -> Option<String> {
     let is_sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && toks[k].2 == toks[k].1 + 1 && s[toks[k].1] == c;
     let mut defs = vec![];
     let ar = arities(s, &toks, &mut defs);
-    // use 文と struct / enum の定義の中は書き換えない
+    // Inside use statements and struct / enum definitions is not rewritten
     let mut in_use = vec![false; toks.len()];
     for &(a, b) in &defs {
         for x in &mut in_use[a..b.min(toks.len())] {
@@ -130,7 +130,7 @@ pub fn rewrite_ctor_values(src: &str) -> Option<String> {
             k += 1;
             continue;
         }
-        // 前: `(` / `,` / `=` (`==` などでない)
+        // Before: `(` / `,` / `=` (not `==` etc.)
         let p = k - 1;
         let eq = is_sym(p, b'=') && !(p >= 1 && matches!(s[toks[p].1 - 1], b'=' | b'!' | b'<' | b'>' | b'+' | b'-' | b'*' | b'/' | b'|' | b'&' | b'^' | b'%')) && !is_sym(k, b'=');
         // (not a type alias's right side: `type Ok = Ok;` names a type (a parameter `Ok`), not the variant)
@@ -140,7 +140,7 @@ pub fn rewrite_ctor_values(src: &str) -> Option<String> {
             k += 1;
             continue;
         }
-        // `A::B` か `B`
+        // `A::B` or `B`
         let (ty, name, last) = if k + 3 < toks.len() && is_sym(k + 1, b':') && is_sym(k + 2, b':') && toks[k + 3].0 == 0 {
             (String::from_utf8_lossy(tok(k)).into_owned(), String::from_utf8_lossy(tok(k + 3)).into_owned(), k + 3)
         } else {
@@ -168,7 +168,7 @@ pub fn rewrite_ctor_values(src: &str) -> Option<String> {
                 last = j;
             }
         }
-        // 後ろ: `)` / `,` / `;` (`::` の続きでない)
+        // After: `)` / `,` / `;` (not a continuation of `::`)
         let next_ok = last + 1 < toks.len() && (is_sym(last + 1, b')') || is_sym(last + 1, b',') || is_sym(last + 1, b';')) && !(is_sym(last + 1, b':'));
         if !next_ok || !name.starts_with(|c: char| c.is_ascii_uppercase()) {
             k += 1;
@@ -176,7 +176,7 @@ pub fn rewrite_ctor_values(src: &str) -> Option<String> {
         }
         let n = match (ty.as_str(), name.as_str()) {
             ("" | "Option", "Some") | ("" | "Result", "Ok") | ("" | "Result", "Err") => Some(1),
-            // タプル struct は呼び出しの引数の位置だけ (`(u32, Wrapper)` のような型の位置と区別する)
+            // Tuple structs only in call argument position (to tell them from type positions like `(u32, Wrapper)`)
             ("", _) => ar
                 .iter()
                 .find(|a| a.0.is_empty() && a.1 == name)
@@ -185,7 +185,7 @@ pub fn rewrite_ctor_values(src: &str) -> Option<String> {
                 .map(|a| a.2),
             (t, _) => ar.iter().find(|a| a.0 == t && a.1 == name).map(|a| a.2),
         };
-        // (Self::V は型がその場では分からないので書き換えない)
+        // (Self::V is not rewritten, since its type is not known on the spot)
         let Some(n) = n.filter(|&n| n > 0 && ty != "Self") else {
             k += 1;
             continue;

@@ -1,7 +1,7 @@
-"""zustc 自身の crates/codegen/src/link.rs (リンカを探して直接起動する) と crates/core/src/testgen.rs (ベンチ用のプログラム生成器) を
-1 ファイルのプログラムにまとめる。
+"""Bundles zustc's own crates/codegen/src/link.rs (finds the linker and launches it directly) and crates/core/src/testgen.rs (the program generator for the benches)
+into a single-file program.
 usage: python3 tests/selfhost/build_link.py > out/selfhost/link_main.rs
-main は <obj> <out> を受け取り、link::link でリンクして実行し、その出力と testgen の生成結果のハッシュを出す。"""
+main takes <obj> <out>, links with link::link and runs the result, and prints its output and the hash of testgen's generated output."""
 
 link = open("crates/codegen/src/link.rs").read()
 testgen = open("crates/core/src/testgen.rs").read()

@@ -1,9 +1,9 @@
-//! driver2 (syn・Cranelift を使わないドライバ) のキャッシュ。cache.rs と同じ考え方で、外部クレート (zstd) を使わない:
-//! - キー: 128 bit のハッシュ (下位 64 bit をファイルに書く)
-//! - 値: アイテムの要約、または関数の機械語 + シンボリックな再配置 (acg::Blob。呼び先のインスタンスは (元の関数名, 型引数) で書く)
-//! - 保存するときは今回のビルドで使ったエントリだけを書く (古いものは自然に消える)
+//! The cache of driver2 (the driver that uses neither syn nor Cranelift). The same idea as cache.rs, without external crates (zstd):
+//! - key: a 128-bit hash (the low 64 bits are written to the file)
+//! - value: an item's summary, or a fn's machine code + symbolic relocations (acg::Blob; callee instances are written as (original fn name, type arguments))
+//! - saving writes only the entries this build used (old ones disappear naturally)
 //!
-//! Blob の直列化は fork した子プロセスからコンパイル結果を受け取るのにも使う (driver2 の並列化)。
+//! The serialization of Blob is also used to receive compilation results from forked child processes (driver2's parallelization).
 
 use std::sync::Mutex;
 
@@ -22,7 +22,7 @@ unsafe extern "C" {
     fn c_getpid() -> i32;
 }
 
-/// キャッシュファイル: MAGIC, エントリの数 (可変長), (キーの下位 64 bit, 長さ (可変長), 中身) *
+/// The cache file: MAGIC, number of entries (varint), (low 64 bits of the key, length (varint), contents) *
 pub struct Cache2 {
     data: Vec<u8>,
     index: FxMap<u64, (usize, usize)>,
@@ -75,7 +75,7 @@ impl Rd<'_> {
     }
 }
 
-/// 符号なしの可変長整数 (7 bit ずつ、上位ビットが続きの印)
+/// An unsigned variable-length integer (7 bits at a time, the high bit marks a continuation)
 pub fn put_uv(out: &mut Vec<u8>, mut v: u64) {
     while v >= 0x80 {
         out.push(v as u8 | 0x80);
@@ -84,7 +84,7 @@ pub fn put_uv(out: &mut Vec<u8>, mut v: u64) {
     out.push(v as u8);
 }
 
-/// 符号つき (zigzag) の可変長整数
+/// A signed (zigzag) variable-length integer
 pub fn put_sv(out: &mut Vec<u8>, v: i64) {
     put_uv(out, ((v << 1) ^ (v >> 63)) as u64);
 }
@@ -99,7 +99,7 @@ impl Cache2 {
         Cache2 { data: vec![], index: FxMap::default() }
     }
 
-    /// ファイルを読む (読めない・形式が違うなら空)
+    /// Reads the file (empty if it cannot be read or has a different format)
     pub fn open(path: &std::path::Path) -> Cache2 {
         let data = std::fs::read(path).unwrap_or_default();
         let mut c = Cache2::empty();
@@ -131,9 +131,9 @@ impl Cache2 {
         Some(&self.data[s..e])
     }
 
-    /// エントリを書く (一時ファイルに書いて rename)。書いたバイト数
-    /// (一時ファイルの名前はプロセスごと: 同じ出力に同時に保存する別の zustc が、rename した後のファイルに書き続けると、
-    ///  読む側が 2 つの書き込みの混ざったものを受け付けうる。formal/tla/CacheSave.tla)
+    /// Writes the entries (to a temporary file, then rename). The number of bytes written
+    /// (the temporary file's name is per process: if another zustc saving to the same output at the same time kept writing to the file after it was renamed,
+    ///  the reader could accept a mix of the two writes; formal/tla/CacheSave.tla)
     pub fn save(path: &std::path::Path, entries: &[(Key, &[u8])]) -> Result<usize, String> {
         let mut out = MAGIC.to_vec();
         put_uv(&mut out, entries.len() as u64);
@@ -141,7 +141,7 @@ impl Cache2 {
             out.extend_from_slice(&(*k as u64).to_le_bytes());
             put_bytes(&mut out, b);
         }
-        // SAFETY: getpid は引数を取らず、失敗しない
+        // SAFETY: getpid takes no arguments and does not fail
         let tmp = format!("{}.{}.tmp", path.display(), unsafe { c_getpid() });
         if let Err(e) = std::fs::write(&tmp, &out) {
             let _ = std::fs::remove_file(&tmp);
@@ -149,7 +149,7 @@ impl Cache2 {
         }
         let a = format!("{tmp}\0");
         let b = format!("{}\0", path.display());
-        // SAFETY: どちらも NUL で終わる文字列
+        // SAFETY: both are NUL-terminated strings
         let r = unsafe { c_rename(a.as_bytes().as_ptr(), b.as_bytes().as_ptr()) };
         if r != 0 {
             let _ = std::fs::remove_file(&tmp);
@@ -159,7 +159,7 @@ impl Cache2 {
     }
 }
 
-/// 関数への参照: 普通の関数は名前 (タグ 0)、インスタンスは (元の関数名, 型引数) (タグ 2)、vtable の空欄 (タグ 6)、vtable の数の欄 (タグ 7)
+/// A reference to a fn: an ordinary fn by name (tag 0), an instance by (original fn name, type arguments) (tag 2), an empty vtable slot (tag 6), a vtable's number entry (tag 7)
 fn put_func(out: &mut Vec<u8>, id: u32, prog: &Program, insts: &Insts) {
     if id == u32::MAX {
         out.push(6);
@@ -194,7 +194,7 @@ fn get_name<'a>(r: &mut Rd<'a>) -> Option<&'a str> {
     std::str::from_utf8(s).ok()
 }
 
-/// put_func の逆 (タグを読んだ後)。インスタンスは insts に要求し直す (pending に積まれる)
+/// The inverse of put_func (after the tag has been read). Instances are requested again from insts (pushed onto pending)
 fn get_func(r: &mut Rd, tag: u8, prog: &Program, insts: &Mutex<Insts>) -> Option<u32> {
     if tag == 6 {
         return Some(u32::MAX);
@@ -218,7 +218,7 @@ fn get_func(r: &mut Rd, tag: u8, prog: &Program, insts: &Mutex<Insts>) -> Option
     insts.lock().unwrap().request(prog, id, args).ok()
 }
 
-/// 機械語 + 再配置 + 無名データ + vtable + panic の場所を書く (整数は可変長、オフセットと行は前からの差)
+/// Writes the machine code + relocations + anonymous data + vtables + panic locations (integers as varints, offsets and lines as deltas from the previous one)
 pub fn encode_blob(b: &Blob, prog: &Program, insts: &Insts, out: &mut Vec<u8>) {
     // (the low bit: the closures' facts follow at the end)
     put_uv(out, (b.align as u64) << 1 | !b.clo_facts.is_empty() as u64);
@@ -240,7 +240,7 @@ pub fn encode_blob(b: &Blob, prog: &Program, insts: &Insts, out: &mut Vec<u8>) {
                 out.push(3);
                 put_uv(out, *k as u64);
             }
-            // static は名前で (番号はアイテムの並びで変わる)
+            // A static by name (its number changes with the order of the items)
             Target::Static(ci) => {
                 out.push(4);
                 put_bytes(out, prog.consts[*ci as usize].name.as_bytes());
@@ -347,7 +347,7 @@ fn get_clo_fact(r: &mut Rd, prog: &Program) -> Option<CloFact> {
     Some(CloFact { body, kind_free: fl & 1 != 0, rg })
 }
 
-/// encode_blob の逆。呼び先のインスタンスは insts に要求し直す
+/// The inverse of encode_blob. Callee instances are requested again from insts
 pub fn decode_blob(d: &[u8], prog: &Program, insts: &Mutex<Insts>) -> Option<Blob> {
     let mut r = Rd { d, pos: 0 };
     let a0 = r.uv()?;

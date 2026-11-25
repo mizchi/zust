@@ -1,5 +1,5 @@
-// HashMap のサンプル: insert / get / 添字 / entry().or_insert() で単語を数える / remove / contains_key /
-// derive(Hash) した struct をキーに / for で回す / values_mut / collect で作る。&str の split も使う
+// HashMap sample: insert / get / indexing / counting words with entry().or_insert() / remove / contains_key /
+// a derive(Hash) struct as a key / iterating with for / values_mut / building with collect. Also uses &str's split
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

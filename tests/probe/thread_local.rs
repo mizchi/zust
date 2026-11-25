@@ -1,8 +1,8 @@
-// thread_local! (遅延初期化・RefCell / Cell・モジュールの中)
+// thread_local! (lazy initialization, RefCell / Cell, inside a module)
 use std::cell::{Cell, RefCell};
 
 thread_local! {
-    /// 作っている途中のもの
+    /// What is being built
     static STACK: RefCell<Vec<(u32, String)>> = const { RefCell::new(Vec::new()) };
     static COUNT: Cell<u64> = Cell::new(10);
 }

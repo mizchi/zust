@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# ミューテーションテスト (cargo-mutants)。設定は .cargo/mutants.toml、ビルドは profile.mutants。
-# 変異は全部で 1 万 8 千個ほどあり、1 個にビルドとテストで数十秒かかるので、範囲を絞って回す:
+# Mutation testing (cargo-mutants). The config is in .cargo/mutants.toml, the build uses profile.mutants.
+# There are about 18,000 mutants in all, and each takes tens of seconds to build and test, so run them over a narrowed scope:
 #
-#   bench/mutants.sh diff [BASE]      BASE (既定 origin/main) からの差分の行の変異だけ (変更の確認に)
-#   bench/mutants.sh pkg NAME         クレート NAME の変異 (例: zust-ide, zust-base)
-#   bench/mutants.sh file PATH...     ファイルの変異 (例: crates/ide/src/symbols.rs)
-#   bench/mutants.sh list [...]       変異の一覧だけ (数を見る)。後ろは cargo mutants の引数
+#   bench/mutants.sh diff [BASE]      only the mutants on the lines of the diff from BASE (default origin/main) (to check a change)
+#   bench/mutants.sh pkg NAME         the mutants of crate NAME (e.g. zust-ide, zust-base)
+#   bench/mutants.sh file PATH...     the mutants of files (e.g. crates/ide/src/symbols.rs)
+#   bench/mutants.sh list [...]       only the list of mutants (to see the count). The rest are cargo mutants arguments
 #
-# テストに使うパッケージは、変異を入れるクレートから決める:
-#   crates/ide・crates/analyzer だけ → zust-ide と zust-analyzer のテスト (速い)
-#   それ以外 → ワークスペース全部のテスト (コンパイラの層のテストの多くは zustc (ルート) の tests/ にある)
-# `--` の後ろは cargo mutants にそのまま渡す (例: -- -j 2 --shard 1/8 -F 'match_score')。
-# 結果は mutants.out/ (missed.txt: テストで見つからなかった変異、caught.txt、timeout.txt、unviable.txt)。
+# The packages used for testing are chosen from the crates being mutated:
+#   only crates/ide / crates/analyzer → the tests of zust-ide and zust-analyzer (fast)
+#   otherwise → the tests of the whole workspace (many tests of the compiler layers are in the tests/ of zustc (the root))
+# What follows `--` is passed to cargo mutants as is (e.g. -- -j 2 --shard 1/8 -F 'match_score').
+# The results are in mutants.out/ (missed.txt: the mutants the tests did not catch, caught.txt, timeout.txt, unviable.txt).
 #
-# 要るもの: cargo install cargo-mutants --locked
+# Requires: cargo install cargo-mutants --locked
 set -uo pipefail
 cd "$(dirname "$0")/.."
 command -v cargo-mutants >/dev/null || { echo "cargo-mutants がない: cargo install cargo-mutants --locked"; exit 2; }
@@ -27,7 +27,7 @@ while [ $# -gt 0 ]; do
   args+=("$1"); shift
 done
 
-# 変異を入れるファイルの列 → テストのパッケージの指定
+# The list of files to mutate → the test package options
 tests_for() {
   local only_ide=1
   for f in "$@"; do
