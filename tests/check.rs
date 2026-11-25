@@ -2767,3 +2767,17 @@ fn attributes_with_no_item_after_them_in_an_impl() {
     assert_eq!(first("struct Foo;\nimpl Foo {\n    fn foo() {}\n    #[inline]\n    #[allow(dead_code)]\n}\nfn main() {}\n"), Some((4, 5, "expected item after attributes".to_string())));
     assert_eq!(first("struct Foo;\nimpl Foo {\n    #[inline]\n    fn foo() {}\n}\nfn main() { Foo::foo(); }\n"), None);
 }
+
+#[test]
+fn abis_no_one_has_and_raw_pointers_without_their_keyword() {
+    // (rustc 1.100: E0703 at the ABI's string; a raw pointer type's `const` or `mut`, at the `*`)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(first("pub extern \"fictional\" fn lol() {}\nfn main() {}\n"), Some((1, 12, "invalid ABI: found `fictional` (E0703)".to_string())));
+    assert_eq!(first("extern \"\\x43\" fn foo() {}\nextern \"C-unwind\" { fn bar(); }\nfn main() {}\n"), None, "an escaped C, C-unwind");
+    let p = |l: usize, c: usize| Some((l, c, "expected `mut` or `const` keyword in raw pointer type".to_string()));
+    assert_eq!(first("fn foo(_: *()) {}\nfn main() {}\n"), p(1, 11), "a bare pointer");
+    assert_eq!(first("fn main() {\n    let x = 5u8;\n    let p: *const u8 = &x;\n    let _d: **const u8 = &p;\n}\n"), p(4, 13), "a pointer to a pointer");
+}

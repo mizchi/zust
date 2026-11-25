@@ -1407,9 +1407,11 @@ impl Parser {
         if self.eat_punct("*") {
             let m = if self.eat_ident("mut") {
                 true
-            } else {
-                self.eat_ident("const");
+            } else if self.eat_ident("const") {
                 false
+            } else {
+                // (`*T`, `**const T`: a raw pointer type says `const` or `mut`, rustc's error at the `*`)
+                return Err(self.bare_pointer_err());
             };
             return Ok(Ty::Ptr(m, Box::new(self.ty_no_bounds()?)));
         }
@@ -2864,6 +2866,14 @@ impl Parser {
         } else if let Some(d) = ds.iter().find(|d| d.3) {
             self.defer(d.1 as usize, "defaults for generic parameters are not allowed here");
         }
+    }
+
+    /// A raw pointer type without its keyword, at its `*` (out of the type parser's hot path)
+    #[cold]
+    #[inline(never)]
+    fn bare_pointer_err(&self) -> String {
+        let t = &self.toks[self.i - 1];
+        format!("{}:{}: expected `mut` or `const` keyword in raw pointer type", t.line, t.col + 1)
     }
 
     /// "missing type for `const` item" (or `static`), right after the name or its colon (the token before the current

@@ -12062,16 +12062,39 @@ fn attr_gate(name: &str, args: &[&str]) -> Option<(&'static str, String)> {
     }
 }
 
+/// The ABIs rustc 1.100 knows, stable or behind a feature (`extern "rust-intrinsic"` is no longer one)
+const KNOWN_ABIS: &[&str] = &[
+    "Rust", "C", "C-unwind", "cdecl", "cdecl-unwind", "stdcall", "stdcall-unwind", "fastcall", "fastcall-unwind", "vectorcall", "vectorcall-unwind",
+    "thiscall", "thiscall-unwind", "aapcs", "aapcs-unwind", "win64", "win64-unwind", "sysv64", "sysv64-unwind", "ptx-kernel", "msp430-interrupt",
+    "x86-interrupt", "gpu-kernel", "efiapi", "avr-interrupt", "avr-non-blocking-interrupt", "riscv-interrupt-m", "riscv-interrupt-s",
+    "cmse-nonsecure-call", "cmse-nonsecure-entry", "C-cmse-nonsecure-call", "C-cmse-nonsecure-entry", "system", "system-unwind", "rust-call",
+    "unadjusted", "rust-cold", "rust-invalid", "custom", "tail", "rust-preserve-none", "llvm-intrinsic", "Swift", "interrupt",
+];
+
 /// An ABI behind a feature gate the source does not enable, `extern "rust-cold" fn f()` (rustc 1.100): `line:col:
 /// the extern "x" ABI is experimental and subject to change (E0658)`, at the ABI's string
 fn gated_abi(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>) -> Option<String> {
     let toks = lexer::tokenize(&src.as_bytes()[from..to]);
     let tx = |k: usize| &src[from + toks[k].1..from + toks[k].2];
+    // (the item's head, before its first `{`, `(` or `;`: an ABI there is the item's, not a fn pointer type's or a macro
+    // call's input)
+    let head = (0..toks.len()).find(|&k| toks[k].0 == 1 && matches!(tx(k), "{" | "(" | ";")).unwrap_or(toks.len());
     for k in 1..toks.len() {
         if toks[k].0 != 2 || toks[k - 1].0 != 0 || tx(k - 1) != "extern" {
             continue;
         }
         let Some(abi) = str_lit_value(tx(k)) else { continue };
+        // (E0703: a name no ABI of rustc's has, `extern "fictional" fn`; a literal with a suffix, `"C"__`, is rustc's
+        // error of the literal first)
+        if k < head && !KNOWN_ABIS.contains(&abi.as_str()) {
+            let i = from + toks[k].1;
+            let line = src[..i].matches('\n').count() + 1;
+            let col = i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1;
+            if toks.get(k + 1).is_some_and(|n| n.0 == 0 && n.1 == toks[k].2) {
+                return Some(format!("{line}:{col}: suffixes on string literals are invalid"));
+            }
+            return Some(format!("{line}:{col}: invalid ABI: found `{abi}` (E0703)"));
+        }
         let (feat, how) = match abi.as_str() {
             "rust-cold" => ("rust_cold_cc", "is experimental and subject to change"),
             "tail" => ("rust_tail_cc", "is experimental and subject to change"),

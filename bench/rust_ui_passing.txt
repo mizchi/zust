@@ -2740,6 +2740,7 @@ check-pass	extern/extern-C-non-FFI-safe-arg-ice-52334.rs
 check-pass	extern/extern-C-str-arg-ice-80125.rs
 build-pass	extern/extern-c-method-with-str-param.rs
 run-pass	extern/extern-compare-with-return-type.rs
+compile-fail	extern/extern-empty-string-issue-140884.rs
 compile-fail	extern/extern-ffi-fn-with-body.rs
 check-pass	extern/extern-fn-pointer-clone-copy.rs
 run-pass	extern/extern-foreign-crate.rs
@@ -2751,6 +2752,7 @@ run-pass	extern/extern-prelude-std.rs
 run-pass	extern/extern-pub.rs
 check-pass	extern/extern-rust-trait-method.rs
 run-pass	extern/extern-rust.rs
+compile-fail	extern/fictional-abi.rs
 compile-fail	extern/foreign-fn-pattern-error-10877.rs
 compile-fail	extern/function-definition-in-extern-block-75283.rs
 run-pass	extern/issue-10025.rs
@@ -5387,6 +5389,7 @@ compile-fail	parser/bad-if-statements.rs
 compile-fail	parser/bad-let-as-field.rs
 compile-fail	parser/bad-match.rs
 compile-fail	parser/bad-name.rs
+compile-fail	parser/bad-pointer-type.rs
 compile-fail	parser/bad-recover-kw-after-impl.rs
 compile-fail	parser/bad-struct-following-where.rs
 compile-fail	parser/bad-value-ident-false.rs
@@ -5453,6 +5456,7 @@ run-pass	parser/doc-comment-parsing.rs
 compile-fail	parser/doc-inside-trait-item.rs
 compile-fail	parser/dotdotdot-expr.rs
 compile-fail	parser/dotdotdot-rest-pattern-suggestion-span.rs
+compile-fail	parser/double-pointer.rs
 compile-fail	parser/duplicate-visibility.rs
 compile-fail	parser/duplicate-where-clauses.rs
 compile-fail	parser/else-no-if.rs
@@ -5687,6 +5691,7 @@ compile-fail	parser/issues/issue-84104.rs
 compile-fail	parser/issues/issue-84117.rs
 compile-fail	parser/issues/issue-84148-1.rs
 compile-fail	parser/issues/issue-84148-2.rs
+compile-fail	parser/issues/issue-8537.rs
 compile-fail	parser/issues/issue-86895.rs
 compile-fail	parser/issues/issue-87086-colon-path-sep.rs
 compile-fail	parser/issues/issue-87197-missing-semicolon.rs
@@ -5789,6 +5794,7 @@ compile-fail	parser/macro/expr-in-attribute.rs
 check-pass	parser/macro/extern-abi-from-mac-literal-frag.rs
 compile-fail	parser/macro/issue-33569.rs
 compile-fail	parser/macro/kw-in-item-pos-recovery-149692.rs
+compile-fail	parser/macro/lit-err-in-macro.rs
 compile-fail	parser/macro/macro-bad-delimiter-ident.rs
 check-pass	parser/macro/macro-bare-trait-object-maybe-trait-bound.rs
 compile-fail	parser/macro/macro-in-attribute.rs
@@ -7386,6 +7392,7 @@ check-pass	structs/uninstantiable-struct.rs
 run-pass	structs/unit-like-struct.rs
 compile-fail	structs/unresolved-struct-with-fru.rs
 check-pass	structs/variant-structs-trivial.rs
+compile-fail	suggestions/abi-typo.rs
 compile-fail	suggestions/ambiguous-assoc-type-path-suggest-similar-item.rs
 compile-fail	suggestions/args-instead-of-tuple-errors.rs
 compile-fail	suggestions/args-instead-of-tuple.rs
