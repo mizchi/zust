@@ -129,4 +129,5 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-24 | [Structs with an unsized tail, part 2: `dyn` tails, `size_of_val`, boxes](2026-11-24-05-dst-dyn-tails.md) |
 | 2026-11-25 | [Region (lifetime) checking, part 34: `impl Trait + 'static` arguments, `'static` bounds of fields' types, what a `Cell` stores, a value's drop that sees a loan of itself](2026-11-25-06-region-check-34.md) |
 | 2026-11-25 | [Region (lifetime) checking, part 35: the drop of a type that holds no reference](2026-11-25-07-region-check-35.md) |
-| 2026-11-25 | [`Sized`: where only a sized type may be (E0277)](2026-11-25-08-sized.md) |
+| 2026-11-25 | [Region (lifetime) checking, part 36: `x @ sub` patterns, items in constant initializers, `Fn` parameters boxed as trait objects, lifetime bounds of impl methods](2026-11-25-08-region-check-36.md) |
+| 2026-11-25 | [`Sized`: where only a sized type may be (E0277)](2026-11-25-09-sized.md) |

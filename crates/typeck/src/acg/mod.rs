@@ -525,6 +525,9 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         owned: vec![],
         temps: vec![],
         owned_binds: 0,
+        at_binds: vec![],
+        at_pat_at: None,
+        dead_stmt: false,
         last_scrut: None,
         env,
         insts,
@@ -1109,6 +1112,17 @@ pub enum BindMode {
     Ref(bool),
 }
 
+/// How a binding of a pattern binds, for the check of `x @ sub` (at_conflict)
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AtBind {
+    /// by value, of a type that is not `Copy`
+    Move,
+    /// by value, of a `Copy` type
+    Copy,
+    /// by reference (`ref`, `ref mut`, or the default binding mode): whether `mut`
+    Ref(bool),
+}
+
 pub struct Cx<'p> {
     pub b: FunctionBuilder,
     /// 借用検査の記録
@@ -1211,6 +1225,14 @@ pub struct Cx<'p> {
     pub owned: Vec<Owned>,
     pub temps: Vec<Owned>,
     pub owned_binds: usize,
+    /// The bindings the subpattern of each `x @ sub` being bound makes, innermost last: by move (not `Copy`), by copy,
+    /// or by reference (whether `mut`), with their names (pat_bind, at_conflict)
+    pub at_binds: Vec<Vec<(AtBind, String)>>,
+    /// Where the pattern a `let` binds starts, while it binds (at_pat_pos)
+    pub at_pat_at: Option<Sp>,
+    /// The statement being lowered comes after one that diverges, in its block or one around it (`return;`): the
+    /// borrow check's errors are not reported there, so the moves of an `x @ sub` are not checked (at_conflict)
+    pub dead_stmt: bool,
     pub last_scrut: Option<StackSlot>,
     /// 書き換えで作った式 (コード生成の間アドレスを動かさないために持っておく)
     pub keep: Vec<Box<Expr>>,
@@ -2285,7 +2307,9 @@ impl Cx<'_> {
         // (the borrowed temporaries of each statement end with it; the tail expression's, with the enclosing one)
         let bk_mark = self.bk.stmt_temps.len();
         let mut tail_srcs: Vec<borrowck::Src> = vec![];
+        let dead0 = self.dead_stmt;
         for k in 0..n {
+            self.dead_stmt = dead0 || diverged;
             let (i, st) = if split.is_empty() { (k, &blk.stmts[k]) } else { split[k] };
             // (`let x = S::<&'static u32> { t: &c };` / `S::<&'a u32> { t: &c };`: a `let` of the type the path writes,
             // whose annotation the region check reads; a let's temporaries are extended as the literal's would be. Only
@@ -2301,7 +2325,7 @@ impl Cx<'_> {
             self.stmt_i = i;
             match st {
                 // (`let None = x;`: a unit variant or a constant, a pattern to test (E0005), not a new name)
-                Stmt::Let(pat, ann_ty, init, els, ..) if !is_simple_let(pat) || els.is_some() || self.names_variant_or_const(pat) => {
+                Stmt::Let(pat, ann_ty, init, els, let_at) if !is_simple_let(pat) || els.is_some() || self.names_variant_or_const(pat) => {
                     // 分解する let (`let S { x, y } = s;`): 反駁不能パターンとして束縛だけ行う
                     let Some(init) = init else {
                         // (a pattern that binds no name declares nothing: `let S { field: _, .. };`, libc 0.2's
@@ -2401,7 +2425,10 @@ impl Cx<'_> {
                     let pm = self.bk.pat_moves;
                     let pre = if is_place_expr(init) { self.moved_flag(init) } else { None };
                     self.bk_bind_begin();
+                    // (the pattern's position, after the `let`, where an error of a `x @ sub` in it is reported)
+                    let ap0 = std::mem::replace(&mut self.at_pat_at, Some(Sp { line: let_at.line, col: let_at.col + 4 }).filter(|s| s.line != 0));
                     let r = self.pat_bind(pat, place, BindMode::Move);
+                    self.at_pat_at = ap0;
                     self.bk_bind_end();
                     r?;
                     if self.owned_binds > ob || self.bk.pat_moves > pm {
@@ -2977,6 +3004,7 @@ impl Cx<'_> {
             }
         }
         self.pop_scope();
+        self.dead_stmt = dead0;
         if diverged && result.1 == Ty::Unit {
             result = (None, Ty::Never);
         }

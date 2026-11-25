@@ -182,6 +182,27 @@ const HELPERS: &[(&str, &str)] = &[
     ("$arity1", "function $arity1(f) {\n  return (a) => f(a);\n}"),
     ("$arity2", "function $arity2(f) {\n  return (a, b) => f(a, b);\n}"),
     ("$round", "function $round(x) {\n  return x < 0 ? -Math.round(-x) : Math.round(x);\n}"),
+    // (the methods of the prelude's `Option` / `Result`: `None` / `Err` passes through as it is)
+    ("$o_map", "function $o_map(o, f) {\n  return o.TAG === \"None\" || o.TAG === \"Err\" ? o : { TAG: o.TAG, _0: f(o._0) };\n}"),
+    ("$o_then", "function $o_then(o, f) {\n  return o.TAG === \"None\" || o.TAG === \"Err\" ? o : f(o._0);\n}"),
+    ("$o_filter", "function $o_filter(o, f) {\n  return o.TAG === \"Some\" && !f(o._0) ? { TAG: \"None\" } : o;\n}"),
+    ("$o_map_err", "function $o_map_err(r, f) {\n  return r.TAG === \"Err\" ? { TAG: \"Err\", _0: f(r._0) } : r;\n}"),
+    ("$o_unwrap_or", "function $o_unwrap_or(o, d) {\n  return o.TAG === \"None\" || o.TAG === \"Err\" ? d : o._0;\n}"),
+    ("$o_unwrap_or_else", "function $o_unwrap_or_else(o, f) {\n  return o.TAG === \"None\" ? f() : o.TAG === \"Err\" ? f(o._0) : o._0;\n}"),
+    ("$o_ok_or", "function $o_ok_or(o, e) {\n  return o.TAG === \"Some\" ? { TAG: \"Ok\", _0: o._0 } : { TAG: \"Err\", _0: e };\n}"),
+    ("$o_ok_or_else", "function $o_ok_or_else(o, f) {\n  return o.TAG === \"Some\" ? { TAG: \"Ok\", _0: o._0 } : { TAG: \"Err\", _0: f() };\n}"),
+    ("$o_ok", "function $o_ok(r) {\n  return r.TAG === \"Ok\" ? { TAG: \"Some\", _0: r._0 } : { TAG: \"None\" };\n}"),
+    // (what JS gives an extern: `null` / `undefined` is `None`; a `Result` catches what it throws, as its message or
+    // as the value thrown; a `Promise` of one, its rejection too. And an `Option` handed to JS: `undefined` for `None`)
+    ("$nullable", "function $nullable(x) {\n  return x == null ? { TAG: \"None\" } : { TAG: \"Some\", _0: x };\n}"),
+    ("$undef", "function $undef(o) {\n  return o.TAG === \"Some\" ? o._0 : undefined;\n}"),
+    // (the message of a value that cannot be made a string, `Object.create(null)`, is fixed: still an `Err`)
+    ("$message", "function $message(e) {\n  try {\n    return e instanceof Error ? String(e.message) : String(e);\n  } catch {\n    return \"(a thrown value that has no string form)\";\n  }\n}"),
+    ("$catch", "function $catch(f, message) {\n  try {\n    return { TAG: \"Ok\", _0: f() };\n  } catch (e) {\n    return { TAG: \"Err\", _0: message ? $message(e) : e };\n  }\n}"),
+    ("$catchP", "async function $catchP(f, message) {\n  try {\n    return { TAG: \"Ok\", _0: await f() };\n  } catch (e) {\n    return { TAG: \"Err\", _0: message ? $message(e) : e };\n  }\n}"),
+    // (`xs.try_map(f)`: one array, built once; the first `Err` / `None` is the result)
+    ("$try_map_r", "function $try_map_r(xs, f) {\n  const out = [];\n  for (let i = 0; i < xs.length; i++) {\n    const r = f(xs[i]);\n    if (r.TAG === \"Err\") return r;\n    out.push(r._0);\n  }\n  return { TAG: \"Ok\", _0: out };\n}"),
+    ("$try_map_o", "function $try_map_o(xs, f) {\n  const out = [];\n  for (let i = 0; i < xs.length; i++) {\n    const r = f(xs[i]);\n    if (r.TAG === \"None\") return r;\n    out.push(r._0);\n  }\n  return { TAG: \"Some\", _0: out };\n}"),
     (
         "$handle",
         "// Deep handlers on generators (one-shot continuations), run by one loop that keeps the frames on a heap stack:\n// operations and resumptions do not grow the JS stack. A generator yields an operation (a variant) or an\n// instruction to the loop (`$i`): run a handled body, resume a continuation, or resume it as the arm's last act\nfunction $handle(body, ops, arm) {\n  return { $i: 1, body, ops, arm };\n}\n\nfunction $resume(k, v) {\n  return { $i: 2, k, v };\n}\n\nfunction $tail(k, v) {\n  return { $i: 3, k, v };\n}\n\n// The loop over the frames `st` (a frame: a generator, and for a handled body its operations and arm; a\n// continuation: the frames it cut off). An operation no frame handles is yielded to whoever drives the loop (a TS\n// caller of an exported function, or an outer loop), and its answer is sent back to the frame that performed it\nfunction* $drive(st) {\n  let v, e, thrown = false;\n  for (;;) {\n    const f = st[st.length - 1];\n    let r;\n    try {\n      r = thrown ? f.g.throw(e) : f.g.next(v);\n    } catch (x) {\n      st.pop();\n      if (st.length === 0) throw x;\n      thrown = true;\n      e = x;\n      continue;\n    }\n    thrown = false;\n    v = undefined;\n    if (r.done) {\n      st.pop();\n      if (st.length === 0) return r.value;\n      v = r.value;\n      continue;\n    }\n    const y = r.value;\n    if (y.$i === 1) {\n      st.push({ g: y.body(), ops: y.ops, arm: y.arm });\n    } else if (y.$i !== undefined) {\n      const seg = y.k.seg;\n      if (seg === null) {\n        thrown = true;\n        e = new Error(\"zustscript: a continuation was resumed twice\");\n        continue;\n      }\n      y.k.seg = null;\n      // (as the arm's last act, the arm's value is the continuation's: its frame goes)\n      if (y.$i === 3) st.pop();\n      for (let i = 0; i < seg.length; i++) st.push(seg[i]);\n      v = y.v;\n    } else {\n      // (the nearest handler of the operation: the frames from it up are the continuation, and its arm runs in\n      // their place, under the handlers outside it)\n      let i = st.length - 1;\n      while (i >= 0 && (st[i].ops === undefined || !st[i].ops.includes(y.TAG))) i--;\n      if (i < 0) {\n        try {\n          v = yield y;\n        } catch (x) {\n          thrown = true;\n          e = x;\n        }\n        continue;\n      }\n      const h = st[i];\n      const k = { seg: st.splice(i) };\n      st.push({ g: h.arm(y, k) });\n    }\n  }\n}\n\n// A `handle` outside any generator: nothing outside it can answer an operation it does not handle\nfunction $run(body, ops, arm) {\n  const r = $drive([{ g: body(), ops, arm }]).next();\n  if (!r.done) throw new Error(\"zustscript: unhandled effect \" + r.value.TAG);\n  return r.value;\n}",
@@ -276,7 +297,7 @@ impl<'a> Js<'a> {
                 }
                 Item::Extern { name, js, .. } => {
                     self.module_names.insert(ident(name));
-                    self.module_names.insert(js.split('.').next().unwrap_or(js).to_string());
+                    self.module_names.insert(js_root(js).to_string());
                 }
                 _ => {}
             }
@@ -427,6 +448,9 @@ impl<'a> Js<'a> {
         if need.contains("$handle") {
             need.extend(["$resume", "$tail", "$drive", "$run"]);
         }
+        if need.contains("$catch") || need.contains("$catchP") {
+            need.insert("$message");
+        }
         if need.contains("$perform") {
             need.insert("$handleD");
         }
@@ -472,9 +496,51 @@ impl<'a> Js<'a> {
         match &e.kind {
             EK::Block(s, t) => !s.is_empty() || t.as_ref().is_some_and(|t| Self::complex(t)),
             EK::Match(..) | EK::Assign(..) | EK::While(..) | EK::For(..) | EK::Break | EK::Continue => true,
-            EK::If(_, t, el) => Self::complex(t) || el.as_ref().is_none_or(|x| Self::complex(x)),
+            // (a `?` in a branch runs only on that branch: not a `? :` whose operands were written before it)
+            EK::If(_, t, el) => Self::complex(t) || el.as_ref().is_none_or(|x| Self::complex(x)) || has_try(t) || el.as_deref().is_some_and(has_try),
             _ => false,
         }
+    }
+
+    /// `s` kept in a temporary first, when a later operand returns early with `?`: the `?` is written as statements
+    /// before the expression, so an operand before it is evaluated before them too (left to right, as written)
+    fn pin(&mut self, s: String, later: bool) -> String {
+        if !later || s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') {
+            return s;
+        }
+        let t = self.fresh();
+        self.line(&format!("const {t} = {s};"));
+        t
+    }
+
+    /// The operands `xs`, in order (each kept in a temporary before a later one's `?`)
+    fn seq(&mut self, xs: &[&Expr]) -> Vec<String> {
+        let last = xs.iter().rposition(|y| has_try(y));
+        let mut out = vec![];
+        for (k, x) in xs.iter().enumerate() {
+            let s = self.expr(x);
+            let later: &[&Expr] = match last {
+                Some(l) if k < l => &xs[k + 1..=l],
+                _ => &[],
+            };
+            out.push(self.pin_before(x, s, later));
+        }
+        out
+    }
+
+    /// The JS `s` of the operand `x`, kept in a temporary when one of the operands after it (`later`) has a `?`. A
+    /// literal needs none; a local's name needs one only when a later operand assigns a local
+    fn pin_before(&mut self, x: &Expr, s: String, later: &[&Expr]) -> String {
+        if !later.iter().any(|y| has_try(y)) || matches!(x.kind, EK::Lit(_)) {
+            return s;
+        }
+        // (whatever it is written as: `x as f64` is `x` in JS)
+        if later.iter().any(|y| assigns_local(y)) {
+            let t = self.fresh();
+            self.line(&format!("const {t} = {s};"));
+            return t;
+        }
+        self.pin(s, true)
     }
 
     /// A loop's body: its statements, the value dropped
@@ -592,7 +658,10 @@ impl<'a> Js<'a> {
                 self.ind -= 1;
                 let mut el = el.as_deref();
                 while let Some(x) = el {
-                    if let EK::If(c2, t2, el2) = &x.kind {
+                    // (a condition with a `?` is written before its `if`: inside the `else`)
+                    if let EK::If(c2, t2, el2) = &x.kind
+                        && !has_try(c2)
+                    {
                         let c2 = self.expr(c2);
                         self.line(&format!("}} else if ({c2}) {{"));
                         self.ind += 1;
@@ -841,6 +910,14 @@ impl<'a> Js<'a> {
     }
 
     fn iife(&mut self, e: &Expr) -> String {
+        // (a `?` inside returns from the function being written: the expression is written as statements before
+        // the one it is in, into a temporary, not as a function of its own)
+        if has_try(e) {
+            let v = self.fresh();
+            self.line(&format!("let {v};"));
+            self.stmt_expr(e, &Dest::Assign(v.clone()));
+            return v;
+        }
         if let Some(pos) = loop_exit(e) {
             self.errors.push((pos, "`break` / `continue` here would have to leave a function in the JS output: move this `if` / `match` into a statement of its own (`let v = if ..;`)".into()));
         }
@@ -893,7 +970,13 @@ impl<'a> Js<'a> {
     /// literal as is, anything else wrapped so it receives exactly its own arguments
     fn callback(&mut self, f: &Expr, arity: usize) -> String {
         let s = self.expr(f);
-        if matches!(f.kind, EK::Closure(..)) {
+        self.adapt(f, s, arity)
+    }
+
+    /// The JS `s` of the function value `f`, made to take exactly `arity` arguments (see [`Js::callback`])
+    fn adapt(&mut self, f: &Expr, s: String, arity: usize) -> String {
+        // (a closure, or an extern's converting function, takes the arguments it names and no more)
+        if matches!(f.kind, EK::Closure(..)) || matches!(self.info.callee.get(&f.id), Some(Callee::Extern(_))) && s.starts_with("($a") {
             return s;
         }
         if !s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') {
@@ -930,7 +1013,20 @@ impl<'a> Js<'a> {
                 }
                 Some(Callee::Extern(js)) => {
                     self.note_extern(n);
-                    js
+                    // (as a value: a function that converts as a call does)
+                    let (sig, _, _) = &self.info.externs[n];
+                    let (args, ret) = (sig.args.clone(), sig.ret.clone());
+                    // (a constructor is called with `new`: a function of its own)
+                    let ctor = js.starts_with("new ");
+                    let zsc = self.info.zsc_externs.contains(n);
+                    if !ctor && (zsc || (!args.iter().any(is_option) && !needs_js_result(&ret))) {
+                        return js;
+                    }
+                    let ps: Vec<String> = (0..args.len()).map(|k| format!("$a{k}")).collect();
+                    let a: Vec<String> = if zsc { ps.clone() } else { ps.iter().zip(&args).map(|(p, t)| self.js_arg(p.clone(), t)).collect() };
+                    let call = format!("{js}({})", a.join(", "));
+                    let body = if zsc { call } else { self.js_result(call, &ret) };
+                    format!("({}) => {body}", ps.join(", "))
                 }
                 Some(Callee::Fn) => self.fn_name(e.id, n),
                 Some(Callee::Range) => {
@@ -951,7 +1047,17 @@ impl<'a> Js<'a> {
                         _ => (if one { "1" } else { "0" }).into(),
                     };
                 }
-                let a: Vec<String> = args.iter().map(|x| self.expr(x)).collect();
+                // (a computed callee is evaluated before the arguments, as JS does)
+                // (a local function an argument may assign is read first too, as JS reads it)
+                let local_fn = matches!(&f.kind, EK::Var(n) if matches!(self.info.callee.get(&f.id), Some(Callee::Local)) && !self.conts.contains(n) && !self.dconts.contains(n));
+                let reassigned = local_fn && args.iter().any(has_try) && args.iter().any(assigns_local);
+                let callee = if matches!(f.kind, EK::Var(_) | EK::Path(..)) && !reassigned {
+                    None
+                } else {
+                    let c = self.expr(f);
+                    Some(self.pin_before(f, c, &args.iter().collect::<Vec<_>>()))
+                };
+                let a: Vec<String> = self.seq(&args.iter().collect::<Vec<_>>());
                 if let Some(Callee::TypedCtor(el, c)) = self.info.callee.get(&f.id).cloned() {
                     let ctor = typed_js(&el);
                     return if c == "zeros" { format!("new {ctor}({})", a[0]) } else { format!("{ctor}.from({})", a[0]) };
@@ -973,12 +1079,18 @@ impl<'a> Js<'a> {
                         }
                         Some(Callee::Extern(js)) => {
                             self.note_extern(n);
-                            return format!("{js}({})", a.join(", "));
+                            if self.info.zsc_externs.contains(n) {
+                                return format!("{js}({})", a.join(", "));
+                            }
+                            let (sig, _, _) = &self.info.externs[n];
+                            let (args, ret) = (sig.args.clone(), sig.ret.clone());
+                            let a: Vec<String> = a.into_iter().zip(&args).map(|(v, t)| self.js_arg(v, t)).collect();
+                            return self.extern_call(a, &ret, |a| format!("{js}({})", a.join(", ")));
                         }
                         _ => {}
                     }
                 }
-                let f = self.expr(f);
+                let f = callee.unwrap_or_else(|| self.expr(f));
                 format!("{}({})", self.wrap_callee(&f), a.join(", "))
             }
             EK::Method(r, m, args) => {
@@ -988,24 +1100,40 @@ impl<'a> Js<'a> {
                     && matches!(self.info.callee.get(&f.id), Some(Callee::Range))
                     && matches!(b, Some(Builtin::Fold | Builtin::Map))
                 {
-                    let (lo, hi) = (self.expr(&ra[0]), self.expr(&ra[1]));
-                    return if b == Some(Builtin::Fold) {
+                    // (the bounds, a fold's initial value, then the function, in order)
+                    let fold = b == Some(Builtin::Fold);
+                    let mut ops = vec![&ra[0], &ra[1]];
+                    ops.extend(args.iter());
+                    let v = self.seq(&ops);
+                    let (lo, hi) = (v[0].clone(), v[1].clone());
+                    let fe = &args[if fold { 1 } else { 0 }];
+                    let f = self.adapt(fe, v[v.len() - 1].clone(), if fold { 2 } else { 1 });
+                    return if fold {
                         self.helpers.insert("$rangeFold");
-                        let f = self.callback(&args[1], 2);
-                        let init = self.expr(&args[0]);
+                        let init = v[2].clone();
                         format!("$rangeFold({lo}, {hi}, {init}, {f})")
                     } else if let Some(el) = self.info.typed_lit.get(&e.id).cloned() {
                         // (into a typed array, as the type says)
                         self.helpers.insert("$rangeMapTo");
-                        let f = self.callback(&args[0], 1);
                         format!("$rangeMapTo({}, {lo}, {hi}, {f})", typed_js(&el))
                     } else {
                         self.helpers.insert("$rangeMap");
-                        let f = self.callback(&args[0], 1);
                         format!("$rangeMap({lo}, {hi}, {f})")
                     };
                 }
                 let recv = self.operand(r);
+                let recv = self.pin_before(r, recv, &args.iter().collect::<Vec<_>>());
+                // (a method of an extern type: called as JS's, its arguments and result converted)
+                if let Some((tn, mn)) = self.info.member.get(&e.id).cloned() {
+                    let (_, ps, ret, js) = self.info.ext_types[&tn].methods.iter().find(|m| m.0 == mn).cloned().unwrap();
+                    let a: Vec<String> = self.seq(&args.iter().collect::<Vec<_>>());
+                    let a: Vec<String> = a.into_iter().zip(&ps).map(|(v, t)| self.js_arg(v, t)).collect();
+                    if let Some(p) = js.strip_suffix('=') {
+                        return format!("({}{} = {}, undefined)", recv, member(p), a[0]);
+                    }
+                    let vals: Vec<String> = [recv].into_iter().chain(a).collect();
+                    return self.extern_call(vals, &ret, |v| format!("{}{}({})", v[0], member(&js), v[1..].join(", ")));
+                }
                 let arg = |js: &mut Js, k: usize| js.expr(&args[k]);
                 use Builtin as B;
                 match b {
@@ -1017,8 +1145,10 @@ impl<'a> Js<'a> {
                     Some(B::Fold) => {
                         // (a counting loop: Array.prototype.reduce is several times slower in V8)
                         self.helpers.insert("$fold");
-                        let f = self.callback(&args[1], 2);
-                        format!("$fold({recv}, {}, {f})", arg(self, 0))
+                        // (the initial value, then the function, in order)
+                        let v = self.seq(&[&args[0], &args[1]]);
+                        let f = self.adapt(&args[1], v[1].clone(), 2);
+                        format!("$fold({recv}, {}, {f})", v[0])
                     }
                     // (in place onto a local array no one else sees, at its last use: amortized O(1), not a copy)
                     Some(B::Push) if self.inplace.contains(&e.id) => format!("({recv}.push({}), {recv})", arg(self, 0)),
@@ -1033,27 +1163,68 @@ impl<'a> Js<'a> {
                     Some(B::Trim) => format!("{recv}.trim()"),
                     Some(B::Contains) => format!("{recv}.includes({})", arg(self, 0)),
                     Some(B::Split) => format!("{recv}.split({})", arg(self, 0)),
-                    Some(B::ToString) => format!("String({})", self.expr(r)),
-                    Some(B::Floor) => format!("Math.floor({})", self.expr(r)),
-                    Some(B::Sqrt) if self.num(e.id) == Ty::F32 => format!("Math.fround(Math.sqrt({}))", self.expr(r)),
-                    Some(B::Sqrt) => format!("Math.sqrt({})", self.expr(r)),
-                    Some(B::Max) => format!("Math.max({}, {})", self.expr(r), arg(self, 0)),
-                    Some(B::Min) => format!("Math.min({}, {})", self.expr(r), arg(self, 0)),
+                    Some(B::ToString) => format!("String({})", unparen(&recv)),
+                    Some(B::Floor) => format!("Math.floor({})", unparen(&recv)),
+                    Some(B::Sqrt) if self.num(e.id) == Ty::F32 => format!("Math.fround(Math.sqrt({}))", unparen(&recv)),
+                    Some(B::Sqrt) => format!("Math.sqrt({})", unparen(&recv)),
+                    Some(B::Max) => format!("Math.max({}, {})", unparen(&recv), arg(self, 0)),
+                    Some(B::Min) => format!("Math.min({}, {})", unparen(&recv), arg(self, 0)),
                     Some(B::ToArray) => format!("Array.from({recv})"),
-                    Some(B::Abs) => format!("Math.abs({})", self.expr(r)),
+                    Some(B::Abs) => format!("Math.abs({})", unparen(&recv)),
                     Some(B::Round) => {
                         self.helpers.insert("$round");
-                        format!("$round({})", self.expr(r))
+                        format!("$round({})", unparen(&recv))
+                    }
+                    Some(B::Opt(m @ ("is_some" | "is_none" | "is_ok" | "is_err"))) => {
+                        let tag = match m {
+                            "is_some" => "Some",
+                            "is_none" => "None",
+                            "is_ok" => "Ok",
+                            _ => "Err",
+                        };
+                        format!("({recv}.TAG === {})", js_str(tag))
+                    }
+                    Some(B::Opt(m)) => {
+                        let h = match m {
+                            "map" => "$o_map",
+                            "and_then" => "$o_then",
+                            "filter" => "$o_filter",
+                            "map_err" => "$o_map_err",
+                            "unwrap_or" => "$o_unwrap_or",
+                            "unwrap_or_else" => "$o_unwrap_or_else",
+                            "ok_or" => "$o_ok_or",
+                            "ok_or_else" => "$o_ok_or_else",
+                            _ => "$o_ok",
+                        };
+                        self.helpers.insert(h);
+                        let a: Vec<String> = match m {
+                            "map" | "and_then" | "filter" | "map_err" => vec![self.callback(&args[0], 1)],
+                            _ => args.iter().map(|x| self.expr(x)).collect(),
+                        };
+                        format!("{h}({})", [recv].into_iter().chain(a).collect::<Vec<_>>().join(", "))
+                    }
+                    Some(B::TryMap(res)) => {
+                        let h = if res { "$try_map_r" } else { "$try_map_o" };
+                        self.helpers.insert(h);
+                        format!("{h}({recv}, {})", self.callback(&args[0], 1))
                     }
                     None => {
-                        let a: Vec<String> = args.iter().map(|x| self.expr(x)).collect();
+                        let a: Vec<String> = self.seq(&args.iter().collect::<Vec<_>>());
                         format!("{recv}.{m}({})", a.join(", "))
                     }
                 }
             }
             EK::Index(x, i) => {
                 self.helpers.insert("$at");
-                format!("$at({}, {})", self.expr(x), self.expr(i))
+                let v = self.seq(&[x, i]);
+                format!("$at({}, {})", v[0], v[1])
+            }
+            EK::Field(x, f) if self.info.member.contains_key(&e.id) => {
+                let (tn, pn) = self.info.member[&e.id].clone();
+                let (_, t, js) = self.info.ext_types[&tn].props.iter().find(|p| p.0 == pn).cloned().unwrap();
+                let s = self.operand(x);
+                // (a getter that throws: the receiver is evaluated outside the catch, as a call's are)
+                self.extern_call(vec![s], &t, |v| format!("{}{}", v[0], member(&js)))
             }
             EK::Field(x, f) => {
                 let s = self.operand(x);
@@ -1090,7 +1261,7 @@ impl<'a> Js<'a> {
                 self.gen_ = false;
                 let mark = self.locals.len();
                 let ps: Vec<String> = ps.iter().map(|p| self.bind(&p.0)).collect();
-                let b = if Self::complex(body) {
+                let b = if Self::complex(body) || has_try(body) {
                     let save = (std::mem::take(&mut self.out), self.ind);
                     self.ind += 1;
                     self.stmt_expr(body, &Dest::Return);
@@ -1108,28 +1279,43 @@ impl<'a> Js<'a> {
             EK::Record(_, fs, base) => {
                 let mut parts = vec![];
                 if let Some(b) = base {
-                    parts.push(format!("...{}", self.operand(b)));
+                    let v = self.operand(b);
+                    let v = self.pin_before(b, v, &fs.iter().map(|f| &f.1).collect::<Vec<_>>());
+                    parts.push(format!("...{v}"));
                 }
-                for (f, x) in fs {
-                    let v = self.expr(x);
+                let vs = self.seq(&fs.iter().map(|f| &f.1).collect::<Vec<_>>());
+                for ((f, _), v) in fs.iter().zip(vs) {
                     parts.push(if v == *f { f.clone() } else { format!("{f}: {v}") });
                 }
                 format!("{{ {} }}", parts.join(", "))
             }
             EK::Array(xs) if self.info.typed_lit.contains_key(&e.id) => {
                 let ctor = typed_js(&self.info.typed_lit[&e.id].clone());
-                format!("new {ctor}([{}])", xs.iter().map(|x| self.expr(x)).collect::<Vec<_>>().join(", "))
+                format!("new {ctor}([{}])", self.seq(&xs.iter().collect::<Vec<_>>()).join(", "))
             }
-            EK::Array(xs) | EK::Tuple(xs) => format!("[{}]", xs.iter().map(|x| self.expr(x)).collect::<Vec<_>>().join(", ")),
+            EK::Array(xs) | EK::Tuple(xs) => format!("[{}]", self.seq(&xs.iter().collect::<Vec<_>>()).join(", ")),
             EK::Await(x) => format!("(await {})", self.bin_operand(x, 14, true)),
+            // (statements before the one it is in: the value in a temporary, returned as it is when it is the
+            // `Err` / `None`, whose shape does not depend on the other type argument)
+            EK::Try(x) => {
+                let v = self.expr(x);
+                let t = self.fresh();
+                self.line(&format!("const {t} = {v};"));
+                let en = self.info.tries[&e.id].clone();
+                let bad = if en == "Result" { "Err" } else { "None" };
+                let tag = self.tag_key(&en);
+                self.line(&format!("if ({t}.{tag} === {}) return {t};", self.tag_js(&en, bad)));
+                format!("{t}.{}", self.field_key(&en, if en == "Result" { "Ok" } else { "Some" }, 0))
+            }
             EK::Async(c) => format!("async {}", self.expr(c)),
             // (a template literal: a hole writes its value as `String(..)` does, which is `to_string`'s JS)
             EK::Interp(parts, holes) => {
+                let hs = self.seq(&holes.iter().collect::<Vec<_>>());
                 let mut o = String::from("`");
                 for (k, p) in parts.iter().enumerate() {
                     o.push_str(&template_text(p));
-                    if let Some(h) = holes.get(k) {
-                        let _ = write!(o, "${{{}}}", self.expr(h));
+                    if let Some(h) = hs.get(k) {
+                        let _ = write!(o, "${{{h}}}");
                     }
                 }
                 o.push('`');
@@ -1162,7 +1348,7 @@ impl<'a> Js<'a> {
                 }
             }
             EK::Perform(_, v, args) => {
-                let a: Vec<String> = args.iter().map(|x| self.expr(x)).collect();
+                let a: Vec<String> = self.seq(&args.iter().collect::<Vec<_>>());
                 let en = self.info.variant_of[v].clone();
                 if self.info.direct.contains(&en) {
                     self.helpers.insert("$perform");
@@ -1289,10 +1475,81 @@ impl<'a> Js<'a> {
         format!("{h}({v})")
     }
 
+    /// A value JS gave (an extern's result, a property of an extern type), as zustscript's: `null` / `undefined`
+    /// is `None`, and a `Result` catches what the call throws (`call` is evaluated inside the catch)
+    fn js_result(&mut self, call: String, r: &Ty) -> String {
+        let message = |e: &Ty| if matches!(e, Ty::Str) { "true" } else { "false" };
+        match r {
+            Ty::Named(n, a) if n == "Option" && a.len() == 1 => {
+                self.helpers.insert("$nullable");
+                format!("$nullable({call})")
+            }
+            Ty::Named(n, a) if n == "Result" && a.len() == 2 => {
+                let inner = self.js_result(call, &a[0]);
+                self.helpers.insert("$catch");
+                format!("$catch(() => {inner}, {})", message(&a[1]))
+            }
+            Ty::Named(n, a) if n == "Promise" && a.len() == 1 => match &a[0] {
+                Ty::Named(m, b) if m == "Result" && b.len() == 2 => {
+                    let inner = if is_option(&b[0]) {
+                        self.helpers.insert("$nullable");
+                        format!("{call}.then($nullable)")
+                    } else {
+                        call
+                    };
+                    self.helpers.insert("$catchP");
+                    format!("$catchP(() => {inner}, {})", message(&b[1]))
+                }
+                t if is_option(t) => {
+                    self.helpers.insert("$nullable");
+                    format!("{call}.then($nullable)")
+                }
+                _ => call,
+            },
+            _ => call,
+        }
+    }
+
+    /// A call of JS (`make` writes it from the values of its receiver and arguments), its result converted. When the
+    /// result catches what the call throws, the values are evaluated before, where the call stands (an `await` or a
+    /// `yield` in one stays in the function being written): `(($v0) => $catch(() => f($v0), true))(await p)`
+    fn extern_call(&mut self, vals: Vec<String>, ret: &Ty, make: impl Fn(&[String]) -> String) -> String {
+        let catches = match ret {
+            Ty::Named(n, a) if n == "Result" && a.len() == 2 => true,
+            Ty::Named(n, a) if n == "Promise" && a.len() == 1 => matches!(&a[0], Ty::Named(m, b) if m == "Result" && b.len() == 2),
+            _ => false,
+        };
+        // (a property read may run a getter that throws: it is evaluated outside the catch too)
+        let plain = |s: &String| s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') || (s.len() >= 2 && s.starts_with('"') && s.ends_with('"') && !s[1..s.len() - 1].contains('"'));
+        if !catches || vals.iter().all(plain) {
+            return self.js_result(make(&vals), ret);
+        }
+        let ps: Vec<String> = (0..vals.len()).map(|k| format!("$v{k}")).collect();
+        let inner = self.js_result(make(&ps), ret);
+        format!("(({}) => {inner})({})", ps.join(", "), vals.join(", "))
+    }
+
+    /// A value handed to JS (an extern's argument): `None` is `undefined`
+    fn js_arg(&mut self, v: String, t: &Ty) -> String {
+        if is_option(t) {
+            // (a literal: its JS value as it is)
+            if v == "{ TAG: \"None\" }" {
+                return "undefined".into();
+            }
+            if let Some(x) = v.strip_prefix("{ TAG: \"Some\", _0: ").and_then(|x| x.strip_suffix(" }"))
+                && balanced(x)
+            {
+                return x.to_string();
+            }
+            self.helpers.insert("$undef");
+            return format!("$undef({v})");
+        }
+        v
+    }
+
     fn note_extern(&mut self, n: &str) {
         if let Some((_, Some(m), js)) = self.info.externs.get(n) {
-            let root = js.split('.').next().unwrap_or(js).to_string();
-            self.imports.entry(m.clone()).or_default().insert(root);
+            self.imports.entry(m.clone()).or_default().insert(js_root(js).to_string());
         }
     }
 
@@ -1302,7 +1559,9 @@ impl<'a> Js<'a> {
         if let Some(t) = self.info.deep_eq.get(&id).cloned() {
             let t = subst_ty(&t, &self.subst);
             if let Some(f) = self.eq_fn(&t) {
-                let (a, b) = (self.expr(l), self.expr(r));
+                let a = self.expr(l);
+                let a = self.pin_before(l, a, &[r]);
+                let b = self.expr(r);
                 return if op == "==" { format!("{f}({a}, {b})") } else { format!("!{f}({a}, {b})") };
             }
         }
@@ -1313,7 +1572,9 @@ impl<'a> Js<'a> {
             (Ty::F32, "+" | "-" | "*" | "/" | "%") => bin_prec(op),
             _ => bin_prec(op),
         };
-        let (a, b) = (self.bin_operand(l, p, false), self.bin_operand(r, p, true));
+        let a = self.bin_operand(l, p, false);
+        let a = self.pin_before(l, a, &[r]);
+        let b = self.bin_operand(r, p, true);
         match op {
             "==" => return format!("{a} === {b}"),
             "!=" => return format!("{a} !== {b}"),
@@ -1353,8 +1614,15 @@ impl<'a> Js<'a> {
         };
         let mut props = vec![];
         let mut key = None;
-        for (a, x) in &j.attrs {
-            let v = self.expr(x);
+        // (the attributes, then the children, in order)
+        let mut all: Vec<&Expr> = j.attrs.iter().map(|a| &a.1).collect();
+        all.extend(j.children.iter().filter_map(|c| match c {
+            JsxChild::Expr(x) => Some(x),
+            JsxChild::Text(_) => None,
+        }));
+        let mut vals = self.seq(&all).into_iter();
+        for (a, _) in &j.attrs {
+            let v = vals.next().unwrap();
             if a == "key" {
                 key = Some(v);
                 continue;
@@ -1367,7 +1635,7 @@ impl<'a> Js<'a> {
             .iter()
             .map(|c| match c {
                 JsxChild::Text(t) => js_str(t),
-                JsxChild::Expr(x) => self.expr(x),
+                JsxChild::Expr(_) => vals.next().unwrap(),
             })
             .collect();
         let f = if kids.len() > 1 { "_jsxs" } else { "_jsx" };
@@ -1439,6 +1707,56 @@ fn single_call(s: &str) -> bool {
     false
 }
 
+/// The name an extern's JS starts from: `api` of `api.read`, `URL` of `new URL` (what a module's extern imports)
+fn js_root(js: &str) -> &str {
+    let js = js.strip_prefix("new ").unwrap_or(js);
+    js.split('.').next().unwrap_or(js)
+}
+
+/// `(x)` → `x` (an operand written inside a call's parentheses needs none of its own)
+fn unparen(s: &str) -> &str {
+    match s.strip_prefix('(').and_then(|x| x.strip_suffix(')')) {
+        Some(x) if balanced(x) => x,
+        _ => s,
+    }
+}
+
+fn is_option(t: &Ty) -> bool {
+    matches!(t, Ty::Named(n, a) if n == "Option" && a.len() == 1)
+}
+
+/// Does a value of `t` from JS need converting ([`Js::js_result`])
+fn needs_js_result(t: &Ty) -> bool {
+    match t {
+        Ty::Named(n, a) if (n == "Option" && a.len() == 1) || (n == "Result" && a.len() == 2) => true,
+        Ty::Named(n, a) if n == "Promise" && a.len() == 1 => needs_js_result(&a[0]),
+        _ => false,
+    }
+}
+
+/// `.name` (or `["data-x"]` for a JS name that is not an identifier)
+fn member(js: &str) -> String {
+    if !js.is_empty() && js.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$') && !js.starts_with(|c: char| c.is_ascii_digit()) { format!(".{js}") } else { format!("[{}]", js_str(js)) }
+}
+
+/// An assignment of a local in `e` (not in a closure: one cannot assign a local outside it)
+fn assigns_local(e: &Expr) -> bool {
+    match &e.kind {
+        EK::Assign(..) => true,
+        EK::Closure(..) | EK::Async(_) => false,
+        _ => crate::check::subexprs(e).into_iter().any(assigns_local),
+    }
+}
+
+/// A `?` in `e` that is not inside a closure of its own (it returns from the function `e` is in)
+pub fn has_try(e: &Expr) -> bool {
+    match &e.kind {
+        EK::Try(_) => true,
+        EK::Closure(..) | EK::Async(_) => false,
+        _ => crate::check::subexprs(e).into_iter().any(has_try),
+    }
+}
+
 /// An `await` in `e` that is not inside a closure of its own (it belongs to the function `e` is in)
 fn awaits(e: &Expr) -> bool {
     match &e.kind {
@@ -1462,7 +1780,7 @@ fn loop_exit(e: &Expr) -> Option<Pos> {
                 .or_else(|| tail.as_deref().and_then(walk)),
             EK::If(c, t, el) => walk(c).or_else(|| walk(t)).or_else(|| el.as_deref().and_then(walk)),
             EK::Match(s, arms) => walk(s).or_else(|| arms.iter().find_map(|a| walk(&a.1))),
-            EK::Assign(_, x) | EK::Un(_, x) | EK::Field(x, _) | EK::Cast(x, _) => walk(x),
+            EK::Assign(_, x) | EK::Un(_, x) | EK::Field(x, _) | EK::Cast(x, _) | EK::Try(x) | EK::Await(x) => walk(x),
             EK::Bin(_, a, b) | EK::Index(a, b) => walk(a).or_else(|| walk(b)),
             EK::Call(f, a) => walk(f).or_else(|| a.iter().find_map(walk)),
             EK::Method(r, _, a) => walk(r).or_else(|| a.iter().find_map(walk)),
@@ -1619,10 +1937,33 @@ fn ts_plain(t: &Ty, named: &mut BTreeSet<String>) -> String {
     }
 }
 
+/// A type as JS hands it to (or takes it from) an extern: `T | null | undefined` for an `Option` result (`T |
+/// undefined` for an argument), `T` for a `Result` (what does not throw), and so in a `Promise`
+fn ts_js_side(t: &Ty, named: &mut BTreeSet<String>, ret: bool) -> String {
+    match t {
+        Ty::Named(n, a) if n == "Option" && a.len() == 1 => {
+            let t = ts_plain(&a[0], named);
+            let t = if matches!(a[0], Ty::Fn(..)) { format!("({t})") } else { t };
+            format!("{t} | {}undefined", if ret { "null | " } else { "" })
+        }
+        Ty::Named(n, a) if ret && n == "Result" && a.len() == 2 => ts_js_side(&a[0], named, ret),
+        Ty::Named(n, a) if ret && n == "Promise" && a.len() == 1 => format!("Promise<{}>", ts_js_side(&a[0], named, ret)),
+        t => ts_plain(t, named),
+    }
+}
+
 /// The unbranded copy of a record or enum, in the `.d.ts`'s shape
 fn ts_plain_def(n: &str, items: &[Item], info: &Info, named: &mut BTreeSet<String>) -> Option<String> {
     for it in items {
         match it {
+            // (JS's own type, by its TS name)
+            Item::ExternType { name, module, params, ts, .. } if name == n => {
+                let g = if params.is_empty() { String::new() } else { format!("<{}>", params.join(", ")) };
+                return Some(match module {
+                    Some(m) => format!("import type {{ {ts} as $I_{n} }} from {};\ntype $P_{n}{g} = $I_{n}{g};", js_str(m)),
+                    None => format!("type $P_{n}{g} = {ts}{g};"),
+                });
+            }
             Item::Record { name, params, .. } if name == n => {
                 let g = if params.is_empty() { String::new() } else { format!("<{}>", params.join(", ")) };
                 let fs: Vec<String> = info.records[n].fields.iter().map(|(f, t)| format!("readonly {f}: {}", ts_plain(t, named))).collect();
@@ -1665,10 +2006,24 @@ pub fn extern_check(items: &[Item], info: &Info) -> Option<(String, Vec<(usize, 
         if let Item::Extern { name, module, pos, .. } = it {
             let (sig, _, js) = &info.externs[name];
             let g = if sig.generics.is_empty() { String::new() } else { format!("<{}>", sig.generics.join(", ")) };
-            let ps: Vec<String> = sig.args.iter().enumerate().map(|(k, t)| format!("a{k}: {}", ts_plain(t, &mut named))).collect();
-            let want = format!("{g}({}) => {}", ps.join(", "), ts_plain(&sig.ret, &mut named));
+            let side = |t: &Ty, named: &mut BTreeSet<String>, ret: bool| if info.zsc_externs.contains(name) { ts_plain(t, named) } else { ts_js_side(t, named, ret) };
+            let ps: Vec<String> = sig.args.iter().enumerate().map(|(k, t)| format!("a{k}: {}", side(t, &mut named, false))).collect();
+            let want = format!("{g}({}) => {}", ps.join(", "), side(&sig.ret, &mut named, true));
             let k = checks.len();
             let value = match module {
+                // (a constructor: called with `new`, its parameters the class's)
+                _ if js.starts_with("new ") => {
+                    let c = &js[4..];
+                    let c = match module {
+                        Some(m) => {
+                            let root = js_root(js);
+                            imports.push(format!("import {{ {root} as $e{k} }} from {};", js_str(m)));
+                            format!("$e{k}{}", &c[root.len()..])
+                        }
+                        None => c.to_string(),
+                    };
+                    format!("(...a: ConstructorParameters<typeof {c}>) => new {c}(...a)")
+                }
                 Some(m) => {
                     // (a dotted name `api.read`: import the root, reach the member through it)
                     let root = js.split('.').next().unwrap_or(js);
@@ -1678,6 +2033,31 @@ pub fn extern_check(items: &[Item], info: &Info) -> Option<(String, Vec<(usize, 
                 None => js.clone(),
             };
             checks.push((format!("const $c{k}: {want} = {value};"), name.clone(), *pos));
+        }
+        // (each member of an extern type: read or called on a value of the TS type, it fits the declared type)
+        if let Item::ExternType { name, params, members, .. } = it {
+            let x = &info.ext_types[name];
+            let at = |n: &str| members.iter().find_map(|m| match m {
+                Member::Prop { name, pos, .. } | Member::Method { name, pos, .. } if name == n => Some(*pos),
+                _ => None,
+            }).unwrap_or_default();
+            let g = if params.is_empty() { String::new() } else { format!("<{}>", params.join(", ")) };
+            let o = format!("o: $P_{name}{g}");
+            named.insert(name.clone());
+            for (p, t, js) in &x.props {
+                let k = checks.len();
+                let want = format!("{g}({o}) => {}", ts_js_side(t, &mut named, true));
+                checks.push((format!("const $c{k}: {want} = (o) => o{};", member(js)), format!("{name}.{p}"), at(p)));
+            }
+            for (m, args, ret, js) in &x.methods {
+                let k = checks.len();
+                let ps: Vec<String> = args.iter().enumerate().map(|(k, t)| format!("a{k}: {}", ts_js_side(t, &mut named, false))).collect();
+                let c = match js.strip_suffix('=') {
+                    Some(p) => format!("const $c{k}: {g}({o}, {}) => void = (o, v) => {{ o{} = v; }};", ps.join(", "), member(p)),
+                    None => format!("const $c{k}: {g}({}) => {} = (o, ...a) => o{}(...a);", [o.clone()].into_iter().chain(ps).collect::<Vec<_>>().join(", "), ts_js_side(ret, &mut named, true), member(js)),
+                };
+                checks.push((c, format!("{name}.{m}"), at(m)));
+            }
         }
     }
     if checks.is_empty() {
@@ -1728,7 +2108,7 @@ pub fn runtime_js() -> String {
     o.push('\n');
     for (_, code) in HELPERS {
         for line in code.lines() {
-            if line.starts_with("function") {
+            if line.starts_with("function") || line.starts_with("async function") {
                 o.push_str("export ");
             }
             o.push_str(line);
@@ -1774,6 +2154,29 @@ pub fn brand_runtime(used: &[&str]) -> String {
     o
 }
 
+/// An enum's type in the `.d.ts`: a union of string literals, or of `{ TAG, _0, .. }` objects
+fn enum_dts(name: &str, params: &[String], info: &Info) -> String {
+    let e = &info.enums[name];
+    let g = if params.is_empty() { String::new() } else { format!("<{}>", params.join(", ")) };
+    let alts: Vec<String> = e
+        .variants
+        .iter()
+        .map(|(v, fs)| {
+            if e.unit_only() && !e.is_effect() {
+                js_str(v)
+            } else {
+                let mut s = format!("{{ readonly TAG: {}", js_str(v));
+                for (k, t) in fs.iter().enumerate() {
+                    let _ = write!(s, "; readonly _{k}: {}", ts(t));
+                }
+                s.push_str(" }");
+                s
+            }
+        })
+        .collect();
+    format!("export type {name}{g} = {};\n\n", alts.join(" | "))
+}
+
 /// The `.d.ts`, and the numeric brands it uses
 /// (`spec`: the module specifier of a TS file a record was read from, from the `.d.ts`'s directory)
 pub fn dts(items: &[Item], info: &Info, shared_runtime: bool, spec: &dyn Fn(&std::path::Path) -> String) -> (String, Vec<&'static str>) {
@@ -1808,27 +2211,9 @@ pub fn dts(items: &[Item], info: &Info, shared_runtime: bool, spec: &dyn Fn(&std
                 }
                 o.push_str("}\n\n");
             }
-            Item::Enum { name, params, .. } => {
-                let e = &info.enums[name];
-                let g = if params.is_empty() { String::new() } else { format!("<{}>", params.join(", ")) };
-                let alts: Vec<String> = e
-                    .variants
-                    .iter()
-                    .map(|(v, fs)| {
-                        if e.unit_only() && !e.is_effect() {
-                            js_str(v)
-                        } else {
-                            let mut s = format!("{{ readonly TAG: {}", js_str(v));
-                            for (k, t) in fs.iter().enumerate() {
-                                let _ = write!(s, "; readonly _{k}: {}", ts(t));
-                            }
-                            s.push_str(" }");
-                            s
-                        }
-                    })
-                    .collect();
-                let _ = writeln!(o, "export type {name}{g} = {};\n", alts.join(" | "));
-            }
+            // (the prelude's: declared below, when the declarations use it)
+            Item::Enum { pos, .. } if crate::ast::is_prelude(*pos) => {}
+            Item::Enum { name, params, .. } => o.push_str(&enum_dts(name, params, info)),
             Item::Fn { name, public: true, generics, bounds, args, .. } if !bounds.is_empty() => {
                 let s = &info.fns[name];
                 for targs in all_instances(generics, bounds) {
@@ -1858,8 +2243,37 @@ pub fn dts(items: &[Item], info: &Info, shared_runtime: bool, spec: &dyn Fn(&std
             _ => {}
         }
     }
+    // (`Result<T, E>` may hold an `Option`: the prelude's types that are used, the last first)
+    for it in items.iter().rev() {
+        if let Item::Enum { name, params, pos, .. } = it
+            && crate::ast::is_prelude(*pos)
+            && uses_word(&o, name)
+        {
+            o = enum_dts(name, params, info) + &o;
+        }
+    }
+    // (an extern type is TS's: imported from its module, or named as TS names it)
+    let mut ext_imports = String::new();
+    for it in items {
+        if let Item::ExternType { name, module, params, ts, .. } = it
+            && uses_word(&o, name)
+        {
+            let g = if params.is_empty() { String::new() } else { format!("<{}>", params.join(", ")) };
+            match module {
+                Some(m) if ts == name => {
+                    let _ = writeln!(ext_imports, "import type {{ {name} }} from {};", js_str(m));
+                }
+                Some(m) => {
+                    let _ = writeln!(ext_imports, "import type {{ {ts} as {name} }} from {};", js_str(m));
+                }
+                None if ts != name => o = format!("/** JS's `{ts}` */\ntype {name}{g} = {ts}{g};\n\n") + &o,
+                None => {}
+            }
+        }
+    }
     let used: Vec<&'static str> = BRANDS.iter().map(|b| b.0).filter(|n| uses_word(&o, n)).collect();
     let mut h = String::from("// generated by zsc: the types of the module's exports\n");
+    h.push_str(&ext_imports);
     if USES_JSX.with(|u| u.replace(false)) {
         h.push_str("import type { ReactElement as $ReactElement } from \"react\";\n");
     }

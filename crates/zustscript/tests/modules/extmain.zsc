@@ -1,0 +1,4 @@
+// one extern type reached through two modules is one type; its module's path is rebased to this directory
+import { from_a } from "./ext/a.zsc";
+import { from_b } from "./ext/b.zsc";
+export fn both(s: String) -> Token { from_b(from_a(s).text) }
