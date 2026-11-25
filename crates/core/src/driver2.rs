@@ -12381,7 +12381,15 @@ fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem]
                 // (a value of the type itself: an argument, or the result)
                 let by_value = may(t) && !(k == sig.params.len() && matches!(t, Ty::Dyn(_)));
                 if let Some(b) = if by_value { Some(t) } else { prog.sized_wf_with(t, &may, 0) } {
-                    return Some(format!("{}:1: {}", items[ii].line, size_msg(b, &gens)));
+                    // (at the argument's type or the result's, as rustc: a signature may span lines)
+                    let part = if k == sig.params.len() { "r".to_string() } else { format!("p{k}") };
+                    let it = &items[ii];
+                    let at = src.get(it.start..it.end.min(src.len())).and_then(|t| sig_part(t, &part)).map(|o| it.start + o);
+                    let pos = match at {
+                        Some(at) => format!("{}:{}", src[..at].matches('\n').count() + 1, at - src[..at].rfind('\n').map_or(0, |p| p + 1) + 1),
+                        None => format!("{}:1", it.line),
+                    };
+                    return Some(format!("{pos}: {}", size_msg(b, &gens)));
                 }
             }
         }

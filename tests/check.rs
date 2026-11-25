@@ -3151,6 +3151,13 @@ fn sized_review_cases() {
     let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
     let d = check("struct W<T: ?Sized>(T);\nfn bad<T: ?Sized>(_: W<T>) {}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].msg.contains("`T` cannot be known"), "{d:?}");
+    // (at the argument's type in a signature over lines, as rustc; a let's annotation whatever its initializer)
+    let d = check("fn bad<T: ?Sized>(\n    x: T,\n) {}\nfn main() {}\n");
+    assert!(d.len() == 1 && (d[0].line, d[0].col) == (2, 8), "{d:?}");
+    for src in ["fn main() { let _: Vec<str> = loop {}; }\n", "fn main() { let (_a, _b): (Vec<str>, u8) = loop {}; }\n"] {
+        let d = check(src);
+        assert!(d.len() == 1 && d[0].msg.contains("`str` cannot be known"), "{src}\n{d:?}");
+    }
     // (a `?Sized` parameter as a trait argument for the trait's parameter not declared `?Sized`)
     let d = check("trait Tr<T> {}\nimpl<T: ?Sized> Tr<T> for () {}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].msg.contains("`T` cannot be known"), "{d:?}");

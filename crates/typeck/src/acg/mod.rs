@@ -2335,7 +2335,12 @@ impl Cx<'_> {
                         }
                         return err(SP, "`let` without initializer is not supported");
                     };
-                    let ann = ann_ty.as_ref().and_then(|t| self.parse_ty(t).ok());
+                    // (a Sized error of the annotation stands: `let (a, b): (Vec<str>, u8) = loop {};`)
+                    let ann = match ann_ty.as_ref().map(|t| self.parse_ty(t)) {
+                        Some(Ok(a)) => Some(a),
+                        Some(Err(e)) if e.contains(crate::traits::SOLVED_NO) => return Err(e),
+                        _ => None,
+                    };
                     // (`let Some(n): &mut Option<i32> = &mut &Some(5) else { .. }`: E0596, as for a plain `let`)
                     if let (Some(a), true) = (ann, self.bk_on()) {
                         if self.peek(init).is_some_and(|t| mut_through_shared(t, a)) {
@@ -2483,6 +2488,8 @@ impl Cx<'_> {
                     let ann = match ann_ty.as_ref().map(|t| (t, self.parse_ty(t))) {
                         Some((_, Ok(a))) => Some(a),
                         Some((t, Err(e))) if e.contains("cannot find type") && !names_std_path(t) => return Err(e),
+                        // (and a Sized error, whatever the initializer: `let _: Vec<str> = loop {};`)
+                        Some((_, Err(e))) if e.contains(crate::traits::SOLVED_NO) => return Err(e),
                         _ => None,
                     };
                     let full = ann.filter(|&a| !has_hole(self.prog, a) && !self.prog.has_param(a));
