@@ -1,5 +1,7 @@
 // Items written in blocks of one fn: same-named fns (and structs) in sibling blocks, which call each other, an
-// item in a block that shadows one of its fn's body or a top-level one, and same-named items in two fns
+// item in a block that shadows one of its fn's body or a top-level one, same-named items in two fns, and a fn beside
+// a braced struct of its name in a block (a value and a type: each use takes the one of its namespace)
+#![allow(non_camel_case_types)]
 fn f() -> u8 {
     9
 }
@@ -63,4 +65,22 @@ fn main() {
         println!("{}", P(7, 8).1);
     }
     println!("{} {}", a(), b());
+    fn n() -> u8 {
+        10
+    }
+    {
+        struct n {}
+        let _x: n = n {};
+        println!("{}", n());
+    }
+    struct t {
+        v: u8,
+    }
+    {
+        fn t() -> u8 {
+            11
+        }
+        let a = t { v: 12 };
+        println!("{} {}", t(), a.v);
+    }
 }

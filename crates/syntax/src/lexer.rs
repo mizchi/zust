@@ -1454,6 +1454,11 @@ pub fn hoist_nested_items_parts(src: &str) -> Option<(String, Vec<(usize, String
     hoist_parts_at(src, 0)
 }
 
+/// (namespaces of a hoisted item's name, for its renames)
+const HOIST_NS_VALUE: u8 = 0;
+const HOIST_NS_TYPE: u8 = 1;
+const HOIST_NS_BOTH: u8 = 2;
+
 /// depth: 名前を変えてやり直した回数 (壊れたソースで名前の変更が止まらないときは 8 回で止める)
 fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)> {
     // (速く飛ばす: 字下げした行頭の `fn ` などがなければ入れ子のアイテムはない)
@@ -1486,7 +1491,9 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     let mut nest = 0i32;
     let mut moves: Vec<(usize, usize)> = vec![];
     // 入れ子のアイテムの名前と、それを含む関数の本体 (開き括弧のトークン位置)。閉じた本体の (開き, 閉じ)
-    let mut nested_names: Vec<(Vec<u8>, usize)> = vec![];
+    // (and its namespace: HOIST_NS_VALUE (fn / static / const), HOIST_NS_TYPE (a braced struct, enum, trait, ..), or HOIST_NS_BOTH (a
+    // tuple or unit struct, and the rest))
+    let mut nested_names: Vec<(Vec<u8>, usize, u8)> = vec![];
     let mut bodies: Vec<(usize, usize)> = vec![];
     // (an item's scope is its innermost block, `{ struct Bar; } { struct Bar; }` two: the `{` before its statement,
     // found back from it, as items in bodies are few)
@@ -1651,14 +1658,41 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 moves.push((toks[st].1, toks[e].2));
                 let nk = if matches!(t, b"static") && tok(ik + 1) == b"mut" { ik + 2 } else { ik + 1 };
                 if nk < toks.len() && toks[nk].0 == 0 && t != b"use" && t != b"impl" && !extern_block {
-                    nested_names.push((tok(nk).to_vec(), block_of(k)));
+                    let ns = match t {
+                        b"fn" | b"static" | b"const" => HOIST_NS_VALUE,
+                        b"enum" | b"union" | b"trait" | b"type" | b"mod" => HOIST_NS_TYPE,
+                        // (`struct S { .. }` names a type only; `struct S(..);` / `struct S;` a constructor too. The
+                        // first `{` / `(` / `;` past its generics tells)
+                        b"struct" => {
+                            let mut d = 0i32;
+                            let mut ns = HOIST_NS_BOTH;
+                            for q in nk + 1..e.min(toks.len()) {
+                                if toks[q].0 != 1 {
+                                    continue;
+                                }
+                                match tok(q) {
+                                    b"<" => d += 1,
+                                    b">" => d -= 1,
+                                    b"{" if d <= 0 => {
+                                        ns = HOIST_NS_TYPE;
+                                        break;
+                                    }
+                                    b"(" | b";" if d <= 0 => break,
+                                    _ => {}
+                                }
+                            }
+                            ns
+                        }
+                        _ => HOIST_NS_BOTH,
+                    };
+                    nested_names.push((tok(nk).to_vec(), block_of(k), ns));
                 }
                 // (an extern block's functions: names of the block's function, renamed like its other items when
                 // another function's block declares the name too; the declaration then keeps its symbol, link_name)
                 if extern_block {
                     for q in ik + 1..e {
                         if toks[q].0 == 0 && tok(q) == b"fn" && q + 1 < e && toks[q + 1].0 == 0 {
-                            nested_names.push((tok(q + 1).to_vec(), block_of(k)));
+                            nested_names.push((tok(q + 1).to_vec(), block_of(k), HOIST_NS_VALUE));
                         }
                     }
                 }
@@ -1708,8 +1742,9 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     // (別々の関数の中の同じ名前のアイテム (`static TABLE`) は、外に出すとぶつかるので、
     //  その関数の本体の中でだけ `TABLE__h1` などに名前を変えてからやり直す)
     let mut renames: Vec<(usize, usize, Vec<u8>, Vec<u8>)> = vec![];
-    for (i, (n, b)) in nested_names.iter().enumerate() {
-        let dup = nested_names.iter().enumerate().any(|(j, (m, c))| j != i && m == n && c != b) || top_names.contains(n);
+    let mut rename_ns: Vec<u8> = vec![];
+    for (i, (n, b, ns)) in nested_names.iter().enumerate() {
+        let dup = nested_names.iter().enumerate().any(|(j, (m, c, _))| j != i && m == n && c != b) || top_names.contains(n);
         if !dup {
             continue;
         }
@@ -1736,6 +1771,7 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
             let mut nn = n.clone();
             nn.extend_from_slice(format!("__h{i}").as_bytes());
             renames.push((open, close, n.clone(), nn));
+            rename_ns.push(*ns);
         }
     }
     if !renames.is_empty() {
@@ -1753,6 +1789,33 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
         // (同じトークンに複数あれば、その位置を囲むいちばん内側の block のもの: Rust の名前の見え方と同じ。
         //  `fn m` in a fn's body beside another `fn m` in a block of it: the block's tokens take the block's name, or the
         //  two would be renamed alike on each redo)
+        // (in the namespace the token is in, where its neighbours tell: `m(` / `fn m` a value, `m::` / `struct m` /
+        // `-> m` a type. `fn m` beside `{ struct m {} m() }`: the call takes the fn's name, not the struct's)
+        let tok_ns = |k: usize| -> u8 {
+            let prev = if k >= 1 { tok(k - 1) } else { b"" };
+            let next = if k + 1 < toks.len() { tok(k + 1) } else { b"" };
+            if matches!(prev, b"fn" | b"static" | b"const") {
+                HOIST_NS_VALUE
+            } else if matches!(prev, b"struct" | b"enum" | b"union" | b"trait" | b"type" | b"mod" | b"->") || next == b"::" {
+                HOIST_NS_TYPE
+            } else if next == b"(" {
+                HOIST_NS_VALUE
+            } else if next == b"{"
+                && (matches!(prev, b"(" | b",")
+                    || prev == b"=" && !(k >= 2 && toks[k - 2].0 == 1 && b"=!<>+-*/%&|^".contains(&s[toks[k - 2].1])))
+            {
+                // (a struct literal, `let a = m { .. }`: not `x == m {`, where `{` opens a block)
+                HOIST_NS_TYPE
+            } else {
+                HOIST_NS_BOTH
+            }
+        };
+        let fits = |k: usize, ri: usize| {
+            let (a, b) = (tok_ns(k), rename_ns[ri]);
+            a == HOIST_NS_BOTH || b == HOIST_NS_BOTH || a == b
+        };
+        let all = at.clone();
+        at.retain(|&(k, ri)| fits(k, ri) || !all.iter().any(|&(k2, r2)| k2 == k && fits(k, r2)));
         at.sort_by(|x, y| x.0.cmp(&y.0).then(renames[y.1].0.cmp(&renames[x.1].0)));
         at.dedup_by_key(|x| x.0);
         // (a foreign function's declaration, `fn abs(x: i32) -> i32;` with no body, renamed: it keeps its symbol, a

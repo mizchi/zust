@@ -256,6 +256,7 @@ test by test (`cratebench/test_result.md`). fnv, rustc-hash, cfg-if and adler2 m
   `bench/rust_ui_ratchet.txt`; run that locally before pushing a change to the compiler.
 - `tests/parse.rs` (`parses_like_syn`) compares zust's parse of the repository's own sources with syn's. zust counts a
   destructuring assignment (`(a, b) = (c, d);`) as a `let`, so writing one in zust's sources fails the test; assign
-  the parts one by one.
+  the parts one by one, through temporaries when a part reads another (`let t = b; b = a; a = t;` for
+  `(a, b) = (b, a)`).
 - `scripts/docs_check.sh --update` may leave the pair `docs/language.md` / `docs/ja/language.md` unjudged
   (`excerpt-budget`), and then fails with 3: the pair is large. A change there may need to be made smaller.
