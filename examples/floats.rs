@@ -1,6 +1,6 @@
-// 浮動小数点のサンプル: f64 / f32 の四則演算・剰余・比較・キャスト (飽和)、Display / Debug (いちばん短い表現・
-// 指数・-0・NaN・inf)、{:.N} / 幅 / 0 埋め / +、メソッド (sqrt / powi / powf / 三角関数 / floor など)、定数、parse、
-// sort_by(partial_cmp) / total_cmp、構造体のフィールド・Vec の合計
+// Floating-point sample: f64 / f32 arithmetic, remainder, comparison, casts (saturating), Display / Debug (shortest representation,
+// exponents, -0, NaN, inf), {:.N} / width / zero padding / +, methods (sqrt / powi / powf / trigonometric fns / floor, etc.), constants, parse,
+// sort_by(partial_cmp) / total_cmp, struct fields, summing a Vec
 use std::f64::consts::PI;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -26,14 +26,14 @@ fn main() {
     let inf = f64::INFINITY;
     println!("{} {:?} {} {} {}", nan, nan, inf, -inf, nan == nan);
     println!("[{:.2}] [{:.0}] [{:.3}] [{:8.2}] [{:<8.1}] [{:08.3}] [{:+.1}] [{:.1}]", PI, 2.5, -0.0005, PI, 1.25, -3.14159, 2.0, 0.05);
-    // 演算・比較・キャスト
+    // Arithmetic / comparison / casts
     let a = 7.5f64;
     let b = 2.0;
     println!("{} {} {} {} {} {}", a + b, a - b, a * b, a / b, a % b, -a % b);
     println!("{} {} {} {}", a > b, a <= b, (0.1 + 0.2) == 0.3, (0.1f64 + 0.2 - 0.3).abs() < f64::EPSILON);
     println!("{} {} {} {} {} {}", 3.99 as i32, -3.99 as i32, 300.7 as u8, -5.0 as u8, f64::NAN as i32, 1e20 as i64);
     println!("{} {} {} {}", 7 as f64 / 2.0, (2u64.pow(53) + 1) as f64, 1.0f32 as f64, 0.1f64 as f32);
-    // メソッド
+    // Methods
     let x = 2.0f64;
     println!("{} {} {} {} {}", x.sqrt(), x.powi(10), x.powf(0.5), x.exp(), x.ln());
     println!("{:.6} {:.6} {:.6} {:.6}", (PI / 6.0).sin(), (PI / 3.0).cos(), 1.0f64.atan2(1.0), 100f64.log10());
@@ -50,7 +50,7 @@ fn main() {
         }
     }
     println!();
-    // sort / 合計 / 構造体
+    // sort / sum / structs
     let mut v = vec![3.5, -1.0, 2.25, 0.0, 10.0];
     v.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let total: f64 = v.iter().sum();

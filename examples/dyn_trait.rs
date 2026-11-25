@@ -1,5 +1,5 @@
-// dyn Trait のサンプル: &dyn / &mut dyn、デフォルトメソッド、スライス・struct・戻り値の中の dyn、
-// プリミティブ型への実装、ジェネリックな struct の実装、&dyn Fn
+// A dyn Trait sample: &dyn / &mut dyn, default methods, dyn inside slices / structs / return values,
+// impls for primitive types, impls for generic structs, &dyn Fn
 unsafe extern "C" {
     fn putchar(c: i32) -> i32;
 }

@@ -149,6 +149,7 @@
           <div class="bar-row" data-k="build_pass"><span class="name">build-pass</span><span class="track"><span class="fill"></span></span><span class="v">—</span></div>
           <div class="bar-row" data-k="compile_fail"><span class="name">compile-fail</span><span class="track"><span class="fill"></span></span><span class="v">—</span></div>
         </div>
+        <p class="note" id="ui-pending" hidden></p>
       </div>
       <div class="sec">
         <h2>Status</h2>
@@ -210,6 +211,21 @@
       row.querySelector('.fill').style.width = v + '%';
       row.querySelector('.v').textContent = v.toFixed(1) + '%';
     });
+  }).catch(() => {});
+  // (what the open pull requests add, and how far 90% is: the retrospective's forecast dataset)
+  fetch('dashboard/data/forecast.json').then((r) => (r.ok ? r.json() : Promise.reject())).then((rows) => {
+    const a = rows.find((r) => r.kind === 'all');
+    if (!a) return;
+    const n = document.getElementById('ui-pending');
+    // (reached when nothing is needed; the days are rounded, so "under a day" rather than 0 with tests left)
+    const d = (v) => (v < 1 ? 'less than a day' : `about ${Math.round(v)} days`);
+    const days = a.needed === 0 ? ' 90% is reached.' : a.days_linear == null ? ''
+      : ` 90% of them is ${d(a.days_linear)} away at the last two days' pace (${Math.round(a.pace_per_day)} tests a day), or ${a.days_geometric == null ? 'longer' : d(a.days_geometric)} if it slows down as the easier tests are taken.`;
+    // (the CI run these totals are from: the last that measured every kind, which may be older than the bars')
+    n.textContent = `All kinds, CI run ${a.commit.slice(0, 7)}: ${a.passing.toLocaleString('en')} of ${a.applicable.toLocaleString('en')} (${a.rate.toFixed(1)}%). ` +
+      (a.pending ? `Open pull requests add ${a.pending.toLocaleString('en')} more (${a.rate_with_pending.toFixed(1)}%).` : '') + days + ' ';
+    const l = document.createElement('a'); l.href = 'dashboard/#progress'; l.textContent = 'By kind and by pull request.';
+    n.append(l); n.hidden = false;
   }).catch(() => {});
 })();
 </script>

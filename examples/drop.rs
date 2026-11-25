@@ -1,5 +1,5 @@
-// Drop のサンプル: スコープ・ムーブ・代入・break / return・match・Option・Box<T> / Box<dyn Trait>・
-// 再帰的なリスト・クロージャのキャプチャ・ジェネリックな Drop。drop の順序を rustc と比べる
+// Drop sample: scopes, moves, assignment, break / return, match, Option, Box<T> / Box<dyn Trait>,
+// recursive lists, closure captures, generic Drop. Compares the drop order with rustc
 unsafe extern "C" {
     fn putchar(c: i32) -> i32;
 }
@@ -126,24 +126,24 @@ impl Stack {
 }
 
 fn main() {
-    // スコープの終わりで逆順に
+    // In reverse order at the end of the scope
     let _a = Noisy(b'a');
     {
         let b = Noisy(b'b');
         put(b.0);
         put(b' ');
     }
-    // ムーブしたものは drop しない
+    // Moved values are not dropped
     let c = Noisy(b'c');
     consume(c);
     let d = Noisy(b'd');
     let e = d;
     put(e.0);
     put(b'\n');
-    // 捨てた値・`let _ =` はその場で
+    // Discarded values / `let _ =` are dropped on the spot
     make(b't');
     let _ = make(b'u');
-    // 代入は古い値を drop する
+    // Assignment drops the old value
     let mut f = Noisy(b'f');
     f = Noisy(b'g');
     put(f.0);
@@ -160,7 +160,7 @@ fn main() {
     put(b'0' + early(true));
     put(b'0' + early(false));
     put(b'\n');
-    // match / if let はパターンがムーブする
+    // match / if let: the pattern moves
     let o = Some(Noisy(b'o'));
     if let Some(n) = o {
         put(n.0);
@@ -171,7 +171,7 @@ fn main() {
         None => {}
     }
     put(b'\n');
-    // struct のフィールド (Box も)
+    // struct fields (Box too)
     let p = Pair {
         a: Noisy(b'1'),
         b: Box::new(Noisy(b'2')),
@@ -180,26 +180,26 @@ fn main() {
     put(b'\n');
     drop(p);
     put(b'\n');
-    // ジェネリックな Drop と、中身の drop の順
+    // Generic Drop, and the drop order of the contents
     let g = Guard {
         v: Noisy(b'v'),
         tag: b'x',
     };
     put(g.v.0);
     put(b'\n');
-    // Box<dyn Trait>: 中身 (Dog → Noisy) まで drop する
+    // Box<dyn Trait>: drops down to the contents (Dog → Noisy)
     let animals: [Box<dyn Animal>; 2] = [Box::new(Dog(Noisy(b'w'))), Box::new(Dog(Noisy(b'z')))];
     for an in &animals {
         put(an.name());
     }
     put(b'\n');
-    // クロージャの move キャプチャはクロージャと一緒に drop する
+    // A closure's move captures are dropped together with the closure
     let cap = Noisy(b'k');
     let show = move || put(cap.0);
     show();
     show();
     put(b'\n');
-    // 再帰的なリスト (全部 free される)
+    // Recursive list (all of it is freed)
     let mut l = None;
     for i in 1..=4 {
         l = push(l, i * 10);

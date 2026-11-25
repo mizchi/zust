@@ -1,7 +1,7 @@
-"""zustc 自身の crates/syntax/src/types.rs (型の表現と intern) / crates/syntax/src/parse.rs / crates/syntax/src/ast_types.rs (型の構文 → TySyn) を
-1 ファイルのプログラムにまとめる。
+"""Bundles zustc's own crates/syntax/src/types.rs (the type representation and intern) / crates/syntax/src/parse.rs / crates/syntax/src/ast_types.rs (type syntax → TySyn)
+into a single-file program.
 usage: python3 tests/selfhost/build_ast_types.py > out/selfhost/ast_types_main.rs
-main は引数のファイルごとに、アイテムの型を TySyn にして出し、intern した型の性質 (大きさ・整数か) も出す。"""
+For each file given as an argument, main prints the items' types as TySyn, and also the properties of the interned types (size, whether integer)."""
 
 types = open("crates/syntax/src/types.rs").read()
 parse = open("crates/syntax/src/parse.rs").read()

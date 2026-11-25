@@ -1,4 +1,4 @@
-// 浮動小数点の書式化の比較用: 疑似乱数の f64 / f32 3000 個を {} / {:?} / {:.3} / {:.0} で出す (rustc と 1 文字違わず同じになること)
+// For comparing float formatting: prints 3000 pseudo-random f64 / f32 with {} / {:?} / {:.3} / {:.0} (must be identical to rustc, not a single char different)
 fn main() {
     let mut s: u64 = 12345;
     let mut out = String::new();

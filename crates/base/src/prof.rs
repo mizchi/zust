@@ -1,19 +1,19 @@
-//! 時間の計測 (ZUSTC_PROF=1 の段ごとの時間)。std::time を使わない (zustc 自身でもコンパイルできるように)
+//! Time measurement (the time of each stage with ZUSTC_PROF=1). Does not use std::time (so that zustc itself can compile it)
 
 unsafe extern "C" {
     #[link_name = "clock_gettime"]
     fn c_clock_gettime(clk: i32, ts: *mut i64) -> i32;
 }
 
-/// 単調な時計 (ns)
+/// A monotonic clock (ns)
 pub fn now_ns() -> u64 {
     let mut ts = [0i64; 2];
-    // SAFETY: CLOCK_MONOTONIC (1)。ts は timespec と同じ並び
+    // SAFETY: CLOCK_MONOTONIC (1). ts has the same layout as timespec
     unsafe { c_clock_gettime(1, ts.as_mut_ptr()) };
     ts[0] as u64 * 1_000_000_000 + ts[1] as u64
 }
 
-/// 段ごとの時間を出す (on のときだけ)
+/// Prints the time of each stage (only when on)
 pub struct Timer {
     pub on: bool,
     pub last: u64,

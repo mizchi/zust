@@ -1,5 +1,5 @@
-//! 型の構文 (TySyn) と要約 (Summary) の直列化 (キャッシュ用)。front.rs から分けたもの: syn に依存しないので
-//! driver2 (syn・Cranelift を使わないドライバ) も使え、zustc 自身でもコンパイルできる。
+//! Serialization of type syntax (TySyn) and summaries (Summary) (for the cache). Split out of front.rs: since it does not depend on syn,
+//! driver2 (the driver that uses neither syn nor Cranelift) can use it too, and zustc itself can compile it.
 
 use crate::enc::{Enc, Rd};
 use crate::types::TYS;
@@ -127,6 +127,7 @@ crate::enc_struct!(SigSyn {
     is_unsafe,
     regions,
     preds,
+    own_unsized,
 });
 crate::enc_struct!(RSigSyn { lts, slots, outlives, ty_outlives, outer, self_slots, derived, derived_ty });
 crate::enc_struct!(RImplSyn { lts, self_slots, outlives, ty_outlives, free, wf_pairs, wf_vague, trait_lts, self_paths });
@@ -206,12 +207,12 @@ impl Enc for (String, TySyn, String, bool) {
     }
 }
 
-/// キャッシュにインスタンスの型引数を書くため
+/// For writing an instance's type arguments into the cache
 pub fn put_ty(out: &mut Vec<u8>, t: &TySyn) {
     t.enc(out)
 }
 
-/// d[*pos..] から TySyn を 1 つ読む
+/// Reads one TySyn from d[*pos..]
 pub fn read_ty(d: &[u8], pos: &mut usize) -> Option<TySyn> {
     let mut r = Rd { d, pos: *pos };
     let t = TySyn::dec(&mut r);

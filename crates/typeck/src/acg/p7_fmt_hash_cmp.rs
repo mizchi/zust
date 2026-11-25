@@ -4,20 +4,20 @@ use crate::types::{Ty, intern};
 use lit::Lit;
 
 // ---------------------------------------------------------------------------
-// 書式化 (format! / print! / println! / eprint! / eprintln! / write! / writeln!)
+// Formatting (format! / print! / println! / eprint! / eprintln! / write! / writeln!)
 // ---------------------------------------------------------------------------
 //
-// 書式文字列はコンパイル時に分解し、prelude の Formatter に「文字列片」と「値」を順に書く。
-// 値は `__exr_display::<T>` / `__exr_debug::<T>` (drop glue と同じく型ごとに codegen が本体を作る) で書く。
-// 数値・文字列の書き出し・パディング・Debug の整形は prelude の Rust の関数。
+// The format string is split up at compile time, and "string pieces" and "values" are written in order to the prelude's Formatter.
+// Values are written with `__exr_display::<T>` / `__exr_debug::<T>` (codegen builds their bodies per type, like drop glue).
+// Writing out numbers / strings, padding, and Debug pretty-printing are Rust fns in the prelude.
 
-/// 書式指定 1 個分
+/// One format spec
 #[derive(Clone, Default, PartialEq)]
 pub(crate) struct FmtSpec {
     width: usize,
-    /// `{:w$}` / `{:1$}`: 幅を引数から取る (引数の番号)
+    /// `{:w$}` / `{:1$}`: take the width from an argument (the argument's number)
     width_arg: Option<usize>,
-    /// `{:.p$}` / `{:.1$}` / `{:.*}`: 精度を引数から取る
+    /// `{:.p$}` / `{:.1$}` / `{:.*}`: take the precision from an argument
     prec_arg: Option<usize>,
     fill: char,
     align: u8,
@@ -29,14 +29,14 @@ pub(crate) struct FmtSpec {
 pub(crate) enum FmtPiece {
     Lit(String),
     Arg {
-        /// 引数の番号 (位置か名前から決めたもの)
+        /// The argument's number (determined from the position or the name)
         arg: usize,
         debug: bool,
         spec: FmtSpec,
     },
 }
 
-/// 書式文字列を分解する。名前つきの `{x}` は named (名前つき引数) か、なければその名前の変数を引数に足す
+/// Splits up a format string. A named `{x}` is one of named (the named arguments), or if there is none, the variable of that name is added to the arguments
 pub(crate) fn parse_fmt(
     s: &str,
     n_pos: usize,
@@ -134,7 +134,7 @@ pub(crate) fn parse_fmt(
             spec.flags |= 1;
             j += 1;
         }
-        // 幅: 数字、または `名前$` / `番号$`
+        // Width: a number, or `name$` / `number$`
         let ws = j;
         while sc.get(j).is_some_and(|c| c.is_ascii_alphanumeric() || *c == '_') {
             j += 1;
@@ -153,7 +153,7 @@ pub(crate) fn parse_fmt(
                 },
             });
         } else {
-            // 先頭の数字だけが幅で、残りは型の指定 (`12e` / `x` / `b` など)
+            // Only the leading digits are the width; the rest is the type spec (`12e` / `x` / `b` etc.)
             j = ws;
             let mut w = 0;
             let mut any = false;
@@ -174,7 +174,7 @@ pub(crate) fn parse_fmt(
             }
             let ptok: String = sc[ps..j].iter().collect();
             if sc.get(ps) == Some(&'*') {
-                // `.*`: 次の位置引数が精度で、その次が値
+                // `.*`: the next positional argument is the precision, and the one after it is the value
                 j = ps + 1;
                 spec.prec = Some(0);
                 if implicit {
@@ -198,7 +198,7 @@ pub(crate) fn parse_fmt(
                     },
                 });
             } else {
-                // 数字だけ取り、残りは型の指定
+                // Take only the digits; the rest is the type spec
                 j = ps;
                 let mut p = 0;
                 while let Some(d) = sc.get(j).and_then(|c| c.to_digit(10)) {
@@ -232,7 +232,7 @@ pub(crate) fn parse_fmt(
 }
 
 impl Cx<'_> {
-    /// &str の定数 (fat pointer のアドレス)
+    /// A &str constant (the address of the fat pointer)
     pub(crate) fn str_const(&mut self, s: &str) -> Value {
         let n = s.len();
         let p = self.data_addr(s.as_bytes().to_vec());
@@ -253,7 +253,7 @@ impl Cx<'_> {
         Ok(Ty::Struct(sid))
     }
 
-    /// 値として書けるか (`{}` なら Display、`{:?}` なら Debug を実装しているか)
+    /// Whether it can be written as a value (whether it implements Display for `{}`, Debug for `{:?}`)
     pub(crate) fn fmt_ok(&self, t: Ty, debug: bool) -> bool {
         match t {
             t if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Str) => true,
@@ -274,7 +274,7 @@ impl Cx<'_> {
         }
     }
 
-    /// 書式化マクロの本体。dest が Some なら write! (その Formatter / String に書く)
+    /// The body of a formatting macro. If dest is Some, write! (writes to that Formatter / String)
     pub(crate) fn fmt_macro(&mut self, p: &Path, g: &str, name: &str) -> R<V> {
         let _ = p;
         let span = SP;
@@ -284,13 +284,13 @@ impl Cx<'_> {
         let Some(parsed) = crate::ast_closure::macro_args_at(g, self.mbase) else {
             return err(span, format!("`{name}!`: expected comma-separated expressions"));
         };
-        // (読み直した引数は関数の間持っておく: アドレスで引く表を使うコードに渡すため)
+        // (the re-read arguments are kept for the duration of the fn: to pass them to code that uses tables looked up by address)
         let Expr::Tuple(kept) = self.keep_expr(Expr::Tuple(parsed)) else { unreachable!() };
         let args: Vec<&Expr> = kept.iter().collect();
         self.fmt_macro_args(args, name)
     }
 
-    /// fmt_macro の続き (引数は読んだ式)
+    /// The continuation of fmt_macro (the arguments are the parsed expressions)
     pub(crate) fn fmt_macro_args(&mut self, args: Vec<&Expr>, name: &str) -> R<V> {
         let span = SP;
         let mut args = args;
@@ -337,7 +337,7 @@ impl Cx<'_> {
         }
         let fmt_arg = args.first().copied();
         let rest: Vec<&Expr> = args.into_iter().skip(1).collect();
-        // 位置引数と `name = expr`
+        // Positional arguments and `name = expr`
         let mut pos: Vec<&Expr> = vec![];
         let mut named: Vec<String> = vec![];
         let mut named_e: Vec<&Expr> = vec![];
@@ -370,7 +370,7 @@ impl Cx<'_> {
         if newline {
             pieces.push(FmtPiece::Lit("\n".into()));
         }
-        // 書式文字列の `{x}` (引数にない名前) はその名前の変数。位置は書式文字列のもの (rustc は `{x}` で報告する)
+        // A `{x}` in the format string (a name not among the arguments) is the variable of that name. Its position is the format string's (rustc reports at `{x}`)
         let lit_pos = match fmt_arg {
             Some(Expr::Lit(_, p)) => *p,
             _ => SP,
@@ -383,7 +383,7 @@ impl Cx<'_> {
             named_e.push(self.keep_expr(pe));
         }
         let all: Vec<&Expr> = pos.into_iter().chain(named_e).collect();
-        // 書き込み先の Formatter
+        // The Formatter to write to
         let fty = self.formatter_ty().or_else(|e| err(span, e))?;
         let fref = Ty::Ref(true, intern(fty));
         let sty = self.string_ty().or_else(|e| err(span, e))?;
@@ -412,8 +412,8 @@ impl Cx<'_> {
                     Ty::Struct(sid) => self.prog.method(sid, "write_str"),
                     _ => None,
                 } {
-                    // `write_str` を持つ書き込み先 (Stdout / BufWriter / fmt::Write を実装した型):
-                    // いったん String に書いてから渡す
+                    // A destination that has `write_str` (Stdout / BufWriter / a type implementing fmt::Write):
+                    // write to a String first, then pass it
                     writer = Some((v, t, id));
                     let (s, _) = self.call_named("String::new", vec![], &[], span)?;
                     let s = s.unwrap();
@@ -427,7 +427,7 @@ impl Cx<'_> {
                 }
             }
             None => {
-                // (format! の String は、決まった部分の長さ + 引数 1 つあたり 8 byte を先に確保する: 伸ばすたびの realloc を省く)
+                // (the String of format! reserves the length of the fixed parts + 8 bytes per argument up front: saves the realloc on every growth)
                 let (s, _) = if self.prog.index.contains_key("__exr_string_cap") {
                     let lits: usize = pieces.iter().map(|p| match p {
                         FmtPiece::Lit(l) => l.len(),
@@ -443,9 +443,9 @@ impl Cx<'_> {
                 self.call_named("__exr_formatter", vec![Ty::Unit], &[(s, sref)], span)?.0.unwrap()
             }
         };
-        // 引数は (ムーブせずに) 1 回ずつ評価してアドレスにする
+        // Each argument is evaluated once (without moving) and made into an address
         let mut vals: Vec<(Value, Ty, Sp)> = vec![];
-        // 幅に使う引数 (`{:w$}`) は usize
+        // Arguments used for the width (`{:w$}`) are usize
         let width_args: Vec<usize> = pieces
             .iter()
             .flat_map(|p| match p {
@@ -546,7 +546,7 @@ impl Cx<'_> {
                         self.call_named("__exr_fmt_ptr", vec![Ty::Unit], &[(f, fref), (a, Ty::Usize)], span)?;
                         continue;
                     }
-                    // `{:e}` / `{:E}`: 数値を指数表記で (prelude の __exr_fmt_exp)
+                    // `{:e}` / `{:E}`: a number in exponent notation (the prelude's __exr_fmt_exp)
                     if spec.radix >= 5 && (t.is_int() || t.is_float()) {
                         let ct = clif_ty(t).unwrap();
                         let x = self.b.ins().load(ct, mf(), v, 0);
@@ -556,7 +556,7 @@ impl Cx<'_> {
                             let is32 = self.b.ins().iconst(types::I8, (t == Ty::F32) as i64);
                             self.call_named("__exr_fmt_exp", vec![Ty::Unit], &[(f, fref), (x, Ty::F64), (is32, Ty::Bool), (up, Ty::Bool)], span)?;
                         } else {
-                            // (絶対値を u128 にして渡す)
+                            // (pass the absolute value as a u128)
                             let w = if ct == types::I128 {
                                 x
                             } else if t.signed() {
@@ -620,7 +620,7 @@ impl Cx<'_> {
         }
     }
 
-    /// 書式マクロの引数を 1 回ずつ評価してアドレスにする (発散したらそこで止める: vals が足りなくなる)
+    /// Evaluates each argument of a format macro once and makes it an address (stops there if one diverges: vals then comes up short)
     pub(crate) fn fmt_eval_args(
         &mut self,
         all: &[&Expr],
@@ -668,15 +668,15 @@ impl Cx<'_> {
         Ok(())
     }
 
-    /// `x.to_string()` (Display を実装した型): `format!("{}", x)` と同じ
+    /// `x.to_string()` (a type implementing Display): the same as `format!("{}", x)`
     pub(crate) fn to_string_value(&mut self, recv: &Expr, span: Sp) -> R<V> {
-        // (`format!("{}", recv)` の引数を作る: recv はそのまま (型の表を引けるように) 渡す)
+        // (build the arguments of `format!("{}", recv)`: recv is passed as is (so that the type table can be looked up))
         let _ = span;
         let fmt = self.keep_expr(Expr::Lit("\"{}\"".to_string(), crate::parse::Pos::default()));
         self.fmt_macro_args(vec![fmt, recv], "format")
     }
 
-    /// `__exr_display::<T>` / `__exr_debug::<T>` の本体
+    /// The body of `__exr_display::<T>` / `__exr_debug::<T>`
     pub(crate) fn fmt_glue_body(&mut self, sig: &FnSig, debug: bool) -> R<()> {
         let entry = self.b.create_block();
         self.b.switch_to_block(entry);
@@ -745,7 +745,7 @@ impl Cx<'_> {
                 let l = self.str_const("()");
                 self.call_named("__exr_fmt_lit", vec![Ty::Unit], &[(f, fref), (l, str_ref)], span)?;
             }
-            // x: &str (fat のアドレス)
+            // x: &str (the address of the fat pointer)
             Ty::Str => {
                 let h = if debug { "__exr_fmt_str_debug" } else { "__exr_fmt_str" };
                 self.call_named(h, vec![Ty::Unit], &[(f, fref), (x, str_ref)], span)?;
@@ -758,7 +758,7 @@ impl Cx<'_> {
                 let p = self.b.ins().load(PTR, mf(), x, 0);
                 self.call_named(me, vec![*i], &[(p, Ty::Ref(false, intern(*i))), (f, fref)], span)?;
             }
-            // &[T] / &mut [T]: 要素の列
+            // &[T] / &mut [T]: the sequence of elements
             Ty::Ref(_, Ty::Slice(e)) | Ty::Box(Ty::Slice(e)) => {
                 let p = self.b.ins().load(PTR, mf(), x, 0);
                 let n = self.b.ins().load(types::I64, mf(), x, 8);
@@ -774,7 +774,7 @@ impl Cx<'_> {
                 let bname = self.prog.structs[b as usize].name.clone();
                 let mname = format!("{bname}::<{tr}>::fmt");
                 if let Some(&m) = self.prog.index.get(&mname) {
-                    // 手書き (と prelude) の impl
+                    // Hand-written (and prelude) impls
                     let ms = &self.prog.sigs[m as usize];
                     let mut fid = m;
                     if ms.is_generic() {
@@ -845,7 +845,7 @@ impl Cx<'_> {
         Ok(())
     }
 
-    /// `#[derive(Debug)]` の struct / enum とタプル
+    /// `#[derive(Debug)]` structs / enums and tuples
     pub(crate) fn fmt_derived(&mut self, sid: u32, x: Value, f: Value) -> R<()> {
         let fty = self.formatter_ty()?;
         let fref = Ty::Ref(true, intern(fty));
@@ -854,12 +854,12 @@ impl Cx<'_> {
         let sd = &self.prog.structs[sid as usize];
         let tuple = self.prog.is_tuple(b);
         let bname = self.prog.structs[b as usize].name.clone();
-        // (モジュールの中の名前 `m__Ty` (ぶつかる名前を平らにしたもの) は元の名前で表示する)
+        // (a name inside a module `m__Ty` (a clashing name flattened) is shown with its original name)
         let bname = match bname.rfind("__") {
             Some(i) if i > 0 && !bname.starts_with('_') => bname[i + 2..].to_string(),
             _ => bname,
         };
-        // (名前, フィールド (名前, 型, オフセット), 名前つきか) の候補。enum なら判別値ごと
+        // The candidates of (name, fields (name, type, offset), whether named). Per discriminant for an enum
         let shapes: Vec<(Option<i64>, String, Vec<(String, Ty, u32)>, bool)> = if sd.is_enum {
             sd.variants
                 .iter()
@@ -925,8 +925,8 @@ impl Cx<'_> {
 }
 
 impl Cx<'_> {
-    /// `__exr_hash::<T>(x: &T) -> u64` の本体 (整数は掛け算で混ぜる、文字列はバイト列の FNV、
-    /// struct / enum / タプル / 配列は要素のハッシュを組み合わせる)
+    /// The body of `__exr_hash::<T>(x: &T) -> u64` (integers are mixed by multiplication, strings with FNV over their bytes,
+    /// struct / enum / tuple / array combine the hashes of their elements)
     pub(crate) fn hash_glue_body(&mut self, sig: &FnSig) -> R<()> {
         let entry = self.b.create_block();
         self.b.switch_to_block(entry);
@@ -990,14 +990,14 @@ impl Cx<'_> {
             Ty::Struct(sid) => {
                 let sd = &self.prog.structs[sid as usize];
                 let bname = self.prog.structs[self.prog.base_of(sid) as usize].name.clone();
-                // String は中身のバイト列
+                // A String by its bytes
                 if bname == "String" {
                     let (fat, _) = self
                         .deref_to_slice(x, sid, false)
                         .ok_or("internal: bad String")?;
                     return Ok(self.call_named("__exr_hash_bytes", vec![Ty::Unit], &[(fat, u8s)], span)?.0.unwrap());
                 }
-                // Vec は長さと要素で (バッファのアドレスでなく)
+                // A Vec by its length and elements (not by the buffer's address)
                 if let Some((po, lo, et)) = self.vec_fields(sid) {
                     let (es, _) = self.prog.size_align(et);
                     let p = self.b.ins().load(PTR, mf(), x, po as i32);
@@ -1070,7 +1070,7 @@ impl Cx<'_> {
                     h
                 }
             }
-            // 生ポインタはアドレスで (std と同じ)
+            // Raw pointers by address (same as std)
             Ty::Ptr(..) => {
                 let v = self.b.ins().load(PTR, mf(), x, 0);
                 let z = self.b.ins().iconst(types::I64, 0);
@@ -1081,11 +1081,11 @@ impl Cx<'_> {
     }
 }
 
-// --- 大小比較 (PartialOrd / Ord) ---------------------------------------------
+// --- Ordering comparison (PartialOrd / Ord) ---------------------------------------------
 
 impl Cx<'_> {
-    /// 値 v (型 t) を比較の glue に渡せる (アドレス, 指す先の型) にする。
-    /// 細い参照は指す先まで辿り、スカラーの値は一時領域に置く
+    /// Turns a value v (of type t) into an (address, pointee type) that can be passed to the comparison glue.
+    /// Thin references are followed to their pointee, and scalar values are put in a temporary slot
     pub(crate) fn ord_addr(&mut self, v: Value, t: Ty) -> (Value, Ty) {
         let (mut v, mut t) = (v, t);
         loop {
@@ -1108,12 +1108,12 @@ impl Cx<'_> {
         }
     }
 
-    /// `__exr_cmp::<t>(a, b)` (a, b は t の値のアドレス) → -1 / 0 / 1 の i32
+    /// `__exr_cmp::<t>(a, b)` (a, b are addresses of values of t) → an i32 of -1 / 0 / 1
     pub(crate) fn cmp_call(&mut self, a: Value, b: Value, t: Ty) -> R<Value> {
         if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Unit | Ty::Ptr(..)) {
             return self.cmp_at(a, b, t);
         }
-        // glue がなければその場で展開する
+        // If there is no glue, expand it in place
         if !self.prog.index.contains_key("__exr_cmp") {
             if self.cmp_depth > 16 {
                 return Err(format!("comparison of the recursive type `{}` is not supported", self.prog.tn(t)));
@@ -1129,7 +1129,7 @@ impl Cx<'_> {
         Ok(v.unwrap())
     }
 
-    /// `__exr_cmp::<T>(a: &T, b: &T) -> i32` の本体
+    /// The body of `__exr_cmp::<T>(a: &T, b: &T) -> i32`
     pub(crate) fn cmp_glue_body(&mut self, sig: &FnSig) -> R<()> {
         let entry = self.b.create_block();
         self.b.switch_to_block(entry);
@@ -1144,7 +1144,7 @@ impl Cx<'_> {
         Ok(())
     }
 
-    /// `__exr_eq::<T>(a: &T, b: &T) -> bool` の本体
+    /// The body of `__exr_eq::<T>(a: &T, b: &T) -> bool`
     pub(crate) fn eq_glue_body(&mut self, sig: &FnSig) -> R<()> {
         let entry = self.b.create_block();
         self.b.switch_to_block(entry);
@@ -1160,7 +1160,7 @@ impl Cx<'_> {
         Ok(())
     }
 
-    /// 2 つのスカラーの大小 (x > y) - (x < y)
+    /// The ordering of 2 scalars (x > y) - (x < y)
     pub(crate) fn cmp_scalar(&mut self, x: Value, y: Value, signed: bool) -> Value {
         let (lt, gt) = if signed {
             (IntCC::SignedLessThan, IntCC::SignedGreaterThan)
@@ -1174,14 +1174,14 @@ impl Cx<'_> {
         self.b.ins().isub(g, l)
     }
 
-    /// 0 でなければ done へ (その値で)、0 なら次のブロックへ進む
+    /// If nonzero, go to done (with that value); if 0, go on to the next block
     pub(crate) fn cmp_chain(&mut self, c: Value, done: Block) {
         let next = self.b.create_block();
         self.b.ins().brif(c, done, &[c], next, &[]);
         self.b.switch_to_block(next);
     }
 
-    /// 要素型 e の列 (pa, la) と (pb, lb) を辞書順に比べる
+    /// Compares the sequences (pa, la) and (pb, lb) of element type e lexicographically
     pub(crate) fn cmp_seq(&mut self, pa: Value, la: Value, pb: Value, lb: Value, e: Ty) -> R<Value> {
         let (es, _) = self.prog.size_align(e);
         let done = self.b.create_block();
@@ -1213,8 +1213,8 @@ impl Cx<'_> {
         Ok(res)
     }
 
-    /// a, b (t の値のアドレス) の大小。derive(PartialOrd) と同じく、フィールド・要素を前から辞書順に比べる。
-    /// 手書きの partial_cmp / cmp があればそれを呼ぶ
+    /// The ordering of a, b (addresses of values of t). Like derive(PartialOrd), compares fields / elements lexicographically from the front.
+    /// If there is a hand-written partial_cmp / cmp, calls it
     pub(crate) fn cmp_at(&mut self, a: Value, b: Value, t: Ty) -> R<Value> {
         Ok(match t {
             Ty::Unit => self.b.ins().iconst(types::I32, 0),
@@ -1259,7 +1259,7 @@ impl Cx<'_> {
                 self.cmp_seq(a, l, b, l, *e)?
             }
             Ty::Struct(sid) => {
-                // Vec / String は中身の列
+                // Vec / String by their sequence of contents
                 if let Some((fa, ft)) = self.deref_to_slice(a, sid, false) {
                     let (fb, _) = self.deref_to_slice(b, sid, false).unwrap();
                     return self.cmp_at(fa, fb, ft);
@@ -1268,7 +1268,7 @@ impl Cx<'_> {
                     .into_iter()
                     .find(|m| !self.prog.is_tuple(sid) && self.prog.method(sid, m).is_some());
                 if let Some(m) = user {
-                    // 手書きの impl: `__exr_pord_i32(&__a.partial_cmp(__b))`
+                    // A hand-written impl: `__exr_pord_i32(&__a.partial_cmp(__b))`
                     let r = Ty::Ref(false, intern(t));
                     self.scopes.push(vec![]);
                     self.bind("__exr_ca".into(), r, Some(a));
@@ -1295,7 +1295,7 @@ impl Cx<'_> {
                 let done = self.b.create_block();
                 let res = self.b.append_block_param(done, types::I32);
                 if is_enum {
-                    // バリアントの判別値の順、同じバリアントならフィールドの辞書順
+                    // By the order of the variants' discriminants; for the same variant, lexicographically by fields
                     let ct = clif_ty(tag_ty).unwrap();
                     let ta = self.b.ins().load(ct, mf(), a, 0);
                     let tb = self.b.ins().load(ct, mf(), b, 0);
@@ -1335,7 +1335,7 @@ impl Cx<'_> {
         })
     }
 
-    /// `a.cmp(&b)` / `a.partial_cmp(&b)` (手書きの impl がない型: 整数・タプル・derive した型など)
+    /// `a.cmp(&b)` / `a.partial_cmp(&b)` (types with no hand-written impl: integers, tuples, derived types, etc.)
     pub(crate) fn ord_method(&mut self, mc: &Expr) -> R<Option<V>> {
         let Expr::MethodCall(receiver, method, _, margs, _) = mc else { return Ok(None) };
         let name = method.to_string();
@@ -1346,7 +1346,7 @@ impl Cx<'_> {
         if !self.prog.index.contains_key(helper) {
             return Ok(None);
         }
-        // 手書きの cmp があれば普通のメソッド呼び出し
+        // If there is a hand-written cmp, an ordinary method call
         if let Some(mut t) = self.peek(&**receiver) {
             while let Ty::Ref(_, i) = t {
                 t = *i;
@@ -1360,7 +1360,7 @@ impl Cx<'_> {
         let (v, t) = self.operand(&**receiver, None, true)?;
         let Some(v) = v else { return Ok(Some((None, Ty::Never))) };
         let (ra, rt) = self.ord_addr(v, t);
-        // (`Abs(-3).cmp(&b)`: 受け手の型が評価してから分かった手書きの impl は、評価した値でそのメソッドを呼ぶ)
+        // (`Abs(-3).cmp(&b)`: a hand-written impl found only once the receiver's type is known after evaluation calls that method with the evaluated value)
         if let Ty::Struct(sid) = rt {
             if let Some(id) = self.prog.method(sid, &name) {
                 let args: Vec<&Expr> = margs.iter().collect();
@@ -1378,7 +1378,7 @@ impl Cx<'_> {
             );
         }
         let r = Ty::Ref(false, intern(rt));
-        // (浮動小数点の partial_cmp は NaN で None)
+        // (a floating-point partial_cmp is None on NaN)
         if name == "partial_cmp" && rt.is_float() && self.prog.index.contains_key("__exr_pcmp_fl") {
             let ct = clif_ty(rt).unwrap();
             let x = self.b.ins().load(ct, mf(), ra, 0);

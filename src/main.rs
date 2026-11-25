@@ -1,7 +1,7 @@
-//! zustc の CLI。
-//!   zustc <input.rs> [-o out] [...]   ビルド (自前のフロントエンド + Cranelift。`--backend=minclif` で minclif)
-//!   zustc build <workspace> [-o dir]   ワークスペース (複数のクレート) をビルド
-//!   zustc check <input.rs> [-j N]     型検査だけ (全診断を表示。関数が多ければ N 個の子プロセスで分ける)
+//! The zustc CLI.
+//!   zustc <input.rs> [-o out] [...]   build (our own frontend + Cranelift; minclif with `--backend=minclif`)
+//!   zustc build <workspace> [-o dir]   build a workspace (several crates)
+//!   zustc check <input.rs> [-j N]     type check only (shows all diagnostics; with many fns, splits them across N child processes)
 
 use std::path::PathBuf;
 
@@ -48,7 +48,7 @@ fn main() {
     let mut input = PathBuf::new();
     let mut output = PathBuf::new();
     let mut mode = "build";
-    // (バックエンド: 既定は Cranelift。ZUSTC_BACKEND=minclif / --backend=minclif で minclif)
+    // (Backend: Cranelift by default. minclif with ZUSTC_BACKEND=minclif / --backend=minclif)
     let mut backend = std::env::var("ZUSTC_BACKEND").unwrap_or_else(|_| "cranelift".to_string());
     let mut target = String::from("x86_64-unknown-linux-gnu");
     match args.peek().map(String::as_str) {
@@ -122,14 +122,14 @@ fn main() {
     if mode == "workspace" {
         let crates = zustc::driver2::read_workspace(&input).unwrap_or_else(|e| die(e));
         let out_dir = if output.as_os_str().is_empty() { input.parent().map(|d| d.join("target")).unwrap_or("target".into()) } else { output };
-        // (キャッシュはクレートごとに out_dir/<名前>.crcache2)
+        // (The cache is out_dir/<name>.crcache2 per crate)
         match Session2::new(o).build_workspace(&crates, &out_dir) {
             Ok(_) => std::process::exit(0),
             Err(e) => die(e),
         }
     }
     if mode == "check" {
-        // (`mod x;` のファイルも読む。診断の行は結合したソースのもの: 1 ファイルならそのまま)
+        // (Files of `mod x;` are read too. Diagnostic lines are those of the combined source: as is for a single file)
         let (src, mut map) = zustc::srcmap::load_crate_keeping_externs(&input, "src/main.rs", &o.cfg_with(&o.features)).unwrap_or_else(|e| die(e));
         // (`--test`: checked with the harness, as it is built: a crate of tests needs no `main` of its own)
         let src = if o.test {

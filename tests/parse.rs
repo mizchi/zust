@@ -1,5 +1,5 @@
-//! 自前の構文解析 (crates/syntax/src/parse.rs) を syn と比べる: probe / examples / src の全ファイルを解析し、
-//! 節の種類ごとの数が syn で数えたものと一致するか。
+//! Compares our own parser (crates/syntax/src/parse.rs) with syn: parses every file of probe / examples / src and checks
+//! whether the count of each kind of node matches the one counted with syn.
 use zustc::parse::{Counts, parse_file};
 use syn::visit::Visit;
 
@@ -61,7 +61,7 @@ impl<'a> Visit<'a> for SynCounts {
     fn visit_macro(&mut self, _: &'a syn::Macro) {
         self.0.macros += 1;
     }
-    // (型・パターン・属性の中の式は数えない: 自前の方も数えない)
+    // (expressions inside types, patterns and attributes are not counted: our own side does not count them either)
     fn visit_type(&mut self, _: &'a syn::Type) {}
     fn visit_pat(&mut self, _: &'a syn::Pat) {}
     fn visit_attribute(&mut self, _: &'a syn::Attribute) {}

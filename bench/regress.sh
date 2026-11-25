@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# 回帰チェック。
-#   bench/regress.sh save    今の状態をベースライン "main" として保存する (機能追加の前に)
-#   bench/regress.sh         ベースラインと比べる。criterion が「回帰」と判定したもの、
-#                            サイズ予算 (bench/budget.txt) 超過、rustc との出力差があれば失敗する
-# 環境変数 ZUSTC_BENCH_LINKER でリンカを固定できる (ベースラインと同じ条件で比べること)。
+# Regression check.
+#   bench/regress.sh save    saves the current state as the baseline "main" (before adding features)
+#   bench/regress.sh         compares with the baseline. Fails if there is anything criterion judges a "regression",
+#                            a size budget (bench/budget.txt) overrun, or an output difference from rustc
+# The linker can be fixed with the environment variable ZUSTC_BENCH_LINKER (compare under the same conditions as the baseline).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 cargo build --release -q || exit 1

@@ -1,4 +1,4 @@
-// cfg-if: if / else if / else の cfg を選ぶマクロ
+// cfg-if: a macro choosing among the cfgs of if / else if / else
 cfg_if::cfg_if! {
     if #[cfg(target_os = "windows")] {
         fn os() -> &'static str { "windows" }

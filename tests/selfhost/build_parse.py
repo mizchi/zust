@@ -1,6 +1,6 @@
-"""zustc 自身の crates/syntax/src/parse.rs (syn を使わない Rust の構文解析) を 1 ファイルのプログラムにまとめる。
+"""Bundles zustc's own crates/syntax/src/parse.rs (the Rust parser that does not use syn) into a single-file program.
 usage: python3 tests/selfhost/build_parse.py > out/selfhost/parse_main.rs
-main は引数のファイルごとに構文解析し、節の数・アイテムの名前と関数のシグネチャを出す。"""
+main parses each file in its arguments and prints the number of nodes, the item names and the fn signatures."""
 
 parse = open("crates/syntax/src/parse.rs").read()
 print("""// 自動生成: tests/selfhost/build_parse.py (zustc の crates/syntax/src/parse.rs をそのまま含む)

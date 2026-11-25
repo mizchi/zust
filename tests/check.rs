@@ -1,4 +1,4 @@
-//! check (LSP の診断) はエラーがあっても止まらず、全関数の診断を返す
+//! check (LSP diagnostics) does not stop on errors and returns the diagnostics of all fns
 use zustc::{Options2, Session2};
 
 #[test]
@@ -8,7 +8,7 @@ fn reports_all_errors_and_recovers() {
     let d = s.check(src);
     assert_eq!(d.len(), 2, "{d:?}");
     assert_eq!((d[0].line, d[1].line), (4, 8));
-    // 直した後は診断が消え、変わっていない関数は検査済みの印で飛ばされる
+    // After the fix the diagnostics disappear, and unchanged fns are skipped by their checked marks
     let fixed = src
         .replace("E::A(x, y)", "E::A(x)")
         .replace("-> bool { 1 }", "-> bool { true }");
@@ -16,8 +16,8 @@ fn reports_all_errors_and_recovers() {
     assert!(s.check(&fixed).is_empty());
 }
 
-/// 呼び出し元が「検査済み」でキャッシュに当たっても、ジェネリック関数の本体の型エラーは報告される
-/// (検査済みの印に、その関数が要求したインスタンスを保存して要求し直すため)
+/// Even if a caller hits the cache as "checked", type errors in a generic fn's body are reported
+/// (because the checked mark stores the instances that fn requested, and they are requested again)
 #[test]
 fn generic_body_errors_with_cached_callers() {
     let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/traits.rs"))
@@ -35,8 +35,8 @@ fn generic_body_errors_with_cached_callers() {
     assert!(s.check(&src).is_empty());
 }
 
-/// クロージャの本体のエラーは (呼ばれていなくても) 正しい行で報告され、直せば消える。
-/// 検査済みの印が付いた後も、編集したクロージャの本体だけが検査し直される
+/// Errors in a closure's body are reported on the right line (even if it is not called), and disappear once fixed.
+/// Even after the checked mark is set, only the edited closure body is checked again
 #[test]
 fn closure_and_dyn_errors() {
     let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/closures.rs"))
@@ -61,8 +61,8 @@ fn closure_and_dyn_errors() {
     assert!(d[0].msg.contains("not implemented for `u32`"), "{d:?}");
 }
 
-/// 編集をまたいだ check の記録 (ChkMemo) を使っても、毎回新しい Session2 で検査したものと診断が同じ。
-/// examples の関数の本体 (総称関数も) に、型エラーになる文・ならない文を足したり消したりを続ける
+/// Using the check record across edits (ChkMemo) gives the same diagnostics as checking with a new Session2 each time.
+/// Keeps adding and removing statements that do / do not cause type errors in the bodies of the examples' fns (generic fns too)
 #[test]
 fn check_memo_matches_fresh_check() {
     let root = env!("CARGO_MANIFEST_DIR");
@@ -87,7 +87,7 @@ fn check_memo_matches_fresh_check() {
             let f = |d: &[zustc::Diagnostic]| d.iter().map(|x| (x.line, x.col, x.msg.clone())).collect::<Vec<_>>();
             assert_eq!(f(&d1), f(&d2), "{}", p.display());
             compared += 1;
-            // (関数の本体の先頭 (`{\n` の後ろ) に文を足すか、足したものを消す)
+            // (Add a statement at the start of a fn body (after `{\n`), or remove one that was added)
             let at: Vec<usize> = cur.match_indices(") {\n").map(|(i, _)| i + 4).collect();
             if at.is_empty() {
                 break;
@@ -2930,6 +2930,26 @@ fn projections_are_goals() {
     ok("trait Bar {}\nimpl Bar for u16 {}\ntrait Tr { type A: Bar; }\nimpl Tr for u8 { type A = u16; }\nfn main() {}");
 }
 
+/// Sized (E0277) is not asked where rustc does not ask it: a `?Sized` parameter given `str` or a struct with an unsized
+/// tail, `Box<X>` of a `X: ?Sized`, `T: Clone + ?Sized` in a slice (Clone implies Sized), an unsized last tuple
+/// element behind a reference, `size_of_val` of a str (checked against rustc)
+#[test]
+fn sized_accepts() {
+    let d = Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check("trait Tr { fn n(&self) -> u8 { 1 } }\nimpl Tr for u8 {}\nstruct W<T: ?Sized>(u8, T);\nfn relaxed<X: ?Sized>(_: &X) {}\nfn boxed<X: ?Sized + Tr>(x: Box<X>) -> u8 { x.n() }\nfn cloned<T: Clone + ?Sized>(x: &[T]) -> usize { x.to_vec().len() }\nfn main() {\n    relaxed(\"abc\");\n    let w: &W<[u8]> = &W(1, [2u8, 3]);\n    relaxed(w);\n    let t: Option<&(u8, [u8])> = None;\n    let b: Box<dyn Tr> = Box::new(3u8);\n    println!(\"{} {} {} {}\", t.is_none(), boxed(b), std::mem::size_of_val(\"abcd\"), w.0 + cloned(&[1u8]) as u8);\n}\n");
+    assert!(d.is_empty(), "{d:?}");
+}
+
+/// A `?Sized` parameter passed on to one that must be sized, in a generic fn nothing calls (`zustc check` checks it
+/// with placeholders): E0277, as rustc
+#[test]
+fn sized_rejects_maybe_unsized_param() {
+    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let d = check("fn sized<X>(_: &X) {}\nfn relaxed<X: ?Sized>(x: &X) {\n    sized::<X>(x);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].msg.contains("`X` cannot be known"), "{d:?}");
+    let d = check("struct Foo<T>(T);\nfn not_sized<T: ?Sized>() {}\nfn f<T: ?Sized>() { not_sized::<Foo<T>>() }\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].msg.contains("`T` cannot be known"), "{d:?}");
+}
+
 #[test]
 fn async_main_and_test_attributes_where_rustc_rejects_them() {
     // (rustc 1.100: E0752 at the fn; the test macro's error at the `#[test]` on what is no free fn, `--test` or not)
@@ -3298,4 +3318,44 @@ fn where_a_value_that_is_not_the_type_its_place_wants_is() {
     // the assignment)
     assert_eq!(first("fn ok() -> Result<Option<bool>, ()> { Ok(Some(true)) }\nfn main() {\n    match ok() {\n        Ok(x) if let Err(_) = x => {},\n        _ => {}\n    }\n}\n"), Some(4));
     assert_eq!(first("fn main() {\n    let mut x\n        =\n        2;\n    x = 5.0;\n    let _ = x;\n}\n"), Some(5));
+}
+
+/// Review of #180, each checked against rustc: a struct whose tail is a `?Sized` parameter is unsized by value in a
+/// signature (E0277); a program trait whose supertrait is Clone makes a `?Sized` parameter sized; a closure does not
+/// make its parent's `?Sized` parameter sized
+#[test]
+fn sized_review_cases() {
+    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let d = check("struct W<T: ?Sized>(T);\nfn bad<T: ?Sized>(_: W<T>) {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].msg.contains("`T` cannot be known"), "{d:?}");
+    // (at the argument's type in a signature over lines, as rustc; a let's annotation whatever its initializer)
+    for src in [
+        "fn bad<T: ?Sized>(\n    x: T,\n) {}\nfn main() {}\n",
+        // (a generic bound's `Fn()` and a `pub(crate)` are not the parameters' parentheses)
+        "fn bad<F: Fn(), T: ?Sized>(\n    x: T,\n) {}\nfn main() {}\n",
+        "pub(crate) fn bad<T: ?Sized>(\n    x: T,\n) {}\nfn main() {}\n",
+    ] {
+        let d = check(src);
+        assert!(d.len() == 1 && (d[0].line, d[0].col) == (2, 8), "{src}\n{d:?}");
+    }
+    for src in ["fn main() { let _: Vec<str> = loop {}; }\n", "fn main() { let (_a, _b): (Vec<str>, u8) = loop {}; }\n"] {
+        let d = check(src);
+        assert!(d.len() == 1 && d[0].msg.contains("`str` cannot be known"), "{src}\n{d:?}");
+    }
+    // (a `?Sized` parameter as a trait argument for the trait's parameter not declared `?Sized`)
+    let d = check("trait Tr<T> {}\nimpl<T: ?Sized> Tr<T> for () {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].msg.contains("`T` cannot be known"), "{d:?}");
+    // (with a defaulted parameter the impl does not write)
+    let d = check("trait Tr<T, U = ()> {}\nimpl<T: ?Sized> Tr<T> for () {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].msg.contains("`T` cannot be known"), "{d:?}");
+    for src in [
+        "struct W<T: ?Sized>(T);\nfn good<T: ?Sized>(_: &W<T>) {}\nfn main() {}\n",
+        "trait Tr<T: ?Sized> {}\nimpl<T: ?Sized> Tr<T> for () {}\nfn main() {}\n",
+        "#[doc = \"{\"]\ntrait Tr<T: ?Sized> {}\nimpl<T: ?Sized> Tr<T> for () {}\nfn main() {}\n",
+        "trait Dup: Clone {}\nfn f<T: Dup + ?Sized>(_: &T) { let _v: Vec<T> = Vec::new(); }\nfn main() {}\n",
+        "use std::fmt::Display;\nfn f<T: ?Sized + Display>(x: &T) -> String { let c = |y: &T| format!(\"{y}\"); c(x) }\nfn main() { println!(\"{}\", f(\"abc\")); }\n",
+    ] {
+        let d = check(src);
+        assert!(d.is_empty(), "{src}\n{d:?}");
+    }
 }

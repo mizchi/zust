@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# セルフホストの仕上げ: syn・Cranelift を使わないコンパイラ全体 (tests/selfhost/build_compiler.py が 1 ファイルにまとめたもの) を
-# rustc と zustc (driver2) の両方でコンパイルし、できた 2 つのコンパイラで tests/probe / examples / tests/acg をコンパイルして
-#   - 2 つのコンパイラが出す .o が同じバイト列か
-#   - それを実行した出力が同じか
-# を確かめる。さらに zustc 版のコンパイラで自分自身 (compiler_main.rs) をもう一度コンパイルし (2 段目)、
-# 1 段目と同じ .o になるか (不動点) も確かめる。
+# Final self-host step: compiles the whole compiler without syn / Cranelift (combined into one file by tests/selfhost/build_compiler.py)
+# with both rustc and zustc (driver2), compiles tests/probe / examples / tests/acg with the 2 resulting compilers, and checks
+#   - whether the .o files the 2 compilers output are the same bytes
+#   - whether the outputs of running them are the same
+# Further, the zustc-built compiler compiles itself (compiler_main.rs) once more (stage 2),
+# and it is checked that this gives the same .o as stage 1 (fixed point).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 cargo build --release -q || exit 1
@@ -12,7 +12,7 @@ out=out/selfhost
 mkdir -p "$out/cc/r" "$out/cc/c"
 python3 tests/selfhost/build_compiler.py > "$out/compiler_main.rs"
 rustc --edition 2024 -O -Awarnings "$out/compiler_main.rs" -o "$out/compiler_rustc" || exit 1
-# (1 段目は minclif: できたコンパイラ (中も minclif) が自分自身をコンパイルした結果と同じになるはず)
+# (Stage 1 is minclif: it should match the result of the built compiler (minclif inside too) compiling itself)
 if ! target/release/zustc --backend=minclif "$out/compiler_main.rs" -o "$out/compiler_zustc" -O; then
   echo "FAIL compiler (zustc)"; exit 1
 fi
@@ -42,7 +42,7 @@ for f in tests/probe/*.rs examples/*.rs tests/acg/*.rs; do
   same=$((same + 1))
 done
 echo "compiled by both compilers: $same same, $diff_o .o differ, $diff_run outputs differ"
-# 2 段目: zustc 版のコンパイラで自分自身をコンパイルする
+# Stage 2: compile itself with the zustc-built compiler
 if "$out/compiler_zustc" "$out/compiler_main.rs" -o "$out/compiler_zustc2" -O; then
   if cmp -s "$out/compiler_zustc.o" "$out/compiler_zustc2.o"; then
     echo "ok   stage 2: the zustc-built compiler reproduces itself ($(wc -c < "$out/compiler_zustc2.o") bytes .o)"
@@ -52,7 +52,7 @@ if "$out/compiler_zustc" "$out/compiler_main.rs" -o "$out/compiler_zustc2" -O; t
 else
   echo "FAIL stage 2 (compiler_zustc could not compile itself)"; fail=1
 fi
-# Cranelift のバックエンドでビルドしたコンパイラも同じ .o を出すか
+# Whether the compiler built with the Cranelift backend also outputs the same .o
 if target/release/zustc "$out/compiler_main.rs" -o "$out/compiler_clif" -O && "$out/compiler_clif" "$out/compiler_main.rs" -o "$out/compiler_clif2" -O; then
   if cmp -s "$out/compiler_zustc.o" "$out/compiler_clif2.o"; then
     echo "ok   the Cranelift-built compiler produces the same .o"

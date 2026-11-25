@@ -1,5 +1,5 @@
-//! ベンチ・テスト用のプログラム生成器 (`bench/gen.py` と同じ出力)。
-//! `variant` を変えると `f{n/2}` の本体だけが変わる (1 関数編集のシミュレーション)。
+//! A program generator for benches / tests (the same output as `bench/gen.py`).
+//! Changing `variant` changes only the body of `f{n/2}` (simulating an edit of 1 fn).
 
 use std::fmt::Write;
 

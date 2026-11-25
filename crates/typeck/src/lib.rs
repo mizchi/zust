@@ -1,5 +1,5 @@
-//! zustc の型の検査。acg は構文木と型推論の結果を読みながら型を検査し、命令の列を zust_ir::Recorder に記録する
-//! (check / LSP はここで止める。機械語にするのは zust-codegen の lower)。cache2 は関数ごとの結果 (Blob) の直列化
+//! zustc's type checking. acg checks types while reading the syntax tree and the type inference results, and records the instruction sequence in zust_ir::Recorder
+//! (check / LSP stop here; turning it into machine code is zust-codegen's lower). cache2 is the serialization of each fn's result (Blob)
 
 pub use zust_ir as ir;
 pub use zust_sema::*;

@@ -1,6 +1,6 @@
-//! アイテムの要約 (front.rs の `summarize` / `parse_sig` / `lift_closures` / `parse_and_summarize`) を
-//! 自前の構文木 (src/parse.rs) の上で行う。tests/ast_summary.rs が全ファイルで syn 版と同じ要約になることを確かめる。
-//! 外部クレートに依存しない (parse / types / ast_types / ast_closure / lexer だけ) ので zustc 自身でもコンパイルできる。
+//! Item summaries (front.rs's `summarize` / `parse_sig` / `lift_closures` / `parse_and_summarize`)
+//! done on our own syntax tree (src/parse.rs). tests/ast_summary.rs checks that every file gets the same summaries as the syn version.
+//! It depends on no external crates (only parse / types / ast_types / ast_closure / lexer), so zustc itself can compile it too.
 
 use crate::ast_closure;
 use crate::ast_types::tysyn;
@@ -16,12 +16,12 @@ fn err<T>(msg: &str) -> R<T> {
     Err(msg.to_string())
 }
 
-/// 空白を除いた属性のテキスト (`#[derive(Debug,Clone)]`)
+/// Attribute text with whitespace removed (`#[derive(Debug,Clone)]`)
 fn compact(s: &str) -> String {
     s.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
-/// `#[name]` か `#[unsafe(name)]` が付いているか
+/// Whether `#[name]` or `#[unsafe(name)]` is present
 fn has_attr(attrs: &[String], name: &str) -> bool {
     attrs.iter().any(|a| {
         let c = compact(a);
@@ -29,7 +29,7 @@ fn has_attr(attrs: &[String], name: &str) -> bool {
     })
 }
 
-/// `#[derive(A, B)]` の名前 (1 つの識別子のものだけ)
+/// The names in `#[derive(A, B)]` (only single-identifier ones)
 /// (also as std's prelude writes it, `#[::core::prelude::v1::derive(::core::clone::Clone, ::core::marker::Copy)]`, as
 /// libc 0.2's `s!` does: a std trait by its path is its name)
 fn derive_names(attrs: &[String]) -> Vec<String> {
@@ -124,7 +124,7 @@ fn layout_reprs(attrs: &[String]) -> R<Vec<String>> {
     Ok(v)
 }
 
-/// `#[link_name = "malloc"]` の名前
+/// The name in `#[link_name = "malloc"]`
 fn link_name(attrs: &[String]) -> Option<String> {
     for a in attrs {
         let c = compact(a);
@@ -197,16 +197,16 @@ pub fn const_int(e: &Expr) -> R<i64> {
     }
 }
 
-/// 境界の名前 (front.rs の bound_names と同じ規則)
+/// Bound names (the same rules as front.rs's bound_names)
 pub fn bound_names(bs: &[Bound]) -> R<Vec<String>> {
     let mut v = Vec::new();
     for b in bs {
         match b {
-            // `?Sized` は制約を緩めるだけなので数えない
+            // `?Sized` only relaxes a constraint, so it is not counted
             Bound::Trait(true, _) => {}
             Bound::Trait(false, p) => {
                 let last = p.segs.last().ok_or("empty bound")?;
-                // (`iter::FromIterator<char>` はモジュールの部分を飛ばす)
+                // (`iter::FromIterator<char>` skips the module part)
                 if last.fn_args.is_some() || !last.args.is_empty() {
                     v.push(last.text.clone());
                 } else {
@@ -281,12 +281,12 @@ fn collect_generics(g: &Generics, out: &mut Vec<(String, Vec<String>)>) -> R<()>
         }
     }
     for (t, bs) in &g.preds {
-        // (型パラメータ以外への境界は読み飛ばす)
+        // (Bounds on anything other than type parameters are skipped)
         let PTy::Path(None, p) = t else { continue };
         if p.global || p.segs.len() != 1 || !p.segs[0].args.is_empty() || p.segs[0].fn_args.is_some() {
             continue;
         }
-        // (ライフタイムの述語 `'a: 'b`)
+        // (Lifetime predicates `'a: 'b`)
         if p.segs[0].name.starts_with('\'') {
             continue;
         }
@@ -477,7 +477,7 @@ fn ty_names(t: &PTy, out: &mut Vec<String>) {
     }
 }
 
-/// 型の空白なしのテキスト (syn のトークン列から空白を除いたものと同じ: `PartialEq<[U;N]>` の比較用)
+/// The text of a type without whitespace (same as syn's token sequence with whitespace removed: for comparing `PartialEq<[U;N]>`)
 fn ty_compact(t: &PTy) -> String {
     match t {
         PTy::Path(None, p) => path_compact(p),
@@ -518,7 +518,7 @@ fn expr_compact(e: &Expr) -> String {
     }
 }
 
-/// 関数のシグネチャ (front.rs の parse_sig)
+/// A fn signature (front.rs's parse_sig)
 /// `-> impl Trait + use<..>`: the precise capture list names the function's own parameters
 fn check_impl_ret(sig: &PSig, owner: Option<&Owner>) -> R<()> {
     let Some(PTy::Impl(bs)) = &sig.ret else { return Ok(()) };
@@ -732,7 +732,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
                 return Err(format!("the size for values of type `{u}` cannot be known at compilation time (E0277)"));
             }
         }
-        // 引数位置の `impl Trait` は名前のない型パラメータ
+        // An `impl Trait` in argument position is an unnamed type parameter
         let (inner, rf) = match t {
             PTy::Ref(_, m, i) => (&**i, Some(*m)),
             t => (t, None),
@@ -843,6 +843,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         },
         is_unsafe: sig.quals.iter().any(|q| q == "unsafe") || (is_extern && !sig.quals.iter().any(|q| q == "safe")),
         preds: preds,
+        own_unsized: adt_unsized(&sig.generics),
     })
 }
 
@@ -1775,7 +1776,7 @@ fn opaque_from(sig: &PSig) -> u64 {
     crate::types::OPAQUE_FROM | m24 | m21 << 31
 }
 
-/// `Fn(A, B) -> R` 形式の境界なら (種類, 引数, 戻り値)
+/// (kind, arguments, return value) if it is a bound of the form `Fn(A, B) -> R`
 pub fn parse_fn_bound(s: &str) -> Option<(String, Vec<TySyn>, TySyn)> {
     let kind = ["FnOnce", "FnMut", "Fn"].into_iter().find(|k| s.starts_with(k) && s[k.len()..].trim_start().starts_with('('))?;
     let f = parse_file(&format!("type __B = dyn {s};")).ok()?;
@@ -1880,7 +1881,7 @@ pub fn fn_bound_ret_from(s: &str) -> Vec<usize> {
         .collect()
 }
 
-/// 境界 `Iterator<Item = T>` の関連型の束縛 (名前, 型)
+/// The associated type bindings (name, type) of a bound `Iterator<Item = T>`
 pub fn assoc_bindings(s: &str) -> Vec<(String, TySyn)> {
     let mut out = Vec::new();
     let Ok(f) = parse_file(&format!("type __B = dyn {s};")) else { return out };
@@ -1898,9 +1899,9 @@ pub fn assoc_bindings(s: &str) -> Vec<(String, TySyn)> {
     out
 }
 
-// ---------------------------------------------------------------- クロージャの持ち上げ
+// ---------------------------------------------------------------- Closure lifting
 
-/// パターンの中のすべてのパターン (束縛の名前を集める)
+/// All the patterns within patterns (collects the bound names)
 fn pats_in_block(b: &Block, out: &mut Vec<String>) {
     for s in &b.stmts {
         match s {
@@ -1969,7 +1970,7 @@ fn pats_in_expr(e: &Expr, out: &mut Vec<String>) {
     }
 }
 
-/// 関数 (入れ子のクロージャを含む) のどこかで束縛される名前
+/// Names bound anywhere in a fn (including nested closures)
 fn bound_in_fn(sig: &PSig, body: &Block) -> Vec<String> {
     let mut v = Vec::new();
     if sig.recv_ty.is_some() {
@@ -1982,7 +1983,7 @@ fn bound_in_fn(sig: &PSig, body: &Block) -> Vec<String> {
     v
 }
 
-/// 本体の `let n = ..` から、返すクロージャがキャプチャした変数の型 (注釈か初期化式のリテラル)
+/// From `let n = ..` in the body, the type of a variable captured by the returned closure (an annotation or the literal of the initializer)
 fn local_ty_syn(b: &Block, n: &str, int_hint: Option<Ty>) -> Option<TySyn> {
     let mut found = None;
     for st in &b.stmts {
@@ -2008,7 +2009,7 @@ fn local_ty_syn(b: &Block, n: &str, int_hint: Option<Ty>) -> Option<TySyn> {
     found
 }
 
-/// リテラルのテキストから型 (整数は接尾辞 → 文脈 → i32)
+/// A type from literal text (integers: suffix → context → i32)
 fn lit_ty(t: &str, int_hint: Option<Ty>) -> Option<TySyn> {
     if t == "true" || t == "false" {
         return Some(TySyn::Prim(Ty::Bool));
@@ -2023,7 +2024,7 @@ fn lit_ty(t: &str, int_hint: Option<Ty>) -> Option<TySyn> {
         return None;
     }
     let hex = t.starts_with("0x") || t.starts_with("0b") || t.starts_with("0o");
-    // 接尾辞: 数字・`_`・(16 進なら a-f) の後ろの英字
+    // Suffix: the letters after the digits / `_` / (a-f if hex)
     let body = if hex { &t[2..] } else { t };
     let suf_at = body
         .char_indices()
@@ -2150,7 +2151,7 @@ fn impl_as_infer(t: &PTy) -> PTy {
     }
 }
 
-/// 引数の名前 (識別子のパターンなら)
+/// A parameter's name (if it is an identifier pattern)
 fn pat_name(p: &Pat) -> Option<&str> {
     match p {
         Pat::Ident(_, _, n, None) => Some(n),
@@ -2243,7 +2244,7 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
             deref,
         });
     }
-    // `-> impl Fn(A) -> B { move |x| .. }`: 型は末尾のクロージャの struct
+    // `-> impl Fn(A) -> B { move |x| .. }`: the type is the struct of the trailing closure
     if sig.ret == TySyn::Named(IMPL_RET.into()) {
         let mut tail = match body.stmts.last() {
             Some(Stmt::Expr(e, false)) => Some(e),
@@ -2303,7 +2304,7 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
     Ok(())
 }
 
-// ---------------------------------------------------------------- 要約
+// ---------------------------------------------------------------- Summary
 
 /// E0106 in a fn pointer type or an `Fn(..) -> R` bound: its return type elides a lifetime, and its parameters do not
 /// have exactly one lifetime to take it from
@@ -2593,7 +2594,7 @@ fn tail_borrows_own_local(b: &Block) -> Option<(u32, String, bool)> {
     Some((p.pos.line, seg.name.clone(), init.is_some()))
 }
 
-/// 1 つのアイテムの要約 (front.rs の summarize)
+/// The summary of one item (front.rs's summarize)
 pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
     if item_elision_err(item) {
         return err("missing lifetime specifier (E0106)");
@@ -2719,7 +2720,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             lift_closures(fs, body, &name, &mut sig, Some(&ow.self_ty), &mut sm)?;
             sm.fns.push((name, sig));
         }
-        // 型の別名 (`type Key = u128;`)
+        // Type alias (`type Key = u128;`)
         ItemKind::Type(n, g, _, Some(t)) => {
             let mut gs = Vec::new();
             collect_generics(g, &mut gs)?;
@@ -2929,7 +2930,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     })
                     .collect();
                 sm.impl_trait_args = args.unwrap_or_default();
-                // `impl PartialEq<[U; N]> for Vec<T>`: 右辺の型が self 型と違う比較は trait 名に型引数を残す
+                // `impl PartialEq<[U; N]> for Vec<T>`: a comparison whose right-hand type differs from the self type keeps the type arguments in the trait name
                 if (last.name == "PartialEq" || last.name == "PartialOrd") && !last.args.is_empty() {
                     let rhs = compact(&last.text[last.name.len()..]);
                     let selfs = ty_compact(self_ty);
@@ -2975,7 +2976,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     }
                 }
             }
-            // `impl Add for &M`: M のメソッド `__ref_add` (self は &M) として持つ
+            // `impl Add for &M`: held as M's method `__ref_add` (self is &M)
             // (`impl Tr for &&str`: every reference off, the methods `str::__ref___ref_m`, one `__ref_` a level)
             let mut self_path = self_ty;
             while let (PTy::Ref(_, _, i), true) = (self_path, tr.is_some()) {
@@ -3368,7 +3369,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
     Ok(sm)
 }
 
-/// 字句解析のアイテム (lexer) 1 つを構文解析して要約する (front.rs の parse_and_summarize)
+/// Parses and summarizes one lexer item (front.rs's parse_and_summarize)
 pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<Summary> {
     let text = &src[it.start..it.end];
     if let LexKind::InnerAttr = it.kind {
@@ -3401,7 +3402,7 @@ pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<
     if let LexKind::TraitMember(_) = it.kind {
         let ow = owner.ok_or("trait member without trait")?;
         match &item.kind {
-            // `type Item: Clone;` (関連型の宣言): its bounds (a binding `dyn Tr<Item = T>` must meet them)
+            // `type Item: Clone;` (an associated type declaration): its bounds (a binding `dyn Tr<Item = T>` must meet them)
             // (one without bounds too: a `dyn Tr` must bind every associated type the trait leaves without a
             // default (E0191))
             ItemKind::Type(n, _, bs, None) => {
@@ -3423,7 +3424,7 @@ pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<
                 return Ok(sm);
             }
             ItemKind::Type(..) => return Ok(Summary::default()),
-            // `const K: i32 = 3;` (既定値があれば `Trait::K` という const)
+            // `const K: i32 = 3;` (with a default, a const named `Trait::K`)
             ItemKind::Const(n, t, e) => {
                 let mut sm = Summary::default();
                 if let (Some(t), Some(_)) = (t, e) {
@@ -3456,7 +3457,7 @@ pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<
     Ok(sm)
 }
 
-/// impl / trait のヘッダの要約からメンバの所有者を作る (driver.rs と同じ)
+/// Makes the members' owner from the summary of an impl / trait header (same as driver.rs)
 pub fn owner_of(it: &SrcItem, sums: &[Summary]) -> Option<Owner> {
     match it.kind {
         LexKind::ImplMember(h) => {

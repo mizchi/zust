@@ -1,4 +1,4 @@
-// 手書きの Ord / Eq (sort・max・BinaryHeap・BTreeSet・clamp・cmp・==)
+// Hand-written Ord / Eq (sort, max, BinaryHeap, BTreeSet, clamp, cmp, ==)
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, BTreeMap, BTreeSet};
 #[derive(Debug, Clone)]

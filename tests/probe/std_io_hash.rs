@@ -1,4 +1,4 @@
-// std の fs / env / io::Error / hash (DefaultHasher は SipHash-1-3 で値も std と同じ) / bool::then / 型の別名 / to_le_bytes
+// std's fs / env / io::Error / hash (DefaultHasher is SipHash-1-3 and its values are the same as std's) / bool::then / type aliases / to_le_bytes
 use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
 type Key = u128;

@@ -2430,6 +2430,7 @@ run-pass	dst/dst-coercions.rs
 run-pass	dst/dst-field-align.rs
 run-pass	dst/dst-irrefutable-bind.rs
 compile-fail	dst/dst-rvalue.rs
+compile-fail	dst/dst-sized-trait-param.rs
 run-pass	dst/dst-struct-sole.rs
 run-pass	dst/dst-struct.rs
 run-pass	dst/dst-trait.rs
@@ -3956,6 +3957,7 @@ run-pass	layout/aggregate-lang/union-size.rs
 compile-fail	layout/cannot-transmute-unnormalizable-type.rs
 compile-fail	layout/failed-to-get-layout-for-type-error-ice-92979.rs
 compile-fail	layout/ice-non-last-unsized-field-issue-121473.rs
+compile-fail	layout/invalid-unsized-in-always-sized-tail.rs
 run-pass	layout/issue-112048-unsizing-field-order.rs
 compile-fail	layout/issue-unsized-tail-restatic-ice-122488.rs
 compile-fail	layout/malformed-unsized-type-in-union.rs
@@ -6881,6 +6883,7 @@ compile-fail	resolve/issue-35675.rs
 compile-fail	resolve/issue-39559-2.rs
 compile-fail	resolve/issue-42944.rs
 compile-fail	resolve/issue-49074.rs
+compile-fail	resolve/issue-5035-2.rs
 compile-fail	resolve/issue-5035.rs
 compile-fail	resolve/issue-5099.rs
 compile-fail	resolve/issue-54379.rs
@@ -7575,6 +7578,7 @@ run-pass	structs/unit-like-struct.rs
 compile-fail	structs/unresolved-struct-with-fru.rs
 check-pass	structs/variant-structs-trivial.rs
 compile-fail	suggestions/abi-typo.rs
+compile-fail	suggestions/adt-param-with-implicit-sized-bound.rs
 compile-fail	suggestions/ambiguous-assoc-type-path-suggest-similar-item.rs
 compile-fail	suggestions/args-instead-of-tuple-errors.rs
 compile-fail	suggestions/args-instead-of-tuple.rs
@@ -7766,6 +7770,7 @@ compile-fail	suggestions/option-to-bool.rs
 compile-fail	suggestions/parenthesized-deref-suggestion.rs
 compile-fail	suggestions/partialeq_suggest_swap.rs
 compile-fail	suggestions/partialeq_suggest_swap_on_e0277.rs
+compile-fail	suggestions/path-by-value.rs
 compile-fail	suggestions/path-display.rs
 compile-fail	suggestions/pattern-slice-vec.rs
 compile-fail	suggestions/pattern-struct-with-slice-vec-field.rs
@@ -7780,6 +7785,7 @@ compile-fail	suggestions/recover-invalid-float.rs
 compile-fail	suggestions/recover-missing-turbofish-surrounding-angle-braket.rs
 compile-fail	suggestions/redundant-shared-reference-issue-133685.rs
 compile-fail	suggestions/ref-pattern-binding.rs
+compile-fail	suggestions/removal-of-multiline-trait-bound-in-where-clause.rs
 compile-fail	suggestions/remove-question-symbol-with-paren.rs
 compile-fail	suggestions/restrict-type-argument.rs
 compile-fail	suggestions/restrict-type-not-param.rs
@@ -7965,6 +7971,7 @@ check-pass	trait-bounds/anonymous-parameters-13775.rs
 compile-fail	trait-bounds/argument-with-unnecessary-method-call.rs
 compile-fail	trait-bounds/deep-level-send-bound-check-issue-40827.rs
 compile-fail	trait-bounds/false-span-in-trait-bound-label.rs
+compile-fail	trait-bounds/fix-dyn-sized-fn-param-sugg.rs
 compile-fail	trait-bounds/impl-missing-where-clause-lifetimes-from-trait.rs
 compile-fail	trait-bounds/issue-119530-sugg-from-fn.rs
 check-pass	trait-bounds/issue-75961.rs
@@ -7978,6 +7985,7 @@ compile-fail	trait-bounds/suggest-maybe-sized-bound.rs
 compile-fail	trait-bounds/super-assoc-mismatch.rs
 compile-fail	trait-bounds/trait-bound-adt-issue-145611.rs
 compile-fail	trait-bounds/trait-selection-overflow-prevention-72839.rs
+compile-fail	trait-bounds/unsized-bound.rs
 compile-fail	traits/alias/generic-default-in-dyn.rs
 run-pass	traits/alignment-gep-tup-like-1.rs
 run-pass	traits/anon-static-method.rs
@@ -8267,6 +8275,7 @@ compile-fail	traits/suggest-dereferences/root-obligation.rs
 compile-fail	traits/suggest-dereferences/suggest-dereferencing-receiver-argument.rs
 compile-fail	traits/suggest-fully-qualified-path-with-adjustment.rs
 compile-fail	traits/suggest-fully-qualified-path-without-adjustment.rs
+compile-fail	traits/suggest-where-clause.rs
 run-pass	traits/superdefault-generics.rs
 compile-fail	traits/test-2.rs
 compile-fail	traits/test.rs
@@ -8788,17 +8797,24 @@ compile-fail	unsized/relaxed-bounds-invalid-places.rs
 compile-fail	unsized/thin-ptr-to-unsized-projection.rs
 run-pass	unsized/unchanged-param.rs
 check-pass	unsized/unsize-coerce-multiple-adt-params.rs
+compile-fail	unsized/unsized-bare-typaram.rs
+compile-fail	unsized/unsized-enum.rs
 compile-fail	unsized/unsized-enum2.rs
+compile-fail	unsized/unsized-fn-arg.rs
 compile-fail	unsized/unsized-fn-param.rs
 compile-fail	unsized/unsized-function-argument-41229.rs
+compile-fail	unsized/unsized-inherent-impl-self-type.rs
 compile-fail	unsized/unsized-non-last-field-overlapping-impls-83097.rs
 compile-fail	unsized/unsized-ref-fn-param.rs
 compile-fail	unsized/unsized-slice-element.rs
+compile-fail	unsized/unsized-struct.rs
 compile-fail	unsized/unsized-trait-impl-self-type.rs
 compile-fail	unsized/unsized-trait-impl-trait-arg.rs
 run-pass	unsized/unsized.rs
 run-pass	unsized/unsized2.rs
+compile-fail	unsized/unsized3.rs
 compile-fail	unsized/unsized5.rs
+compile-fail	unsized/unsized6.rs
 compile-fail	unsized/unsized7.rs
 compile-fail	unsized/vec-of-unsized-type.rs
 compile-fail	unstable-feature-bound/unstable_feature_bound_staged_api.rs

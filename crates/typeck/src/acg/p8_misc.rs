@@ -5,13 +5,13 @@ use crate::types::{Ty, intern};
 use crate::acg::clif::{MemFlagsData, types};
 use crate::ir::{FloatCC, IntCC, Type, Value};
 
-/// turbofish (空なら None)
+/// turbofish (None if empty)
 fn tf_of(tf: &[GArg]) -> Option<&[GArg]> {
     (!tf.is_empty()).then_some(tf)
 }
 
 impl Cx<'_> {
-    /// 型 t がイテレータ (next を持つ struct) か
+    /// Whether type t is an iterator (a struct with next)
     pub(crate) fn is_iterator_ty(&self, t: Ty) -> bool {
         match t {
             Ty::Struct(sid) => self.prog.method(sid, "next").is_some() || self.prog.default_method(sid, "next").is_some(),
@@ -19,14 +19,14 @@ impl Cx<'_> {
         }
     }
 
-    /// `v.extend(arg)` (Vec / BinaryHeap): IntoIterator の代わりに、イテレータでない arg を
-    /// `arg.into_iter()` (値) / `arg.iter()` (参照・配列) にする。要素が `&T` なら __extend_ref (T: Copy)
+    /// `v.extend(arg)` (Vec / BinaryHeap): instead of IntoIterator, turns an arg that is not an iterator into
+    /// `arg.into_iter()` (value) / `arg.iter()` (reference / array). If the elements are `&T`, __extend_ref (T: Copy)
     pub(crate) fn extend_call(&mut self, mc: &Expr, expected: Option<Ty>) -> R<Option<V>> {
         let Expr::MethodCall(receiver, method, _, margs, _) = mc else { return Ok(None) };
         if method != "extend" || margs.len() != 1 {
             return Ok(None);
         }
-        // (下で作り直した `recv.extend(__exr_ext)` は普通のメソッド呼び出し)
+        // (the `recv.extend(__exr_ext)` rebuilt below is an ordinary method call)
         if matches!(&margs[0], Expr::Path(_, p) if is_ident(p, "__exr_ext")) {
             return Ok(None);
         }
@@ -36,7 +36,7 @@ impl Cx<'_> {
         let Ty::Struct(sid) = rt else { return Ok(None) };
         let bname = self.prog.structs[self.prog.base_of(sid) as usize].name.clone();
         let is_vec = matches!(bname.as_str(), "Vec" | "BinaryHeap") && self.prog.method(sid, "__extend_ref").is_some();
-        // (ほかのコレクションと String は、引数をイテレータにしてから prelude の extend へ)
+        // (other collections and String: make the argument an iterator, then go to the prelude's extend)
         let other = matches!(bname.as_str(), "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "String" | "VecDeque")
             && self.prog.method(sid, "extend").is_some();
         if !is_vec && !other {
@@ -70,7 +70,7 @@ impl Cx<'_> {
         };
         let iter_e: Option<&'static Expr> = iter_e.map(|e| self.keep_expr(e));
         self.scopes.push(vec![]);
-        // 配列は一度ローカルに置いてから iter() する (リテラルの `[1, 2].iter()` は場所でないため)
+        // An array is first put in a local and then iter() is called (since a literal `[1, 2].iter()` is not a place)
         match (at, strip_paren(arg)) {
             (Some(Ty::Array(..)), _) => {
                 let (v, t) = self.expr(arg, None)?;
@@ -118,7 +118,7 @@ impl Cx<'_> {
 }
 
 impl Cx<'_> {
-    /// break / continue の行き先のループ (ラベルがなければいちばん内側のループ。ラベル付きブロックは飛ばす)
+    /// The loop that break / continue goes to (without a label, the innermost loop; labeled blocks are skipped)
     pub(crate) fn loop_index(&self, label: Option<&str>, is_break: bool) -> Option<usize> {
         self.loops.iter().rposition(|l| match label {
             Some(n) => l.label.as_deref() == Some(n) && (is_break || !l.is_block),
@@ -145,7 +145,7 @@ impl Cx<'_> {
         if lp.breaks == 0 {
             return Ok((v, t));
         }
-        // 末尾の値も break と同じく exit の引数で渡す
+        // The tail value is also passed as exit's argument, the same as break
         if t != Ty::Never {
             if let Some(w) = lp.val {
                 self.same(SP, t, w)?;
@@ -163,7 +163,7 @@ impl Cx<'_> {
     }
 }
 
-/// スライスパターンの (前の要素, `..` (と `x @ ..`), 後ろの要素)
+/// The (leading elements, `..` (and `x @ ..`), trailing elements) of a slice pattern
 pub(crate) fn slice_parts(sp: &Pat) -> (Vec<&Pat>, Option<&Pat>, Vec<&Pat>) {
     let mut pre = vec![];
     let mut post = vec![];
@@ -187,7 +187,7 @@ pub(crate) fn slice_parts(sp: &Pat) -> (Vec<&Pat>, Option<&Pat>, Vec<&Pat>) {
 }
 
 impl Cx<'_> {
-    /// ローカル変数の置き場所の値 (block の引数で渡す形: 集約型はアドレス)
+    /// The value of a local variable's location (in the form passed as a block argument: an address for aggregate types)
     pub(crate) fn loc_arg(&mut self, loc: Loc, t: Ty) -> Option<Value> {
         match loc {
             Loc::Var(v) => Some(self.b.use_var(v)),
@@ -198,12 +198,12 @@ impl Cx<'_> {
         }
     }
 
-    /// block の引数にするときの型 (サイズ 0 なら None)
+    /// The type when made a block argument (None if size 0)
     pub(crate) fn param_ty(&self, t: Ty) -> Option<Type> {
         if t.is_agg() || t.is_fat() { Some(PTR) } else { clif_ty(t) }
     }
 
-    /// スライスパターンの対象: (先頭, 長さ, 要素型, 参照越しなら束縛のモード)
+    /// The scrutinee of a slice pattern: (start, length, element type, the binding mode if through a reference)
     pub(crate) fn slice_scrutinee(&mut self, p: Place, span: Sp) -> R<(Value, Value, Ty, Option<bool>)> {
         let mut p = p;
         let mut rmode = None;
@@ -246,7 +246,7 @@ impl Cx<'_> {
         }
     }
 
-    /// 前と後ろの要素の place
+    /// The places of the leading and trailing elements
     pub(crate) fn slice_elems<'p>(
         &mut self,
         base: Value,
@@ -272,7 +272,7 @@ impl Cx<'_> {
 }
 
 impl Cx<'_> {
-    /// char を UTF-8 にして一時領域に置き、`&str` の fat pointer にする
+    /// Encodes a char as UTF-8 into a temporary slot and makes it a `&str` fat pointer
     pub(crate) fn char_to_str(&mut self, c: Value, span: Sp) -> R<Value> {
         let ss = self.b.create_stack_slot(4, 1);
         let buf = self.b.ins().stack_addr(PTR, ss, 0);
@@ -281,8 +281,8 @@ impl Cx<'_> {
         Ok(self.make_fat_v(buf, n.unwrap()))
     }
 
-    /// `recv.name(args)` を prelude の `{prefix}{name}(recv, args)` にする (なければ None)。
-    /// 引数の `&str` には char (UTF-8 にする) と `&String` も渡せる
+    /// Turns `recv.name(args)` into the prelude's `{prefix}{name}(recv, args)` (None if there is none).
+    /// A `&str` parameter also accepts a char (encoded as UTF-8) and a `&String`
     pub(crate) fn helper_method(&mut self, prefix: &str, name: &str, mc: &Expr, recv: (Value, Ty)) -> R<Option<V>> {
         let Expr::MethodCall(_, _, turbofish, margs, _) = mc else { return Ok(None) };
         let f = format!("{prefix}{name}");
@@ -292,7 +292,7 @@ impl Cx<'_> {
             return err(SP, format!("`{name}` takes {} arguments", sig.params.len() - 1));
         }
         let args: Vec<&Expr> = margs.iter().collect();
-        // 本物の型引数を持つもの (`parse::<T>`) は普通の呼び出し
+        // Those with real type arguments (`parse::<T>`) are ordinary calls
         if !sig.generics.iter().all(|g| g.0 == "G") {
             let exp = self.lets.get(&(mc as *const Expr as usize)).copied();
             return self.call_fn(id, Some(recv), &args, tf_of(turbofish), exp, SP).map(Some);
@@ -319,7 +319,7 @@ impl Cx<'_> {
                     t = ft;
                 }
             }
-            // `&&str` → `&str` (fat pointer の組を指すアドレスがそのまま &str の値)
+            // `&&str` → `&str` (the address pointing at the fat pointer pair is itself the &str value)
             if let (Ty::Ref(_, Ty::Ref(_, Ty::Str)), true) = (t, pt == sref) {
                 t = sref;
             }
@@ -333,7 +333,7 @@ impl Cx<'_> {
 }
 
 impl Cx<'_> {
-    /// 範囲 `a..b` / `a..=b` / `..b` / `a..` の (lo, hi)
+    /// The (lo, hi) of a range `a..b` / `a..=b` / `..b` / `a..`
     pub(crate) fn range_bounds(&mut self, rg: &Expr, len: Value) -> R<(Value, Value)> {
         let Expr::Range(start, end, inclusive) = rg else {
             return err(SP, "internal: expected a range");
@@ -358,7 +358,7 @@ impl Cx<'_> {
         Ok((lo, hi))
     }
 
-    /// バイト位置 idx (<= len) が UTF-8 の文字の境界か (i8 の 0/1)
+    /// Whether byte position idx (<= len) is a UTF-8 char boundary (0/1 as an i8)
     pub(crate) fn char_boundary(&mut self, ptr: Value, len: Value, idx: Value) -> Value {
         let done = self.b.create_block();
         let res = self.b.append_block_param(done, types::I8);
@@ -377,10 +377,10 @@ impl Cx<'_> {
     }
 }
 
-// --- clone (derive(Clone) など) ---------------------------------------------------
+// --- clone (derive(Clone) etc.) ---------------------------------------------------
 
 impl Cx<'_> {
-    /// `x.clone()` (自分の clone メソッドがない型): 整数などはそのまま読み、ほかは __exr_clone::<T>
+    /// `x.clone()` (a type without its own clone method): integers etc. are read as is, others use __exr_clone::<T>
     pub(crate) fn clone_call(&mut self, mc: &Expr) -> R<Option<V>> {
         let Expr::MethodCall(receiver, method, _, margs, _) = mc else { return Ok(None) };
         if method != "clone" || !margs.is_empty() {
@@ -442,11 +442,11 @@ impl Cx<'_> {
                 }
             }
         }
-        // (`&str` / `&[T]` の clone は参照のコピー)
+        // (the clone of `&str` / `&[T]` is a copy of the reference)
         let (v, vt) = self.operand(receiver, None, true)?;
         let Some(v) = v else { return Ok(Some((None, Ty::Never))) };
         let (a, t) = self.ord_addr(v, vt);
-        // (型が分からずに評価してから、自分の clone を持つ型だったとき)
+        // (when, after evaluating without knowing the type, it turns out to be a type with its own clone)
         if let Ty::Struct(sid) = t {
             if let Some(id) = self.prog.method(sid, "clone") {
                 return self.call_fn(id, Some((a, Ty::Ref(false, intern(t)))), &[], None, None, SP).map(Some);
@@ -468,7 +468,7 @@ impl Cx<'_> {
         self.prog.surely_not_clone(t, depth)
     }
 
-    /// `__exr_clone::<T>(x: &T) -> T` の本体
+    /// The body of `__exr_clone::<T>(x: &T) -> T`
     pub(crate) fn clone_glue_body(&mut self, sig: &FnSig) -> R<()> {
         let entry = self.b.create_block();
         self.b.switch_to_block(entry);
@@ -487,7 +487,7 @@ impl Cx<'_> {
             let src = ps[0];
             match clif_ty(t) {
                 Some(ct) => {
-                    // (Box などスカラーでも drop の要る型は clone してから返す)
+                    // (types that need drop even though they are scalar, such as Box, are cloned before being returned)
                     let tmp = self.temp(t);
                     self.clone_into(src, tmp, t)?;
                     let v = self.b.ins().load(ct, mf(), tmp, 0);
@@ -501,7 +501,7 @@ impl Cx<'_> {
         Ok(())
     }
 
-    /// src にある t の値の clone を dst に書く
+    /// Writes the clone of the value of t at src to dst
     pub(crate) fn clone_into(&mut self, src: Value, dst: Value, t: Ty) -> R<()> {
         if !self.needs_drop(t) {
             self.copy(dst, src, t);
@@ -509,7 +509,7 @@ impl Cx<'_> {
         }
         match t {
             Ty::Struct(sid) => {
-                // 自分の clone (String / Vec / 手書きの impl Clone): それを呼ぶ
+                // Its own clone (String / Vec / a hand-written impl Clone): call it
                 if let Some(id) = self.prog.method(sid, "clone") {
                     let sig0 = self.prog.sigs[id as usize].clone();
                     let (fid, sig) = if sig0.is_generic() {
@@ -542,14 +542,14 @@ impl Cx<'_> {
                     }
                     return Ok(());
                 }
-                // enum: 判別値をコピーし、そのバリアントのフィールドを clone
+                // enum: copy the discriminant and clone that variant's fields
                 let tag_ty = sd.tag;
                 let variants: Vec<(i64, Vec<(String, Ty, u32)>)> = sd.variants.iter().map(|v| (v.discr, v.fields.clone())).collect();
                 let (size, _) = self.prog.size_align(t);
                 let _ = size;
                 let ct = clif_ty(tag_ty).unwrap();
                 let tag = self.b.ins().load(ct, mf(), src, 0);
-                // (まずビットごとにコピーしてから、要るフィールドを clone で上書きする)
+                // (first copy bitwise, then overwrite the fields that need it with clones)
                 self.copy(dst, src, t);
                 let done = self.b.create_block();
                 for (d, fs) in variants {
@@ -599,7 +599,7 @@ impl Cx<'_> {
         }
     }
 
-    /// 要素 1 つの clone: drop の要らない型はコピー、ほかは __exr_clone::<t> を呼ぶ
+    /// The clone of one element: types that need no drop are copied, others call __exr_clone::<t>
     pub(crate) fn clone_elem(&mut self, src: Value, dst: Value, t: Ty) -> R<()> {
         if !self.needs_drop(t) {
             self.copy(dst, src, t);
@@ -621,7 +621,7 @@ impl Cx<'_> {
 // --- Default ---------------------------------------------------------------------
 
 impl Cx<'_> {
-    /// `Default::default()` / `T::default()` / `i32::default()` / `Vec::default()` (手書きの default がない型)
+    /// `Default::default()` / `T::default()` / `i32::default()` / `Vec::default()` (types without a hand-written default)
     pub(crate) fn default_call(&mut self, c: &Expr, expected: Option<Ty>) -> R<Option<V>> {
         let Expr::Call(func, cargs) = c else { return Ok(None) };
         let Expr::Path(qself, path) = &**func else { return Ok(None) };
@@ -631,7 +631,7 @@ impl Cx<'_> {
         if !self.prog.index.contains_key("__exr_default") {
             return Ok(None);
         }
-        // `X::default()` で X 自身の default がある (手書きの impl Default for X / 自分の関数) ならそれを呼ぶ
+        // For `X::default()`, if X has its own default (a hand-written impl Default for X / its own fn), call it
         if qself.is_none() && path.segs.len() == 2 && path.segs[0].name != "Default" {
             if let Some(id) = self.prog.fn_by_p(&PPath::of(path), self.self_sid) {
                 if self.prog.sigs[id as usize].has_body {
@@ -643,7 +643,7 @@ impl Cx<'_> {
             }
         }
         let exp = expected.or_else(|| self.lets.get(&(c as *const Expr as usize)).copied());
-        // (`m::S::default()`: モジュールの部分は飛ばす)
+        // (`m::S::default()`: skip the module part)
         let stripped = if qself.is_none() { self.prog.strip_mods_p(&PPath::of(path)) } else { None };
         let mut path = path.clone();
         if let Some(q) = stripped {
@@ -661,8 +661,8 @@ impl Cx<'_> {
                     let ty = crate::parse::Ty::Path(None, path_of(&path.segs[0].name));
                     match self.parse_ty(&ty) {
                         Ok(t) => Some(t),
-                        // ジェネリックな型の名前だけ (`Vec::default()`): 期待型から
-                        // (ジェネリックな別名 `FxMap::default()` も)
+                        // Just the name of a generic type (`Vec::default()`): from the expected type
+                        // (also generic aliases `FxMap::default()`)
                         Err(_) => exp.filter(|&e| {
                             self.prog.aliases.contains_key(x.as_str())
                                 || matches!(e, Ty::Struct(sid) if self.prog.structs[self.prog.base_of(sid) as usize].name == *x)
@@ -686,7 +686,7 @@ impl Cx<'_> {
         self.call_named("__exr_default", vec![t], &[], SP).map(Some)
     }
 
-    /// `__exr_default::<T>() -> T` の本体
+    /// The body of `__exr_default::<T>() -> T`
     pub(crate) fn default_glue_body(&mut self, sig: &FnSig) -> R<()> {
         let entry = self.b.create_block();
         self.b.switch_to_block(entry);
@@ -712,9 +712,9 @@ impl Cx<'_> {
         Ok(())
     }
 
-    /// dst に t の既定値を書く
+    /// Writes the default value of t to dst
     pub(crate) fn default_into(&mut self, dst: Value, t: Ty) -> R<()> {
-        // 手書きの `impl Default for S`
+        // A hand-written `impl Default for S`
         if let Ty::Struct(sid) = t {
             let bname = self.prog.structs[self.prog.base_of(sid) as usize].name.clone();
             if let Some(&id) = self.prog.index.get(&format!("{bname}::default")) {
@@ -738,7 +738,7 @@ impl Cx<'_> {
                 return Ok(());
             }
         }
-        // それ以外は 0 で埋め、フィールド (と Box の中身) を辿る
+        // Otherwise fill with 0 and walk the fields (and the contents of Boxes)
         let (size, _) = self.prog.size_align(t);
         if size > 0 {
             let z = self.b.ins().iconst(types::I8, 0);
@@ -795,7 +795,7 @@ impl Cx<'_> {
 }
 
 impl Cx<'_> {
-    /// const は式そのものを埋め込む
+    /// A const embeds the expression itself
     pub(crate) fn const_value(&mut self, p: &Expr, ci: u32) -> R<V> {
         // (E0391: a constant whose value needs its own (`const A: i32 = B; const B: i32 = A;`))
         thread_local! {
@@ -822,8 +822,8 @@ impl Cx<'_> {
         let prog = self.prog;
         let c = &prog.consts[ci as usize];
         let (t, src) = (c.ty, c.expr.clone());
-        // 整数の const は畳み込む (`u8::MAX.ilog10() as usize + 1` を使うたびに計算しない)。評価は型付きなので `!` も
-        // 型の幅で (`!0u8` は 255)。範囲の外の結果 (u128 のビット列) と、評価できない式は実行時に計算する
+        // Integer consts are folded (`u8::MAX.ilog10() as usize + 1` is not computed at every use). The evaluation is typed, so `!` is also
+        // at the type's width (`!0u8` is 255). Out-of-range results (u128 bit patterns) and expressions that cannot be evaluated are computed at run time
         if t.is_int() {
             match prog.const_int(&c.name, 0) {
                 Ok(v) => {
@@ -841,7 +841,7 @@ impl Cx<'_> {
         }
         let ce: Expr = crate::parse::parse_expr(&src).or_else(|er| err(SP, er))?;
         let ce = self.keep_expr(ce);
-        // (行番号は今は出さない: Sp は場所を持たない)
+        // (no line numbers for now: Sp carries no location)
         // (a type that names the impl's parameters is a hole: the expression takes the expected type at the use)
         let hint = self.const_hint.take();
         // (an impl's const: `Self` in it is the impl's type, `const ALIGN: usize = Self::BYTES - 1;` of `S::ALIGN` /
@@ -878,10 +878,10 @@ impl Cx<'_> {
     }
 }
 
-// --- 浮動小数点のメソッド ---------------------------------------------------------
+// --- Floating-point methods ---------------------------------------------------------
 
 impl Cx<'_> {
-    /// f32 / f64 の組み込みメソッド (命令になるものは命令、ほかは libm)
+    /// The built-in methods of f32 / f64 (instructions for those that map to one, libm for the others)
     pub(crate) fn float_method(&mut self, mc: &Expr, t: Ty) -> R<Option<V>> {
         let Expr::MethodCall(receiver, method, _, margs, _) = mc else { return Ok(None) };
         let name = method.to_string();
@@ -900,7 +900,7 @@ impl Cx<'_> {
         if !(known.contains(&name.as_str()) || lib1.contains(&name.as_str()) || lib2.contains(&name.as_str())) {
             return Ok(None);
         }
-        // 受け手 (参照なら中身)
+        // The receiver (its pointee if a reference)
         let (a, at) = if matches!(self.peek(receiver), Some(Ty::Ref(..))) {
             self.expr(receiver, None)?
         } else {
@@ -972,7 +972,7 @@ impl Cx<'_> {
                 };
                 (Some(v), t)
             }
-            // Rust の max / min: 片方が NaN ならもう片方
+            // Rust's max / min: if one is NaN, the other
             "max" | "min" => {
                 let b = arg(self, 0, t)?;
                 let cc = if name == "max" { FloatCC::GreaterThan } else { FloatCC::LessThan };
@@ -1018,7 +1018,7 @@ impl Cx<'_> {
                 let it = if f32 { types::I32 } else { types::I64 };
                 (Some(self.b.ins().bitcast(it, MemFlagsData::new(), a)), if f32 { Ty::U32 } else { Ty::U64 })
             }
-            // NaN は NaN、それ以外は符号つきの 1
+            // NaN for NaN, otherwise a signed 1
             "signum" => {
                 let one = fc(self, 1.0);
                 let s1 = self.b.ins().fcopysign(one, a);
@@ -1046,7 +1046,7 @@ impl Cx<'_> {
                 (Some(self.b.ins().fdiv(la, lb)), t)
             }
             "total_cmp" => {
-                // ビット列を全順序の整数にして比べる
+                // Turn the bit patterns into totally ordered integers and compare
                 let b = arg(self, 0, t)?;
                 let it = if f32 { types::I32 } else { types::I64 };
                 let sh = if f32 { 31 } else { 63 };
@@ -1082,11 +1082,11 @@ impl Cx<'_> {
 }
 
 impl Cx<'_> {
-    /// `use std::f64::consts::PI;` で取り込んだ定数の名前 (ローカル変数でも const でもないとき)
+    /// The name of a constant brought in by `use std::f64::consts::PI;` (when it is neither a local variable nor a const)
     pub(crate) fn float_const_name(&self, p: &Expr) -> Option<f64> {
         let Expr::Path(_, path) = p else { return None };
         let id = ident_of(path)?;
-        // (速い判定から: 名前は大文字だけ)
+        // (the fast check first: the name is uppercase only)
         let n = id.to_string();
         if !n.bytes().all(|b| b.is_ascii_uppercase() || b == b'_' || b.is_ascii_digit()) || n.is_empty() {
             return None;

@@ -1,13 +1,13 @@
-"""本物の小さなクレート (vendor/) を、それを使う app (apps/) と一緒に zustc と rustc でビルドして比べる。
+"""Builds real small crates (vendor/) together with the apps that use them (apps/) with zustc and rustc and compares them.
 
-usage: python3 cratebench/run.py [NAME ...] [--reps R]   (experiment のディレクトリで。事前に cargo build --release)
+usage: python3 cratebench/run.py [NAME ...] [--reps R]   (in the experiment directory; cargo build --release beforehand)
 
-各クレートで:
-  - 出力が rustc -O と同じか
-  - ビルド時間: cold (キャッシュなし) / noop (何も変えない) / edit (app の main を 1 か所変える)。中央値 (ms)
-  - 実行時間 (中央値, ms) とバイナリサイズ
-zustc はワークスペース (lib + bin) としてビルドする。rustc は lib を rlib にして --extern でリンクする
-(edit は app だけをコンパイルし直す: cargo と同じ)。
+For each crate:
+  - whether the output is the same as rustc -O
+  - build time: cold (no cache) / noop (nothing changed) / edit (one place in the app's main changed). Median (ms)
+  - run time (median, ms) and binary size
+zustc builds it as a workspace (lib + bin). rustc makes the lib an rlib and links it with --extern
+(edit recompiles only the app: same as cargo).
 """
 import os
 import shutil
@@ -23,8 +23,8 @@ OUT = os.path.join(ROOT, "out/cratebench")
 
 
 def copy_crate_src(src, dst):
-    """vendor の submodule (上流のリポジトリそのまま) から、クレートのソースを dst/src/ にコピーする。
-    lib.rs がリポジトリの直下にあるもの (fnv) も src/lib.rs にそろえる"""
+    """Copies a crate's source from the vendor submodule (the upstream repository as is) to dst/src/.
+    Ones with lib.rs directly under the repository (fnv) are also aligned to src/lib.rs"""
     os.makedirs(dst, exist_ok=True)
     if os.path.isdir(os.path.join(src, "src")):
         shutil.copytree(os.path.join(src, "src"), os.path.join(dst, "src"))
@@ -54,7 +54,7 @@ def crates():
 
 
 def setup(name, ed, feats, d):
-    """作業用のコピー (edit で app を書き換えるので) とワークスペースの説明ファイル"""
+    """A working copy (since edit rewrites the app) and the workspace description file"""
     shutil.rmtree(d, ignore_errors=True)
     os.makedirs(d)
     copy_crate_src(os.path.join(HERE, "vendor", name), os.path.join(d, "lib"))
@@ -99,7 +99,7 @@ def bench(name, ed, feats, reps):
     d = os.path.join(OUT, name)
     lname = setup(name, ed, feats, d)
     rows = []
-    # rustc -O が基準
+    # rustc -O is the baseline
     want = None
     for opt in (False, True):
         lib, app, exe = rustc_cmds(lname, ed, feats, d, opt)

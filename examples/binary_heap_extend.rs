@@ -1,5 +1,5 @@
-// BinaryHeap の append / extend と Vec::extend のサンプル: std と同じ rebuild_tail の判定
-// (足す数が少なければ sift_up、多ければ作り直し。2048 要素を超えるときの判定も) なので並びも std と同じ
+// Sample of BinaryHeap's append / extend and Vec::extend: the same rebuild_tail decision as std
+// (sift_up if few are added, a rebuild if many; including the decision beyond 2048 elements), so the order is also the same as std
 use std::collections::BinaryHeap;
 
 fn lcg(s: &mut u64) -> u64 {
@@ -16,7 +16,7 @@ fn checksum(h: &BinaryHeap<u64>) -> u64 {
 }
 
 fn main() {
-    // extend: Vec / 配列 / 範囲 / イテレータ / 参照
+    // extend: Vec / array / range / iterator / references
     let mut h = BinaryHeap::new();
     h.extend(vec![5, 1, 8]);
     println!("{:?}", h);
@@ -28,7 +28,7 @@ fn main() {
     h.extend(&more);
     h.extend(more.iter().map(|x| x * 3));
     println!("{:?} {}", h, h.len());
-    // 少しだけ足す (sift_up の経路)
+    // Add just a few (the sift_up path)
     let mut big = BinaryHeap::new();
     let mut seed = 7u64;
     for _ in 0..100 {
@@ -36,11 +36,11 @@ fn main() {
     }
     big.extend(vec![lcg(&mut seed), lcg(&mut seed)]);
     println!("{} {}", big.len(), checksum(&big));
-    // たくさん足す (作り直しの経路)
+    // Add many (the rebuild path)
     let v: Vec<u64> = (0..300).map(|_| lcg(&mut seed)).collect();
     big.extend(v);
     println!("{} {}", big.len(), checksum(&big));
-    // 2048 要素を超える
+    // Beyond 2048 elements
     let mut huge = BinaryHeap::new();
     for _ in 0..3000 {
         huge.push(lcg(&mut seed));
@@ -51,7 +51,7 @@ fn main() {
     let w2: Vec<u64> = (0..400).map(|_| lcg(&mut seed)).collect();
     huge.extend(w2);
     println!("{} {}", huge.len(), checksum(&huge));
-    // append (大きい方に足す。other は空になる)
+    // append (adds to the larger one; other becomes empty)
     let mut a = BinaryHeap::from(vec![1, 5, 3]);
     let mut b = BinaryHeap::from(vec![9, 2, 8, 7, 6]);
     a.append(&mut b);

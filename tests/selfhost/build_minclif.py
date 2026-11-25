@@ -1,14 +1,14 @@
-"""zustc 自身の crates/minclif/src/lib.rs (Cranelift の代わりの最小のバックエンド) と、それが使う crates/ir/src/lib.rs を 1 ファイルのプログラムにまとめる。
+"""Bundles zustc's own crates/minclif/src/lib.rs (the minimal backend in place of Cranelift) and the crates/ir/src/lib.rs it uses into a single-file program.
 usage: python3 tests/selfhost/build_minclif.py > out/selfhost/minclif_main.rs
-main は tests/minclif.rs と同じ関数 (ループ・再帰・変数・スタックスロット・8 引数、浮動小数点・i128・オーバーフロー・
-ビット演算・間接呼び出し・データ) を組み立て、引数の 2 つのパスに ELF の .o を書き、2 つ目の期待する出力を出す。"""
+main builds the same fns as tests/minclif.rs (loops, recursion, variables, stack slots, 8 arguments, floating point, i128, overflow,
+bit operations, indirect calls, data), writes ELF .o files to the 2 paths in its arguments, and prints the expected output of the 2nd."""
 src = open("crates/minclif/src/lib.rs").read().replace("zust_ir::", "crate::ir::")
 ir = open("crates/ir/src/lib.rs").read()
 test = open("tests/minclif.rs").read()
 a = test.index("/// sum(n)")
 b = test.index("/// main: printf")
 fns = test[a:b].replace("zustc::minclif::", "minclif::")
-# 浮動小数点・i128・オーバーフロー・ビット演算・間接呼び出し・データの関数
+# The fns for floating point, i128, overflow, bit operations, indirect calls and data
 a2 = test.index("/// 浮動小数点・i128・オーバーフロー")
 b2 = test.index("#[test]\nfn ext_ops()")
 fns += test[a2:b2].replace("zustc::minclif::", "minclif::")

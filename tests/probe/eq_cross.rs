@@ -1,4 +1,4 @@
-// 型の違う ==: Vec と配列・スライス、要素の型が違う比較、手書きの `impl PartialEq<R> for T`
+// == across different types: Vec with arrays / slices, comparisons with different element types, a hand-written `impl PartialEq<R> for T`
 #[derive(Debug)]
 struct Meters(f64);
 #[derive(Debug)]

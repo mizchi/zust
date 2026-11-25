@@ -1,5 +1,5 @@
-// Vec と String のサンプル (prelude の Vec<T> / String は Rust で書いてあり、libc の realloc / free を使う)。
-// push / pop / 添字 / スライス / sort / insert / remove / clone / ==、vec![..]、&Vec<T> → &[T]、String::from / push_str / push(char)
+// Sample of Vec and String (the prelude's Vec<T> / String are written in Rust and use libc's realloc / free).
+// push / pop / indexing / slices / sort / insert / remove / clone / ==, vec![..], &Vec<T> → &[T], String::from / push_str / push(char)
 unsafe extern "C" {
     fn putchar(c: i32) -> i32;
 }
@@ -132,12 +132,12 @@ fn main() {
     line(*e.last().unwrap());
     let eq = vec![1, 2] == vec![1, 2];
     line(eq as i64);
-    // 文字列の比較 (String / &str)
+    // String comparison (String / &str)
     let hi = String::from("hi");
     line((hi == "hi") as i64);
     line((hi.as_str() == "ho") as i64);
     line((hi == hi.clone()) as i64);
-    // タプルの Vec、iter_mut、while let + pop
+    // Vec of tuples, iter_mut, while let + pop
     let mut ps: Vec<(i64, u8)> = Vec::new();
     ps.push((1, 2));
     ps.push((3, 4));
@@ -152,7 +152,7 @@ fn main() {
         put(b' ');
     }
     put(b'\n');
-    // フィールドに String / Vec を持つ struct と、Vec を返す関数
+    // A struct with String / Vec fields, and a fn returning a Vec
     let mut p = Person::new("ann");
     p.scores.push(7);
     p.scores.push(12);
