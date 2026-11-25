@@ -5224,3 +5224,166 @@ fn c() {
 fn main() { a(); b(); c(); }
 "#, &[(21, "`x` does not live long enough")], "dk1");
 }
+
+#[test]
+fn part36_fn_bounded_parameters_boxed_as_trait_objects() {
+    // (zustc check of a generic fn nothing calls boxes a placeholder bounded by `FnMut(..)` into a `Box<dyn FnMut(..)>`:
+    // it was "not a closure", so the fn went unchecked. Each was checked with rustc 1.97: f is moved (E0382 at 3), F
+    // must outlive `'static` for a `Box<dyn FnMut(bool)>` (E0310 at 6), and the body's other errors are found (E0382
+    // at 11); d and e are accepted)
+    errors_at(r#"fn a<F: FnMut(bool)>(f: F) {
+    let b: Box<dyn FnMut(bool)> = Box::new(f);
+    drop(f);
+}
+fn b<F: FnMut(bool)>(f: F) -> Box<dyn FnMut(bool)> {
+    Box::new(f)
+}
+fn c<F: FnMut(bool) + 'static>(f: F) -> Box<dyn FnMut(bool)> {
+    let s = String::new();
+    drop(s);
+    drop(s);
+    Box::new(f)
+}
+fn d<F: Fn() + 'static>(f: F) -> Box<dyn Fn()> {
+    Box::new(f)
+}
+fn e<'a, F: FnOnce() -> u8 + 'a>(f: F) -> Box<dyn FnOnce() -> u8 + 'a> {
+    Box::new(f)
+}
+fn main() {}
+"#, &[(3, "use of moved value: `f`"), (6, "the parameter type `F` may not live long enough"), (11, "use of moved value: `s`")], "fb1");
+}
+
+#[test]
+fn part36_items_in_const_and_static_initializers() {
+    // (a fn written in a `const` / `static` initializer's block is hoisted as one in a fn body is, so it is checked:
+    // E0507 at 3 and E0596 at 9, as in rustc 1.97 (borrowck/borrowck-fn-in-const-a.rs, span/borrowck-fn-in-const-b.rs);
+    // the two `broken` are two fns)
+    errors_at(r#"const MOVE: fn(&String) -> String = {
+    fn broken(x: &String) -> String {
+        return *x
+    }
+    broken
+};
+static MUTATE: fn(&Vec<String>) = {
+    fn broken(x: &Vec<String>) {
+        x.push(String::new());
+    }
+    broken
+};
+const OK: fn() -> i32 = {
+    fn fine() -> i32 { 1 }
+    fine
+};
+fn main() { let _ = OK(); }
+"#, &[(3, "cannot move out of `*x`"), (9, "cannot borrow `*x` as mutable")], "ci1");
+}
+
+#[test]
+fn part36_bindings_after_at() {
+    // (rustc's check of `x @ sub` patterns, and the moves of their bindings, each checked with rustc 1.97 at the same
+    // position (the parameter's, at its fn): a by-move x with a `ref` in sub (5, 12), a `ref` x with a move in sub
+    // (6, 13), `ref mut` with `ref` (7, 9) and with `ref mut` (8), and x moved after sub moved a part of it (10) or all
+    // of it (11). Copy parts, two `ref`s, `ref x @ copy` and default binding modes are accepted, as is `ref x` as a
+    // parameter)
+    errors_at(r#"struct U;
+#[derive(Clone, Copy)]
+struct C;
+struct NC<A, B>(A, B);
+fn a() { let a @ ref b = U; }
+fn b() { let ref a @ b = U; }
+fn c() { let ref mut a @ ref b = U; }
+fn d() { let ref mut a @ ref mut b = U; }
+fn e() { let ref a @ ref mut b = U; }
+fn f() { let a @ NC(b, c @ NC(d, e)) = NC(C, NC(C, C)); }
+fn g() { let a @ b = U; }
+fn h(x: Option<String>) { match x { s @ Some(ref t) => {} None => {} } }
+fn i(ref a @ b: U) {}
+fn ok() {
+    let a @ NC(b, c) = NC(C, C);
+    let ref a @ ref b = U;
+    let ref a @ b = C;
+    match &Some(U) { a @ Some(b) => {} None => {} }
+}
+fn ok2(ref x: U) -> usize { let _ = x; 0 }
+fn main() { ok(); ok2(U); }
+"#, &[
+        (5, "borrow of moved value"),
+        (6, "cannot move out of value because it is borrowed"),
+        (7, "cannot borrow value as immutable because it is also borrowed as mutable"),
+        (8, "cannot borrow value as mutable more than once at a time"),
+        (9, "cannot borrow value as mutable because it is also borrowed as immutable"),
+        (10, "use of partially moved value: `a`"),
+        (11, "use of moved value: `a`"),
+        (12, "borrow of moved value"),
+        (13, "cannot move out of value because it is borrowed"),
+    ], "at1");
+}
+
+#[test]
+fn part36_lifetime_bounds_of_impl_methods() {
+    // (checked with rustc 1.97: a trait method's lifetime that a where clause bounds a type by (`where T: 'a`) is
+    // early-bound, so the impl's, which nothing bounds, does not match it (E0195 at 9); a type parameter of an impl's
+    // method bounded by `'static` where the trait's is bounded by its `'a` is stricter (E0276 at 7), not where the
+    // impl gives the trait `'static` (C); a GAT's `where 'b2: 'a2` for the trait's `where 'a1: 'b1` is stricter (E0276
+    // at 7, the bound), its `'a2: 'b2` is not)
+    errors_at(r#"use std::fmt::Debug;
+struct State;
+trait Foo<T> {
+    fn foo<'a>(&self, state: &'a State) -> &'a T
+    where
+        T: 'a;
+}
+impl<T> Foo<T> for Vec<T> {
+    fn foo<'a>(&self, state: &'a State) -> &'a T {
+        &self[0]
+    }
+}
+fn main() {}
+"#, &[(9, "lifetime parameters or bounds on method `foo` do not match the trait declaration")], "lb1");
+    errors_at(r#"use std::fmt::Debug;
+trait A<'a> {
+    fn put<F>(&mut self, f: F) where F: Debug + 'a;
+}
+struct B;
+impl<'a> A<'a> for B {
+    fn put<F>(&mut self, f: F) where F: Debug + 'static {}
+}
+struct C;
+impl A<'static> for C {
+    fn put<F>(&mut self, f: F) where F: Debug + 'static {}
+}
+fn main() {}
+"#, &[(7, "impl has stricter requirements than trait")], "lb2");
+    errors_at(r#"trait G {
+    type T<'a1, 'b1>
+    where
+        'a1: 'b1;
+}
+impl G for () {
+    type T<'a2, 'b2> = () where 'b2: 'a2;
+}
+impl G for u8 {
+    type T<'a2, 'b2> = () where 'a2: 'b2;
+}
+fn main() {}
+"#, &[(7, "impl has stricter requirements than trait")], "lb3");
+}
+
+#[test]
+fn part36_moves_of_at_patterns_after_a_return() {
+    // (by-move-sub-pat-unreachable.rs: the moves of `a @ (b, c)` are the borrow check's, which rustc does not give the
+    // code after `return;`; its check of the pattern itself still holds there (a by-move `a @ ref b`))
+    errors_at(r#"fn f() {
+    return;
+    struct S;
+    let a @ (b, c) = (S, S);
+}
+fn g() {
+    return;
+    struct S;
+    let a @ ref b = S;
+}
+fn main() { f(); g(); }
+"#, &[(9, "borrow of moved value")], "at2");
+}

@@ -6974,7 +6974,10 @@ fn syn_has_assoc(t: &TySyn) -> bool {
 fn early_bound(r: Option<&crate::types::RSigSyn>, g: &[(String, Vec<String>)], outer_names: &mut Vec<String>) -> (Vec<bool>, Vec<(i32, i32)>) {
     let Some(r) = r else { return (vec![], vec![]) };
     let in_bounds = |l: &str| g.iter().flat_map(|x| x.1.iter()).any(|b| b.match_indices(l).any(|(k, _)| !b[k + l.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')));
-    let idx: Vec<usize> = (r.outer as usize..r.lts.len()).filter(|&i| in_bounds(&r.lts[i]) || r.outlives.iter().any(|&(a, b)| a as usize == i || b as usize == i)).collect();
+    // (also a lifetime a where clause bounds a type by, of the trait's parameters too: `where T: 'a`)
+    let idx: Vec<usize> = (r.outer as usize..r.lts.len())
+        .filter(|&i| in_bounds(&r.lts[i]) || r.outlives.iter().any(|&(a, b)| a as usize == i || b as usize == i) || r.ty_outlives.iter().any(|x| x.1 as usize == i))
+        .collect();
     let mut ord = |c: u8| match idx.iter().position(|&k| k == c as usize) {
         Some(p) => Some(p as i32),
         None if c == crate::types::R_STATIC => Some(-1),

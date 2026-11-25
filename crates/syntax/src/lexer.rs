@@ -1479,6 +1479,9 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     let mut depth = 0i32;
     let mut fn_bodies: Vec<(i32, usize)> = vec![];
     let mut pending_fn = false;
+    // (a top-level `const` / `static` whose initializer is a block, `const F: fn() = { fn broken() {..} broken };`: the
+    // block's items are hoisted as a fn body's are. Set at the item's keyword, until its `;`)
+    let mut init_item = false;
     let mut moves: Vec<(usize, usize)> = vec![];
     // 入れ子のアイテムの名前と、それを含む関数の本体 (開き括弧のトークン位置)。閉じた本体の (開き, 閉じ)
     let mut nested_names: Vec<(Vec<u8>, usize)> = vec![];
@@ -1507,6 +1510,9 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     while k < toks.len() {
         let t = tok(k);
         if toks[k].0 == 0 {
+            if depth == 0 && matches!(t, b"const" | b"static") && k + 1 < toks.len() && !matches!(tok(k + 1), b"fn" | b"unsafe" | b"extern" | b"async") {
+                init_item = true;
+            }
             if depth == 0 && matches!(t, b"fn" | b"struct" | b"enum" | b"const" | b"static" | b"union" | b"trait" | b"type") && k + 1 < toks.len() {
                 let nk = if t == b"static" && tok(k + 1) == b"mut" { k + 2 } else { k + 1 };
                 if nk < toks.len() && toks[nk].0 == 0 {
@@ -1668,6 +1674,8 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                     if pending_fn {
                         fn_bodies.push((depth, k));
                         pending_fn = false;
+                    } else if init_item && depth == 0 && k >= 1 && is_sym(k - 1, b"=") {
+                        fn_bodies.push((depth, k));
                     }
                     depth += 1;
                 }
@@ -1679,7 +1687,12 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                     }
                 }
                 // `fn f();` (宣言だけ) は本体なし
-                b";" => pending_fn = false,
+                b";" => {
+                    pending_fn = false;
+                    if depth == 0 {
+                        init_item = false;
+                    }
+                }
                 _ => {}
             }
         }
