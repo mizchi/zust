@@ -813,6 +813,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         },
         is_unsafe: sig.quals.iter().any(|q| q == "unsafe") || (is_extern && !sig.quals.iter().any(|q| q == "safe")),
         preds: preds,
+        own_unsized: adt_unsized(&sig.generics),
     })
 }
 

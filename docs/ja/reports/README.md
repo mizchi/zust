@@ -127,3 +127,4 @@ zustc / zust-analyzer の作業の記録 (日付順)。数値はそれぞれの�
 | 2026-11-24 | [最後のフィールドが unsized な struct (`&Foo<[T]>`)](2026-11-24-04-dst-struct-tails.md) |
 | 2026-11-24 | [最後のフィールドが unsized な struct、その 2: `dyn` の末尾、`size_of_val`、Box](2026-11-24-05-dst-dyn-tails.md) |
 | 2026-11-25 | [リージョン (ライフタイム) 検査、その 34: `impl Trait + 'static` の引数、フィールドの型の `'static` の境界、`Cell` が格納するもの、自分への借用を見る値のドロップ](2026-11-25-06-region-check-34.md) |
+| 2026-11-25 | [`Sized`: 大きさの決まった型しか置けない場所 (E0277)](2026-11-25-07-sized.md) |

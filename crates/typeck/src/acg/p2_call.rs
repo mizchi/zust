@@ -3363,6 +3363,18 @@ impl Cx<'_> {
                 *a = *b;
             }
         }
+        // (E0277: a type parameter of the program's fn that is not `?Sized` takes a sized type; a placeholder of a
+        // caller's `?Sized` parameter may be unsized (`fn f1<X: ?Sized>(x: &X) { f2::<X>(x) }`))
+        if let Some(ks) = self.prog.fn_sized_gens.get(&id) {
+            for &k in ks {
+                if let Some(t) = sol0.get(k).copied().flatten() {
+                    if self.prog.maybe_unsized(t) {
+                        let n = crate::traits::display_ty(self.prog, t);
+                        return Err(self.at(span, format!("the size for values of type `{n}` cannot be known at compilation time {}", crate::traits::SOLVED_NO)));
+                    }
+                }
+            }
+        }
         // (drop の要らない型の `__exr_drop_in_place::<T>` / `drop(x)` は何もしない: インスタンスも作らない)
         if matches!(self.prog.names[id as usize].as_str(), "__exr_drop_in_place" | "__core_drop") && arg_tys.len() == 1 {
             let t = match arg_tys[0] {

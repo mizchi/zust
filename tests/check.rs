@@ -1437,3 +1437,23 @@ fn projections_are_goals() {
     bad("trait Bar {}\ntrait Tr { type A: Bar; }\nimpl Tr for u8 { type A = u16; }\nfn main() {}", "`u16: Bar`");
     ok("trait Bar {}\nimpl Bar for u16 {}\ntrait Tr { type A: Bar; }\nimpl Tr for u8 { type A = u16; }\nfn main() {}");
 }
+
+/// Sized (E0277) is not asked where rustc does not ask it: a `?Sized` parameter given `str` or a struct with an unsized
+/// tail, `Box<X>` of a `X: ?Sized`, `T: Clone + ?Sized` in a slice (Clone implies Sized), an unsized last tuple
+/// element behind a reference, `size_of_val` of a str (checked against rustc)
+#[test]
+fn sized_accepts() {
+    let d = Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check("trait Tr { fn n(&self) -> u8 { 1 } }\nimpl Tr for u8 {}\nstruct W<T: ?Sized>(u8, T);\nfn relaxed<X: ?Sized>(_: &X) {}\nfn boxed<X: ?Sized + Tr>(x: Box<X>) -> u8 { x.n() }\nfn cloned<T: Clone + ?Sized>(x: &[T]) -> usize { x.to_vec().len() }\nfn main() {\n    relaxed(\"abc\");\n    let w: &W<[u8]> = &W(1, [2u8, 3]);\n    relaxed(w);\n    let t: Option<&(u8, [u8])> = None;\n    let b: Box<dyn Tr> = Box::new(3u8);\n    println!(\"{} {} {} {}\", t.is_none(), boxed(b), std::mem::size_of_val(\"abcd\"), w.0 + cloned(&[1u8]) as u8);\n}\n");
+    assert!(d.is_empty(), "{d:?}");
+}
+
+/// A `?Sized` parameter passed on to one that must be sized, in a generic fn nothing calls (`zustc check` checks it
+/// with placeholders): E0277, as rustc
+#[test]
+fn sized_rejects_maybe_unsized_param() {
+    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let d = check("fn sized<X>(_: &X) {}\nfn relaxed<X: ?Sized>(x: &X) {\n    sized::<X>(x);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].msg.contains("`X` cannot be known"), "{d:?}");
+    let d = check("struct Foo<T>(T);\nfn not_sized<T: ?Sized>() {}\nfn f<T: ?Sized>() { not_sized::<Foo<T>>() }\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].msg.contains("`T` cannot be known"), "{d:?}");
+}

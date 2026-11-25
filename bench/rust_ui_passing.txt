@@ -2445,6 +2445,7 @@ compile-fail	enum/single-variant-enum-deref-error-9814.rs
 run-pass	enum/struct-like-variant-construct.rs
 run-pass	enum/struct-like-variant-match.rs
 check-pass	enum/union-in-enum.rs
+compile-fail	enum/unsized-field-in-enum-variant.rs
 run-pass	enum/zero-variant-enum-pattern-matching-3037.rs
 compile-fail	env-macro/env-arg-2-not-string-literal.rs
 compile-fail	env-macro/env-escaped-var.rs
@@ -2785,6 +2786,7 @@ compile-fail	feature-gates/feature-gate-trace_macros.rs
 compile-fail	feature-gates/feature-gate-trait-alias.rs
 compile-fail	feature-gates/feature-gate-transparent_unions.rs
 run-pass	feature-gates/feature-gate-trivial_bounds-lint.rs
+compile-fail	feature-gates/feature-gate-trivial_bounds.rs
 compile-fail	feature-gates/feature-gate-try_blocks.rs
 compile-fail	feature-gates/feature-gate-try_blocks_heterogeneous.rs
 compile-fail	feature-gates/feature-gate-type_alias_impl_trait.rs
@@ -3713,6 +3715,7 @@ run-pass	layout/aggregate-lang/union-offsets.rs
 run-pass	layout/aggregate-lang/union-size.rs
 compile-fail	layout/cannot-transmute-unnormalizable-type.rs
 compile-fail	layout/failed-to-get-layout-for-type-error-ice-92979.rs
+compile-fail	layout/invalid-unsized-in-always-sized-tail.rs
 run-pass	layout/issue-112048-unsizing-field-order.rs
 compile-fail	layout/issue-unsized-tail-restatic-ice-122488.rs
 compile-fail	layout/malformed-unsized-type-in-union.rs
@@ -6435,6 +6438,7 @@ compile-fail	resolve/issue-3214.rs
 compile-fail	resolve/issue-33876.rs
 compile-fail	resolve/issue-35675.rs
 compile-fail	resolve/issue-39559-2.rs
+compile-fail	resolve/issue-5035-2.rs
 compile-fail	resolve/issue-5035.rs
 compile-fail	resolve/issue-5099.rs
 compile-fail	resolve/issue-54379.rs
@@ -7083,6 +7087,7 @@ check-pass	structs/uninstantiable-struct.rs
 run-pass	structs/unit-like-struct.rs
 compile-fail	structs/unresolved-struct-with-fru.rs
 check-pass	structs/variant-structs-trivial.rs
+compile-fail	suggestions/adt-param-with-implicit-sized-bound.rs
 compile-fail	suggestions/ambiguous-assoc-type-path-suggest-similar-item.rs
 compile-fail	suggestions/args-instead-of-tuple-errors.rs
 compile-fail	suggestions/args-instead-of-tuple.rs
@@ -7211,6 +7216,7 @@ compile-fail	suggestions/issue-84973-2.rs
 compile-fail	suggestions/issue-84973-negative.rs
 compile-fail	suggestions/issue-84973.rs
 compile-fail	suggestions/issue-85347.rs
+compile-fail	suggestions/issue-85943-no-suggest-unsized-indirection-in-where-clause.rs
 compile-fail	suggestions/issue-85945-check-where-clause-before-suggesting-unsized.rs
 compile-fail	suggestions/issue-86100-tuple-paren-comma.rs
 compile-fail	suggestions/issue-86667.rs
@@ -7263,6 +7269,7 @@ compile-fail	suggestions/option-to-bool.rs
 compile-fail	suggestions/parenthesized-deref-suggestion.rs
 compile-fail	suggestions/partialeq_suggest_swap.rs
 compile-fail	suggestions/partialeq_suggest_swap_on_e0277.rs
+compile-fail	suggestions/path-by-value.rs
 compile-fail	suggestions/path-display.rs
 compile-fail	suggestions/pattern-slice-vec.rs
 compile-fail	suggestions/pattern-struct-with-slice-vec-field.rs
@@ -7276,6 +7283,7 @@ compile-fail	suggestions/recover-invalid-float-invalid.rs
 compile-fail	suggestions/recover-invalid-float.rs
 compile-fail	suggestions/recover-missing-turbofish-surrounding-angle-braket.rs
 compile-fail	suggestions/redundant-shared-reference-issue-133685.rs
+compile-fail	suggestions/removal-of-multiline-trait-bound-in-where-clause.rs
 compile-fail	suggestions/remove-question-symbol-with-paren.rs
 compile-fail	suggestions/restrict-type-argument.rs
 compile-fail	suggestions/restrict-type-not-param.rs
@@ -7376,6 +7384,7 @@ check-pass	suggestions/unused-imports.rs
 compile-fail	suggestions/use-parentheses-to-call-closure-issue-145404.rs
 compile-fail	suggestions/use-type-argument-instead-of-assoc-type.rs
 compile-fail	suggestions/while-let-typo.rs
+compile-fail	suggestions/wrap-dyn-in-suggestion-issue-120223.rs
 compile-fail	suggestions/wrap-function-local-constructors.rs
 run-pass	supertrait-shadowing/trivially-false-subtrait.rs
 build-pass	symbol-names/issue-53912.rs
@@ -7453,6 +7462,7 @@ check-pass	trait-bounds/anonymous-parameters-13775.rs
 compile-fail	trait-bounds/argument-with-unnecessary-method-call.rs
 compile-fail	trait-bounds/deep-level-send-bound-check-issue-40827.rs
 compile-fail	trait-bounds/false-span-in-trait-bound-label.rs
+compile-fail	trait-bounds/fix-dyn-sized-fn-param-sugg.rs
 compile-fail	trait-bounds/issue-119530-sugg-from-fn.rs
 check-pass	trait-bounds/issue-75961.rs
 compile-fail	trait-bounds/issue-82038.rs
@@ -7464,6 +7474,7 @@ compile-fail	trait-bounds/sort-missing-ord-bound.rs
 compile-fail	trait-bounds/super-assoc-mismatch.rs
 compile-fail	trait-bounds/trait-bound-adt-issue-145611.rs
 compile-fail	trait-bounds/trait-selection-overflow-prevention-72839.rs
+compile-fail	trait-bounds/unsized-bound.rs
 compile-fail	traits/alias/generic-default-in-dyn.rs
 run-pass	traits/alignment-gep-tup-like-1.rs
 run-pass	traits/anon-static-method.rs
@@ -7546,6 +7557,7 @@ compile-fail	traits/dont-autoderef-ty-with-escaping-var.rs
 compile-fail	traits/dont-suggest-impl-as-closure-arg.rs
 compile-fail	traits/duplicate-generic-parameter-error-86756.rs
 compile-fail	traits/duplicate-methods.rs
+compile-fail	traits/dyn-trait-size-error-23281.rs
 run-pass	traits/dyn-trait.rs
 run-pass	traits/dynamic-dispatch-trait-objects-5666.rs
 run-pass	traits/early-vtbl-resolution.rs
@@ -7739,6 +7751,7 @@ compile-fail	traits/suggest-dereferences/root-obligation.rs
 compile-fail	traits/suggest-dereferences/suggest-dereferencing-receiver-argument.rs
 compile-fail	traits/suggest-fully-qualified-path-with-adjustment.rs
 compile-fail	traits/suggest-fully-qualified-path-without-adjustment.rs
+compile-fail	traits/suggest-where-clause.rs
 run-pass	traits/superdefault-generics.rs
 compile-fail	traits/test-2.rs
 compile-fail	traits/test.rs
@@ -8232,16 +8245,26 @@ compile-fail	unsized/relaxed-bounds-invalid-places.rs
 compile-fail	unsized/thin-ptr-to-unsized-projection.rs
 run-pass	unsized/unchanged-param.rs
 check-pass	unsized/unsize-coerce-multiple-adt-params.rs
+compile-fail	unsized/unsized-bare-typaram.rs
+compile-fail	unsized/unsized-enum.rs
+compile-fail	unsized/unsized-enum2.rs
+compile-fail	unsized/unsized-fn-arg.rs
 compile-fail	unsized/unsized-fn-param.rs
 compile-fail	unsized/unsized-function-argument-41229.rs
+compile-fail	unsized/unsized-inherent-impl-self-type.rs
 compile-fail	unsized/unsized-non-last-field-overlapping-impls-83097.rs
 compile-fail	unsized/unsized-ref-fn-param.rs
 compile-fail	unsized/unsized-slice-element.rs
+compile-fail	unsized/unsized-struct.rs
 compile-fail	unsized/unsized-trait-impl-self-type.rs
 compile-fail	unsized/unsized-trait-impl-trait-arg.rs
 run-pass	unsized/unsized.rs
 run-pass	unsized/unsized2.rs
+compile-fail	unsized/unsized3.rs
+compile-fail	unsized/unsized5.rs
+compile-fail	unsized/unsized6.rs
 compile-fail	unsized/unsized7.rs
+compile-fail	unsized/vec-of-unsized-type.rs
 compile-fail	unstable-feature-bound/unstable_feature_bound_staged_api.rs
 compile-fail	use/unused-trait-with-method-err.rs
 compile-fail	use/use-after-move-based-on-type.rs
@@ -8297,6 +8320,7 @@ compile-fail	wf/wf-associated-const.rs
 check-pass	wf/wf-dyn-in-hrtb-bound-issue-157122.rs
 compile-fail	wf/wf-fn-def-check-sig-2.rs
 compile-fail	wf/wf-impl-associated-type-region.rs
+compile-fail	wf/wf-impl-self-type.rs
 compile-fail	wf/wf-in-fn-type-arg.rs
 compile-fail	wf/wf-in-fn-type-ret.rs
 compile-fail	wf/wf-in-fn-type-static.rs

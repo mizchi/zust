@@ -2131,6 +2131,12 @@ impl Cx<'_> {
                 let Some(t) = targ else {
                     return err(SP, format!("`{name}` needs a type: `{name}::<T>()`"));
                 };
+                // (E0277: `size_of::<str>()`, `size_of::<T>()` of a `T: ?Sized`; the prelude's own uses are of its
+                // instances, `size_of_val`'s T among them)
+                if self.user_code && self.prog.maybe_unsized(t) {
+                    let n = crate::traits::display_ty(self.prog, t);
+                    return err(SP, format!("the size for values of type `{n}` cannot be known at compilation time {}", crate::traits::SOLVED_NO));
+                }
                 let (sz, al) = self.prog.size_align(t);
                 let v = if name == "size_of" { sz } else { al };
                 (Some(self.b.ins().iconst(types::I64, v as i64)), Ty::Usize)

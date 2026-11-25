@@ -96,6 +96,8 @@ pub struct StructDef {
     /// A placeholder for a type parameter of a generic fn `zustc check` instantiates though nothing calls it: the
     /// traits the parameter's bounds name (Program::placeholder)
     pub placeholder: Option<Vec<String>>,
+    /// That placeholder's parameter is declared `?Sized` (Program::fn_unsized_gens): it may be unsized
+    pub maybe_unsized: bool,
 }
 
 impl StructDef {
@@ -114,6 +116,7 @@ impl StructDef {
             args: vec![],
             symbolic: false,
             placeholder: None,
+            maybe_unsized: false,
         }
     }
 }
@@ -390,6 +393,10 @@ pub struct Program {
     pub copy_params: FxMap<u32, Vec<usize>>,
     /// A struct's type parameters declared `?Sized` (base ids: the places), which its last field may make unsized
     pub unsized_params: FxMap<u32, Vec<usize>>,
+    /// A fn's own type parameters, by their index in its generics: those that must be sized (a call's type for one is
+    /// E0277 when unsized) and those declared `?Sized` (its placeholder may be unsized). The program's fns only
+    pub fn_sized_gens: FxMap<u32, Vec<usize>>,
+    pub fn_unsized_gens: FxMap<u32, Vec<usize>>,
     /// A struct's parameter names and its last field's type as written (base ids, the structs with `?Sized`
     /// parameters): whether an instance's tail is unsized, asked before the definition's fields are resolved
     /// (`struct Holder<T> { p: *const Tail<[u8]> }` laid out before `struct Tail<T: ?Sized>(T)`)
@@ -1362,6 +1369,8 @@ impl Program {
             struct_defaults: FxMap::default(),
             copy_params: FxMap::default(),
             unsized_params: FxMap::default(),
+            fn_sized_gens: FxMap::default(),
+            fn_unsized_gens: FxMap::default(),
             tail_syn: FxMap::default(),
             has_mods: false,
             trait_clone_fns: false,
@@ -2033,6 +2042,25 @@ impl Program {
                 p.item_of.push((!ss.is_extern).then_some(ii as u32));
                 if !ss.preds.is_empty() {
                     p.fn_preds.insert(p.sigs.len() as u32, ss.preds.clone());
+                }
+                if ii < user && !ss.generics.is_empty() {
+                    // (its own parameters follow its impl's (impl_generics) or its trait's (`Self` and the trait's))
+                    let owner = match items[ii].kind {
+                        crate::lexer::ItemKind::ImplMember(h) => sums.get(h as usize).map_or(0, |h| h.impl_generics.len()),
+                        crate::lexer::ItemKind::TraitMember(h) => sums.get(h as usize).map_or(0, |h| 1 + h.trait_generics.iter().filter(|g| !g.0.starts_with('#')).count()),
+                        _ => 0,
+                    };
+                    // (`T: Clone + ?Sized` is sized: Clone's supertrait)
+                    let sized_by = |bs: &[String]| bs.iter().any(|b| matches!(b.split('<').next().unwrap_or(b).trim().rsplit("::").next().unwrap_or(""), "Sized" | "Clone" | "Copy" | "Default" | "From" | "Into" | "TryFrom" | "TryInto" | "FromStr" | "FromIterator"));
+                    let un: Vec<usize> = ss.own_unsized.iter().filter_map(|n| ss.generics.iter().rposition(|g| &g.0 == n)).filter(|&k| !sized_by(&ss.generics[k].1)).collect();
+                    // (a const parameter is no type: `__const` among its bounds)
+                    let sz: Vec<usize> = (owner.min(ss.generics.len())..ss.generics.len()).filter(|k| !un.contains(k) && !ss.generics[*k].1.iter().any(|b| b.starts_with(crate::types::CONST_GENERIC))).collect();
+                    if !sz.is_empty() {
+                        p.fn_sized_gens.insert(p.sigs.len() as u32, sz);
+                    }
+                    if !un.is_empty() {
+                        p.fn_unsized_gens.insert(p.sigs.len() as u32, un);
+                    }
                 }
                 p.sigs.push(FnSig {
                     params,
@@ -4544,12 +4572,68 @@ impl Program {
     /// n 要素のタプルの (組み込みの) ジェネリック定義
     /// The placeholder type for type parameter k (named `name`, bounded by the traits `bounds`) of fn id: a struct
     /// with no fields, named `name#` (no program's type has that name), that implements just those traits
+    /// Whether t may be unsized: `[T]`, `str`, `dyn Tr`, a struct with such a tail, or the placeholder of a parameter
+    /// declared `?Sized`
+    pub fn maybe_unsized(&self, t: Ty) -> bool {
+        t.is_unsized() || matches!(t, Ty::Struct(s) if self.structs[s as usize].maybe_unsized)
+    }
+
+    /// The first type in t that may be unsized (maybe_unsized) where only a sized one may be: an argument of the
+    /// program's struct or enum for a parameter not declared `?Sized`, of std's `Vec` / `Option` / `Result` and the
+    /// collections, a tuple's element other than the last, a slice's or array's element (E0277)
+    pub fn sized_wf(&self, t: Ty, depth: u32) -> Option<Ty> {
+        self.sized_wf_with(t, &|t| self.maybe_unsized(t), depth)
+    }
+
+    /// sized_wf with may_unsized saying which types may be unsized (a definition's `?Sized` parameters too)
+    pub fn sized_wf_with(&self, t: Ty, may_unsized: &dyn Fn(Ty) -> bool, depth: u32) -> Option<Ty> {
+        if depth > 16 {
+            return None;
+        }
+        match t {
+            Ty::Struct(s) => {
+                let sd = &self.structs[s as usize];
+                let b = sd.base?;
+                let tuple = self.is_tuple(b);
+                let user = !tuple && self.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prelude_from) && !self.is_closure(b);
+                let std_sized = !user && !tuple && self.struct_item.get(b as usize).is_some_and(|&ii| ii >= self.prelude_from) && matches!(self.structs[b as usize].name.as_str(), "Vec" | "Option" | "Result" | "VecDeque" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "BinaryHeap" | "LinkedList");
+                let n = sd.args.len();
+                for (k, &a) in sd.args.iter().enumerate() {
+                    let may = if tuple {
+                        k + 1 == n
+                    } else if user {
+                        self.unsized_params.get(&b).is_some_and(|v| v.contains(&k))
+                    } else {
+                        !std_sized
+                    };
+                    if !may && may_unsized(a) {
+                        return Some(a);
+                    }
+                    if let Some(x) = self.sized_wf_with(a, may_unsized, depth + 1) {
+                        return Some(x);
+                    }
+                }
+                None
+            }
+            Ty::Slice(e) | Ty::Array(e, _) => {
+                if may_unsized(*e) {
+                    return Some(*e);
+                }
+                self.sized_wf_with(*e, may_unsized, depth + 1)
+            }
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) => self.sized_wf_with(*i, may_unsized, depth + 1),
+            Ty::Fn(f) => f.params.iter().chain([&f.ret]).find_map(|&x| self.sized_wf_with(x, may_unsized, depth + 1)),
+            _ => None,
+        }
+    }
+
     pub fn placeholder(&self, id: u32, k: u32, name: &str, bounds: &[String]) -> u32 {
         if let Some(&s) = self.structs.placeholders.lock().unwrap().get(&(id, k)) {
             return s;
         }
         let mut d = StructDef::blank(format!("{name}#"), false);
         d.placeholder = Some(bounds.to_vec());
+        d.maybe_unsized = self.fn_unsized_gens.get(&id).is_some_and(|v| v.contains(&(k as usize)));
         let mut h = KeyHasher::new();
         h.add(&("placeholder", id, k));
         d.deep = h.finish();
@@ -5006,7 +5090,8 @@ impl Program {
         if b.is_enum {
             return false;
         }
-        let oracle = |i: u8| args.get(i as usize).is_some_and(|a| a.is_unsized());
+        // (a placeholder of a `?Sized` parameter counts: `Bar<T>` with `struct Bar<T: ?Sized>` may be unsized)
+        let oracle = |i: u8| args.get(i as usize).is_some_and(|&a| self.maybe_unsized(a));
         match b.fields.last() {
             Some(f) => self.tail_unsized(base, f.1, &oracle, 0),
             // (the definition's fields are not resolved yet: from its last field as written)

@@ -1405,7 +1405,16 @@ impl Cx<'_> {
     /// 書かれた型 (`Self` と型パラメータは env から)
     pub fn parse_ty(&self, t: &crate::parse::Ty) -> R<Ty> {
         let ts = crate::ast_types::tysyn(t, Some(&crate::types::TySyn::Named("Self".into())))?;
-        self.prog.resolve_env(&ts, &self.env)
+        let r = self.prog.resolve_env(&ts, &self.env)?;
+        // (E0277: a type written in the program's code that puts a maybe-unsized type where only a sized one may be:
+        // `Foo<T>` of a `T: ?Sized` with `struct Foo<T>`, `Vec<str>`, `[[u8]; 2]`)
+        if self.user_code && self.inline_depth == 0 {
+            if let Some(bad) = self.prog.sized_wf(r, 0) {
+                let n = crate::traits::display_ty(self.prog, bad);
+                return Err(format!("the size for values of type `{n}` cannot be known at compilation time {}", crate::traits::SOLVED_NO));
+            }
+        }
+        Ok(r)
     }
 
     /// マクロの引数。型推論が読んだものがあればその構文木 (型の記録がある)、なければ読み直す
