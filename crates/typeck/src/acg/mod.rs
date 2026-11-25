@@ -1671,6 +1671,7 @@ impl Cx<'_> {
         // captures none, so its hidden type's regions are 'static too (E0700 in rustc). Not with type parameters,
         // which it captures)
         self.bk.lint_mut = self.prog.deny_unused_mut && self.user_code && self.bk_on() && self.bk.level >= 2;
+        self.bk.ret_impl = matches!(&f.sig.ret, Some(crate::parse::Ty::Impl(_)));
         self.bk.ret_no_capture = self.bk_on()
             && self.user_code
             && self.prog.opaque.contains(&self.rg.base)

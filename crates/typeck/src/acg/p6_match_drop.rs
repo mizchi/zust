@@ -2809,7 +2809,7 @@ impl Cx<'_> {
 
 /// t is a `&mut`, or holds one in an array, a tuple, a struct's field or an enum's variant (`Option<&mut T>`, whose
 /// derived Copy is_copy takes to hold, as it takes every reference for Copy)
-fn holds_mut_ref(prog: &crate::program::Program, t: Ty, depth: u32) -> bool {
+pub(crate) fn holds_mut_ref(prog: &crate::program::Program, t: Ty, depth: u32) -> bool {
     if depth > 16 {
         return false;
     }

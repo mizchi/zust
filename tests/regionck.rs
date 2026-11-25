@@ -4888,3 +4888,57 @@ fn e(x: Option<String>) -> usize {
 fn main() {}
 "#, &[(3, "cannot move out of `v` in pattern guard"), (9, "cannot assign to `y`, as it is immutable for the pattern guard"), (14, "cannot borrow `v` as mutable, as it is immutable for the pattern guard"), (19, "cannot borrow `*r` as mutable, as it is immutable for the pattern guard")], "pg");
 }
+
+#[test]
+fn part33_receivers_returned_closures_and_aggregates() {
+    // (each case checked with rustc 1.97: zustc reports each fn's first error on rustc's line)
+    // (a `self: Box<Self>` or `self: Pin<&mut Self>` receiver moves into the call: a use after is E0382 (10, 16))
+    errors_at(r#"use std::pin::Pin;
+struct Foo(i32);
+impl Foo {
+    fn bar(self: Box<Self>) {}
+    fn baz(self: Pin<&mut Self>) {}
+}
+fn a() {
+    let b = Box::new(Foo(1));
+    b.bar();
+    b.bar();
+}
+fn c() {
+    let mut f = Foo(1);
+    let p = Pin::new(&mut f);
+    p.baz();
+    p.baz();
+}
+fn main() {}
+"#, &[(10, "use of moved value: `b`"), (16, "use of moved value: `p`")], "rv");
+    // (a closure that borrows a local, held in a local returned as an `impl Trait`: rustc's E0597 at the use in its
+    // body of what it captures (7, the `p` that `println!` names, not `p.x`); returned itself or in a `Box<dyn ..>`,
+    // E0373 at the closure (13))
+    errors_at(r#"#[derive(Debug)]
+struct Point { x: i32, y: i32 }
+fn foo() -> impl FnMut() {
+    let mut p = Point { x: 1, y: 2 };
+    let c = || {
+        p.x += 5;
+        println!("{:?}", p);
+    };
+    c
+}
+fn bar() -> Box<dyn Fn() -> i32> {
+    let p = Point { x: 1, y: 2 };
+    let d = || p.x;
+    Box::new(d)
+}
+fn main() {}
+"#, &[(7, "`p` does not live long enough"), (13, "closure may outlive the current function")], "rc");
+    // (a tuple, an array or a struct's literal returned holds what its parts borrow: E0515 also where the signature
+    // has one region (1, 2, 3))
+    errors_at(r#"fn a(x: &str) -> (&str, &&str) { (x, &x) }
+fn b(x: &i32) -> [&i32; 1] { let y = *x; [&y] }
+struct W<'a> { r: &'a i32 }
+fn c(x: &i32) -> W<'_> { let y = *x; W { r: &y } }
+fn d(x: &i32) -> (&i32, u8) { (x, 1) }
+fn main() {}
+"#, &[(1, "cannot return"), (2, "cannot return"), (4, "cannot return")], "ag");
+}

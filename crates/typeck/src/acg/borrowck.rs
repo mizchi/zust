@@ -266,6 +266,9 @@ pub struct Bk {
     /// The result is an `impl Trait` that captures no lifetime (before edition 2024, its bounds name none, not generic):
     /// what it returns must not borrow through a parameter's reference (E0700)
     pub ret_no_capture: bool,
+    /// The result is an `impl Trait`: a closure that borrows a local and is returned from a local holding it is
+    /// rustc's E0597 at the use in its body (one returned itself, or in a `Box<dyn ..>`, is E0373)
+    pub ret_impl: bool,
     /// The parameters whose regions are all 'static (`x: &'static u8`, `'a: 'static`): returning them captures nothing
     pub static_params: Vec<u32>,
     /// The parameters whose type has a region that may not be 'static under its own reference (`s: &Foo<'a>`): a
@@ -336,6 +339,9 @@ pub struct Bk {
     pub masks: Vec<Vec<bool>>,
     /// The loans of each closure's captures by reference, by the closure's address
     pub cap_loans: HashMap<usize, Vec<u32>>,
+    /// The use in a closure's body of the place a capture loan borrows itself (the first, not a part's: `p` of
+    /// `println!("{:?}", p)` where `p.x += 5` makes the loan mutable), by the loan: where rustc reports its E0597
+    pub cap_path_at: HashMap<u32, Sp>,
     /// The locals a closure holds by value that hold loans, by the closure's address: the closure holds what they do
     /// (`move || iter.next()` with `iter = vec.iter()`)
     pub cap_held: HashMap<usize, Vec<u32>>,
@@ -2077,11 +2083,23 @@ impl Bk {
                             }) {
                                 errs.push(BkError { sp: *sp, msg: "captured variable cannot escape `FnMut` closure body (what is returned holds a mutable borrow of a capture)".to_string() });
                             }
-                            for ln in ls {
+                            for &ln in &ls {
                                 let lo = &self.loans[ln as usize];
                                 if lo.place.owned_len() == lo.place.proj.len() {
                                     let what = if self.locals[lo.place.local as usize].name == "self" { "a value owned by the function" } else { "a local variable" };
                                     let name = path_str(&self.locals, &lo.place);
+                                    // (a closure in a local returned as an `impl Trait`: rustc's E0597 at the use in its
+                                    // body, for each capture it borrows (the first on the earliest line is reported))
+                                    if name != TEMP && lo.capture && self.ret_impl && !srcs.contains(&Src::Loan(ln)) {
+                                        for &cl in &ls {
+                                            let co = &self.loans[cl as usize];
+                                            if co.capture && co.place.owned_len() == co.place.proj.len() {
+                                                let at = self.cap_path_at.get(&cl).copied().unwrap_or(co.at);
+                                                errs.push(BkError { sp: at, msg: format!("`{}` does not live long enough (E0597)", path_str(&self.locals, &co.place)) });
+                                            }
+                                        }
+                                        break;
+                                    }
                                     // (a closure that borrows it: at the closure, E0373)
                                     errs.push(if name == TEMP {
                                         BkError { sp: *sp, msg: "cannot return reference to temporary value (E0515)".to_string() }
@@ -3890,7 +3908,8 @@ impl Cx<'_> {
             }
         }
         paths.sort_by_key(|p| p.0.proj.len());
-        let mut keep: Vec<(BPlace, Option<Ty>, CapMode, Sp)> = vec![];
+        // (and the first use of the kept place itself, which a part's stronger use does not replace)
+        let mut keep: Vec<(BPlace, Option<Ty>, CapMode, Sp, Sp)> = vec![];
         for (p, pt, mode, at) in paths {
             if p.local != l {
                 continue;
@@ -3902,10 +3921,10 @@ impl Cx<'_> {
                         k.3 = at;
                     }
                 }
-                None => keep.push((p, pt, mode, at)),
+                None => keep.push((p, pt, mode, at, at)),
             }
         }
-        for (p, pt, mode, at) in keep {
+        for (p, pt, mode, at, path_at) in keep {
             // (the use in the body, for a mutability error; the closure itself otherwise)
             let at = if at.line == 0 { sp } else { at };
             let pt = if p.proj.is_empty() { Some(t) } else { pt };
@@ -3928,6 +3947,9 @@ impl Cx<'_> {
                     q.proj.push(Proj::Deref(false));
                     let uniq = muts.iter().any(|m| *m == q);
                     let ln = self.bk.loans.len() as u32;
+                    if path_at.line != 0 {
+                        self.bk.cap_path_at.insert(ln, path_at);
+                    }
                     self.bk.cap_loans.entry(c as *const Expr as usize).or_default().push(ln);
                     self.bk.loans.push(Loan { place: q.clone(), mutable: uniq, sp, at, quiet: false, capture: true });
                     self.bk_ev(Ev::Acc(q, Acc::Borrow(ln), sp));
@@ -3940,6 +3962,9 @@ impl Cx<'_> {
                 }
             }
             let ln = self.bk.loans.len() as u32;
+            if path_at.line != 0 {
+                self.bk.cap_path_at.insert(ln, path_at);
+            }
             self.bk.cap_loans.entry(c as *const Expr as usize).or_default().push(ln);
             self.bk.loans.push(Loan { place: p.clone(), mutable: mode == CapMode::RefMut, sp, at, quiet: false, capture: true });
             self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
@@ -4359,8 +4384,10 @@ impl Cx<'_> {
                 return;
             }
         }
-        if let Expr::Macro(_, g, _) = e {
-            match crate::ast_closure::macro_args(g) {
+        // (the arguments read at their positions in the source: a use's position is reported (E0597 at
+        // `println!("{:?}", p)`'s `p`))
+        if let Expr::Macro(_, g, msp) = e {
+            match crate::ast_closure::macro_args_at(g, msp.at) {
                 Some(args) => {
                     for a in &args {
                         // (`println!("{n}")`: the whole variable)
@@ -5015,6 +5042,22 @@ impl Cx<'_> {
             Expr::Match(_, arms) => {
                 for a in arms {
                     self.bk_direct(&a.body, out);
+                }
+            }
+            // (a tuple, an array, a struct's literal: they hold what their parts do (`(x, &x)` returned, E0515 also
+            // where no region check runs))
+            Expr::Tuple(es) | Expr::Array(es) => {
+                for x in es {
+                    self.bk_direct(x, out);
+                }
+            }
+            Expr::Repeat(x, _) => self.bk_direct(x, out),
+            Expr::Struct(_, fs, base) => {
+                for (_, x) in fs {
+                    self.bk_direct(x, out);
+                }
+                if let Some(b) = base {
+                    self.bk_direct(b, out);
                 }
             }
             _ => {}
