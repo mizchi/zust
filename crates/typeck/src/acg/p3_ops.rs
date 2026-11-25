@@ -1968,11 +1968,23 @@ impl Cx<'_> {
             }
         }
         let mut vals = vec![];
+        // (an element type the context gives: each element is coerced to it by deref, as at a coercion site
+        // (`[&x]` with x: `&[u8]` where `[&[u8]; 1]` is expected))
+        let given = !soft && matches!(elem, Some(Ty::Ref(..)));
         for e in elems {
             let (v, t) = self.expr(e, elem)?;
             if t == Ty::Never {
                 return Ok((None, Ty::Never));
             }
+            // (a coercion site, as a struct literal's field: a place of a `&mut` is reborrowed, and the array holds the
+            // loan (`[rr]` of rr: `&mut &mut i32` as a `[&mut i32; 1]`, then `**rr = 1` while it lives, E0506))
+            if let (true, Some(w @ Ty::Ref(..))) = (given, elem) {
+                self.bk_reborrow_let(e, w);
+            }
+            let (v, t) = match elem {
+                Some(et) if given && t != et && matches!(t, Ty::Ref(_, Ty::Ref(..))) => self.deref_coerce(v, t, et),
+                _ => (v, t),
+            };
             match elem {
                 Some(et) if soft && t != et => elem = Some(t),
                 Some(et) => self.same(SP, t, et)?,
@@ -2049,6 +2061,14 @@ impl Cx<'_> {
         if elem == Ty::Never {
             return Ok((None, Ty::Never));
         }
+        // (coerced to the expected element type by deref, as array_lit's elements, and reborrowed as they are)
+        if let Some(w @ Ty::Ref(..)) = exp {
+            self.bk_reborrow_let(x, w);
+        }
+        let (v, elem) = match exp {
+            Some(et @ Ty::Ref(..)) if elem != et && matches!(elem, Ty::Ref(_, Ty::Ref(..))) => self.deref_coerce(v, elem, et),
+            _ => (v, elem),
+        };
         // (E0277: two or more copies of a value need it to be Copy; a constant (`[C; 4]`, `[const { .. }; 4]`) is
         // evaluated for each)
         let constant = match strip_paren(x) {

@@ -6546,6 +6546,7 @@ compile-fail	rfcs/rfc-0107-bind-by-move-pattern-guards/rfc-reject-double-move-ac
 compile-fail	rfcs/rfc-0107-bind-by-move-pattern-guards/rfc-reject-double-move-in-first-arm.rs
 run-pass	rfcs/rfc-1238-nonparametric-dropck/must-work-ex1.rs
 run-pass	rfcs/rfc-1238-nonparametric-dropck/must-work-ex2.rs
+compile-fail	rfcs/rfc-1238-nonparametric-dropck/reject-ex1.rs
 compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/cant-hide-behind-direct-struct-embedded.rs
 compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/cant-hide-behind-direct-struct-param.rs
 compile-fail	rfcs/rfc-1445-restrict-constants-in-patterns/cant-hide-behind-doubly-indirect-embedded.rs
@@ -6602,6 +6603,7 @@ compile-fail	rfcs/rfc-2091-track-caller/error-odd-syntax.rs
 compile-fail	rfcs/rfc-2091-track-caller/error-with-main.rs
 check-pass	rfcs/rfc-2091-track-caller/macro-declaration.rs
 compile-fail	rfcs/rfc-2091-track-caller/only-for-fns.rs
+compile-fail	rfcs/rfc-2093-infer-outlives/dont-infer-static.rs
 check-pass	rfcs/rfc-2093-infer-outlives/issue-54467.rs
 run-pass	rfcs/rfc-2093-infer-outlives/privacy.rs
 compile-fail	rfcs/rfc-2093-infer-outlives/regions-outlives-nominal-type-region-rev.rs
@@ -6820,13 +6822,17 @@ compile-fail	span/borrowck-ref-into-rvalue.rs
 compile-fail	span/coerce-suggestions.rs
 compile-fail	span/destructor-restrictions.rs
 compile-fail	span/drop-location-span-error-rust-2021-incompatible-closure-captures-96258.rs
+compile-fail	span/dropck_arr_cycle_checked.rs
+compile-fail	span/dropck_direct_cycle_with_drop.rs
 compile-fail	span/dropck_misc_variants.rs
+compile-fail	span/dropck_vec_cycle_checked.rs
 compile-fail	span/gated-features-attr-spans.rs
 compile-fail	span/impl-wrong-item-for-trait.rs
 compile-fail	span/issue-23338-locals-die-before-temps-of-body.rs
 check-pass	span/issue-24690.rs
 compile-fail	span/issue-24805-dropck-child-has-items-via-parent.rs
 compile-fail	span/issue-24895-copy-clone-dropck.rs
+compile-fail	span/issue-25199.rs
 compile-fail	span/issue-29106.rs
 compile-fail	span/issue-29595.rs
 compile-fail	span/issue-34264.rs
@@ -6862,6 +6868,7 @@ compile-fail	span/suggestion-raw-68962.rs
 compile-fail	span/typo-suggestion.rs
 run-pass	span/unused-warning-point-at-identifier.rs
 compile-fail	span/vec-macro-outlives-issue-15480.rs
+compile-fail	span/vec-must-not-hide-type-from-dropck.rs
 compile-fail	span/vec_refs_data_with_early_death.rs
 compile-fail	span/wf-method-late-bound-regions.rs
 compile-fail	specialization/feature-gate-specialization.rs
