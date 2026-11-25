@@ -499,6 +499,10 @@ fn split_items(src: &str) -> Result<Vec<SrcItem>, String> {
         if rest.is_empty() {
             return Ok(items);
         }
+        // (a literal or a comment the file ends in: rustc's lexer reports it, at its start, before the delimiters)
+        if let Some(e) = unterminated_literal(s) {
+            return Err(e);
+        }
         // (more delimiters opened than closed to the end: rustc's error at the end of the file, its last line)
         if unclosed_delims(rest.as_bytes()) {
             let src = std::str::from_utf8(s).unwrap_or("");
@@ -589,6 +593,94 @@ fn utf8_len(b: u8) -> usize {
         0xc0.. => 2,
         _ => 1,
     }
+}
+
+/// rustc's lexer error for a string, a raw string or a block comment that the file ends in, at its start: E0765
+/// "unterminated double quote string" (E0766 for a byte string), E0748 "unterminated raw string", E0758
+/// "unterminated block comment". Read only when the items do not split (an error is reported anyway)
+#[cold]
+pub fn unterminated_literal(s: &[u8]) -> Option<String> {
+    let n = s.len();
+    let at = |i: usize, m: &str| {
+        let line = 1 + s[..i].iter().filter(|&&c| c == b'\n').count();
+        let col = std::str::from_utf8(&s[s[..i].iter().rposition(|&c| c == b'\n').map_or(0, |p| p + 1)..i]).map_or(1, |l| l.chars().count() + 1);
+        Some(format!("{line}:{col}: {m}"))
+    };
+    let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c >= 0x80;
+    let mut i = 0;
+    while i < n {
+        let c = s[i];
+        if c == b'/' && s.get(i + 1) == Some(&b'/') {
+            i += s[i..].iter().position(|&c| c == b'\n').unwrap_or(n - i);
+        } else if c == b'/' && s.get(i + 1) == Some(&b'*') {
+            let (st, mut d) = (i, 0u32);
+            loop {
+                if i + 1 >= n {
+                    return at(st, "unterminated block comment (E0758)");
+                }
+                if s[i] == b'/' && s[i + 1] == b'*' {
+                    d += 1;
+                    i += 2;
+                } else if s[i] == b'*' && s[i + 1] == b'/' {
+                    d -= 1;
+                    i += 2;
+                    if d == 0 {
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+        } else if c == b'\'' {
+            // (a char literal, `'x'` / `'\''`, or a lifetime)
+            let close = if s.get(i + 1) == Some(&b'\\') { s[i + 3.min(n - i)..].iter().position(|&c| c == b'\'').map(|p| i + 3 + p) } else { Some(i + 1 + s.get(i + 1).map_or(1, |&b| utf8_len(b))).filter(|&e| s.get(e) == Some(&b'\'')) };
+            i = match close {
+                Some(e) => e + 1,
+                None => i + 1,
+            };
+        } else if ident(c) {
+            let (st, raw) = (i, c == b'r' || ((c == b'b' || c == b'c') && s.get(i + 1) == Some(&b'r')));
+            let mut j = if raw && c != b'r' { i + 2 } else { i + 1 };
+            if raw && (s.get(j) == Some(&b'#') || s.get(j) == Some(&b'"')) {
+                let h = s[j..].iter().take_while(|&&c| c == b'#').count();
+                if s.get(j + h) == Some(&b'"') {
+                    j += h + 1;
+                    let end = (j..n).find(|&k| s[k] == b'"' && s.len() >= k + 1 + h && s[k + 1..k + 1 + h].iter().all(|&c| c == b'#'));
+                    match end {
+                        Some(k) => i = k + 1 + h,
+                        None => return at(st, "unterminated raw string (E0748)"),
+                    }
+                    continue;
+                }
+            }
+            if (c == b'b' || c == b'c') && s.get(i + 1) == Some(&b'"') {
+                i += 1;
+                continue;
+            }
+            if c == b'b' && s.get(i + 1) == Some(&b'\'') {
+                i += 1;
+                continue;
+            }
+            while j < n && ident(s[j]) {
+                j += 1;
+            }
+            i = j;
+        } else if c == b'"' {
+            let byte = i > 0 && s[i - 1] == b'b';
+            let st = if byte { i - 1 } else { i };
+            let mut j = i + 1;
+            while j < n && s[j] != b'"' {
+                j += if s[j] == b'\\' { 2 } else { 1 };
+            }
+            if j >= n {
+                return at(st, if byte { "unterminated double quote byte string (E0766)" } else { "unterminated double quote string (E0765)" });
+            }
+            i = j + 1;
+        } else {
+            i += 1;
+        }
+    }
+    None
 }
 
 /// 位置 i から文字列リテラルが始まっていればその終端を返す。

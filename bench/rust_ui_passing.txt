@@ -1517,6 +1517,7 @@ compile-fail	codemap_tests/issue-28308.rs
 compile-fail	codemap_tests/one_line.rs
 compile-fail	codemap_tests/overlapping_inherent_impls.rs
 compile-fail	codemap_tests/tab.rs
+compile-fail	codemap_tests/tab_2.rs
 compile-fail	codemap_tests/unicode_2.rs
 check-pass	codemap_tests/unicode_3.rs
 run-pass	codemap_tests/utf8-bom.rs
@@ -5402,6 +5403,7 @@ check-pass	parser/bounds-obj-parens.rs
 compile-fail	parser/brace-in-let-chain.rs
 compile-fail	parser/break-in-unlabeled-block-parenthesized.rs
 compile-fail	parser/break-in-unlabeled-block.rs
+compile-fail	parser/byte-string-literals.rs
 compile-fail	parser/cast-angle-bracket-precedence.rs
 compile-fail	parser/chained-comparison-suggestion.rs
 compile-fail	parser/char/whitespace-character-literal.rs
@@ -5902,12 +5904,16 @@ compile-fail	parser/range-inclusive-suggestion-span.rs
 compile-fail	parser/range_inclusive.rs
 compile-fail	parser/range_inclusive_dotdotdot.rs
 compile-fail	parser/raw/issue-70677-panic-on-unterminated-raw-str-at-eof.rs
+compile-fail	parser/raw/raw-byte-string-eof.rs
 compile-fail	parser/raw/raw-byte-string-literals.rs
 compile-fail	parser/raw/raw-literal-keywords.rs
 compile-fail	parser/raw/raw-str-delim.rs
 check-pass	parser/raw/raw-str-in-macro-call.rs
 compile-fail	parser/raw/raw-str-unbalanced.rs
+compile-fail	parser/raw/raw-str-unterminated.rs
+compile-fail	parser/raw/raw-string-2.rs
 run-pass	parser/raw/raw-string-literals.rs
+compile-fail	parser/raw/raw-string.rs
 compile-fail	parser/recover-hrtb-before-dyn-impl-kw.rs
 compile-fail	parser/recover-invalid-fn-trait-bound-pattern.rs
 compile-fail	parser/recover-invalid-function-parameter-pattern-1.rs
@@ -6033,6 +6039,8 @@ compile-fail	parser/type-ascription-in-pattern.rs
 compile-fail	parser/type-parameters-in-field-exprs.rs
 compile-fail	parser/typod-const-in-const-param-def.rs
 run-pass	parser/ufcs-return-unused-parens.rs
+compile-fail	parser/unbalanced-doublequote-2.rs
+compile-fail	parser/unbalanced-doublequote.rs
 compile-fail	parser/unclosed-braces.rs
 compile-fail	parser/unclosed_delim_mod.rs
 compile-fail	parser/underscore-suffix-for-float.rs

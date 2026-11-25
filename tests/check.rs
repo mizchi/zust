@@ -2713,3 +2713,18 @@ fn items_of_one_name_in_two_blocks_of_a_fn() {
     let src = "fn main() {\n    unsafe fn g(x: u8) -> u8 {\n        x + 1\n    }\n    let _ = unsafe { g(1) };\n}\n";
     assert_eq!(s.check(src).first().map(|d| (d.line, d.msg.clone())), None, "an unsafe fn in a body");
 }
+
+#[test]
+fn literals_and_comments_a_file_ends_in() {
+    // (rustc 1.100's lexer errors at the literal's or the comment's start, before the delimiters it leaves open)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    assert_eq!(first("fn main() {\n    let s = \"abc;\n}\n"), e(2, 13, "unterminated double quote string (E0765)"), "a string");
+    assert_eq!(first("fn main() {\n    let s = r##\"abc\"#;\n}\n"), e(2, 13, "unterminated raw string (E0748)"), "a raw string");
+    assert_eq!(first("fn main() {\n    let s = b\"abc;\n}\n"), e(2, 13, "unterminated double quote byte string (E0766)"), "a byte string");
+    assert_eq!(first("fn main() {\n    /* a /* b */\n}\n"), e(2, 5, "unterminated block comment (E0758)"), "a block comment");
+    assert_eq!(first("fn main() {\n    let c = '\"'; let l: &'static str = \"}\"; let r = r#\"\"\"#;\n").map(|d| d.2), Some("this file contains an unclosed delimiter".to_string()), "closed literals: the delimiter's error");
+}
