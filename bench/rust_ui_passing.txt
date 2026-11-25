@@ -8036,6 +8036,7 @@ run-pass	union/union-inherent-method.rs
 compile-fail	union/union-lint-dead-code.rs
 run-pass	union/union-macro.rs
 run-pass	union/union-manuallydrop-rpass.rs
+run-pass	union/union-modification.rs
 compile-fail	union/union-move.rs
 compile-fail	union/union-no-derive-suggestion.rs
 run-pass	union/union-nodrop.rs
@@ -8050,6 +8051,7 @@ run-pass	union/union-transmute.rs
 compile-fail	union/union-unsafe.rs
 compile-fail	union/union.rs
 check-pass	union/union_access_through_block.rs
+run-pass	union/union_destructure.rs
 check-pass	union/union_wild_or_wild.rs
 compile-fail	union/unresolved-field-isnt-copy.rs
 compile-fail	unop/unop-neg-bool.rs

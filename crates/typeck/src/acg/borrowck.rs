@@ -2308,6 +2308,9 @@ pub enum CapMode {
     RefMut,
     /// Moved out (bound by value, not Copy)
     Val,
+    /// Moved out by a pattern's binding by value of a `&mut` (`let S { p } = s;` with p: `&mut T`): not reborrowed,
+    /// as a `&mut` passed by value is
+    ValMove,
 }
 
 /// The expression whose value e is: through parentheses and the tails of blocks (`unsafe { *p }`)
@@ -3793,7 +3796,7 @@ impl Cx<'_> {
                 }
             }
             if move_kw {
-                *mode = CapMode::Val;
+                *mode = (*mode).max(CapMode::Val);
             } else if *mode == CapMode::Use {
                 // (a use that is not a pattern: acg's analysis says whether the closure takes the value)
                 // (`&mut x` of what the closure owns no reference to (`|| { &mut my_var; }`) is a `&mut` capture too)
@@ -3862,11 +3865,13 @@ impl Cx<'_> {
             // (the use in the body, for a mutability error; the closure itself otherwise)
             let at = if at.line == 0 { sp } else { at };
             let pt = if p.proj.is_empty() { Some(t) } else { pt };
-            if mode == CapMode::Val {
+            if mode >= CapMode::Val {
                 // (a `&mut` held by value is moved into the closure: the borrow check counts it as Copy for the
-                // reborrows of passing it, which a capture is not (`move || *r = 1`, `|| { let bar = r; }`). Passed
-                // as an argument, it may be reborrowed (`drop::<&mut U>(r)`): not followed)
-                let copy = pt.is_none_or(|t| self.bk_ty(t).0 && !(matches!(t, Ty::Ref(true, _)) && (move_kw || let_moved)));
+                // reborrows of passing it, which a capture is not (`move || *r = 1`, `|| { let bar = r; }`, a
+                // pattern's binding of it, ValMove). Passed as an argument, it may be reborrowed
+                // (`drop::<&mut U>(r)`): not followed)
+                let moved = move_kw || let_moved || mode == CapMode::ValMove;
+                let copy = pt.is_none_or(|t| self.bk_ty(t).0 && !(matches!(t, Ty::Ref(true, _)) && moved));
                 // (a copy a closure with no `move` holds of what it only reads: rustc's closure borrows it. Not of a
                 // reference: one passed where a reference is expected is reborrowed (`f(b)` is `f(&*b)`), and the
                 // closure holds a copy of it then (rustc's capture of `*b` by reference, truncated))
@@ -3939,6 +3944,8 @@ impl Cx<'_> {
                 let mode = match (by_ref, m) {
                     (true, true) => CapMode::RefMut,
                     (true, false) => CapMode::Ref,
+                    // (a `&mut` bound by value is moved out, which is_copy does not tell)
+                    _ if matches!(t, Some(Ty::Ref(true, _))) => CapMode::ValMove,
                     // (a Copy value bound by value is read: captured by reference)
                     _ if t.is_some_and(|t| is_copy(self.prog, t, 0)) => CapMode::Ref,
                     _ if t.is_some() => CapMode::Val,
@@ -4026,7 +4033,8 @@ impl Cx<'_> {
                     };
                     self.bk_pat_cap(p, &field(base, name), Some(f.1), sp, &mut sub);
                 }
-                if sd.is_enum && sd.variants.len() > 1 {
+                // (a union's capture is of the union, not of a field (the fields overlap: `u.b` is `u.a`))
+                if sd.is_enum && sd.variants.len() > 1 || self.prog.unions.contains(&self.prog.structs[self.prog.base_of(sid) as usize].name) {
                     let mode = sub.iter().map(|x| x.2).max().unwrap_or(CapMode::Ref).max(CapMode::Ref);
                     out.push((base.clone(), t, mode, sp));
                 } else {
@@ -4049,8 +4057,13 @@ impl Cx<'_> {
             }
             Pat::Ident(true, m, _, Some(_)) => out.push((base.clone(), t, if *m { CapMode::RefMut } else { CapMode::Ref }, sp)),
             // (the unit variant of an enum of one variant: nothing to test, so nothing read (edition 2021 captures
-            // nothing for `match sv { SingleVariant::A => .. }`))
-            Pat::Path(_) if matches!(t, Some(Ty::Struct(sid)) if { let sd = &self.prog.structs[sid as usize]; sd.is_enum && sd.variants.len() == 1 }) => {}
+            // nothing for `match sv { SingleVariant::A => .. }`). Not a constant of the enum (`E::ZERO`), which
+            // compares the value)
+            Pat::Path(p)
+                if matches!(t, Some(Ty::Struct(sid)) if {
+                    let sd = &self.prog.structs[sid as usize];
+                    sd.is_enum && sd.variants.len() == 1 && sd.variants[0].fields.is_empty() && p.segs.last().is_some_and(|s| s.name == sd.variants[0].name)
+                }) => {}
             Pat::Lit(_) | Pat::Range(..) | Pat::Path(_) => out.push((base.clone(), t, CapMode::Ref, sp)),
             // (a pattern not followed into: borrowed mutably if it binds a part by `ref mut`, else as the body uses it)
             _ if crate::ast_closure::binds_ref_mut(pat) => out.push((base.clone(), t, CapMode::RefMut, sp)),

@@ -4701,3 +4701,58 @@ fn d() { let t = Two::A; let c = || { match t { Two::A => (), Two::B => () } }; 
 fn main() { a(); }
 "#, &[(8, "cannot move out of `t` because it is borrowed")], "pc");
 }
+
+#[test]
+fn part32_review() {
+    // (review of #159, each case checked with rustc 1.97: a `let` of a raw pointer's type in a const coerces its
+    // block's tail before the block ends (1: no error), a reference's does not (4: E0597))
+    errors_at("const C: () = {\n    let _: *const u32 = { let x = 42; &x };\n};\nconst E: () = {\n    let _: *const u32 = { let y: &u32 = { let x = 42; &x }; y };\n};\nfn main() { let _ = C; let _ = E; }\n", &[(5, "`x` does not live long enough")], "rp");
+    // (a closure's pattern that binds a `&mut` field by value moves it (6, 12: E0382 after the call; the closure is
+    // `FnOnce`, 17), one that binds a Copy field reads it (22: no error))
+    errors_at(r#"struct S<'a> { p: &'a mut i32, q: i32 }
+struct T<'a>(&'a mut i32);
+fn a(mut n: i32) {
+    let s = S { p: &mut n, q: 1 };
+    let c = || { let S { p, .. } = s; p };
+    c(); let _ = &s.p;
+}
+fn b(mut n: i32) {
+    let s = T(&mut n);
+    let c = || { let T(p) = s; p };
+    c();
+    let _ = &s.0;
+}
+fn d(mut n: i32) {
+    let s = (&mut n, 1);
+    let mut c = || { let (p, _) = s; *p += 1; };
+    c(); c();
+}
+fn e(mut n: i32) {
+    let s = S { p: &mut n, q: 1 };
+    let c = || { let S { q, .. } = s; q };
+    c(); let _ = &s.p;
+}
+fn main() {}
+"#, &[(6, "use of moved value: `s.p`"), (12, "use of moved value: `s.0`"), (17, "use of moved value: `c`")], "rm");
+    // (a constant of an enum of one variant in a closure's pattern compares the value: it is read (7: E0506); a
+    // union's pattern captures the union (12: E0506 for a write to another field), and names one field)
+    errors_at(r#"#[derive(PartialEq, Eq)]
+enum E { V(u32) }
+impl E { const ZERO: E = E::V(0); }
+union U { a: u32, b: u32 }
+fn f() {
+    let mut e = E::V(1);
+    let c = || match e { E::ZERO => 1, _ => 0 };
+    e = E::V(2);
+    c();
+}
+fn g() {
+    let mut u = U { a: 1 };
+    let c = || unsafe { let U { a: ref x } = u; };
+    u.b = 2;
+    c();
+}
+fn h() -> u32 { let u = U { a: 1 }; unsafe { let U { b } = u; b } }
+fn main() {}
+"#, &[(8, "cannot assign to `e` because it is borrowed"), (14, "cannot assign to `u.b` because it is borrowed")], "rc");
+}

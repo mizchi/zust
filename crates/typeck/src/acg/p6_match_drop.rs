@@ -1222,7 +1222,24 @@ impl Cx<'_> {
             };
             out.push((fpat, Self::field_place(p, fty, off)?));
         }
-        if !*has_rest && out.len() != fields.len() {
+        // (a union's pattern names one field, with no `..`. Matching the field is reading it, which needs `unsafe`
+        // (E0133), unless its pattern is `_` (or `_ | _`))
+        let union = matches!(p.ty(), Ty::Struct(sid) if self.prog.unions.contains(&self.prog.structs[self.prog.base_of(sid) as usize].name));
+        fn wild(p: &Pat) -> bool {
+            match p {
+                Pat::Wild => true,
+                Pat::Or(ps) => ps.iter().all(wild),
+                _ => false,
+            }
+        }
+        if union && self.unsafe_ok == 0 && self.user_code && out.iter().any(|(q, _)| !wild(q)) {
+            return err(SP, "access to union field is unsafe and requires unsafe block (E0133)");
+        }
+        if union && *has_rest {
+            return err(SP, "`..` cannot be used in union patterns");
+        } else if union && out.len() != 1 {
+            return err(SP, "union patterns should have exactly one field");
+        } else if !union && !*has_rest && out.len() != fields.len() {
             return err(SP, "pattern does not mention all fields (add `..`)");
         }
         Ok(out)

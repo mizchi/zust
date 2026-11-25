@@ -2299,6 +2299,25 @@ fn block_borrowing_own_local(e: &Expr, d: u32) -> Option<(u32, String, bool)> {
         Expr::Block(_, _, b) | Expr::Const(b) => tail_borrows_own_local(b).or_else(|| {
             b.stmts.iter().find_map(|st| match st {
                 Stmt::Expr(x, _) => block_borrowing_own_local(x, d + 1),
+                // (a `let` of a raw pointer's type coerces its block's tail before the block ends: `let _: *const
+                // u32 = { let x = 42; &x };` borrows x no longer than the block. Its statements are looked at)
+                Stmt::Let(_, Some(PTy::Ptr(..)), Some(x), ..) => {
+                    let mut x = x;
+                    while let Expr::Paren(i) = x {
+                        x = i;
+                    }
+                    match x {
+                        Expr::Block(_, _, ib) | Expr::Const(ib) => {
+                            let n = ib.stmts.len() - matches!(ib.stmts.last(), Some(Stmt::Expr(_, false))) as usize;
+                            ib.stmts[..n].iter().find_map(|st| match st {
+                                Stmt::Expr(y, _) => block_borrowing_own_local(y, d + 2),
+                                Stmt::Let(_, _, Some(y), ..) => block_borrowing_own_local(y, d + 2),
+                                _ => None,
+                            })
+                        }
+                        x => block_borrowing_own_local(x, d + 1),
+                    }
+                }
                 Stmt::Let(_, _, Some(x), ..) => block_borrowing_own_local(x, d + 1),
                 _ => None,
             })
