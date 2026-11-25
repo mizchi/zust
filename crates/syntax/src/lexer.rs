@@ -1049,8 +1049,8 @@ pub fn hoist_nested_items_parts(src: &str) -> Option<(String, Vec<(usize, String
 /// depth: 名前を変えてやり直した回数 (壊れたソースで名前の変更が止まらないときは 8 回で止める)
 fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)> {
     // (速く飛ばす: 字下げした行頭の `fn ` などがなければ入れ子のアイテムはない)
-    const KWS: [&str; 21] = [
-        "fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "extern ", "unsafe extern ", "pub fn ", "pub struct ",
+    const KWS: [&str; 22] = [
+        "fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "extern ", "unsafe extern ", "unsafe fn ", "pub fn ", "pub struct ",
         "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ", "pub(crate) ",
     ];
     let indented = src.split('\n').any(|l| {
@@ -1078,6 +1078,24 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     // 入れ子のアイテムの名前と、それを含む関数の本体 (開き括弧のトークン位置)。閉じた本体の (開き, 閉じ)
     let mut nested_names: Vec<(Vec<u8>, usize)> = vec![];
     let mut bodies: Vec<(usize, usize)> = vec![];
+    // (an item's scope is its innermost block, `{ struct Bar; } { struct Bar; }` two: the `{` before its statement,
+    // found back from it, as items in bodies are few)
+    let block_of = |k: usize| -> usize {
+        let mut d = 0u32;
+        let mut j = k;
+        while j > 0 {
+            j -= 1;
+            if toks[j].0 == 1 {
+                match s[toks[j].1] {
+                    b'}' => d += 1,
+                    b'{' if d == 0 => return j,
+                    b'{' => d -= 1,
+                    _ => {}
+                }
+            }
+        }
+        0
+    };
     // トップレベルのアイテムの名前 (入れ子のアイテムを外に出すとぶつかるもの)
     let mut top_names: Vec<Vec<u8>> = vec![];
     let mut k = 0;
@@ -1114,8 +1132,8 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 } else {
                     k
                 }
-            } else if t == b"unsafe" && k + 1 < toks.len() && tok(k + 1) == b"extern" {
-                // (`unsafe extern "C" { .. }`)
+            } else if t == b"unsafe" && k + 1 < toks.len() && matches!(tok(k + 1), b"extern" | b"fn") {
+                // (`unsafe extern "C" { .. }`, `unsafe fn f() { .. }`)
                 k + 1
             } else {
                 k
@@ -1207,14 +1225,14 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 moves.push((toks[st].1, toks[e].2));
                 let nk = if matches!(t, b"static") && tok(ik + 1) == b"mut" { ik + 2 } else { ik + 1 };
                 if nk < toks.len() && toks[nk].0 == 0 && t != b"use" && t != b"impl" && !extern_block {
-                    nested_names.push((tok(nk).to_vec(), fn_bodies.last().unwrap().1));
+                    nested_names.push((tok(nk).to_vec(), block_of(k)));
                 }
                 // (an extern block's functions: names of the block's function, renamed like its other items when
                 // another function's block declares the name too; the declaration then keeps its symbol, link_name)
                 if extern_block {
                     for q in ik + 1..e {
                         if toks[q].0 == 0 && tok(q) == b"fn" && q + 1 < e && toks[q + 1].0 == 0 {
-                            nested_names.push((tok(q + 1).to_vec(), fn_bodies.last().unwrap().1));
+                            nested_names.push((tok(q + 1).to_vec(), block_of(k)));
                         }
                     }
                 }
@@ -1260,7 +1278,26 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
         if !dup {
             continue;
         }
-        if let Some(&(open, close)) = bodies.iter().find(|x| x.0 == *b) {
+        // (the block's `}`: a fn body's is known, another block's is found forward from its `{`)
+        let close_of = |o: usize| -> Option<usize> {
+            let mut d = 0u32;
+            for j in o..toks.len() {
+                if toks[j].0 == 1 {
+                    match s[toks[j].1] {
+                        b'{' => d += 1,
+                        b'}' => {
+                            d -= 1;
+                            if d == 0 {
+                                return Some(j);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            None
+        };
+        if let Some((open, close)) = bodies.iter().find(|x| x.0 == *b).copied().or_else(|| close_of(*b).map(|c| (*b, c))) {
             let mut nn = n.clone();
             nn.extend_from_slice(format!("__h{i}").as_bytes());
             renames.push((open, close, n.clone(), nn));

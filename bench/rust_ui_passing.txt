@@ -850,6 +850,7 @@ compile-fail	borrowck/borrowck-closures-use-after-free.rs
 compile-fail	borrowck/borrowck-consume-unsize-vec.rs
 compile-fail	borrowck/borrowck-consume-upcast-box.rs
 compile-fail	borrowck/borrowck-deref-pattern-assignment.rs
+compile-fail	borrowck/borrowck-describe-lvalue.rs
 compile-fail	borrowck/borrowck-drop-from-guard.rs
 compile-fail	borrowck/borrowck-escaping-closure-error-1.rs
 compile-fail	borrowck/borrowck-escaping-closure-error-2.rs
@@ -1448,6 +1449,7 @@ compile-fail	closures/issue-87461.rs
 check-pass	closures/issue-97607.rs
 compile-fail	closures/issue-99565.rs
 compile-fail	closures/labeled-break-inside-closure-62480.rs
+run-pass	closures/local-enums-in-closure-2074.rs
 compile-fail	closures/local-type-mismatch-attribution-issue-127048.rs
 compile-fail	closures/local-type-mix.rs
 compile-fail	closures/missing-body.rs
@@ -1562,6 +1564,7 @@ run-pass	coercion/issue-3794.rs
 compile-fail	coercion/issue-73886.rs
 check-pass	coercion/leak_check_fndef_lub.rs
 compile-fail	coercion/leak_check_fndef_lub_deadcode_breakage.rs
+check-pass	coercion/lub_coercion_handles_safety.rs
 run-pass	coercion/method-return-trait-object-14399.rs
 compile-fail	coercion/mut-mut-wont-coerce.rs
 check-pass	coercion/mut-trait-object-coercion-8398.rs

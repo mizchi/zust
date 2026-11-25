@@ -2702,3 +2702,14 @@ fn macro_definitions_rustc_rejects_and_rules_with_doc_comments() {
     assert_eq!(first("macro_rules! e {\n    {}\n}\nfn main() {}\n"), e(2, "expected `=>`, found end of macro arguments"), "no `=>`");
     assert_eq!(first("macro_rules! m {\n    /// the empty one\n    () => { 1 };\n    /// a value\n    ($x:expr) => { $x };\n}\nfn main() { let _ = m!() + m!(2); }\n"), None, "doc comments on rules");
 }
+
+#[test]
+fn items_of_one_name_in_two_blocks_of_a_fn() {
+    // (each block's item is its own: moved out of the fn, they are named apart)
+    let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+    let src = "fn main() {\n    {\n        struct Bar { x: u8 }\n        let _ = Bar { x: 1 };\n    }\n    {\n        struct Bar { y: u16 }\n        let b = Bar { y: 2 };\n        let _ = b.y;\n    }\n    if true {\n        enum E { A }\n        let _ = E::A;\n    } else {\n        enum E { B }\n        let _ = E::B;\n    }\n}\n";
+    assert_eq!(s.check(src).first().map(|d| (d.line, d.msg.clone())), None);
+    // (an `unsafe fn` in a body is moved out too: it was left there, "nested items are not supported")
+    let src = "fn main() {\n    unsafe fn g(x: u8) -> u8 {\n        x + 1\n    }\n    let _ = unsafe { g(1) };\n}\n";
+    assert_eq!(s.check(src).first().map(|d| (d.line, d.msg.clone())), None, "an unsafe fn in a body");
+}
