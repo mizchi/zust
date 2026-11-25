@@ -2561,7 +2561,11 @@ impl Cx<'_> {
         // (a `&mut` bound by value is moved out too: a pattern does not reborrow it (`if let Some(mut x) = opt` in a
         // loop, with opt: `Option<&mut T>`, is E0382 the second time))
         if !self.bk_ty(t).0 || matches!(t, Ty::Ref(true, _)) {
-            let sp = self.bk.scrut_place.as_ref().map(|x| x.1).unwrap_or(super::SP);
+            // (a move out of what the scrutinee owns is at the arm, where its binding is, as rustc reports a use after
+            // it: `[.., _y] => {}` after `[_, _, _x]` moved `a[2]`. One through a reference, which cannot be moved
+            // out of, and one outside a match arm are at the scrutinee, as rustc reports E0507 / E0508)
+            let at_arm = self.bk.arm_at.filter(|_| p.owned_len() == p.proj.len());
+            let sp = at_arm.or(self.bk.scrut_place.as_ref().map(|x| x.1)).unwrap_or(super::SP);
             let a = if self.bk.guard_arm { Acc::Read } else { Acc::Move };
             self.bk_acc_place(p, a, sp);
         }
