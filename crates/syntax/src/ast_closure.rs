@@ -896,6 +896,116 @@ fn move_site_in(e: &Expr, caps: &[String], by: MovesBy) -> Option<(String, Pos)>
 }
 
 /// 子の式を順に f に渡す (外から使う版)
+/// Every use of the capture n in the closure c is through a deref of it: a method call's receiver (`n.m(..)`), a
+/// field's or an index's base (`n.f`, `n[i]`), `*n`, a call's argument or callee (`f(n)`, `n()`). With n a shared
+/// reference, edition 2021 captures `*n` by reference there (a reborrow of the referent, not a borrow of n), which is
+/// n's value: copying n is the same. rustc reports E0373 for a closure that escapes only where it uses n itself
+/// (`|| n`, `let x = n`, `(n, 1)`, `for _ in n`). Not where the closure binds a name n of its own
+pub fn deref_uses_only(c: &Expr, n: &str) -> bool {
+    let Expr::Closure(_, ps, _, body, _) = c else { return false };
+    if ps.iter().any(|(p, _)| pat_binds_name(p, n)) || binds_name(body, n, 0) {
+        return false;
+    }
+    let (mut ok, mut seen) = (true, false);
+    deref_walk(body, n, &mut ok, &mut seen, 0);
+    ok && seen
+}
+
+fn is_name(e: &Expr, n: &str) -> bool {
+    match e {
+        Expr::Paren(x) => is_name(x, n),
+        Expr::Path(None, p) => !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() && p.segs[0].name == n,
+        _ => false,
+    }
+}
+
+fn deref_walk(e: &Expr, n: &str, ok: &mut bool, seen: &mut bool, d: u32) {
+    if !*ok {
+        return;
+    }
+    if d > 64 {
+        *ok = false;
+        return;
+    }
+    let mut slot = |x: &Expr, ok: &mut bool, seen: &mut bool| {
+        if is_name(x, n) {
+            *seen = true;
+        } else {
+            deref_walk(x, n, ok, seen, d + 1);
+        }
+    };
+    match e {
+        Expr::MethodCall(r, _, _, args, _) => {
+            slot(r, ok, seen);
+            for a in args {
+                slot(a, ok, seen);
+            }
+        }
+        Expr::Call(f, args) => {
+            slot(f, ok, seen);
+            for a in args {
+                slot(a, ok, seen);
+            }
+        }
+        Expr::Field(b, _, _) => slot(b, ok, seen),
+        Expr::Index(b, i, _) => {
+            slot(b, ok, seen);
+            deref_walk(i, n, ok, seen, d + 1);
+        }
+        Expr::Unary(op, x, _) if op == "*" => slot(x, ok, seen),
+        // (a macro's arguments: the name in them, as a use of its own (`println!("{}", n)` borrows n))
+        Expr::Macro(_, g, _) => {
+            if g.split(|ch: char| !(ch.is_alphanumeric() || ch == '_')).any(|w| w == n) {
+                *ok = false;
+            }
+        }
+        x if is_name(x, n) => *ok = false,
+        _ => each_child(e, &mut |c| deref_walk(c, n, ok, seen, d + 1)),
+    }
+}
+
+pub fn pat_binds_name_pub(p: &Pat, n: &str) -> bool {
+    pat_binds_name(p, n)
+}
+
+fn pat_binds_name(p: &Pat, n: &str) -> bool {
+    let mut v = vec![];
+    pat_idents(p, &mut v);
+    v.iter().any(|x| x == n)
+}
+
+/// A pattern in e (a `let`, a match arm, a `for`, a closure's parameter) binds the name n
+pub fn binds_name(e: &Expr, n: &str, d: u32) -> bool {
+    if d > 64 {
+        return true;
+    }
+    let block = |b: &crate::parse::Block| {
+        b.stmts.iter().any(|s| match s {
+            Stmt::Let(p, _, init, els, ..) => {
+                pat_binds_name(p, n) || init.as_ref().is_some_and(|x| binds_name(x, n, d + 1)) || els.as_ref().is_some_and(|b| b.stmts.iter().any(|s| matches!(s, Stmt::Expr(x, _) if binds_name(x, n, d + 1))))
+            }
+            Stmt::Expr(x, _) => binds_name(x, n, d + 1),
+            _ => false,
+        })
+    };
+    match e {
+        Expr::Closure(_, ps, _, b, _) => ps.iter().any(|(p, _)| pat_binds_name(p, n)) || binds_name(b, n, d + 1),
+        Expr::Let(p, x) => pat_binds_name(p, n) || binds_name(x, n, d + 1),
+        Expr::Match(x, arms) => {
+            binds_name(x, n, d + 1) || arms.iter().any(|a| pat_binds_name(&a.pat, n) || a.guard.as_ref().is_some_and(|g| binds_name(g, n, d + 1)) || binds_name(&a.body, n, d + 1))
+        }
+        Expr::For(_, p, it, b) => pat_binds_name(p, n) || binds_name(it, n, d + 1) || block(b),
+        Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => block(b),
+        Expr::If(c, t, el) => binds_name(c, n, d + 1) || block(t) || el.as_ref().is_some_and(|x| binds_name(x, n, d + 1)),
+        Expr::While(_, c, b) => binds_name(c, n, d + 1) || block(b),
+        _ => {
+            let mut found = false;
+            each_child(e, &mut |c| found = found || binds_name(c, n, d + 1));
+            found
+        }
+    }
+}
+
 pub fn each_child_pub(e: &Expr, f: &mut dyn FnMut(&Expr)) {
     each_child(e, f)
 }

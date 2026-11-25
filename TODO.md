@@ -30,7 +30,6 @@ invariants.
 | `send_dyn_thread` | `dyn Trait` types do not keep `+ Send`, so a `Box<dyn Fn()>` (which may hold an `Rc`) moves to a thread |
 | `cve_2019_12083_error_type_id` | an impl may define a method its trait does not declare (E0407). zustc has no downcast, so no type confusion follows |
 | `const_overflow` | overflow in a const (E0080) is found only when it is evaluated at run time (a panic) |
-| `unsafe_union_pattern` | rejected, but as an unsupported pattern (a union pattern of one field), not as E0133 |
 
 ### Runtime
 

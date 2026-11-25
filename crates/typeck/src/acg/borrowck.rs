@@ -1098,7 +1098,7 @@ fn union_overlap(a: &[Proj], b: &[Proj]) -> bool {
 }
 
 /// The mark of a union's field in a place (Proj::Field)
-const UNION_FIELD: char = '\u{1}';
+pub(crate) const UNION_FIELD: char = '\u{1}';
 
 /// The two places overlap (one contains the other)
 fn overlap(a: &BPlace, b: &BPlace) -> bool {
@@ -1789,8 +1789,10 @@ impl Bk {
                     if let (Acc::Move, Some(errs), false) = (a, errs.as_deref_mut(), self.locals[p.local as usize].via_ref) {
                         if p.owned_len() < p.proj.len() || p.proj.contains(&Proj::Index) {
                             let what = if p.owned_len() < p.proj.len() { "which is behind a reference" } else { "an indexed place" };
-                            // (of a temporary's part (a match on `(a, b)`): of the reference, as rustc says it)
-                            let msg = if self.locals[p.local as usize].name == TEMP && p.owned_len() < p.proj.len() {
+                            // (of a temporary's part (a match on `(a, b)`), or of a local the lowering made (a `for` over an
+                            // Option's `__exr_ox`): of the reference, as rustc says it)
+                            let lname = &self.locals[p.local as usize].name;
+                            let msg = if (lname == TEMP || lname.starts_with("__exr")) && p.owned_len() < p.proj.len() {
                                 // (a `&mut`'s deref is `Deref(false)`, a `&`'s `Shr`, ref_deref)
                                 let m = matches!(p.proj.get(p.owned_len()), Some(Proj::Deref(false)));
                                 format!("cannot move out of a {} reference", if m { "mutable" } else { "shared" })
@@ -2306,6 +2308,9 @@ pub enum CapMode {
     RefMut,
     /// Moved out (bound by value, not Copy)
     Val,
+    /// Moved out by a pattern's binding by value of a `&mut` (`let S { p } = s;` with p: `&mut T`): not reborrowed,
+    /// as a `&mut` passed by value is
+    ValMove,
 }
 
 /// The expression whose value e is: through parentheses and the tails of blocks (`unsafe { *p }`)
@@ -3769,8 +3774,10 @@ impl Cx<'_> {
             self.bk.fnonce_sure.push(ca);
         }
         for (p, pt, mode, _) in &mut paths {
-            // (stop at an index, and a move closure at a deref: it captures the reference)
-            let cut = p.proj.iter().position(|x| *x == Proj::Index || move_kw && matches!(x, Proj::Deref(_) | Proj::Shr));
+            // (stop at an index, and a move closure at a deref: it captures the reference. So does a shared reference held by
+            // value (edition 2021's capture of `*h` used through a deref, ClosureSyn::deref): a copy of the reference)
+            let shared_copy = by_move && matches!(t, Ty::Ref(false, _));
+            let cut = p.proj.iter().position(|x| *x == Proj::Index || (move_kw || shared_copy) && matches!(x, Proj::Deref(_) | Proj::Shr));
             if let Some(i) = cut {
                 p.proj.truncate(i);
                 *pt = None;
@@ -3789,7 +3796,7 @@ impl Cx<'_> {
                 }
             }
             if move_kw {
-                *mode = CapMode::Val;
+                *mode = (*mode).max(CapMode::Val);
             } else if *mode == CapMode::Use {
                 // (a use that is not a pattern: acg's analysis says whether the closure takes the value)
                 // (`&mut x` of what the closure owns no reference to (`|| { &mut my_var; }`) is a `&mut` capture too)
@@ -3858,11 +3865,13 @@ impl Cx<'_> {
             // (the use in the body, for a mutability error; the closure itself otherwise)
             let at = if at.line == 0 { sp } else { at };
             let pt = if p.proj.is_empty() { Some(t) } else { pt };
-            if mode == CapMode::Val {
+            if mode >= CapMode::Val {
                 // (a `&mut` held by value is moved into the closure: the borrow check counts it as Copy for the
-                // reborrows of passing it, which a capture is not (`move || *r = 1`, `|| { let bar = r; }`). Passed
-                // as an argument, it may be reborrowed (`drop::<&mut U>(r)`): not followed)
-                let copy = pt.is_none_or(|t| self.bk_ty(t).0 && !(matches!(t, Ty::Ref(true, _)) && (move_kw || let_moved)));
+                // reborrows of passing it, which a capture is not (`move || *r = 1`, `|| { let bar = r; }`, a
+                // pattern's binding of it, ValMove). Passed as an argument, it may be reborrowed
+                // (`drop::<&mut U>(r)`): not followed)
+                let moved = move_kw || let_moved || mode == CapMode::ValMove;
+                let copy = pt.is_none_or(|t| self.bk_ty(t).0 && !(matches!(t, Ty::Ref(true, _)) && moved));
                 // (a copy a closure with no `move` holds of what it only reads: rustc's closure borrows it. Not of a
                 // reference: one passed where a reference is expected is reborrowed (`f(b)` is `f(&*b)`), and the
                 // closure holds a copy of it then (rustc's capture of `*b` by reference, truncated))
@@ -3925,12 +3934,18 @@ impl Cx<'_> {
             b.proj.push(Proj::Field(name));
             b
         };
+        // (a unit struct (`Unit`, a pattern that names it): nothing to test, nothing captured)
+        let unit = |n: &str| matches!(t, Some(Ty::Struct(sid)) if { let sd = &self.prog.structs[sid as usize]; !sd.is_enum && sd.fields.is_empty() && sd.name == n });
         match pat {
             Pat::Wild | Pat::Rest => {}
+            Pat::Ident(false, false, n, None) if unit(n) => {}
+            Pat::Path(p) if p.segs.last().is_some_and(|s| unit(&s.name)) => {}
             Pat::Ident(by_ref, m, _, None) => {
                 let mode = match (by_ref, m) {
                     (true, true) => CapMode::RefMut,
                     (true, false) => CapMode::Ref,
+                    // (a `&mut` bound by value is moved out, which is_copy does not tell)
+                    _ if matches!(t, Some(Ty::Ref(true, _))) => CapMode::ValMove,
                     // (a Copy value bound by value is read: captured by reference)
                     _ if t.is_some_and(|t| is_copy(self.prog, t, 0)) => CapMode::Ref,
                     _ if t.is_some() => CapMode::Val,
@@ -3987,6 +4002,47 @@ impl Cx<'_> {
                     out.extend(sub);
                 }
             }
+            // (a struct's fields, or those of an enum's variant, by name: `SStruct { b, .. }` captures `x.b` only)
+            Pat::Struct(path, fps, _) => {
+                let Some(Ty::Struct(sid)) = t else {
+                    out.push((base.clone(), t, CapMode::Use, sp));
+                    return;
+                };
+                let sd = &self.prog.structs[sid as usize];
+                let vname = path.segs.last().map(|s| s.name.as_str()).unwrap_or("");
+                let (fields, prefix) = if !sd.is_enum {
+                    (sd.fields.clone(), None)
+                } else {
+                    match sd.variants.iter().find(|v| v.name == vname) {
+                        Some(v) => (v.fields.clone(), Some(v.name.clone())),
+                        None => {
+                            out.push((base.clone(), t, CapMode::Use, sp));
+                            return;
+                        }
+                    }
+                };
+                let mut sub = vec![];
+                for (fname, p) in fps {
+                    let Some(f) = fields.iter().find(|f| f.0 == *fname) else {
+                        out.push((base.clone(), t, CapMode::Use, sp));
+                        return;
+                    };
+                    let name = match &prefix {
+                        Some(v) => format!("{v}::{}", f.0),
+                        None => f.0.clone(),
+                    };
+                    self.bk_pat_cap(p, &field(base, name), Some(f.1), sp, &mut sub);
+                }
+                // (a union's capture is of the union, not of a field (the fields overlap: `u.b` is `u.a`); none where
+                // the pattern captures nothing (`U { a: _ }`))
+                let union = self.prog.unions.contains(&self.prog.structs[self.prog.base_of(sid) as usize].name);
+                if sd.is_enum && sd.variants.len() > 1 || union && !sub.is_empty() {
+                    let mode = sub.iter().map(|x| x.2).max().unwrap_or(CapMode::Ref).max(CapMode::Ref);
+                    out.push((base.clone(), t, mode, sp));
+                } else {
+                    out.extend(sub);
+                }
+            }
             Pat::Slice(ps) if ps.iter().all(|p| matches!(p, Pat::Wild | Pat::Rest)) => {}
             Pat::Slice(ps) => {
                 // (the whole array, as strongly as its elements are bound)
@@ -4002,6 +4058,22 @@ impl Cx<'_> {
                 out.push((base.clone(), t, mode, sp));
             }
             Pat::Ident(true, m, _, Some(_)) => out.push((base.clone(), t, if *m { CapMode::RefMut } else { CapMode::Ref }, sp)),
+            // (the unit variant of an enum of one variant: nothing to test, so nothing read (edition 2021 captures
+            // nothing for `match sv { SingleVariant::A => .. }`). Not a constant, which compares the value: of the
+            // enum (`E::ZERO`), of another type with the variant's name (`Other::V`), or in scope by itself)
+            Pat::Path(p)
+                if matches!(t, Some(Ty::Struct(sid)) if {
+                    let sd = &self.prog.structs[sid as usize];
+                    let ename = &self.prog.structs[self.prog.base_of(sid) as usize].name;
+                    let ename = ename.rsplit("::").next().unwrap_or(ename);
+                    let n = p.segs.len();
+                    let qual = match n {
+                        0 => false,
+                        1 => self.prog.const_index.get(p.segs[0].name.as_str()).is_none(),
+                        _ => p.segs[n - 2].name == ename || p.segs[n - 2].name == "Self",
+                    };
+                    sd.is_enum && sd.variants.len() == 1 && sd.variants[0].fields.is_empty() && qual && p.segs.last().is_some_and(|s| s.name == sd.variants[0].name)
+                }) => {}
             Pat::Lit(_) | Pat::Range(..) | Pat::Path(_) => out.push((base.clone(), t, CapMode::Ref, sp)),
             // (a pattern not followed into: borrowed mutably if it binds a part by `ref mut`, else as the body uses it)
             _ if crate::ast_closure::binds_ref_mut(pat) => out.push((base.clone(), t, CapMode::RefMut, sp)),
