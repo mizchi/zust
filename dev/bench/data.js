@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795637963814,
+  "lastUpdate": 1795638314693,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -57716,6 +57716,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 80.207,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a61fb67713e4c94091cb4fdb294032a9ed4ea39e",
+          "message": "macros: a macro_rules! call inside stringify!(..) stays text (#199) (#222)\n\n`stringify!(m!())` printed `({ 1 + 2 })`; rustc prints `m!()`: stringify's\ninput is tokens, not code to expand. Both expanders expanded it, so\ntests/macros_expand.rs, which compares them, could not catch it.\n\n- expand_with (the fast one): the builtin `stringify!` (unqualified, or\n  `std::` / `core::`) marks its arguments inert for every program, not only\n  when proc macros are in scope, and a `macro_rules!` call inside them is\n  left as written.\n- expand_reference: find_calls does not go into the arguments of a\n  `stringify!(..)`.\n\nA crate's own `macro_rules! stringify` still expands as before.\n`concat!` and the other builtins still expand their arguments.\n\ntests/probe/stringify_macro_call.rs, checked against rustc: `( )`, `[ ]`\nand `{ }` calls, `std::stringify!`, `stringify! { .. }`, and a call of m\nbeside it that expands.\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T05:16:04+09:00",
+          "tree_id": "b91cfa6573ae23620aaa776c80551ea9889c2851",
+          "url": "https://github.com/mizchi/zust/commit/a61fb67713e4c94091cb4fdb294032a9ed4ea39e"
+        },
+        "date": 1795638313694,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 134.4,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 1.005,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 21.928,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 52.263,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 21.945,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 133.106,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 800.15,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 576.872,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.982,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 81.241,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 239.924,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 630.768,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3938.733,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 63.502,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 99.605,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 38.329,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 67.379,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 80.086,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 178.894,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 61.639,
             "unit": "ms"
           }
         ]
