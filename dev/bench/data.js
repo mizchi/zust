@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795586476206,
+  "lastUpdate": 1795586479059,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -125158,6 +125158,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/37362486e6431e2fb2c3d850a3af6ef9c8f45df7"
         },
         "date": 1795584471590,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 77.65,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1866,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 84.23,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1527,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 64.22,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4743,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f85b65a6e7960ac42e69187d777ae2e174d2ac5d",
+          "message": "Merge pull request #157 from mizchi/claude/gracious-brahmagupta-16jxdl\n\nzustscript: async fn, await and async closures (Promise<T>)",
+          "timestamp": "2026-11-25T14:55:30+09:00",
+          "tree_id": "e0b349c67c7e7da5285128abf17278eab538506b",
+          "url": "https://github.com/mizchi/zust/commit/f85b65a6e7960ac42e69187d777ae2e174d2ac5d"
+        },
+        "date": 1795586478364,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
