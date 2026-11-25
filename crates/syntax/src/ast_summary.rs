@@ -2274,7 +2274,39 @@ fn const_local_borrow_err(item: &Item) -> Option<String> {
         ItemKind::Static(_, _, _, e) => (e, "static"),
         _ => return None,
     };
-    let Expr::Block(_, _, b) = e else { return None };
+    // (the initializer's own block, or one in it whose value it uses: `mem::transmute({ .. { let s = [0; 10]; &s } })`)
+    let (line, name) = block_borrowing_own_local(e, 0)?;
+    Some(format!("\u{3}{line}\u{3}`{name}` does not live long enough (borrowed value must outlive the {what}) (E0597)"))
+}
+
+/// A block in e (not in a closure's body) whose tail borrows one of its own locals: that local's line and name
+fn block_borrowing_own_local(e: &Expr, d: u32) -> Option<(u32, String)> {
+    if d > 32 {
+        return None;
+    }
+    match e {
+        Expr::Closure(..) => None,
+        Expr::Block(_, _, b) | Expr::Const(b) => tail_borrows_own_local(b).or_else(|| {
+            b.stmts.iter().find_map(|st| match st {
+                Stmt::Expr(x, _) => block_borrowing_own_local(x, d + 1),
+                Stmt::Let(_, _, Some(x), ..) => block_borrowing_own_local(x, d + 1),
+                _ => None,
+            })
+        }),
+        _ => {
+            let mut found = None;
+            ast_closure::each_child_pub(e, &mut |c| {
+                if found.is_none() {
+                    found = block_borrowing_own_local(c, d + 1);
+                }
+            });
+            found
+        }
+    }
+}
+
+/// The block's tail borrows one of its own locals (`{ let p = 3; &p }`, `&p.0` of a local tuple): its line and name
+fn tail_borrows_own_local(b: &Block) -> Option<(u32, String)> {
     let Some(Stmt::Expr(tail, false)) = b.stmts.last() else { return None };
     let mut x = tail;
     while let Expr::Paren(i) = x {
@@ -2324,7 +2356,7 @@ fn const_local_borrow_err(item: &Item) -> Option<String> {
     if p.pos.line == 0 {
         return None;
     }
-    Some(format!("\u{3}{}\u{3}`{}` does not live long enough (borrowed value must outlive the {what}) (E0597)", p.pos.line, seg.name))
+    Some((p.pos.line, seg.name.clone()))
 }
 
 /// 1 つのアイテムの要約 (front.rs の summarize)
