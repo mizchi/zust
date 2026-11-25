@@ -1249,58 +1249,6 @@ impl Session2 {
                 }
             }
         }
-        // (E0726: the program's impl headers that name a struct, an enum or a trait of the program with lifetimes and
-        // write none of them. Only the headers whose summary names one are read again)
-        {
-            let short = |n: &str| n.rsplit("::").next().unwrap_or(n).to_string();
-            let mut adts: crate::fxhash::FxMap<String, usize> = Default::default();
-            let mut traits: crate::fxhash::FxMap<String, usize> = Default::default();
-            for sm in &sums[..user_src] {
-                if let Some(r) = sm.adt_regions.as_deref().filter(|r| !r.lts.is_empty()) {
-                    for n in sm.structs.iter().map(|s| s.0.as_str()).chain(sm.enums.iter().map(|e| e.0.as_str())) {
-                        adts.insert(short(n), r.lts.len());
-                    }
-                }
-                if let (Some(t), Some(r)) = (sm.trait_decl.as_deref(), sm.hdr_regions.as_deref().filter(|r| !r.lts.is_empty())) {
-                    traits.insert(short(t), r.lts.len());
-                }
-            }
-            if !adts.is_empty() || !traits.is_empty() {
-                let adts: crate::fxhash::FxMap<&str, usize> = adts.iter().map(|(n, &k)| (n.as_str(), k)).collect();
-                let traits: crate::fxhash::FxMap<&str, usize> = traits.iter().map(|(n, &k)| (n.as_str(), k)).collect();
-                fn names(t: &crate::types::TySyn, adts: &crate::fxhash::FxMap<&str, usize>) -> bool {
-                    use crate::types::TySyn as T;
-                    match t {
-                        T::Named(n) => adts.contains_key(n.as_str()),
-                        T::App(n, a) => adts.contains_key(n.as_str()) || a.iter().any(|t| names(t, adts)),
-                        T::Ref(_, i) | T::Ptr(_, i) | T::Slice(i) | T::Array(i, _) => names(i, adts),
-                        T::Tuple(a) => a.iter().any(|t| names(t, adts)),
-                        _ => false,
-                    }
-                }
-                for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
-                    // (an `async fn`'s parameters, by the names before its `fn`)
-                    if !adts.is_empty() && !matches!(it.kind, ItemKind::ImplHeader) && sm.fns.iter().any(|f| f.1.params.iter().any(|t| names(t, &adts))) {
-                        let ids = || it.idents.iter().map(|&(a, b)| src.get(a as usize..b as usize).unwrap_or(""));
-                        if ids().take_while(|w| *w != "fn").any(|w| w == "async") {
-                            if let Some(e) = crate::ast_summary::async_elided_lifetimes(&src, it, &adts) {
-                                return Err(e);
-                            }
-                        }
-                    }
-                    if !matches!(it.kind, ItemKind::ImplHeader) {
-                        continue;
-                    }
-                    let tr = sm.impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim()).is_some_and(|t| traits.contains_key(t));
-                    if !tr && !sm.impl_self_ty.as_ref().is_some_and(|t| names(t, &adts)) {
-                        continue;
-                    }
-                    if let Some(e) = crate::ast_summary::impl_elided_lifetimes(&src, it, &adts, &traits) {
-                        return Err(e);
-                    }
-                }
-            }
-        }
         // (E0310: the program's fields that pass a type parameter to a struct or enum of the program that bounds it by
         // 'static, where the item does not declare it so: the definitions are known now. Only the items whose fields
         // name one are read again)
