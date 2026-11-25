@@ -3858,8 +3858,6 @@ check-pass	lint/clashing-extern-fn-wasm.rs
 check-pass	lint/const-item-interior-mutations-const-atomics.rs
 check-pass	lint/const-item-interior-mutations-const-deref.rs
 check-pass	lint/dangling-pointers-from-locals.rs
-compile-fail	lint/dangling-pointers-from-temporaries/calls.rs
-compile-fail	lint/dangling-pointers-from-temporaries/cstring-as-ptr.rs
 compile-fail	lint/dangling-pointers-from-temporaries/example-from-issue123613.rs
 compile-fail	lint/dangling-pointers-from-temporaries/ext.rs
 compile-fail	lint/dead-code-pub-in-binary/allow-lint.rs
@@ -4006,7 +4004,6 @@ compile-fail	lint/lint-nonstandard-style-unicode-2.rs
 compile-fail	lint/lint-nonstandard-style-unicode-3.rs
 compile-fail	lint/lint-overflowing-int-136675.rs
 check-pass	lint/lint-pub-unreachable-for-nested-glob.rs
-compile-fail	lint/lint-qualification.rs
 compile-fail	lint/lint-range-endpoint-overflow.rs
 check-pass	lint/lint-raw-borrows-via-references.rs
 compile-fail	lint/lint-type-overflow.rs
