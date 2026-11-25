@@ -398,6 +398,13 @@ pub struct Program {
     pub sigs: Vec<FnSig>,
     /// ユーザ定義関数を定義しているアイテム番号 (extern は None)
     pub item_of: Vec<Option<u32>>,
+    /// The associated types of trait impls by name (indices into assocs), made once for normalize: every name is
+    /// looked for again by each instance's goals
+    pub assoc_index: std::sync::OnceLock<FxMap<(String, u32), Vec<u32>>>,
+    /// normalize's answers so far, by (type, trait, associated type)
+    pub normalized: std::sync::Mutex<FxMap<(Ty, String, String), Option<Ty>>>,
+    /// A fn's where clauses on other than a parameter (SigSyn::preds), by fn id: goals of each instance (issue #2)
+    pub fn_preds: FxMap<u32, Vec<(crate::types::TySyn, String, Vec<String>)>>,
     pub structs: AdtTable,
     pub struct_index: FxMap<String, u32>,
     /// バリアント名 → (enum, 番号)。`use E::*;` で取り込んだバリアントを短い名前で引く (同名が複数なら引かない)
@@ -624,6 +631,15 @@ pub struct AssocDef {
     pub ngen: usize,
     /// a generic associated type's own parameters (`type Pointer<T>`: 1), Params after the impl's and a mark
     pub ngat: usize,
+    /// the name of the trait the impl is of (`Iterator`), without its arguments; None for an inherent impl's
+    pub trait_name: Option<String>,
+}
+
+/// The name of the trait of the impl an item is a member of (`impl<T> Iterator<Item = T> for S`: Iterator)
+fn impl_trait_name(kind: &crate::lexer::ItemKind, sums: &[Summary]) -> Option<String> {
+    let crate::lexer::ItemKind::ImplMember(h) = *kind else { return None };
+    let tr = sums.get(h as usize)?.impl_trait.as_deref()?;
+    Some(tr.split('<').next().unwrap_or(tr).trim().to_string())
 }
 
 /// (the impl's parameter count, the generic associated type's) of an associated type's parameter names: those after
@@ -843,6 +859,51 @@ impl Insts {
                         return Err(format!("overflow evaluating the requirement `{}: {tr}` (E0275)", prog.tn(t)));
                     }
                     _ => {}
+                }
+                // (the bound's bindings, `T: Trait<AssociatedType = u32>`: normalizes-to goals, issue #2. Of the
+                // program's fns only: the prelude's bindings are hints for inference, not std's bounds (`sum<S>` asks
+                // `Self: Iterator<Item = S>` where std asks `S: Sum<Self::Item>`)
+                let own = prog.item_of.get(base as usize).copied().flatten().is_some_and(|i| i < prog.prelude_from);
+                let names: Vec<&str> = b.generics.iter().map(|g| g.0.as_str()).collect();
+                if let Some((proj, want, got)) = own.then(|| prog.binding_mismatch(t, tr, &names, &args)).flatten() {
+                    return Err(format!("type mismatch resolving `{proj} == {}`: it is `{}` (E0271)", prog.tn(want), prog.tn(got)));
+                }
+            }
+        }
+        // (the where clauses on other than a parameter, `where T::A: Bar`: the type each names for these arguments,
+        // normalized by the trait that gives it, must meet the bound. Bounds of the program's traits only, as for the
+        // nested goals of impls)
+        if let Some(preds) = prog.fn_preds.get(&base) {
+            let names: Vec<&str> = b.generics.iter().map(|g| g.0.as_str()).collect();
+            for (syn, qtr, bounds) in preds {
+                let Some(st) = prog.pred_subject(syn, qtr, b, &names, &args) else { continue };
+                // (nor a type implements does not see the program's impls for: a Box, an array, a slice, a type with a
+                // trait object in it; as for the supertraits and item bounds of impls)
+                if prog.opaque_to_impls(st) {
+                    continue;
+                }
+                // (nor one with a placeholder in it: the instance checks the generic fn's own body, where its where
+                // clauses are what it may assume, not what it must prove (`where &'max G: Get`))
+                if prog.holds_placeholder(st, 0) {
+                    continue;
+                }
+                for tr in bounds {
+                    // (its bindings too, `where W<T>: Tr<A = u32>`, as for a parameter's bounds: of the program's fns)
+                    let own = prog.item_of.get(base as usize).copied().flatten().is_some_and(|i| i < prog.prelude_from);
+                    if let Some((proj, want, got)) = own.then(|| prog.binding_mismatch(st, tr, &names, &args)).flatten() {
+                        return Err(format!("type mismatch resolving `{proj} == {}`: it is `{}` (E0271)", prog.tn(want), prog.tn(got)));
+                    }
+                    let tname = tr.split('<').next().unwrap_or(tr).trim();
+                    if !prog.user_traits.contains(tname) {
+                        continue;
+                    }
+                    match prog.evaluate(st, tr) {
+                        Certainty::No => return Err(format!("the trait bound `{}: {tr}` is not satisfied (E0277)", prog.tn(st))),
+                        Certainty::Maybe(MaybeCause::Cycle) => {
+                            return Err(format!("overflow evaluating the requirement `{}: {tr}` (E0275)", prog.tn(st)));
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
@@ -1146,6 +1207,9 @@ impl Program {
             variant_names: FxMap::default(),
             opaque: vec![],
             prelude_from: u32::MAX,
+            fn_preds: FxMap::default(),
+            assoc_index: std::sync::OnceLock::new(),
+            normalized: std::sync::Mutex::new(FxMap::default()),
             overflow_checks: false,
             trait_supers: FxMap::default(),
             trait_marker_supers: FxMap::default(),
@@ -1505,7 +1569,8 @@ impl Program {
                 let gn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();
                 if let (Ok(self_ty), Ok(value)) = (p.resolve_g(&a.self_ty, &gn), p.resolve_g(&a.value, &gn)) {
                     let (ngen, ngat) = gat_split(&gn);
-                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat });
+                    let trait_name = impl_trait_name(&items[ii].kind, sums);
+                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat, trait_name });
                     p.note_assoc_regions(items, sums, ii, k);
                     p.assoc_items.push(ii as u32);
                     early.push((ii, k));
@@ -1534,7 +1599,8 @@ impl Program {
                 let gn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();
                 if let (Ok(self_ty), Ok(value)) = (p.resolve_g(&a.self_ty, &gn), p.resolve_g(&a.value, &gn)) {
                     let (ngen, ngat) = gat_split(&gn);
-                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat });
+                    let trait_name = impl_trait_name(&items[ii].kind, sums);
+                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat, trait_name });
                     p.note_assoc_regions(items, sums, ii, k);
                     p.assoc_items.push(ii as u32);
                     early.push((ii, k));
@@ -1664,6 +1730,7 @@ impl Program {
                     value,
                     ngen,
                     ngat,
+                    trait_name: impl_trait_name(&it.kind, sums),
                 });
                 p.note_assoc_regions(items, sums, ii, k);
                 p.assoc_items.push(ii as u32);
@@ -1811,6 +1878,9 @@ impl Program {
                 p.index.insert(name.clone(), p.names.len() as u32);
                 p.names.push(name.clone());
                 p.item_of.push((!ss.is_extern).then_some(ii as u32));
+                if !ss.preds.is_empty() {
+                    p.fn_preds.insert(p.sigs.len() as u32, ss.preds.clone());
+                }
                 p.sigs.push(FnSig {
                     params,
                     ret,
@@ -2391,6 +2461,21 @@ impl Program {
                 }
             }
         }
+        // (whether a type with no parameters implements a trait of the program's, for the checks of impls below: by
+        // implements, or an impl for exactly this type written out (`impl A for [u8; 1]`). A type with a trait
+        // object in it is taken to: `dyn T2` and `dyn T2 + 'static` are told apart by their text here, where rustc
+        // sees one type with two lifetimes. So is a Box, an array or a slice: implements does not know the program's
+        // impls for them)
+        let holds = |p: &Program, t: Ty, name: &str| {
+            p.has_param(t)
+                || p.opaque_to_impls(t)
+                || p.implements(t, name)
+                || sums[..user].iter().any(|o| {
+                    o.impl_generics.is_empty()
+                        && o.impl_trait.as_deref().is_some_and(|x| x.split('<').next().unwrap_or(x).trim() == name)
+                        && o.impl_self_ty.as_ref().and_then(|x| p.resolve_g(x, &[]).ok()) == Some(t)
+                })
+        };
         // (an impl of a trait with supertraits needs the self type to implement them: `trait B: A` and `impl B for C`
         // without `impl A for C` (E0277). For impls of a type with no parameters, and supertraits of the program's: a
         // nested goal of the impl, as the trait solver proves it (issue #2))
@@ -2402,28 +2487,40 @@ impl Program {
                 }
                 let Some(sup) = p.trait_supers.get(tr) else { continue };
                 let Ok(t) = p.resolve_g(st, &[]) else { continue };
-                // (nor a type with a trait object in it: `dyn T2` and `dyn T2 + 'static` are told apart by their text here,
-                // where rustc sees one type with two lifetimes)
-                if p.has_param(t) || p.tn(t).contains("dyn ") {
-                    continue;
-                }
-                // (nor a Box, an array or a slice: implements does not know the program's impls for them)
-                let opaque = matches!(t, Ty::Box(_) | Ty::Array(..) | Ty::Slice(_));
                 for s in sup {
                     let name = s.split('<').next().unwrap_or(s).trim();
-                    if s.contains('<') || !user_traits.contains(name) || p.implements(t, name) {
-                        continue;
-                    }
-                    // (an impl of the supertrait for exactly this type, written out: `impl A for [u8; 1]`)
-                    let written = sums[..user].iter().any(|o| {
-                        o.impl_generics.is_empty()
-                            && o.impl_trait.as_deref().is_some_and(|x| x.split('<').next().unwrap_or(x).trim() == name)
-                            && o.impl_self_ty.as_ref().and_then(|x| p.resolve_g(x, &[]).ok()) == Some(t)
-                    });
-                    if written || opaque {
+                    if s.contains('<') || !user_traits.contains(name) || holds(&p, t, name) {
                         continue;
                     }
                     return Err(format!("{}:1: the trait bound `{}: {name}` is not satisfied (E0277)", items[ii].line, p.tn(t)));
+                }
+            }
+        }
+        // (an impl's associated type meets the bounds its trait declares for it: `trait Tr { type A: Bar; }` and
+        // `impl Tr for u8 { type A = u16; }` without `impl Bar for u16` (E0277). For impls with no parameters, and
+        // bounds of traits of the program's, as for supertraits: the item bounds the trait solver proves, issue #2)
+        if !user_traits.is_empty() && !p.assoc_bounds.is_empty() {
+            for (ii, sm) in sums[..user].iter().enumerate() {
+                let crate::lexer::ItemKind::ImplMember(h) = items[ii].kind else { continue };
+                let imp = &sums[h as usize];
+                let Some(tr) = imp.impl_trait.as_deref() else { continue };
+                let tr = tr.split('<').next().unwrap_or(tr).trim();
+                if !imp.impl_generics.is_empty() || !user_traits.contains(tr) {
+                    continue;
+                }
+                for a in &sm.assocs {
+                    let Some(bs) = p.assoc_bounds.get(&(tr.to_string(), a.name.clone())) else { continue };
+                    if !a.generics.is_empty() {
+                        continue;
+                    }
+                    let Ok(v) = p.resolve_g(&a.value, &[]) else { continue };
+                    for bnd in bs {
+                        let name = bnd.split('<').next().unwrap_or(bnd).trim();
+                        if bnd.contains('<') || !user_traits.contains(name) || holds(&p, v, name) {
+                            continue;
+                        }
+                        return Err(format!("{}:1: the trait bound `{}: {name}` is not satisfied (E0277)", items[ii].line, p.tn(v)));
+                    }
                 }
             }
         }
@@ -4909,6 +5006,186 @@ impl Program {
             Ty::Dyn(s) => s.contains(PMARK) && dyn_marks(s).next().is_some(),
             _ => false,
         }
+    }
+
+    /// The normalizes-to goal `<t as tr>::name` (issue #2): the value the impls of tr give for t. Not by the name
+    /// alone, as assoc_of: an impl of another trait with an associated type of the same name is not t's here. None
+    /// (not known) when no impl of the program's says (std's the prelude does not write out), when the value still
+    /// has a parameter in it, or when the impls that match t disagree (`impl Tr<u8> for X` and `impl Tr<u16> for X`)
+    pub fn normalize(&self, t: Ty, tr: &str, name: &str) -> Option<Ty> {
+        let key = (t, tr.to_string(), name.to_string());
+        if let Some(&r) = self.normalized.lock().unwrap().get(&key) {
+            return r;
+        }
+        let r = self.normalize0(t, tr, name);
+        self.normalized.lock().unwrap().insert(key, r);
+        r
+    }
+
+    fn normalize0(&self, t: Ty, tr: &str, name: &str) -> Option<Ty> {
+        // (by name and the struct the self type is of: u32::MAX for a self type of another kind, a parameter's
+        // too, which any t may match)
+        let head = |p: &Program, t: Ty| match t {
+            Ty::Struct(sid) => p.base_of(sid),
+            _ => u32::MAX,
+        };
+        let index = self.assoc_index.get_or_init(|| {
+            let mut m: FxMap<(String, u32), Vec<u32>> = FxMap::default();
+            for (i, a) in self.assocs.iter().enumerate() {
+                if a.trait_name.is_some() && a.ngat == 0 {
+                    m.entry((a.name.clone(), head(self, a.self_ty))).or_default().push(i as u32);
+                }
+            }
+            m
+        });
+        let mut found: Option<Ty> = None;
+        let h = head(self, t);
+        let own = index.get(&(name.to_string(), h)).map(|v| v.as_slice()).unwrap_or_default();
+        let other = if h == u32::MAX { &[][..] } else { index.get(&(name.to_string(), u32::MAX)).map(|v| v.as_slice()).unwrap_or_default() };
+        for &i in own.iter().chain(other) {
+            let a = &self.assocs[i as usize];
+            if a.trait_name.as_deref() != Some(tr) {
+                continue;
+            }
+            // (match_ty lets `&mut` meet `&` and a pointer meet a reference, as a call coerces: a self type does not)
+            if !self.refs_agree(a.self_ty, t, 0) {
+                continue;
+            }
+            let mut sol = vec![None; a.ngen];
+            if !self.match_ty(a.self_ty, t, &mut sol) {
+                continue;
+            }
+            let args: Vec<Ty> = sol.into_iter().collect::<Option<Vec<Ty>>>()?;
+            // (a value with a projection in it, `type A = T::A;`, is not known: subst would look the projection up by
+            // its name alone, whatever trait T's bound names)
+            if self.mentions_assoc(a.value) {
+                return None;
+            }
+            let v = self.subst(a.value, &args);
+            if self.has_param(v) || found.is_some_and(|f| f != v) {
+                return None;
+            }
+            found = Some(v);
+        }
+        found
+    }
+
+    /// The type a where clause on other than a parameter names for the arguments `args` of a fn's parameters
+    /// `names` (Insts::request). A projection is a normalizes-to goal: `<T as Tr>::A` by Tr's impls, `T::A` by those of
+    /// the traits T's bounds name, which must agree. None when it is not known (a parameter is left, nothing
+    /// normalizes it, or a projection is inside another type, which subst would look up by its name alone)
+    pub fn pred_subject(&self, syn: &crate::types::TySyn, qtr: &str, sig: &FnSig, names: &[&str], args: &[Ty]) -> Option<Ty> {
+        // (a projection is taken apart before it is resolved: resolve_g would look `<u8 as Q>::A`, whose base is
+        // concrete, up by the name A alone, whatever trait gives it)
+        if let crate::types::TySyn::Assoc(bsyn, name) = syn {
+            if name.starts_with(crate::ast_types::GAT_PREFIX) {
+                return None;
+            }
+            // (`<i32 as Local>::Output` is marked as not std's: normalize asks the impls of the trait it names anyway)
+            let name = name.strip_prefix(crate::ast_types::NO_STD_ASSOC).unwrap_or(name);
+            let bt = self.resolve_g(bsyn, names).ok()?;
+            let a = crate::types::AssocTy { base: bt, name: name.to_string() };
+            return self.projection_subject(&a, qtr, sig, args);
+        }
+        let t = self.resolve_g(syn, names).ok()?;
+        if self.mentions_assoc(t) {
+            return None;
+        }
+        let t = self.subst(t, args);
+        (!self.has_param(t)).then_some(t)
+    }
+
+    /// pred_subject's projection `<base as qtr>::name` (`base::name` when qtr is empty), normalized
+    fn projection_subject(&self, a: &crate::types::AssocTy, qtr: &str, sig: &FnSig, args: &[Ty]) -> Option<Ty> {
+        {
+            let base = self.subst(a.base, args);
+            if self.has_param(base) || self.mentions_assoc(base) {
+                return None;
+            }
+            let mut traits: Vec<String> = if !qtr.is_empty() {
+                vec![qtr.to_string()]
+            } else if let Ty::Param(i) = a.base {
+                sig.generics.get(i as usize)?.1.iter().map(|b| b.split('<').next().unwrap_or(b).trim().to_string()).collect()
+            } else {
+                // (`Self::A` in a method of `impl Tr for S`: by the impl's trait, and its supertraits below)
+                let tr = sig.impl_trait.as_deref()?;
+                vec![tr.split('<').next().unwrap_or(tr).trim().to_string()]
+            };
+            // (a qualified projection is its trait's own associated type when that trait gives one: `<T as Sub>::A`)
+            if !qtr.is_empty() {
+                if let Some(v) = self.normalize(base, qtr, &a.name) {
+                    return Some(v);
+                }
+            }
+            // (and their supertraits, which may declare it: `T::A` of `T: Sub` with `trait Sub: Super` and `Super::A`)
+            let mut k = 0;
+            while k < traits.len() && traits.len() < 64 {
+                for sup in self.trait_supers.get(&traits[k]).into_iter().flatten() {
+                    let sup = sup.split('<').next().unwrap_or(sup).trim().to_string();
+                    if !traits.contains(&sup) {
+                        traits.push(sup);
+                    }
+                }
+                k += 1;
+            }
+            let mut found = None;
+            for tr in &traits {
+                if let Some(v) = self.normalize(base, tr, &a.name) {
+                    if found.is_some_and(|f| f != v) {
+                        return None;
+                    }
+                    found = Some(v);
+                }
+            }
+            found
+        }
+    }
+
+    /// t is a type whose impls of the program's implements does not see: a Box, an array or a slice, or one with a
+    /// trait object in it (`dyn T2` and `dyn T2 + 'static` are told apart by their text here, where rustc sees one
+    /// type with two lifetimes). A bound on one is not checked: a no would be a false error
+    pub fn opaque_to_impls(&self, t: Ty) -> bool {
+        matches!(t, Ty::Box(_) | Ty::Array(..) | Ty::Slice(_)) || self.tn(t).contains("dyn ")
+    }
+
+    /// t has a projection (`Ty::Assoc`) in it
+    fn mentions_assoc(&self, t: Ty) -> bool {
+        match t {
+            Ty::Assoc(_) => true,
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => self.mentions_assoc(*i),
+            Ty::Struct(sid) => self.structs[sid as usize].args.iter().any(|&a| self.mentions_assoc(a)),
+            Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&a| self.mentions_assoc(a)),
+            _ => false,
+        }
+    }
+
+    /// A bound's bindings as normalizes-to goals (`T: Trait<AssociatedType = u32>`): with t for its type, each
+    /// `<t as Trait>::AssociatedType` against its binding, written with the parameters `names` that `args` give.
+    /// The first that normalizes to another type, with that type; a binding that does not normalize, or names a
+    /// parameter not given, is not known and is taken to hold (E0271 is for a mismatch, not for not knowing)
+    pub fn binding_mismatch(&self, t: Ty, bound: &str, names: &[&str], args: &[Ty]) -> Option<(String, Ty, Ty)> {
+        if !bound.contains('=') || parse_fn_bound(bound).is_some() {
+            return None;
+        }
+        let tr = bound.split('<').next().unwrap_or(bound).trim();
+        // (the bindings of a bound's text, parsed once: an instance of each call asks again)
+        thread_local! {
+            static BINDINGS: std::cell::RefCell<FxMap<String, std::rc::Rc<Vec<(String, crate::types::TySyn)>>>> = Default::default();
+        }
+        let bs = BINDINGS.with(|m| m.borrow_mut().entry(bound.to_string()).or_insert_with(|| std::rc::Rc::new(crate::ast_summary::assoc_bindings(bound))).clone());
+        for (name, syn) in bs.iter() {
+            let name = name.as_str();
+            let Ok(want) = self.resolve_g(syn, names) else { continue };
+            let want = self.subst(want, args);
+            if self.has_param(want) {
+                continue;
+            }
+            let Some(got) = self.normalize(t, tr, name) else { continue };
+            if got != want {
+                return Some((format!("<{} as {tr}>::{name}", self.tn(t)), want, got));
+            }
+        }
+        None
     }
 
     /// 具体型 t の関連型 name (`impl Iterator for Counter { type Item = u32; }` なら u32)
