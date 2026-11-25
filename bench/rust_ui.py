@@ -294,7 +294,9 @@ def main():
             for l in open(ratchet_path):
                 if l.strip() and not l.startswith("#"):
                     k, n = l.split("\t")[:2]
-                    ratchet[k] = int(n)
+                    # (a kind twice, as .gitattributes' union merge leaves the file when both sides raised it: the
+                    #  higher one)
+                    ratchet[k] = max(ratchet.get(k, 0), int(n))
         counts = {k: sum(1 for kk, _ in passing if kk == k) for k in kinds}
         # (only a run of every test of a kind counts against it: not one with --filter or --limit)
         whole = not a.filter and not a.limit
