@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795629066586,
+  "lastUpdate": 1795630370538,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -56126,6 +56126,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 62.302,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f4c5e2fe3653ca653756c09bfa12011fa7829c29",
+          "message": "Pages: the open pull requests' tests/ui gains, and the way to 90% (#152)\n\n* Pages: the open pull requests' tests/ui gains, and the way to 90%\n\nThe site showed main only. Now the Pages workflow lists the open pull requests\n(gh api, pull-requests: read) and extract.py writes two more datasets:\n\n- pending.json: what each open PR adds to bench/rust_ui_ratchet.txt, by kind,\n  its head against its merge base with its base branch, so a PR stacked on\n  another counts only its own part;\n- forecast.json: by kind and in all, the last CI run's passing tests (the\n  applicable ones from its rate), what the open PRs add, the tests still\n  needed for 90%, and the days to it at the pace of the CI runs in the two\n  days before that run, linear and geometric.\n\nThe dashboard draws them in a new section, \"Open pull requests, and the way to\n90%\" (tiles, a table by kind, a table of the PRs that raise the ratchet), and\nthe intro page gives the totals under its tests/ui bars. Without --pulls the\ndatasets are written empty of PRs, so local builds work as before.\n\nChecked in a browser (Playwright) on data extracted at 91746c0 with the open\nPRs: no console errors at 1280 and 390 px wide, no horizontal page scroll.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* Review of #152: the forecast's denominators, pace window and \"reached\"\n\n- The applicable tests come from the README's tests/ui table (CI writes it\n  from its results), not from the benchmark's rates rounded to two decimals,\n  which can put a count off by one (8214 / 69.98% is 11738); the rate is the\n  fallback without a table.\n- The pace is from the earliest CI run in the two days before the last one,\n  not from the run before that window (which could be weeks earlier); with no\n  other run in the window there is no pace and no days.\n- \"reached\" is shown when no test is needed, not when the rounded estimate is\n  0 (the dashboard says \"less than 0.1 days\", the intro page \"less than a\n  day\", with tests left).\n- The intro page's totals name their CI run: the last that measured every\n  kind, which may be older than the bars'.\n- scripts/retro/README: `mkdir -p out` before writing out/pulls.jsonl.\n\nChecked in a browser (Playwright) on data extracted at becb570: no console\nerrors at 1280 and 390 px.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* Review of #152: warn when a PR's refs cannot be fetched or it has no merge base\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T03:06:18+09:00",
+          "tree_id": "2f15a6f7b6e5bf7854c19bfbd9433f51e1d7dc89",
+          "url": "https://github.com/mizchi/zust/commit/f4c5e2fe3653ca653756c09bfa12011fa7829c29"
+        },
+        "date": 1795630369702,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 174.606,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 1.173,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 26.178,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 69.104,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 21.875,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 132.646,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 798.336,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 743.729,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 1.17,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 96.746,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 318.77,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.156,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 629.547,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3930.7,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 72.982,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 150.286,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 49.474,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 91.855,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 98.139,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 237.114,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 79.904,
             "unit": "ms"
           }
         ]
