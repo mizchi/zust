@@ -4451,6 +4451,7 @@ compile-fail	macros/issue-30143.rs
 check-pass	macros/issue-33185.rs
 compile-fail	macros/issue-35450.rs
 run-pass	macros/issue-37175.rs
+compile-fail	macros/issue-38715.rs
 check-pass	macros/issue-39467.rs
 check-pass	macros/issue-40469.rs
 check-pass	macros/issue-40770.rs
@@ -6595,6 +6596,7 @@ compile-fail	resolve/const-with-typo-in-pattern-binding.rs
 compile-fail	resolve/crate-called-as-function.rs
 compile-fail	resolve/dot-notation-type-namespace-suggest-path-sep.rs
 compile-fail	resolve/duplicate-name-in-module-6936.rs
+compile-fail	resolve/duplicated-enum-variant.rs
 compile-fail	resolve/duplicated-item-in-const-generics.rs
 compile-fail	resolve/editions-crate-root-2015.rs
 compile-fail	resolve/editions-crate-root-2018.rs
@@ -7058,6 +7060,7 @@ compile-fail	span/coerce-suggestions.rs
 compile-fail	span/destructor-restrictions.rs
 compile-fail	span/drop-location-span-error-rust-2021-incompatible-closure-captures-96258.rs
 compile-fail	span/dropck_misc_variants.rs
+compile-fail	span/foreign-item-vis-span.rs
 compile-fail	span/gated-features-attr-spans.rs
 compile-fail	span/impl-wrong-item-for-trait.rs
 compile-fail	span/issue-23338-locals-die-before-temps-of-body.rs

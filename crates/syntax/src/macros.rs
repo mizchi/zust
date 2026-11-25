@@ -42,6 +42,20 @@ thread_local! {
     pub static BAD_FRAGMENT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
 
+thread_local! {
+    /// The name of a `#[macro_export]` macro defined twice (E0428), met while the definitions are read
+    pub static DUP_EXPORT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cold]
+fn dup_export(n: &str) {
+    DUP_EXPORT.with(|c| {
+        if c.borrow().is_none() {
+            *c.borrow_mut() = Some(n.to_string());
+        }
+    });
+}
+
 #[cold]
 fn bad_fragment(k: &str) {
     BAD_FRAGMENT.with(|c| {
@@ -1069,6 +1083,8 @@ fn collect_defs(text: &mut String, macros: &mut HashMap<String, Vec<Rule>>, mut 
         let tk = |k: usize| -> &[u8] { &b[toks[k].1..toks[k].2] };
         let sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && b[toks[k].1] == c;
         let mut cut: Vec<(usize, usize)> = vec![];
+        // (the `#[macro_export]` ones defined here: two of one name are E0428, as both are at the crate's root)
+        let mut exported_here: Vec<String> = vec![];
         let mut i = 0;
         while i + 3 < toks.len() {
             let is_def = toks[i].0 == 0 && tk(i) == b"macro_rules" && sym(i + 1, b'!') && toks[i + 2].0 == 0 && close[i + 3] != usize::MAX;
@@ -1106,6 +1122,12 @@ fn collect_defs(text: &mut String, macros: &mut HashMap<String, Vec<Rule>>, mut 
                 } else {
                     break;
                 }
+            }
+            if st != toks[i].1 && text[st..toks[i].1].contains("macro_export") {
+                if exported_here.contains(&name) {
+                    dup_export(&name);
+                }
+                exported_here.push(name.clone());
             }
             if let Some(f) = first.as_deref_mut() {
                 let exported = st != toks[i].1 && text[st..toks[i].1].contains("macro_export");

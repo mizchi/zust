@@ -2780,6 +2780,19 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             sm.statics.push((n.clone(), tysyn(t, None)?, item.init_text.clone(), *m));
         }
         ItemKind::Extern(items) => {
+            // (E0428: two foreign items of one name in the value namespace, at the second's start, its `pub` included)
+            let mut names: Vec<&str> = vec![];
+            for fi in items {
+                let n = match &fi.kind {
+                    ItemKind::Fn(fs, _) => fs.name.as_str(),
+                    ItemKind::Static(_, n, ..) => n.as_str(),
+                    _ => continue,
+                };
+                if names.contains(&n) {
+                    return Err(format!("{}:1: the name `{n}` is defined multiple times (E0428)", fi.line));
+                }
+                names.push(n);
+            }
             for fi in items {
                 // (`static X: T;`: the symbol X (or its link_name) of what the program links with)
                 if let ItemKind::Static(m, n, t, _) = &fi.kind {

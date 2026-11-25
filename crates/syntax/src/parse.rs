@@ -3173,7 +3173,13 @@ impl Parser {
                 let mut vs = Vec::new();
                 while !self.is_close() {
                     self.attrs()?;
+                    let vat = self.i;
                     let vn = self.decl_ident()?;
+                    // (E0428: two variants of one name)
+                    if vs.iter().any(|v: &(String, Fields, Option<Expr>)| v.0 == vn) {
+                        let t = &self.toks[vat];
+                        return Err(format!("{}:{}: the name `{vn}` is defined multiple times (E0428)", t.line, t.col + 1));
+                    }
                     let f = self.fields()?;
                     let d = if self.eat_punct("=") { Some(self.const_expr()?) } else { None };
                     vs.push((vn, f, d));

@@ -2533,3 +2533,18 @@ fn macro_fragments_and_unit_patterns() {
         "a tuple variant as a path pattern"
     );
 }
+
+#[test]
+fn names_defined_twice_in_one_item_or_by_macro_export() {
+    // (E0428 of two variants, two foreign items, two `#[macro_export]` macros, as rustc 1.100)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, n: &str| Some((l, format!("the name `{n}` is defined multiple times (E0428)")));
+    assert_eq!(first("enum E {\n    A,\n    B,\n    A,\n}\nfn main() {}\n"), e(4, "A"), "two variants");
+    assert_eq!(first("fn main() {\n    enum E {\n        A,\n        A(u8),\n    }\n}\n"), e(4, "A"), "in a fn's enum");
+    assert_eq!(first("extern \"C\" {\n    fn foo();\n    pub\n    fn foo();\n}\nfn main() {}\n"), e(3, "foo"), "two foreign fns, at the `pub`");
+    assert_eq!(first("#[macro_export]\nmacro_rules! foo { () => {} }\n#[macro_export]\nmacro_rules! foo { () => {} }\nfn main() {}\n"), e(4, "foo"), "two exported macros");
+    assert_eq!(first("macro_rules! foo { () => {} }\nmacro_rules! foo { () => {} }\nfn main() { foo!(); }\n"), None, "a macro shadowing one, neither exported");
+}

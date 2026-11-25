@@ -897,6 +897,7 @@ impl Session2 {
         let mut fix = vec![];
         let cfg = self.opts.cfg_of(self.ctx.features.as_ref().unwrap_or(&self.opts.features), &self.ctx.cfgs, &self.ctx.env);
         crate::macros::BAD_FRAGMENT.with(|c| c.borrow_mut().take());
+        crate::macros::DUP_EXPORT.with(|c| c.borrow_mut().take());
         let (mut src, mut items, mut user, prelude_line0) = with_prelude_in(src0, &crates, &mut fix, Some(&cfg), &mut self.sel)?;
         self.ctx.map.colfix = fix;
         // (`zustc check`: each constant of the program is checked where it is defined, used or not, as rustc does: a
@@ -973,6 +974,14 @@ impl Session2 {
             }
             // (a `macro_rules!` matcher's fragment specifier rustc does not know, used or not: the expansion notes one when
             // it reads the definitions; its place is read from the text then)
+            // (E0428: two `#[macro_export]` macros of one name, at the second)
+            if let Some(n) = crate::macros::DUP_EXPORT.with(|c| c.borrow_mut().take()) {
+                let pat = format!("macro_rules! {n}");
+                if let Some((at, _)) = src0.match_indices(pat.as_str()).nth(1) {
+                    let line = 1 + src0[..at].matches('\n').count();
+                    return Err(format!("{line}:1: the name `{n}` is defined multiple times (E0428)"));
+                }
+            }
             if crate::macros::BAD_FRAGMENT.with(|c| c.borrow_mut().take()).is_some() {
                 if let Some(e) = bad_fragment(src0) {
                     return Err(e);
@@ -9698,7 +9707,9 @@ fn hoisted_err_holds(msg: &str) -> bool {
         "expected `:` (found `", "expected `,` (found `", "free static item without body",
         // (an item's written types: an unsized type where a Sized one is needed, sized_error)
         "the size for values of type `"];
-    let unused = msg.starts_with("function `") && msg.contains("is never used") || msg.starts_with("type parameter `") && msg.ends_with("is never used (E0091)");
+    let unused = msg.starts_with("function `") && msg.contains("is never used") || msg.starts_with("type parameter `") && msg.ends_with("is never used (E0091)")
+        // (two variants or foreign items of one name, in the item itself)
+        || msg.starts_with("the name `") && msg.ends_with("is defined multiple times (E0428)");
     // (an impl's associated type against its trait's bound (E0477): an impl in a fn body is hoisted)
     let unmet = msg.starts_with("the type `") && msg.contains("does not fulfill the required lifetime");
     // (a derive's field or a field's type without the bound it needs (derive_field_error, wf_error): a local
