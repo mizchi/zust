@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795613387755,
+  "lastUpdate": 1795613390183,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -128868,6 +128868,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/7c57bb917f00219e563b5c794d0d054792f11038"
         },
         "date": 1795609444216,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.36,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1907,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.71,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1554,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 72.31,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5341,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6300b9cc237adc3560ef4134c17d2b31caad02f7",
+          "message": "Merge pull request #164 from mizchi/claude/gracious-brahmagupta-16jxdl\n\nzustscript: Option / Result and `?`, extern types, exceptions as Err (TODO P0 3, 4, 7)",
+          "timestamp": "2026-11-25T22:23:41+09:00",
+          "tree_id": "0f6f464ad6ae87ab81df0d85fe020491fd015791",
+          "url": "https://github.com/mizchi/zust/commit/6300b9cc237adc3560ef4134c17d2b31caad02f7"
+        },
+        "date": 1795613389765,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
