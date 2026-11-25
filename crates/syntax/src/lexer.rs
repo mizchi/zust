@@ -2086,6 +2086,14 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 || (k + 2 < toks.len() && next == b":" && tok(k + 2) == b":")
             {
                 HOIST_NS_TYPE
+            } else if prev == b":"
+                && !(k >= 2 && tok(k - 2) == b":")
+                && next != b":"
+                && (matches!(next, b"=" | b";" | b")") || (k >= 3 && matches!(tok(k - 3), b"let" | b"mut" | b"(")))
+            {
+                // (an annotation, `let a: m = ..` / `let mut a: m;` / `fn h(x: m)`: not a struct literal's field,
+                // `S { f: m, .. }`, which none of these tells)
+                HOIST_NS_TYPE
             } else if next == b"(" {
                 HOIST_NS_VALUE
             } else if next == b"{"

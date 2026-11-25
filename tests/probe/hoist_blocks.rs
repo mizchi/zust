@@ -80,8 +80,15 @@ fn main() {
         fn t() -> u8 {
             11
         }
+        fn h(x: t, y: u8) -> u8 {
+            x.v + y
+        }
         let a = t { v: 12 };
-        println!("{} {}", t(), a.v);
+        let b: t = t { v: 1 };
+        let mut c: t;
+        c = t { v: 2 };
+        c.v += 1;
+        println!("{} {} {} {} {}", t(), a.v, b.v, c.v, h(t { v: 4 }, 5));
     }
     // (a type's path and return type, `u::mk()` / `-> u`, beside a fn of its name in a block)
     struct u {
