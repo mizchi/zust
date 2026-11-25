@@ -4311,6 +4311,43 @@ impl Cx<'_> {
                 }
             }
         }
+        // (`<J as PartialEq<str>>::eq(a, b)`: the program's impl for that right-hand side, `J::<PartialEq<str>>::eq`
+        // (`ne` is its negation), which `a == b` would not find from b's type alone (`&&str` coerces to `&str`))
+        if let (Expr::Path(Some(qs), p), [a, b]) = (&**func, cargs.as_slice()) {
+            let n = p.segs.len();
+            if n >= 2 && p.segs[n - 2].name == "PartialEq" && matches!(p.segs[n - 1].name.as_str(), "eq" | "ne") && !self.prog.peq.is_empty() {
+                if let [GArg::Ty(rt)] = p.segs[n - 2].args.as_slice() {
+                    if let (Ok(st), Ok(r)) = (self.parse_ty(qs), self.parse_ty(rt)) {
+                        let (sr, rr) = (Ty::Ref(false, intern(st)), Ty::Ref(false, intern(r)));
+                        let f = self.prog.peq.iter().copied().find(|&f| {
+                            let sg = &self.prog.sigs[f as usize];
+                            sg.generics.is_empty() && sg.params.len() == 2 && sg.params[0] == sr && sg.params[1] == rr
+                        });
+                        if let Some(f) = f {
+                            // (the impl's own `ne` when it has one, `J::<PartialEq<str>>::ne`; else the default, `!eq`)
+                            let own_ne = (p.segs[n - 1].name == "ne")
+                                .then(|| self.prog.names[f as usize].split('#').next().unwrap_or("").strip_suffix("::eq").map(|b| format!("{b}::ne")))
+                                .flatten()
+                                .and_then(|ne| self.prog.index.get(&ne).copied());
+                            if let Some(g) = own_ne {
+                                let args: [&Expr; 2] = [a, b];
+                                return self.call_fn(g, None, &args, None, Some(Ty::Bool), SP);
+                            }
+                            if p.segs[n - 1].name == "ne" {
+                                let mut q = p.clone();
+                                q.segs[n - 1].name = "eq".into();
+                                q.segs[n - 1].text = "eq".into();
+                                let call = Expr::Call(Box::new(Expr::Path(Some(qs.clone()), q)), cargs.clone());
+                                let ne = self.keep_expr(Expr::Unary("!".into(), Box::new(Expr::Paren(Box::new(call))), Default::default()));
+                                return self.expr(ne, expected);
+                            }
+                            let args: [&Expr; 2] = [a, b];
+                            return self.call_fn(f, None, &args, None, Some(Ty::Bool), SP);
+                        }
+                    }
+                }
+            }
+        }
         // (`<T as Clone>::clone(x)`: `(x).clone()` naming its trait (not an inherent `clone` of T), for x: &T, a derive's
         // clone too; x of another referent is mismatched types (`<u8 as Clone>::clone(&1u32)`))
         if let (Expr::Path(Some(qs), p), [x]) = (&**func, cargs.as_slice()) {
@@ -4389,7 +4426,9 @@ impl Cx<'_> {
             if let [ts, m] = p.segs.as_slice() {
                 if m.name == "from" && ts.args.is_empty() && m.args.is_empty() {
                     if let Some(t) = Ty::prim(&ts.name).filter(|t| t.is_int() || t.is_float()) {
-                        if self.prog.fn_by_p(&PPath::of(p), self.self_sid).is_none() {
+                        // (the program's own `from` of the number is one of another trait's; its `impl From<J> for f64`
+                        // leaves the numbers' widening `from`)
+                        if self.prog.fn_by_p(&PPath::of(p), self.self_sid).is_none() || self.trait_candidate(&format!("{}::from", ts.name), "From").is_some() {
                             if let Some(a) = self.peek(x).filter(|a| a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char)) {
                                 // (not `f32::from(3.14)`: an unsuffixed float literal falls back to f32 there, which rustc accepts;
                                 // `f32::from(1f64)` is E0277)
@@ -4402,10 +4441,15 @@ impl Cx<'_> {
                 }
             }
         }
-        // `i32::try_from(x)` (an integer type): `x.try_into()` to that type
+        // `i32::try_from(x)` (an integer type): `x.try_into()` to that type; not of a value of another type with the
+        // program's `impl TryFrom<J> for u32`, which is called as written
         if let (Expr::Path(None, p), [x]) = (&**func, cargs.as_slice()) {
             if p.segs.len() == 2 && p.segs[1].name == "try_from" {
-                if let Some(t) = Ty::from_suffix(&p.segs[0].name).filter(|t| t.is_int()) {
+                let own = || {
+                    self.trait_candidate(&format!("{}::try_from", p.segs[0].name), "TryFrom").is_some()
+                        && !self.peek(x).is_some_and(|a| a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char))
+                };
+                if let Some(t) = Ty::from_suffix(&p.segs[0].name).filter(|t| t.is_int() && !own()) {
                     if let Some(rt) = self.result_of(t, "TryFromIntError") {
                         let e = self.keep_expr(mcall(x.clone(), "try_into", vec![]));
                         self.try_into_hint = Some(t);
@@ -4542,7 +4586,7 @@ impl Cx<'_> {
         if let Some(r) = self.intrinsic_call(c, expected)? {
             return Ok(r);
         }
-        let Some((id, _)) = self.callee(func) else {
+        let Some((mut id, _)) = self.callee(func) else {
             // 値の呼び出し: クロージャ / `&dyn Fn`
             return self.call_value(c, expected);
         };
@@ -4565,7 +4609,19 @@ impl Cx<'_> {
             } else if n >= 2 && !p.segs[n - 2].args.is_empty() {
                 let seg = p.segs[n - 2].clone();
                 let ty = crate::parse::Ty::Path(None, Path { global: false, segs: vec![seg], pos: Default::default() });
-                self.seg_self = Some(self.parse_ty(&ty)?);
+                let st = self.parse_ty(&ty)?;
+                self.seg_self = Some(st);
+                // (`<Box<[u8]>>::from_abi(js)` / `Box::<[u8]>::from_abi`: among impls for instances of the type, the one
+                // for this one)
+                let group = self.prog.names[id as usize].split('#').next().unwrap_or("").to_string();
+                if let Some(cs) = self.prog.overloads.get(&group).filter(|_| !self.prog.has_param(st)) {
+                    let own = |c: u32| self.prog.sigs[c as usize].self_ty.is_some_and(|t| self.prog.match_ty_exact(t, st, &mut vec![None; self.prog.sigs[c as usize].generics.len()]));
+                    if !own(id) {
+                        if let Some(&c) = cs.iter().find(|&&c| own(c)) {
+                            id = c;
+                        }
+                    }
+                }
             } else if n == 2 && self.prog.sigs[id as usize].self_ty.is_some_and(|t| self.prog.has_param(t)) {
                 // `T::dec(r)` (T はインスタンスの中で具体的な型): ジェネリックな impl の型引数を Self から
                 let seg = p.segs[0].clone();
@@ -4614,7 +4670,36 @@ impl Cx<'_> {
         // (a call of this kind in the arguments keeps the outer one's for after it)
         let outer = std::mem::replace(&mut self.rg.call_self, written);
         self.bk_arg_flows_before(id, &args);
+        // (`<&[u8] as Tr>::m(&v)`: the impl the qualified type names, whose self type it is; not another overload
+        // the arguments would pick (`&Vec<u8>` coerces to both `&[T]` and `&mut [u8]`'s receiver))
+        // (only when it is the one impl for that self type: `From<u8>` and `From<u16>` for `W<u32>` are still told apart
+        // by the argument, `W::<u32>::from(1u16)`)
+        let mut kept = false;
+        let group = self.prog.overloads.get(self.prog.names[id as usize].split('#').next().unwrap_or(""));
+        let one_for = |st: Ty| {
+            let exact = |c: u32| self.prog.sigs[c as usize].self_ty.is_some_and(|t| self.prog.match_ty_exact(t, st, &mut vec![None; self.prog.sigs[c as usize].generics.len()]));
+            exact(id) && group.is_some_and(|g| g.iter().filter(|&&c| exact(c)).count() == 1)
+        };
+        if let (Some(st), Expr::Path(None, _)) = (self.seg_self, &**func) {
+            if one_for(st) {
+                self.keep_overload.set(Some(id));
+                kept = true;
+            }
+        }
+        if let Expr::Path(Some(q), _) = &**func {
+            if group.is_some() {
+                if let Ok(qt) = self.parse_ty(q) {
+                    if !self.prog.has_param(qt) && one_for(qt) {
+                        self.keep_overload.set(Some(id));
+                        kept = true;
+                    }
+                }
+            }
+        }
         let r = self.call_fn(id, None, &args, tf, expected, SP);
+        if kept {
+            self.keep_overload.set(None);
+        }
         self.rg.call_self = outer;
         if r.is_ok() {
             self.bk_arg_flows(id, &args);

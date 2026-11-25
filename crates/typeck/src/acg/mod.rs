@@ -1501,7 +1501,7 @@ impl Cx<'_> {
             Ok(())
         } else {
             if panic_err() {
-                panic!("mismatched types");
+                panic!("mismatched types: expected `{}`, found `{}`", self.prog.tn(want), self.prog.tn(got));
             }
             Err(self.at(span, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(want), self.prog.tn(got))))
         }
@@ -3263,10 +3263,53 @@ impl Cx<'_> {
     }
 
     /// `f` / `S::f` / `Self::f` 形式の呼び出し先
+    /// The fn m of an impl for a reference to a type parameter, `impl<T: Tr + ?Sized> Tr for &T { fn m() }` (named
+    /// `T::__ref_m`), whose self type t is (`&u8`, `&&str`); of trait tr when one is named
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn ref_blanket_fn(&self, t: Ty, m: &str, tr: Option<&str>) -> Option<u32> {
+        if !matches!(t, Ty::Ref(..)) {
+            return None;
+        }
+        // (also one for the reference to a type the prelude names otherwise, `impl Tr for &Cow<'_, str>` (`Cow::__ref_m`,
+        // whose self type is the prelude's `&__CowStr`): by its self type, an impl for the type itself first)
+        let suffix = format!("::__ref_{m}");
+        let fits = |i: u32, blanket: bool| {
+            let n = self.prog.names[i as usize].as_str();
+            let sig = &self.prog.sigs[i as usize];
+            n.split('#').next().is_some_and(|b| b.ends_with(&suffix))
+                && matches!(sig.self_ty, Some(Ty::Ref(_, Ty::Param(_)))) == blanket
+                && tr.is_none_or(|tr| sig.impl_trait.as_deref().is_some_and(|it| it.split('<').next().unwrap_or(it).trim() == tr))
+                && sig.self_ty.is_some_and(|st| self.prog.match_ty_exact(st, t, &mut vec![None; sig.generics.len()]))
+        };
+        let n = self.prog.names.len() as u32;
+        (0..n).find(|&i| fits(i, false)).or_else(|| (0..n).find(|&i| fits(i, true)))
+    }
+
     pub fn callee(&self, f: &Expr) -> Option<(u32, &FnSig)> {
         let Expr::Path(q, p) = f else { return None };
         let by_ty = |t: Ty, m: &str| -> Option<u32> {
             match t {
+                // (a reference's: an impl for it (`impl Tr for &u8`'s `u8::__ref_m`), then one for a reference to any
+                // type, `impl<T> Tr for &T`)
+                Ty::Ref(..) => {
+                    let (mut pre, mut b) = (String::new(), t);
+                    while let Ty::Ref(_, i) = b {
+                        pre.push_str("__ref_");
+                        b = *i;
+                    }
+                    let base = match b {
+                        Ty::Slice(_) => Some("__slice".to_string()),
+                        Ty::Array(..) => Some("__array".to_string()),
+                        Ty::Box(_) => Some("Box".to_string()),
+                        Ty::Struct(sid) => Some(self.prog.structs[self.prog.base_of(sid) as usize].name.clone()),
+                        b if b.is_int() || b.is_float() || matches!(b, Ty::Bool | Ty::Char | Ty::Str) => Some(self.prog.tn(b)),
+                        _ => None,
+                    };
+                    base.and_then(|base| self.prog.index.get(&format!("{base}::{pre}{m}")).copied())
+                        .or_else(|| self.prog.prim_method(t, m))
+                        .or_else(|| self.ref_blanket_fn(t, m, None))
+                }
                 Ty::Struct(sid) => self.prog.method(sid, m).or_else(|| self.prog.default_method(sid, m)),
                 // (else a default fn of a trait t implements: a blanket `impl<T> Tr for T {}`)
                 t => self.prog.prim_method(t, m).or_else(|| {
@@ -3287,8 +3330,52 @@ impl Cx<'_> {
             // trait's of the same name)
             if p.segs.len() >= 2 {
                 let tr = &p.segs[p.segs.len() - 2].name;
-                if let Some(i) = self.trait_candidate(&format!("{}::{m}", self.ty_key(t)), tr).or_else(|| self.trait_default(tr, &m, t)) {
+                // (among impls of the trait for instances of one type, `<Box<[f32]> as FromWasmAbi>::from_abi` beside
+                // Box<[u8]>'s: the one for the type itself)
+                let own = |c: u32| self.prog.sigs[c as usize].self_ty.is_some_and(|st| self.prog.match_ty_exact(st, t, &mut vec![None; self.prog.sigs[c as usize].generics.len()]));
+                let key = format!("{}::{m}", self.ty_key(t));
+                let multi = self.prog.overloads.contains_key(&key);
+                if let Some(i) = multi.then(|| self.trait_candidate_where(&key, tr, own)).flatten().or_else(|| self.trait_candidate(&key, tr)).or_else(|| self.trait_default(tr, &m, t)) {
                     return Some((i, &self.prog.sigs[i as usize]));
+                }
+                // (`<&J as Tr>::m`: the impl for the reference, whose functions are `J::__ref_m`)
+                if let Ty::Ref(..) = t {
+                    let (mut pre, mut b) = (String::new(), t);
+                    while let Ty::Ref(_, i) = b {
+                        pre.push_str("__ref_");
+                        b = *i;
+                    }
+                    // (an impl for `&[T]` / `&[T; N]` has its functions under `__slice` / `__array`)
+                    let base = match b {
+                        Ty::Slice(_) => "__slice".to_string(),
+                        Ty::Array(..) => "__array".to_string(),
+                        Ty::Box(_) => "Box".to_string(),
+                        b => self.ty_key(b),
+                    };
+                    let key = format!("{base}::{pre}{m}");
+                    if let Some(i) = self.trait_candidate_where(&key, tr, own).or_else(|| self.trait_candidate(&key, tr)).or_else(|| self.ref_blanket_fn(t, &m, Some(tr))) {
+                        return Some((i, &self.prog.sigs[i as usize]));
+                    }
+                }
+            }
+            // (`<&Box<str> as MaybeIntoWasmAbi>::none()`: the trait's blanket impl, `impl<T: OptionIntoWasmAbi>
+            // MaybeIntoWasmAbi for T`, when its bounds hold of the type)
+            if p.segs.len() >= 2 {
+                let tr = &p.segs[p.segs.len() - 2].name;
+                // (the blanket impl's fn of that trait: Program::blanket keeps one of each name, of whichever trait
+                // came first)
+                let suffix = format!("::{m}");
+                let of_tr = |i: usize| {
+                    let bs = &self.prog.sigs[i];
+                    matches!(bs.self_ty, Some(Ty::Param(_)))
+                        && bs.impl_trait.as_deref().is_some_and(|it| it.split('<').next().unwrap_or(it).trim() == tr.as_str())
+                        && self.prog.names[i].split('#').next().is_some_and(|n| n.ends_with(&suffix))
+                };
+                let holds = || self.prog.blanket_bounds.get(tr.as_str()).is_none_or(|b| super::acg::p2_call::blanket_impls_hold(self.prog, t, b, &mut vec![], &mut vec![]));
+                if !self.prog.has_param(t) && self.prog.blanket_traits.contains(tr.as_str()) {
+                    if let Some(bid) = (0..self.prog.sigs.len()).find(|&i| of_tr(i)).filter(|_| holds()) {
+                        return Some((bid as u32, &self.prog.sigs[bid]));
+                    }
                 }
             }
             // (`<T as Tr>::A::m`: a fn of the associated type A, its instance's)
@@ -3297,7 +3384,17 @@ impl Cx<'_> {
                     return Some((i, &self.prog.sigs[i as usize]));
                 }
             }
-            let i = by_ty(t, &m)?;
+            let mut i = by_ty(t, &m)?;
+            // (`<Box<[u8]>>::from_abi(js)`: among impls for instances of one type, the one for the type itself)
+            let group = self.prog.names[i as usize].split('#').next().unwrap_or("");
+            if let Some(cs) = self.prog.overloads.get(group) {
+                let own = |c: u32| self.prog.sigs[c as usize].self_ty.is_some_and(|st| self.prog.match_ty_exact(st, t, &mut vec![None; self.prog.sigs[c as usize].generics.len()]));
+                if !own(i) {
+                    if let Some(&c) = cs.iter().find(|&&c| own(c)) {
+                        i = c;
+                    }
+                }
+            }
             return Some((i, &self.prog.sigs[i as usize]));
         }
         // (`T::A::m(..)`: a fn of the associated type A of the type parameter T)
@@ -3312,6 +3409,24 @@ impl Cx<'_> {
             if self.env.params.iter().any(|(n, _)| n == g) {
                 let ty = crate::parse::Ty::Path(None, path_of(g));
                 if let Ok(t) = self.parse_ty(&ty) {
+                    // (a fn of the name in two traits: the one of T's bounds, `T::none()` with `T: MaybeIntoWasmAbi` beside
+                    // OptionIntoWasmAbi's `none`)
+                    let m = &p.segs[1].name;
+                    if !self.prog.has_param(t) && self.prog.multi_trait_methods.contains(m.as_str()) {
+                        // (the fn's own bounds: `root`, also for a body inlined into another)
+                        let bounds = self.prog.sigs.get(self.root as usize).and_then(|s| s.generics.iter().find(|x| x.0 == *g)).map(|x| x.1.clone()).unwrap_or_default();
+                        for b in &bounds {
+                            let tr = b.split('<').next().unwrap_or(b).trim();
+                            if !self.prog.traits.get(tr).is_some_and(|ds| ds.iter().any(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(m.as_str()))) {
+                                continue;
+                            }
+                            if let Ok(Expr::Path(q2, p2)) = crate::parse::parse_expr(&format!("<{} as {tr}>::{m}", self.prog.tn(t))) {
+                                if let Some(r) = self.callee(&Expr::Path(q2, p2)) {
+                                    return Some(r);
+                                }
+                            }
+                        }
+                    }
                     if let Some(i) = by_ty(t, &p.segs[1].name) {
                         return Some((i, &self.prog.sigs[i as usize]));
                     }
