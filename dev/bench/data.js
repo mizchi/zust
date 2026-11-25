@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795631207952,
+  "lastUpdate": 1795631210626,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -131465,6 +131465,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/708fc07504fe89182ba08dcd26be2d75bee19f32"
         },
         "date": 1795630787200,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.61,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1913,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.77,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1555,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 72.85,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5381,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5beecd0ee9037951f5d73c419be222380ed60f44",
+          "message": "Merge pull request #184 from mizchi/claude/english-comments\n\nComments in English, in the files no open pull request touches (2,550 lines, bit-identical binaries)",
+          "timestamp": "2026-11-26T03:20:41+09:00",
+          "tree_id": "977283baf89be3f4557a8f28720e325ee546e2c6",
+          "url": "https://github.com/mizchi/zust/commit/5beecd0ee9037951f5d73c419be222380ed60f44"
+        },
+        "date": 1795631210108,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
