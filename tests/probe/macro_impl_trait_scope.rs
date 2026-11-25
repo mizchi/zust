@@ -34,17 +34,27 @@ unsafe impl Marker for S {
     getter!(mark, 4);
 }
 struct C<const N: usize>;
+macro_rules! item {
+    () => {
+        #[inline]
+        fn value(&self) -> usize {
+            9
+        }
+    };
+}
+// (that impl's own body is still a place of items: a call there writes an attributed method)
 impl C<{ sum!() * 3 }> {
     fn nine(&self) -> usize {
         9
     }
+    item!();
 }
 fn size<const N: usize>(_: &C<N>) -> usize {
     N
 }
 fn main() {
     let c: C<{ sum!() * 3 }> = C;
-    println!("{} {}", size(&c), c.nine());
+    println!("{} {} {}", size(&c), c.nine(), c.value());
     println!("{} {}", ret(), arg("a"));
     println!("{} {} {}", S.one(), S.two(), S.mark());
 }

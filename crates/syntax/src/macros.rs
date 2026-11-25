@@ -1257,6 +1257,22 @@ fn item_scope(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], depth: &[u
         k -= 1;
         n += 1;
         let t = tk(k);
+        // (a braced const argument inside the head's `<..>`, `impl C<{ m!() * 3 }> {`: stepped over, back to its `{`)
+        if toks[k].0 == 1 && t == b"}" && angle > 0 {
+            let mut d = 0i32;
+            while k > 0 {
+                if toks[k].0 == 1 && tk(k) == b"}" {
+                    d += 1;
+                } else if toks[k].0 == 1 && tk(k) == b"{" {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                k -= 1;
+            }
+            continue;
+        }
         if toks[k].0 == 1 && (t == b";" || t == b"{" || t == b"}") {
             return false;
         }
@@ -2343,6 +2359,8 @@ fn find_calls(
                             TokenTree::Punct(q) if q.as_char() == '>' && !(k > 0 && matches!(&toks[k - 1], TokenTree::Punct(a) if matches!(a.as_char(), '-' | '=') && a.spacing() == proc_macro2::Spacing::Joint)) => angle += 1,
                             TokenTree::Punct(q) if q.as_char() == '<' => angle -= 1,
                             TokenTree::Punct(q) if q.as_char() == ';' => break,
+                            // (a braced const argument inside the head's `<..>`: stepped over)
+                            TokenTree::Group(pg) if pg.delimiter() == proc_macro2::Delimiter::Brace && angle > 0 => {}
                             TokenTree::Group(pg) if pg.delimiter() == proc_macro2::Delimiter::Brace => break,
                             TokenTree::Ident(w) if matches!(w.to_string().as_str(), "fn" | "struct" | "enum" | "union" | "let") => break,
                             // (an `impl` that starts an item, as item_scope: not `-> impl Display`)
