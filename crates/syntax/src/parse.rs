@@ -665,6 +665,9 @@ pub struct Parser {
     in_async: bool,
     /// Inside an `extern "C" { .. }` block: a `static X: T;` without a value is allowed there only
     in_extern: bool,
+    /// Inside a value that must be a constant (a const's or static's value, a discriminant, an array's length) and
+    /// not in a fn or closure body in it: `return` there is E0572
+    in_const: bool,
     /// E0416 is checked where a pattern is parsed; off while a fn parameter may still turn out to be a 2015 anonymous
     /// one (`fn f((u8, u8));`, a type)
     no_dup_check: bool,
@@ -755,7 +758,7 @@ pub fn rewrite_tokens(s: &str, f: &mut dyn FnMut(usize, &[Tok]) -> Option<String
 
 pub fn parse_file(src: &str) -> R<File> {
     let toks = tokenize(src)?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base: Pos::default(), async_on: true, in_async: false, in_extern: false, no_dup_check: false };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base: Pos::default(), async_on: true, in_async: false, in_extern: false, in_const: false, no_dup_check: false };
     let mut attrs = Vec::new();
     while p.is_punct("#") && p.peek_is(1, "!") {
         attrs.push(p.attr()?);
@@ -788,7 +791,7 @@ pub fn parse_expr(src: &str) -> R<Expr> {
 /// 式を読む。位置は base (src の先頭のソース上の位置) からの位置にする
 pub fn parse_expr_at(src: &str, base: Pos) -> R<Expr> {
     let toks = tokenize(src)?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false, no_dup_check: false };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false, in_const: false, no_dup_check: false };
     let e = p.expr(true)?;
     if p.i < p.toks.len() {
         return Err(p.err("unexpected token after expression"));
@@ -803,7 +806,7 @@ pub fn parse_pat_guard(src: &str) -> Option<(Pat, Option<Expr>)> {
 
 pub fn parse_pat_guard_at(src: &str, base: Pos) -> Option<(Pat, Option<Expr>)> {
     let toks = tokenize(src).ok()?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false, no_dup_check: false };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false, in_const: false, no_dup_check: false };
     let pat = p.pat().ok()?;
     let guard = if p.eat_ident("if") { Some(p.expr(true).ok()?) } else { None };
     p.eat_punct(",");
@@ -1387,7 +1390,7 @@ impl Parser {
             self.i += 1;
             let t = self.ty()?;
             if self.eat_punct(";") {
-                let n = self.expr(true)?;
+                let n = self.const_expr()?;
                 self.expect_close("]")?;
                 return Ok(Ty::Array(Box::new(t), Box::new(n)));
             }
@@ -1659,6 +1662,9 @@ impl Parser {
             };
             self.i += 3;
             let hi = self.pat_range_end()?;
+            if hi.is_none() {
+                return Err(no_end_err(&self.toks, self.i - 3));
+            }
             return self.range_pat(Some(lo), hi, true);
         }
         if self.punct_at(0, "..") && !self.punct_at(0, "...") {
@@ -1872,6 +1878,9 @@ impl Parser {
             let incl = self.punct_at(0, "..=");
             self.i += if incl { 3 } else { 2 };
             let hi = if self.range_end_follows() && !(self.is_open("{") && !ss) { Some(Box::new(self.bin_expr(0, ss)?)) } else { None };
+            if incl && hi.is_none() {
+                return Err(no_end_err(&self.toks, self.i - 3));
+            }
             return Ok(Expr::Range(None, hi, incl));
         }
         let l = self.bin_expr(0, ss)?;
@@ -1879,6 +1888,9 @@ impl Parser {
             let incl = self.punct_at(0, "..=");
             self.i += if incl { 3 } else { 2 };
             let ok = self.range_end_follows() && !(self.is_open("{") && !ss);
+            if incl && !ok {
+                return Err(no_end_err(&self.toks, self.i - 3));
+            }
             let hi = if ok { Some(Box::new(self.bin_expr(0, ss)?)) } else { None };
             return Ok(Expr::Range(Some(Box::new(l)), hi, incl));
         }
@@ -2155,9 +2167,19 @@ impl Parser {
         // (an async closure's body may `.await`; a plain closure's may not, even inside an async block)
         let is_async = self.eat_ident("async");
         let saved = std::mem::replace(&mut self.in_async, is_async);
+        let saved_c = std::mem::replace(&mut self.in_const, false);
         let r = self.closure_inner();
         self.in_async = saved;
+        self.in_const = saved_c;
         r
+    }
+
+    /// An expression that must be a constant (E0572 for a `return` in it)
+    fn const_expr(&mut self) -> R<Expr> {
+        let o = std::mem::replace(&mut self.in_const, true);
+        let e = self.expr(true);
+        self.in_const = o;
+        e
     }
 
     fn closure_inner(&mut self) -> R<Expr> {
@@ -2282,7 +2304,7 @@ impl Parser {
                     }
                     let first = self.expr(true)?;
                     if self.eat_punct(";") {
-                        let n = self.expr(true)?;
+                        let n = self.const_expr()?;
                         self.expect_close("]")?;
                         return Ok(Expr::Repeat(Box::new(first), Box::new(n)));
                     }
@@ -2408,6 +2430,9 @@ impl Parser {
                 return self.closure();
             }
             "return" => {
+                if self.in_const {
+                    return Err(self.err_plain("return statement outside of function body (E0572)"));
+                }
                 self.i += 1;
                 let v = if self.expr_follows() { Some(Box::new(self.expr(ss)?)) } else { None };
                 return Ok(Expr::Return(v));
@@ -3080,8 +3105,10 @@ impl Parser {
                 }
                 let st = self.i;
                 let saved = std::mem::replace(&mut self.in_async, sig.quals.iter().any(|q| q == "async"));
+                let saved_c = std::mem::replace(&mut self.in_const, false);
                 let b = self.block();
                 self.in_async = saved;
+                self.in_const = saved_c;
                 let b = b?;
                 // (a `const fn`'s body text: constants may call it)
                 if sig.quals.iter().any(|q| q == "const") {
@@ -3113,7 +3140,7 @@ impl Parser {
                     self.attrs()?;
                     let vn = self.decl_ident()?;
                     let f = self.fields()?;
-                    let d = if self.eat_punct("=") { Some(self.expr(true)?) } else { None };
+                    let d = if self.eat_punct("=") { Some(self.const_expr()?) } else { None };
                     vs.push((vn, f, d));
                     if !self.eat_punct(",") {
                         break;
@@ -3206,7 +3233,7 @@ impl Parser {
                 }
                 let e = if self.eat_punct("=") {
                     let st = self.i;
-                    let e = self.expr(true)?;
+                    let e = self.const_expr()?;
                     self.init_text = self.tokens_text(st, self.i);
                     Some(e)
                 } else {
@@ -3235,7 +3262,7 @@ impl Parser {
                 }
                 self.expect_punct("=")?;
                 let st = self.i;
-                let e = self.expr(true)?;
+                let e = self.const_expr()?;
                 self.init_text = self.tokens_text(st, self.i);
                 self.expect_punct(";")?;
                 Ok(ItemKind::Static(m, n, t, e))
@@ -3308,6 +3335,15 @@ impl Parser {
 }
 
 // ---------------------------------------------------------------- 表示 (確かめる用)
+
+/// E0586: `1..=` / `0..= =` / `X...`, an inclusive range with no end. at: the `..=`'s first token
+#[cold]
+fn no_end_err(toks: &[Tok], at: usize) -> String {
+    match toks.get(at) {
+        Some(t) => format!("{}:{}: inclusive range with no end (E0586)", t.line, t.col + 1),
+        None => "inclusive range with no end (E0586)".to_string(),
+    }
+}
 
 /// E0229: `<I as Foo<A = Bar>>::A`, `where T<Bogus = Foo>: A`, an associated item's constraint where a path names a
 /// type, or a trait it is not a bound of. st: the path's first token

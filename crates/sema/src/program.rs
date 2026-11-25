@@ -2250,6 +2250,10 @@ impl Program {
                     if let Some(mi) = p.method(*sid, m).filter(|&mi| p.sigs[mi as usize].impl_trait.as_deref() == Some(tr.as_str()) && mi != d) {
                         let (ds, ms) = (&p.sigs[d as usize], &p.sigs[mi as usize]);
                         let line = p.item_of[mi as usize].map_or(String::new(), |ii| format!("{}:1: ", items[ii as usize].line));
+                        // (E0185 / E0186: a receiver on one side only)
+                        if ds.has_self != ms.has_self {
+                            return Err(receiver_mismatch(&line, m, if ms.has_self { ms } else { ds }, ms.has_self));
+                        }
                         if ds.params.len() != ms.params.len() && ds.has_self == ms.has_self {
                             return Err(format!(
                                 "{line}method `{m}` has {} parameters but the declaration in trait `{tr}::{m}` has {} (E0050)",
@@ -6807,5 +6811,21 @@ fn alias_structs(t: &TySyn, index: &FxMap<String, u32>, out: &mut Vec<u32>) {
         TySyn::Ref(_, i) | TySyn::Ptr(_, i) | TySyn::Slice(i) | TySyn::Array(i, _) | TySyn::Assoc(i, _) => alias_structs(i, index, out),
         TySyn::Tuple(ts) | TySyn::FnPtr(ts) => ts.iter().for_each(|a| alias_structs(a, index, out)),
         _ => {}
+    }
+}
+
+/// E0185 / E0186: `fn foo(&self)` in the impl for the trait's `fn foo()`, or the other way round. s: the signature
+/// with the receiver
+#[cold]
+fn receiver_mismatch(line: &str, m: &str, s: &FnSig, in_impl: bool) -> String {
+    let recv = match s.params.first() {
+        Some(Ty::Ref(false, _)) => "&self",
+        Some(Ty::Ref(true, _)) => "&mut self",
+        _ => "self",
+    };
+    if in_impl {
+        format!("{line}method `{m}` has a `{recv}` declaration in the impl, but not in the trait (E0185)")
+    } else {
+        format!("{line}method `{m}` has a `{recv}` declaration in the trait, but not in the impl (E0186)")
     }
 }

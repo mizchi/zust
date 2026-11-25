@@ -2371,3 +2371,27 @@ fn item_declarations_rustc_rejects() {
     assert_eq!(first(&format!("{foo}fn main() {{\n    Drop::drop(&mut Foo);\n}}\n")), e(6, dtor), "a path call");
     assert_eq!(first(&format!("{foo}fn main() {{\n    let x = Foo;\n    drop(x);\n}}\n")), None, "std's drop");
 }
+
+#[test]
+fn returns_ranges_and_receivers_rustc_rejects() {
+    // (E0572, E0586, E0185 / E0186, at the lines rustc 1.100 reports them)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, m: &str| Some((l, m.to_string()));
+    let ret = "return statement outside of function body (E0572)";
+    assert_eq!(first("const FOO: u32 = return 0;\nfn main() {}\n"), e(1, ret), "a const's value");
+    assert_eq!(first("const X: () = {\n    return;\n};\nfn main() {}\n"), e(2, ret), "a const's block");
+    assert_eq!(first("enum Bug {\n    V1 = return [0][0],\n}\nfn main() {}\n"), e(2, ret), "a discriminant");
+    assert_eq!(first("fn main() {\n    [(); return];\n}\n"), e(2, ret), "a repeat's length");
+    assert_eq!(first("const F: fn() -> u8 = || { return 1; };\nconst G: u8 = { fn g() -> u8 { return 2; } g() };\nfn main() {}\n"), None, "a closure's or a fn's body in a const");
+    let no_end = "inclusive range with no end (E0586)";
+    assert_eq!(first("fn main() {\n    let v = [1, 2, 3];\n    let x = &v[1..=];\n}\n"), e(3, no_end), "an index");
+    assert_eq!(first("fn main() {\n    for _ in 1..= {}\n}\n"), e(2, no_end), "a for loop's head");
+    assert_eq!(first("fn main() {\n    match 3u8 {\n        0..= => {}\n        _ => {}\n    }\n}\n"), e(3, no_end), "a pattern");
+    assert_eq!(first("fn main() {\n    let v = [1, 2, 3];\n    let _ = &v[..=1];\n    let _ = &v[1..];\n}\n"), None, "ranges with an end or exclusive");
+    let tr = "trait Foo {\n    fn foo();\n    fn bar(&self);\n}\nstruct Bar;\n";
+    assert_eq!(first(&format!("{tr}impl Foo for Bar {{\n    fn foo(&self) {{}}\n    fn bar(&self) {{}}\n}}\nfn main() {{}}\n")), e(7, "method `foo` has a `&self` declaration in the impl, but not in the trait (E0185)"), "a receiver in the impl only");
+    assert_eq!(first(&format!("{tr}impl Foo for Bar {{\n    fn foo() {{}}\n    fn bar() {{}}\n}}\nfn main() {{}}\n")), e(8, "method `bar` has a `&self` declaration in the trait, but not in the impl (E0186)"), "a receiver in the trait only");
+}

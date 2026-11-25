@@ -84,6 +84,7 @@ run-pass	array-slice-vec/nested-vec-2.rs
 run-pass	array-slice-vec/new-style-fixed-length-vec.rs
 compile-fail	array-slice-vec/repeat_empty_ok.rs
 run-pass	array-slice-vec/repeated-vector-syntax.rs
+compile-fail	array-slice-vec/return-in-array-len.rs
 run-pass	array-slice-vec/show-boxed-slice.rs
 compile-fail	array-slice-vec/slice-2.rs
 compile-fail	array-slice-vec/slice-mut-2.rs
@@ -1916,6 +1917,7 @@ check-pass	consts/const-ref-to-static-linux-vtable.rs
 run-pass	consts/const-region-ptrs-noncopy.rs
 run-pass	consts/const-region-ptrs.rs
 compile-fail	consts/const-result-no-expect-suggestion.rs
+compile-fail	consts/const-return-outside-fn.rs
 compile-fail	consts/const-slice-array-deref.rs
 check-pass	consts/const-static-ref-to-closure.rs
 run-pass	consts/const-struct-offsets.rs
@@ -2515,6 +2517,8 @@ compile-fail	error-codes/E0131.rs
 compile-fail	error-codes/E0133.rs
 compile-fail	error-codes/E0161.rs
 compile-fail	error-codes/E0164.rs
+compile-fail	error-codes/E0185.rs
+compile-fail	error-codes/E0186.rs
 compile-fail	error-codes/E0191.rs
 compile-fail	error-codes/E0195.rs
 compile-fail	error-codes/E0200.rs
@@ -2598,8 +2602,10 @@ compile-fail	error-codes/E0559.rs
 compile-fail	error-codes/E0560.rs
 compile-fail	error-codes/E0565-1.rs
 compile-fail	error-codes/E0565.rs
+compile-fail	error-codes/E0572.rs
 compile-fail	error-codes/E0582.rs
 compile-fail	error-codes/E0585.rs
+compile-fail	error-codes/E0586.rs
 compile-fail	error-codes/E0594.rs
 compile-fail	error-codes/E0596.rs
 compile-fail	error-codes/E0597.rs
@@ -5818,6 +5824,7 @@ compile-fail	parser/range-4.rs
 compile-fail	parser/range-exclusive-dotdotlt.rs
 compile-fail	parser/range-inclusive-extra-equals.rs
 compile-fail	parser/range-inclusive-suggestion-span.rs
+compile-fail	parser/range_inclusive.rs
 compile-fail	parser/range_inclusive_dotdotdot.rs
 compile-fail	parser/raw/issue-70677-panic-on-unterminated-raw-str-at-eof.rs
 compile-fail	parser/raw/raw-byte-string-literals.rs
@@ -6256,6 +6263,7 @@ compile-fail	pub/pub-restricted.rs
 compile-fail	query-system/fn-sig-cycle-arity.rs
 compile-fail	query-system/no-query-in-printing-during-query-descr.rs
 compile-fail	query-system/query-cycle-printing-issue-151226.rs
+compile-fail	range/impossible_range.rs
 run-pass	range/inclusive-range-in-closure.rs
 compile-fail	range/issue-54505-no-literals.rs
 compile-fail	range/issue-54505.rs
@@ -6703,12 +6711,15 @@ compile-fail	resolve/visibility-indeterminate.rs
 compile-fail	return/dont-suggest-through-inner-const.rs
 run-pass	return/early-return-with-unreachable-code-24353.rs
 compile-fail	return/infer-return-ty-for-fn-sig-issue-125488.rs
+compile-fail	return/issue-64620.rs
+compile-fail	return/issue-86188-return-not-in-fn-body.rs
 run-pass	return/ret-bang.rs
 compile-fail	return/ret-non-nil.rs
 compile-fail	return/return-disjoint-regions.rs
 compile-fail	return/return-from-diverging.rs
 compile-fail	return/return-from-residual-sugg-issue-125997.rs
 compile-fail	return/return-impl-trait-bad.rs
+compile-fail	return/return-match-array-const.rs
 run-pass	return/return-nil.rs
 compile-fail	return/return-struct.rs
 compile-fail	return/return-ty-mismatch-note.rs
@@ -8135,6 +8146,7 @@ compile-fail	typeck/ice-self-mismatch-const-generics.rs
 compile-fail	typeck/ice-unexpected-region-123863.rs
 compile-fail	typeck/ice-with-expr-not-struct-127332.rs
 compile-fail	typeck/impl-for-nonexistent-type-error-8767.rs
+compile-fail	typeck/incorrect-self-type-in-trait-impl-48276.rs
 run-pass	typeck/inference-method-chain-diverging-fallback.rs
 compile-fail	typeck/invalid-stashed-level-issue-121812.rs
 compile-fail	typeck/isize-usize-mismatch-error.rs
