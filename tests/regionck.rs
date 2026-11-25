@@ -4806,3 +4806,85 @@ fn g() {
 fn main() {}
 "#, &[(10, "cannot assign to `e` because it is borrowed")], "ro");
 }
+
+#[test]
+fn part33_pattern_moves_and_guards() {
+    // (each case checked with rustc 1.97: zustc reports each fn's first error on rustc's line)
+    // (a `ref mut` binding where the default binding mode is by shared reference: E0596 at the binding (2, 5); an
+    // explicit `&` pattern's binding through a `&` is the borrow check's (8); through a `&mut`, accepted (11))
+    errors_at(r#"enum Foo { Bar(i32) }
+fn a(arr: Vec<Foo>) { if let (Some(Foo::Bar(ref mut val)), _) = (&arr.get(0), 0) { *val = 1; } }
+fn b(o: &Option<i32>) {
+    match o {
+        Some(ref mut v) => *v = 1,
+        None => {}
+    }
+}
+fn c(o: &(i32, i32)) { let &(ref mut x, _) = o; *x = 1; }
+fn d(o: &mut Option<(i32, String)>) { if let Some((ref mut x, ref mut s)) = o { *x = 1; s.push('x'); } }
+fn main() {}
+"#, &[(2, "cannot borrow data in a `&` reference as mutable"), (5, "cannot borrow data in a `&` reference as mutable"), (9, "as mutable")], "rm");
+    // (a pattern that moves a field reached through an overloaded deref: E0507 at the scrutinee, also where the
+    // binding needs no drop (6, 9); a Copy field and a `ref` binding are accepted (12, 15); a `Box`'s field moves (18))
+    errors_at(r#"use std::ops::Deref;
+struct Wrap<T>(T);
+struct NonCopy(());
+struct St { field: Option<NonCopy>, n: Option<i32>, s: Option<String> }
+impl<T> Deref for Wrap<T> { type Target = T; fn deref(&self) -> &T { &self.0 } }
+fn a(w: Wrap<St>) -> usize { if let Some(_v) = w.field { 1 } else { 0 } }
+fn b(w: Wrap<St>) -> usize {
+    match w.s {
+        Some(v) => v.len(),
+        None => 0,
+    }
+}
+fn c(w: Wrap<St>) -> i32 { if let Some(n) = w.n { n } else { 0 } }
+fn d(w: Wrap<St>) -> usize {
+    match w.s { Some(ref v) => v.len(), None => 0 }
+}
+fn e(w: Box<St>) -> usize {
+    match w.s { Some(v) => v.len(), None => 0 }
+}
+fn main() {}
+"#, &[(6, "cannot move out of dereference of `Wrap<St>`"), (8, "cannot move out of dereference of `Wrap<St>`")], "od");
+    // (a move out of what a reference that is no place points to: E0507 (2, 3, 5); a borrow of it, a Copy part, a
+    // method call through it are accepted (6))
+    errors_at(r#"struct A(String);
+fn a(x: A) { let _y = *&x; }
+fn b(v: Vec<String>) -> String { *v.first().unwrap() }
+fn id<T>(x: &T) -> &T { x }
+fn c(v: String) -> String { *id(&v) }
+fn d(v: Vec<String>) -> usize { let r = &*v.first().unwrap(); let n = (*v.first().unwrap()).len(); r.len() + n }
+fn main() {}
+"#, &[(2, "cannot move out of a shared reference"), (3, "cannot move out of a shared reference"), (5, "cannot move out of a shared reference")], "nr");
+    // (in a match guard the arm's bindings are seen by shared reference: a move (3), an assignment (9), a mutable
+    // borrow (14), one through a `&mut` binding (19) are E0507 / E0594 / E0596; reads, clones and the arm's own uses
+    // are accepted (23))
+    errors_at(r#"fn a(x: Option<String>) -> usize {
+    match x {
+        Some(v) if { drop(v); false } => 1,
+        _ => 0,
+    }
+}
+fn b(x: Option<i32>) -> usize {
+    match x {
+        Some(mut y) if { y += 1; false } => 1,
+        _ => 0,
+    }
+}
+fn c(x: Option<Vec<i32>>) -> usize {
+    match x { Some(v) if { v.push(1); true } => 1, _ => 0 }
+}
+fn d(o: Option<&mut Vec<i32>>) -> usize {
+    match o {
+        Some(r) if r.len() > 1 => { r.push(1); r.len() }
+        Some(r) if { r.push(1); true } => 0,
+        _ => 0,
+    }
+}
+fn e(x: Option<String>) -> usize {
+    match x { Some(v) if { let w = v.clone(); w.len() > 1 } => v.len(), Some(mut v) => { v.push('a'); v.len() }, None => 0 }
+}
+fn main() {}
+"#, &[(3, "cannot move out of `v` in pattern guard"), (9, "cannot assign to `y`, as it is immutable for the pattern guard"), (14, "cannot borrow `v` as mutable, as it is immutable for the pattern guard"), (19, "cannot borrow `*r` as mutable, as it is immutable for the pattern guard")], "pg");
+}
