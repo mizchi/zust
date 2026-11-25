@@ -10575,12 +10575,26 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
             }
             // (a type parameter of the impl's method bounded by `'static` where the trait's is not (`F: Debug +
             // 'static` for the trait's `F: Debug + 'a`): stricter, unless the impl's header gives the trait `'static`,
-            // or the trait's signature names `'static` past its generics, which may imply it (`x: &'static T`). At
-            // the first `'static` of the member's signature)
+            // or the trait's parameters and result name `'static` and that type parameter, which may imply it (`x:
+            // &'static T`; not `x: &'static u8`). At the first `'static` of the member's signature)
             let (ms_st, ds_st) = (static_params(&ms.generics), static_params(&ds.generics));
             let dt = text(d);
-            let decl_static = dt.find('(').is_some_and(|k| dt[k..].contains("'static"));
-            if ms_st.iter().zip(&ds_st).any(|(m, d)| *m && !*d) && !header_static && !decl_static {
+            let tail = dt.find('(').map_or("", |k| {
+                let r = &dt[k..];
+                &r[..[r.find(" where"), r.find("\nwhere"), r.find('{'), r.find(';')].into_iter().flatten().min().unwrap_or(r.len())]
+            });
+            let word = |n: &str| {
+                tail.match_indices(n).any(|(i, _)| {
+                    let id = |c: char| c.is_alphanumeric() || c == '_';
+                    !tail[..i].ends_with(id) && !tail[i + n.len()..].starts_with(id)
+                })
+            };
+            let names: Vec<&str> = ds.generics.params.iter().filter_map(|q| match q {
+                GParam::Ty(n, ..) => Some(n.as_str()),
+                _ => None,
+            }).collect();
+            let implied = |n: &str| tail.contains("'static") && word(n);
+            if ms_st.iter().zip(&ds_st).zip(&names).any(|((m, d), n)| *m && !*d && !implied(n)) && !header_static {
                 let off = key.find("'static")?;
                 let line = key[..off].matches('\n').count() + 1;
                 let col = off - key[..off].rfind('\n').map_or(0, |k| k + 1);

@@ -1856,7 +1856,9 @@ impl Cx<'_> {
                     // (in an `x @ sub`, how it binds, as pat_bind notes the other bindings (at_conflict): `ref mut a @
                     // [ref b @ ..]`)
                     if let Some(top) = self.at_binds.last_mut() {
-                        let kind = if *by_ref || matches!(mode, BindMode::Ref(_)) {
+                        // (`mut rest @ ..` where the default binding mode is by reference: by value again before
+                        // edition 2024, as an identifier's binding is)
+                        let kind = if *by_ref || (matches!(mode, BindMode::Ref(_)) && !(*mutable && self.prog.edition < 2024)) {
                             AtBind::Ref(m)
                         } else if borrowck::is_copy(self.prog, elem, 0) && !holds_mut_ref(self.prog, elem, 0) {
                             AtBind::Copy

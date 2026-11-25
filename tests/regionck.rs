@@ -5453,3 +5453,24 @@ fn main() {}
 fn main() { println!("{}", foo([1, 2, 3, 4])); }
 "#, &[], "rv7");
 }
+
+#[test]
+fn part36_second_review_of_182() {
+    // (#182's second review, checked with rustc 1.97: a `'static` in the trait's signature implies nothing of a type
+    // parameter it does not name (`x: &'static u8`), so the impl's `T: 'static` is stricter (rv8); `mut b @ ..` where
+    // the default binding mode is by reference binds by value before edition 2024, so it borrows nothing beside the
+    // `ref mut a` around it (rv9))
+    errors_at(r#"trait Tr {
+    fn f<T>(x: &'static u8);
+}
+impl Tr for () {
+    fn f<T: 'static>(x: &'static u8) {}
+}
+fn main() {}
+"#, &[(5, "impl has stricter requirements than trait")], "rv8");
+    errors_at(r#"fn main() {
+    let ref mut a @ [mut b @ ..] = &[1u8];
+    let _ = (a, b);
+}
+"#, &[], "rv9");
+}
