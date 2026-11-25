@@ -200,6 +200,9 @@ const HELPERS: &[(&str, &str)] = &[
     ("$includes", "function $includes(xs, x, eq) {\n  for (let i = 0; i < xs.length; i++) if (eq ? eq(xs[i], x) : xs[i] === x) return true;\n  return false;\n}"),
     ("$find", "function $find(xs, f) {\n  for (let i = 0; i < xs.length; i++) if (f(xs[i])) return { TAG: \"Some\", _0: xs[i] };\n  return { TAG: \"None\" };\n}"),
     ("$find_index", "function $find_index(xs, f) {\n  for (let i = 0; i < xs.length; i++) if (f(xs[i])) return { TAG: \"Some\", _0: i };\n  return { TAG: \"None\" };\n}"),
+    ("$m_get", "function $m_get(m, k) {\n  return m.has(k) ? { TAG: \"Some\", _0: m.get(k) } : { TAG: \"None\" };\n}"),
+    ("$m_remove", "function $m_remove(m, k) {\n  const r = new Map(m);\n  r.delete(k);\n  return r;\n}"),
+    ("$s_remove", "function $s_remove(s, x) {\n  const r = new Set(s);\n  r.delete(x);\n  return r;\n}"),
     ("$cmp", "function $cmp(a, b) {\n  return a < b ? -1 : a > b ? 1 : 0;\n}"),
     ("$s_index_of", "function $s_index_of(s, t) {\n  const i = s.indexOf(t);\n  return i < 0 ? { TAG: \"None\" } : { TAG: \"Some\", _0: i };\n}"),
     // (Rust's `str::replace`: every match; an empty pattern matches at each character's boundary)
@@ -1054,6 +1057,22 @@ impl<'a> Js<'a> {
             (On::Int, "min" | "max") if t == Ty::I64 => format!("{}({recv}, {})", h(self, if m == "min" { "$min_big" } else { "$max_big" }), a[0]),
             (On::Int, "min") => format!("Math.min({}, {})", unparen(&recv), a[0]),
             (On::Int, "max") => format!("Math.max({}, {})", unparen(&recv), a[0]),
+            // (a new collection for each change, unless the local is not seen elsewhere: then in place, as `push`)
+            (On::Map | On::Set, "len") => format!("{recv}.size"),
+            (On::Map | On::Set, "is_empty") => format!("({recv}.size === 0)"),
+            (On::Map, "get") => format!("{}({recv}, {})", h(self, "$m_get"), a[0]),
+            (On::Map, "contains_key") | (On::Set, "contains") => format!("{recv}.has({})", a[0]),
+            (On::Map, "insert") if self.inplace.contains(&e.id) => format!("{recv}.set({}, {})", a[0], a[1]),
+            (On::Map, "insert") => format!("new Map({recv}).set({}, {})", a[0], a[1]),
+            (On::Set, "insert") if self.inplace.contains(&e.id) => format!("{recv}.add({})", a[0]),
+            (On::Set, "insert") => format!("new Set({recv}).add({})", a[0]),
+            (On::Map | On::Set, "remove") if self.inplace.contains(&e.id) => format!("({recv}.delete({}), {recv})", a[0]),
+            (On::Map, "remove") => format!("{}({recv}, {})", h(self, "$m_remove"), a[0]),
+            (On::Set, "remove") => format!("{}({recv}, {})", h(self, "$s_remove"), a[0]),
+            (On::Map, "keys") => format!("[...{recv}.keys()]"),
+            (On::Map | On::Set, "values") => format!("[...{recv}.values()]"),
+            (On::Map, _) => format!("[...{recv}]"),
+            (On::Set, _) => unreachable!(),
             (On::Int, _) => match t {
                 Ty::I64 => format!("{}({recv}, {})", h(self, "$pow_i64"), a[0]),
                 Ty::U32 => format!("({}({recv}, {}) >>> 0)", h(self, "$pow_i32"), a[0]),
@@ -1174,6 +1193,11 @@ impl<'a> Js<'a> {
                 if let Some(Callee::TypedCtor(el, c)) = self.info.callee.get(&f.id).cloned() {
                     let ctor = typed_js(&el);
                     return if c == "zeros" { format!("new {ctor}({})", a[0]) } else { format!("{ctor}.from({})", a[0]) };
+                }
+                // (JS's own Map / Set: a pair is a `[k, v]` array, as a tuple is)
+                if let Some(Callee::Coll(set, c)) = self.info.callee.get(&f.id).cloned() {
+                    let ctor = if set { "Set" } else { "Map" };
+                    return if c == "new" { format!("new {ctor}()") } else { format!("new {ctor}({})", a[0]) };
                 }
                 if let EK::Var(n) | EK::Path(_, n) = &f.kind {
                     match self.info.callee.get(&f.id).cloned() {
@@ -1992,6 +2016,8 @@ pub fn ts(t: &Ty) -> String {
         Ty::Tuple(ts_) => format!("readonly [{}]", ts_.iter().map(ts).collect::<Vec<_>>().join(", ")),
         Ty::Fn(a, r) => format!("({}) => {}", a.iter().enumerate().map(|(k, t)| format!("a{k}: {}", ts(t))).collect::<Vec<_>>().join(", "), ts(r)),
         Ty::Named(n, a) if a.is_empty() => n.clone(),
+        // (the built-in collections: JS's own, read-only to TS as they are immutable here)
+        Ty::Named(n, a) if (n == "Map" && a.len() == 2) || (n == "Set" && a.len() == 1) => format!("Readonly{n}<{}>", a.iter().map(ts).collect::<Vec<_>>().join(", ")),
         Ty::Named(n, a) => format!("{n}<{}>", a.iter().map(ts).collect::<Vec<_>>().join(", ")),
         Ty::Param(p) => p.clone(),
         Ty::Var(_) => "unknown".into(),

@@ -170,6 +170,16 @@ const STD_STR_HELPERS: &[(&str, &[&str], &str)] = &[
         "/// JS's `indexOf`: the first match's index in UTF-16 code units, or -1\nfn zs_index_of16(a: &str, b: &str) -> i32 {\n    let (x, y) = (a.as_bytes(), b.as_bytes());\n    let mut i = 0usize;\n    while i + y.len() <= x.len() {\n        let mut j = 0usize;\n        while j < y.len() && x[i + j] == y[j] {\n            j += 1;\n        }\n        if j == y.len() {\n            let mut n = 0i32;\n            for c in a[..i].chars() {\n                n += if (c as u32) > 0xffff { 2 } else { 1 };\n            }\n            return n;\n        }\n        i += 1;\n    }\n    -1\n}",
     ),
     (
+        "zs_map",
+        &[],
+        "/// JS's Map: entries in insertion order (a key set again keeps its place), found through a HashMap\n#[derive(Clone)]\nstruct ZsMap<K, V> {\n    ks: Vec<K>,\n    vs: Vec<V>,\n    idx: std::collections::HashMap<K, usize>,\n}\n\nimpl<K: PartialEq, V: PartialEq> PartialEq for ZsMap<K, V> {\n    fn eq(&self, o: &Self) -> bool {\n        self.ks == o.ks && self.vs == o.vs\n    }\n}\n\nimpl<K: Clone + Eq + std::hash::Hash, V: Clone> ZsMap<K, V> {\n    fn zs_new() -> Self {\n        ZsMap { ks: Vec::new(), vs: Vec::new(), idx: std::collections::HashMap::new() }\n    }\n    fn zs_insert(&mut self, k: K, v: V) {\n        match self.idx.get(&k) {\n            Some(&i) => {\n                self.vs[i] = v;\n            }\n            None => {\n                self.idx.insert(k.clone(), self.ks.len());\n                self.ks.push(k);\n                self.vs.push(v);\n            }\n        }\n    }\n    fn zs_remove(&mut self, k: &K) {\n        if let Some(i) = self.idx.remove(k) {\n            self.ks.remove(i);\n            self.vs.remove(i);\n            let mut j = i;\n            while j < self.ks.len() {\n                self.idx.insert(self.ks[j].clone(), j);\n                j += 1;\n            }\n        }\n    }\n    fn zs_find(&self, k: &K) -> Option<&V> {\n        match self.idx.get(k) {\n            Some(&i) => Some(&self.vs[i]),\n            None => None,\n        }\n    }\n}",
+    ),
+    (
+        "zs_set",
+        &[],
+        "/// JS's Set: elements in insertion order, found through a HashMap\n#[derive(Clone)]\nstruct ZsSet<T> {\n    xs: Vec<T>,\n    idx: std::collections::HashMap<T, usize>,\n}\n\nimpl<T: PartialEq> PartialEq for ZsSet<T> {\n    fn eq(&self, o: &Self) -> bool {\n        self.xs == o.xs\n    }\n}\n\nimpl<T: Clone + Eq + std::hash::Hash> ZsSet<T> {\n    fn zs_new() -> Self {\n        ZsSet { xs: Vec::new(), idx: std::collections::HashMap::new() }\n    }\n    fn zs_insert(&mut self, x: T) {\n        if !self.idx.contains_key(&x) {\n            self.idx.insert(x.clone(), self.xs.len());\n            self.xs.push(x);\n        }\n    }\n    fn zs_remove(&mut self, x: &T) {\n        if let Some(i) = self.idx.remove(x) {\n            self.xs.remove(i);\n            let mut j = i;\n            while j < self.xs.len() {\n                self.idx.insert(self.xs[j].clone(), j);\n                j += 1;\n            }\n        }\n    }\n    fn zs_has(&self, x: &T) -> bool {\n        self.idx.contains_key(x)\n    }\n}",
+    ),
+    (
         "zs_to_f64",
         &[],
         "unsafe extern \"C\" {\n    fn zs_host_to_f64(p: *const u8, n: usize, out: *mut f64) -> i32;\n}\n\n/// A float read as the JS layer reads it (by the same function: the glue's): zustc's `parse::<f64>` needs `strtod`\nfn zs_to_f64(s: &str, out: &mut f64) -> bool {\n    unsafe { zs_host_to_f64(s.as_ptr(), s.len(), out as *mut f64) != 0 }\n}",
@@ -290,6 +300,8 @@ pub struct Lower<'a> {
     helpers: BTreeSet<String>,
     /// the result type of the function being lowered (None inside a closure: a `return` there is not lowered)
     ret: Option<Ty>,
+    /// `m = m.insert(k, ..)` ([`own::assigned_change`]): this `insert` / `remove` takes `m` itself, after its arguments
+    move_recv: Option<Id>,
     /// the string helpers used ([`STR_HELPERS`])
     str_helpers: BTreeSet<&'static str>,
 }
@@ -355,6 +367,7 @@ pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)], target: 
         type_pos,
         helpers: Default::default(),
         ret: None,
+        move_recv: None,
         str_helpers: Default::default(),
     };
     // Even a private @wasm definition that has no callers must be valid Rust.
@@ -527,7 +540,15 @@ impl Lower<'_> {
             ps.iter().map(|p| Ty::Param(p.clone())).collect()
         });
         let vis = if self.target == Target::Rust { "pub " } else { "" };
-        let mut s = String::from(if own::is_copy(&generic, self.info) { "#[derive(Clone, Copy, PartialEq)]\n" } else { "#[derive(Clone, PartialEq)]\n" });
+        // (an enum without data can be a Map's key or a Set's element: Eq and Hash too)
+        let key = self.info.enums.get(n).is_some_and(|e| e.unit_only());
+        let mut s = String::from(if key {
+            "#[derive(Clone, Copy, PartialEq, Eq, Hash)]\n"
+        } else if own::is_copy(&generic, self.info) {
+            "#[derive(Clone, Copy, PartialEq)]\n"
+        } else {
+            "#[derive(Clone, PartialEq)]\n"
+        });
         if let Some(r) = self.info.records.get(n) {
             let g = if r.params.is_empty() { String::new() } else { format!("<{}>", r.params.join(", ")) };
             let _ = writeln!(s, "{vis}struct {}{g} {{", rs_type(n));
@@ -766,6 +787,16 @@ impl<'a> Lower<'a> {
                 Ok(match borrow {
                     Some(lt) if !self.copy(t) => format!("{}{base}", r(lt)),
                     _ => base,
+                })
+            }
+            // (the built-in collections: in insertion order, as JS's Map / Set, with a HashMap index)
+            Ty::Named(n, targs) if n == "Map" || n == "Set" => {
+                self.str_helpers.insert(if n == "Map" { "zs_map" } else { "zs_set" });
+                let a = targs.iter().map(|t| self.rty(t, pos, None)).collect::<LResult<Vec<_>>>()?;
+                let base = format!("{}<{}>", rs_type(n), a.join(", "));
+                Ok(match borrow {
+                    Some(lt) => format!("{}{base}", r(lt)),
+                    None => base,
                 })
             }
             Ty::Array(e) | Ty::Typed(e) => {
@@ -1277,6 +1308,19 @@ impl<'a> Lower<'a> {
                     let a = args.iter().map(|x| self.expr(x)).collect::<LResult<Vec<_>>>()?;
                     return val(self.variant(&en, n, a, pos)?);
                 }
+                if let Some(Callee::Coll(set, c)) = self.info.callee.get(&f.id).cloned() {
+                    let t = self.ty(e.id);
+                    let rt = self.rty(&t, pos, None)?;
+                    let base = rs_type(if set { "Set" } else { "Map" });
+                    return match (set, c.as_str()) {
+                        (_, "new") => val(format!("{{ let zs_c: {rt} = {base}::zs_new(); zs_c }}")),
+                        (true, _) => {
+                            let (xs, _) = self.borrowed(&args[0])?;
+                            val(format!("{{ let mut zs_c: {rt} = {base}::zs_new(); for zs_x in ({xs}).iter() {{ zs_c.zs_insert(zs_x.clone()); }} zs_c }}"))
+                        }
+                        _ => not_in_subset(pos, "`Map::from(pairs)` (tuples): build it with `insert`"),
+                    };
+                }
                 if let Some(Callee::TypedCtor(el, c)) = self.info.callee.get(&f.id).cloned() {
                     let zero = match el {
                         Ty::F32 => "0.0f32",
@@ -1461,7 +1505,13 @@ impl<'a> Lower<'a> {
                 l.frozen.truncate(frozen);
                 Ok((s, f))
             }),
-            EK::Assign(n, x) => val(format!("{} = {}", local(n), self.expr(x)?)),
+            EK::Assign(n, x) => {
+                // (`m = m.insert(k, f(m.get(k)))`: the arguments first, then `m` changed in place)
+                if own::assigned_change(e, self.info).is_some() {
+                    self.move_recv = Some(x.id);
+                }
+                val(format!("{} = {}", local(n), self.expr(x)?))
+            }
             EK::While(c, body) => val(format!("while {} {}", self.expr(c)?, self.block(body)?)),
             EK::For(x, it, body) => {
                 let el = match self.ty(it.id) {
@@ -1537,6 +1587,13 @@ impl<'a> Lower<'a> {
                     // (the element type, for an empty literal)
                     let t = self.ty(e.id);
                     return val(format!("Vec::<{}>::new()", self.elem_rty(&t)));
+                }
+                // (an element with a block in it is bound first, in order: zustc loses a block's locals and types
+                // inside `vec![..]`, mizchi/zust#208)
+                if v.iter().any(|s| s.contains('{')) {
+                    let lets: String = v.iter().enumerate().map(|(i, s)| format!("let zs_e{i} = {s}; ")).collect();
+                    let names: Vec<String> = (0..v.len()).map(|i| format!("zs_e{i}")).collect();
+                    return val(format!("{{ {lets}vec![{}] }}", names.join(", ")));
                 }
                 val(format!("vec![{}]", v.join(", ")))
             }
@@ -1775,6 +1832,98 @@ impl<'a> Lower<'a> {
             B::ToArray => val(self.owned(recv, &rf, &rt)),
             B::Floor => val(format!("{recv}.floor()")),
             B::Round => val(format!("{recv}.round()")),
+            // (the prelude's Option / Result: the methods that take no function)
+            B::Opt(m @ ("is_some" | "is_none" | "is_ok" | "is_err")) => {
+                let Ty::Named(en, _) = &rt else { unreachable!() };
+                self.used.insert(en.clone());
+                let v = match m {
+                    "is_some" => "Some",
+                    "is_none" => "None",
+                    "is_ok" => "Ok",
+                    _ => "Err",
+                };
+                let pat = if v == "None" { format!("{}::None", rs_type(en)) } else { format!("{}::{v}(_)", rs_type(en)) };
+                val(format!("match &{recv} {{ {pat} => true, _ => false }}"))
+            }
+            B::Opt(m @ ("unwrap_or" | "ok" | "ok_or")) => {
+                let Ty::Named(en, targs) = rt.clone() else { unreachable!() };
+                self.used.insert(en.clone());
+                let o = self.owned(recv, &rf, &rt);
+                let (opt, res) = (rs_type("Option"), rs_type("Result"));
+                let arg = |l: &mut Self, t: &Ty| -> LResult<String> {
+                    let (s, f) = l.ex(&args[0])?;
+                    Ok(if l.copy(t) { s } else { l.owned(s, &f, t) })
+                };
+                match (en.as_str(), m) {
+                    // (bound with its type: zustc does not know the type of a generic enum's field bound by a
+                    // `match` when it is sliced with `[..]`)
+                    ("Option", "unwrap_or") => {
+                        let d = arg(self, &targs[0])?;
+                        let t = self.rty(&targs[0], pos, None)?;
+                        val(format!("{{ let zs_u: {t} = match {o} {{ {opt}::Some(zs_x) => zs_x, {opt}::None => {d} }}; zs_u }}"))
+                    }
+                    (_, "unwrap_or") => {
+                        let d = arg(self, &targs[0])?;
+                        let t = self.rty(&targs[0], pos, None)?;
+                        val(format!("{{ let zs_u: {t} = match {o} {{ {res}::Ok(zs_x) => zs_x, {res}::Err(_) => {d} }}; zs_u }}"))
+                    }
+                    (_, "ok") => {
+                        let (_, oty) = self.option_type(&targs[0]);
+                        val(format!("{{ let zs_o: {oty} = match {o} {{ {res}::Ok(zs_x) => {opt}::Some(zs_x), {res}::Err(_) => {opt}::None }}; zs_o }}"))
+                    }
+                    _ => {
+                        let et = self.ty(e.id);
+                        let Ty::Named(_, rargs) = &et else { unreachable!() };
+                        let ea = arg(self, &rargs[1])?;
+                        self.used.insert("Result".into());
+                        let rty = self.rty(&et, pos, None)?;
+                        val(format!("{{ let zs_o: {rty} = match {o} {{ {opt}::Some(zs_x) => {res}::Ok(zs_x), {opt}::None => {res}::Err({ea}) }}; zs_o }}"))
+                    }
+                }
+            }
+            B::Std(on @ (On::Map | On::Set), m) => {
+                let opt = |l: &mut Self, t: &Ty| l.option_type(t);
+                let Ty::Named(_, targs) = &rt else { unreachable!() };
+                let targs = targs.clone();
+                let mut owned_args = vec![];
+                for (a, t) in args.iter().zip(if on == On::Map && m == "insert" { vec![targs[0].clone(), targs[1].clone()] } else { vec![targs[0].clone()] }) {
+                    let (s, f) = self.ex(a)?;
+                    owned_args.push(if self.copy(&t) { s } else { self.owned(s, &f, &t) });
+                }
+                let change = |l: &mut Self, call: String, recv: String| -> String {
+                    // (the arguments first when the receiver is the local assigned the result: it is moved, not copied)
+                    if l.move_recv == Some(e.id) {
+                        let EK::Var(n) = &r.kind else { unreachable!() };
+                        let lets: String = owned_args.iter().enumerate().map(|(i, a)| format!("let zs_a{i} = {a}; ")).collect();
+                        let call = (0..owned_args.len()).fold(call, |c, i| c.replace(&format!("@{i}"), &format!("zs_a{i}")));
+                        format!("{{ {lets}let mut zs_m = {}; zs_m.{call}; zs_m }}", local(n))
+                    } else {
+                        let call = (0..owned_args.len()).fold(call, |c, i| c.replace(&format!("@{i}"), &owned_args[i]));
+                        let v = l.owned(recv, &rf, &rt);
+                        format!("{{ let mut zs_m = {v}; zs_m.{call}; zs_m }}")
+                    }
+                };
+                match (on, m) {
+                    (On::Map, "len") => val(format!("({recv}.ks.len() as i32)")),
+                    (On::Set, "len") => val(format!("({recv}.xs.len() as i32)")),
+                    (On::Map, "is_empty") => val(format!("{recv}.ks.is_empty()")),
+                    (On::Set, "is_empty") => val(format!("{recv}.xs.is_empty()")),
+                    (On::Map, "get") => {
+                        let (o, oty) = opt(self, &targs[1]);
+                        let c = if self.copy(&targs[1]) { ".copied()" } else { ".cloned()" };
+                        val(format!("{{ let zs_o: {oty} = match {recv}.zs_find(&{}){c} {{ Some(zs_x) => {o}::Some(zs_x), None => {o}::None }}; zs_o }}", owned_args[0]))
+                    }
+                    (On::Map, "contains_key") => val(format!("{recv}.zs_find(&{}).is_some()", owned_args[0])),
+                    (On::Set, "contains") => val(format!("{recv}.zs_has(&{})", owned_args[0])),
+                    (On::Map, "insert") => val(change(self, "zs_insert(@0, @1)".into(), recv)),
+                    (_, "insert") => val(change(self, "zs_insert(@0)".into(), recv)),
+                    (_, "remove") => val(change(self, "zs_remove(&@0)".into(), recv)),
+                    (On::Map, "keys") => val(format!("{recv}.ks.clone()")),
+                    (On::Map, "values") => val(format!("{recv}.vs.clone()")),
+                    (On::Set, "values") => val(format!("{recv}.xs.clone()")),
+                    _ => not_in_subset(pos, "a Map's `entries()` (a tuple)"),
+                }
+            }
             B::Std(On::Float, m) => {
                 let a: Vec<String> = args.iter().map(|a| self.expr(a)).collect::<LResult<_>>()?;
                 val(match m {

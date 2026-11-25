@@ -51,6 +51,8 @@ pub enum Callee {
     Range,
     /// `F64Array::zeros(n)` / `F64Array::from(xs)` (the element type, the constructor)
     TypedCtor(Ty, String),
+    /// `Map::new()` / `Map::from(pairs)` / `Set::new()` / `Set::from(xs)` (a Set's, the constructor)
+    Coll(bool, String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -92,6 +94,8 @@ pub enum On {
     Str,
     Float,
     Int,
+    Map,
+    Set,
 }
 
 pub struct RecordDef {
@@ -233,7 +237,22 @@ pub struct Checker {
     closure_try: bool,
 }
 
-pub const BOUNDS: &[&str] = &["Num", "Integer", "Float"];
+pub const BOUNDS: &[&str] = &["Num", "Integer", "Float", "Eq", "Ord", "Hash"];
+
+/// A numeric bound (its parameter has arithmetic, `T::zero()`, `to_string`)
+pub fn num_bound(b: &str) -> bool {
+    matches!(b, "Num" | "Integer" | "Float")
+}
+
+/// Whether a parameter bounded by `have` satisfies the bound `want`: every bound gives `==`; a numeric one gives `<`;
+/// an integer one can be a key (`Hash`: a `Map`'s key or a `Set`'s element)
+pub fn implies(have: &str, want: &str) -> bool {
+    have == want
+        || want == "Eq"
+        || (want == "Num" && num_bound(have))
+        || (want == "Ord" && num_bound(have))
+        || (want == "Hash" && have == "Integer")
+}
 
 /// The numeric types a bound admits
 pub fn bound_types(b: &str) -> Vec<Ty> {
@@ -592,6 +611,10 @@ impl Checker {
                             e.params.len()
                         } else if let Some(x) = self.info.ext_types.get(n) {
                             x.params.len()
+                        } else if n == "Map" || n == "Set" {
+                            // (the built-in collections, unless the file names a type so)
+                            arity(self, if n == "Map" { 2 } else { 1 });
+                            return Ty::Named(n.clone(), args);
                         } else if let Some((_, _, vs)) = PRELUDE.iter().find(|p| p.0 == n) {
                             let vs: Vec<&str> = vs.iter().map(|v| v.0).collect();
                             self.err(*pos, format!("unknown type `{n}`: the prelude's `{n}` is left out of this file, because another enum has a variant named like one of its own ({}). Rename that variant", vs.join(", ")));
@@ -696,7 +719,12 @@ impl Checker {
                     e.ops = ops;
                     e.ts = from.as_ref().and_then(|f| f.repr.clone());
                 }
-                Item::Fn { name, generics, bounds, args, ret, pos, is_async, wasm, simd, .. } => {
+                Item::Fn { name, generics, bounds, args, ret, pos, is_async, wasm, simd, public, .. } => {
+                    // (a public generic function is written for every type its bounds admit: the numeric ones are
+                    // few, the others are not)
+                    if *public && let Some((g, b)) = bounds.iter().find(|(_, b)| !num_bound(b)) {
+                        self.err(*pos, format!("`{name}` is exported with the bound `{g}: {b}`: export a function for each type it is used with (`export fn uniq_names(xs: Array<String>) -> Array<String> {{ uniq(xs) }}`)"));
+                    }
                     if *is_async && (*wasm || *simd) {
                         self.err(*pos, format!("`{name}` cannot be both async and @wasm / @simd (a Promise does not cross into wasm)"));
                     }
@@ -706,7 +734,7 @@ impl Checker {
                     self.prelude_name(name, *pos);
                     for (_, b) in bounds {
                         if !BOUNDS.contains(&b.as_str()) {
-                            self.err(*pos, format!("unknown bound `{b}` (the numeric bounds are Num, Integer, Float)"));
+                            self.err(*pos, format!("unknown bound `{b}` (the bounds are Num, Integer, Float, Eq, Ord, Hash)"));
                         }
                     }
                     let a = args.iter().map(|(_, t)| self.ty_of(t, generics)).collect();
@@ -861,6 +889,8 @@ impl Checker {
             // (a generic parameter compares only with a numeric bound: unbounded, it could be a function)
             Ty::Str | Ty::Bool | Ty::Unit => true,
             t if self.numeric(t) => true,
+            // (every bound gives `==`)
+            Ty::Param(p) => self.bounds.contains_key(p),
             Ty::Array(e) | Ty::Typed(e) => self.eqable(e, seen),
             Ty::Tuple(ts) => ts.iter().all(|t| self.eqable(t, seen)),
             Ty::Named(n, targs) => {
@@ -932,15 +962,14 @@ impl Checker {
         for (pos, t, b) in std::mem::take(&mut self.bound_checks) {
             let r = self.resolve(&t);
             let ok = match &r {
-                Ty::Param(p) => match (b.as_str(), self.bounds.get(p).map(|s| s.as_str())) {
-                    (_, None) => false,
-                    ("Num", Some(_)) => true,
-                    (x, Some(y)) => x == y,
-                },
-                t => bound_types(&b).contains(t),
+                Ty::Param(p) => self.bounds.get(p).is_some_and(|have| implies(have, &b)),
+                t if num_bound(&b) => bound_types(&b).contains(t),
+                t if b == "Eq" => self.eqable(t, &mut vec![]),
+                t if b == "Ord" => self.numeric(t) || *t == Ty::Str,
+                t => self.key_type(t),
             };
             if matches!(r, Ty::Var(_)) {
-                self.err(pos, "cannot infer the numeric type here; add an annotation");
+                self.err(pos, if num_bound(&b) { "cannot infer the numeric type here; add an annotation" } else { "cannot infer the type here; add an annotation" });
             } else if !ok {
                 let s = self.show(&r);
                 self.err(pos, format!("{s} does not satisfy the bound `{b}`"));
@@ -964,7 +993,8 @@ impl Checker {
             }
             let ok = match what {
                 "num" | "div" => self.numeric(&r),
-                "add" | "ord" => self.numeric(&r) || r == Ty::Str,
+                "add" => self.numeric(&r) || r == Ty::Str,
+                "ord" => self.numeric(&r) || r == Ty::Str || matches!(&r, Ty::Param(p) if self.bounds.get(p).is_some_and(|b| implies(b, "Ord"))),
                 "eq" => {
                     let primitive = match &r {
                         Ty::Str | Ty::Bool | Ty::Unit => true,
@@ -980,6 +1010,7 @@ impl Checker {
                     ok
                 }
                 "hole" => r == Ty::Str || r == Ty::Bool || self.numeric(&r),
+                "key" => self.key_type(&r),
                 "child" => match &r {
                     Ty::Jsx | Ty::Str => true,
                     t if self.numeric(t) => true,
@@ -995,9 +1026,19 @@ impl Checker {
                 let m = match what {
                     "num" | "div" => format!("expected a number (i32, u32, i64, f64), found {s}"),
                     "add" => format!("`+` takes numbers or String, found {s}"),
-                    "ord" => format!("cannot compare {s} with `<`"),
+                    "ord" => match &r {
+                        Ty::Param(p) => format!("cannot compare {s} with `<`: add the bound `{p}: Ord` (numbers and strings)"),
+                        _ => format!("cannot compare {s} with `<`"),
+                    },
                     "hole" => format!("a `${{..}}` of a template string takes a String, a number or a bool, not {s}"),
-                    "eq" => format!("`==` compares values (numbers, strings, bools, and arrays, records, enums and tuples of them, by content), not {s}"),
+                    "key" => match &r {
+                        Ty::Param(p) => format!("a Map's key or a Set's element is an integer, a String, a bool or an enum without data, not {s}: add the bound `{p}: Hash`"),
+                        _ => format!("a Map's key or a Set's element is an integer, a String, a bool or an enum without data, not {s}"),
+                    },
+                    "eq" => match &r {
+                        Ty::Param(p) => format!("`==` compares values (numbers, strings, bools, and arrays, records, enums and tuples of them, by content), not {s}: add the bound `{p}: Eq`"),
+                        _ => format!("`==` compares values (numbers, strings, bools, and arrays, records, enums and tuples of them, by content), not {s}"),
+                    },
                     _ => format!("a JSX child is Jsx, String, a number or an Array of Jsx / String, found {s}"),
                 };
                 self.err(pos, m);
@@ -1007,7 +1048,23 @@ impl Checker {
 
     /// A numeric type, or a generic parameter with a numeric bound
     fn numeric(&self, t: &Ty) -> bool {
-        is_num(t) || matches!(t, Ty::Param(p) if self.bounds.contains_key(p))
+        is_num(t) || matches!(t, Ty::Param(p) if self.bounds.get(p).is_some_and(|b| num_bound(b)))
+    }
+
+    /// `Map` / `Set` are the built-in collections, unless the file declares a type of that name
+    fn builtin_coll(&self, n: &str) -> bool {
+        !self.info.records.contains_key(n) && !self.info.enums.contains_key(n) && !self.info.ext_types.contains_key(n)
+    }
+
+    /// A type that can be a `Map`'s key or a `Set`'s element (`Hash`): integers, strings, bools and enums without
+    /// data. They are the same key in JS's `Map` (by value) and in Rust's `HashMap`; floats are not (NaN)
+    pub fn key_type(&self, t: &Ty) -> bool {
+        match t {
+            Ty::I32 | Ty::U32 | Ty::I64 | Ty::Str | Ty::Bool => true,
+            Ty::Param(p) => self.bounds.get(p).is_some_and(|b| implies(b, "Hash")),
+            Ty::Named(n, _) => self.info.enums.get(n).is_some_and(|e| e.unit_only() && !e.is_effect() && e.ts.as_ref().is_none_or(|t| t.key.is_none())),
+            _ => false,
+        }
     }
 
     fn lookup_idx(&self, n: &str) -> Option<(usize, Ty)> {
@@ -1227,7 +1284,7 @@ impl Checker {
                     "i64" => Ty::I64,
                     "f32" => Ty::F32,
                     "f64" => Ty::F64,
-                    p if self.bounds.contains_key(p) => Ty::Param(p.to_string()),
+                    p if self.bounds.get(p).is_some_and(|b| num_bound(b)) => Ty::Param(p.to_string()),
                     _ => {
                         self.err(pos, format!("`{tn}::{c}` needs a numeric type or a parameter with a numeric bound"));
                         Ty::F64
@@ -1245,6 +1302,25 @@ impl Checker {
                     "from" => Ty::Fn(vec![Ty::Array(Box::new(el))], Box::new(typed)),
                     _ => {
                         self.err(pos, format!("`{tn}` has `{tn}::zeros(n)` and `{tn}::from(xs)` (or write a literal where the type says {tn})"));
+                        self.fresh()
+                    }
+                }
+            }
+            EK::Path(tn, c) if (tn == "Map" || tn == "Set") && self.builtin_coll(tn) => {
+                let set = tn == "Set";
+                let k = self.fresh();
+                let t = if set { Ty::Named("Set".into(), vec![k.clone()]) } else { Ty::Named("Map".into(), vec![k.clone(), self.fresh()]) };
+                self.deferred.push((pos, e.id, "key", k.clone()));
+                self.info.callee.insert(e.id, Callee::Coll(set, c.clone()));
+                match c.as_str() {
+                    "new" => Ty::Fn(vec![], Box::new(t)),
+                    "from" => {
+                        let Ty::Named(_, a) = &t else { unreachable!() };
+                        let el = if set { a[0].clone() } else { Ty::Tuple(a.clone()) };
+                        Ty::Fn(vec![Ty::Array(Box::new(el))], Box::new(t))
+                    }
+                    _ => {
+                        self.err(pos, format!("`{tn}` has `{tn}::new()` and `{tn}::from({})`", if set { "xs" } else { "pairs" }));
                         self.fresh()
                     }
                 }
@@ -2098,7 +2174,7 @@ impl Checker {
             (Ty::Str, "contains") => (vec![Ty::Str], Ty::Bool, B::Contains),
             (Ty::Str, "split") => (vec![Ty::Str], Ty::Array(Box::new(Ty::Str)), B::Split),
             (Ty::I32 | Ty::U32 | Ty::I64 | Ty::F32 | Ty::F64 | Ty::Bool, "to_string") => (vec![], Ty::Str, B::ToString),
-            (Ty::Param(p), "to_string") if self.bounds.contains_key(p) => (vec![], Ty::Str, B::ToString),
+            (Ty::Param(p), "to_string") if self.bounds.get(p).is_some_and(|b| num_bound(b)) => (vec![], Ty::Str, B::ToString),
             // (an integer literal whose type is not decided yet: every integer type has it)
             (Ty::Var(v), "to_string") if self.intv.contains(v) => (vec![], Ty::Str, B::ToString),
             (Ty::Var(v), "to_string") if self.floatv.contains(v) => (vec![], Ty::Str, B::ToString),
@@ -2223,6 +2299,36 @@ impl Checker {
                     return None;
                 }
                 (On::Int, name, if name == "pow" { (vec![Ty::I32], r) } else if name == "abs" { (vec![], r) } else { (vec![r.clone()], r) })
+            }
+            Ty::Named(n, a) if n == "Map" && a.len() == 2 && self.builtin_coll("Map") => {
+                const MAP: &[&str] = &["len", "is_empty", "get", "contains_key", "insert", "remove", "keys", "values", "entries"];
+                let name = *MAP.iter().find(|n| **n == name)?;
+                let (k, v) = (a[0].clone(), a[1].clone());
+                let sig = match name {
+                    "len" => (vec![], Ty::I32),
+                    "is_empty" => (vec![], Ty::Bool),
+                    "get" => (vec![k], opt(v)),
+                    "contains_key" => (vec![k], Ty::Bool),
+                    "insert" => (vec![k, v], r),
+                    "remove" => (vec![k], r),
+                    "keys" => (vec![], Ty::Array(Box::new(k))),
+                    "values" => (vec![], Ty::Array(Box::new(v))),
+                    _ => (vec![], Ty::Array(Box::new(Ty::Tuple(vec![k, v])))),
+                };
+                (On::Map, name, sig)
+            }
+            Ty::Named(n, a) if n == "Set" && a.len() == 1 && self.builtin_coll("Set") => {
+                const SET: &[&str] = &["len", "is_empty", "contains", "insert", "remove", "values"];
+                let name = *SET.iter().find(|n| **n == name)?;
+                let t = a[0].clone();
+                let sig = match name {
+                    "len" => (vec![], Ty::I32),
+                    "is_empty" => (vec![], Ty::Bool),
+                    "contains" => (vec![t], Ty::Bool),
+                    "insert" | "remove" => (vec![t], r),
+                    _ => (vec![], Ty::Array(Box::new(t))),
+                };
+                (On::Set, name, sig)
             }
             _ if intv => {
                 let name = *INT.iter().find(|n| **n == name)?;

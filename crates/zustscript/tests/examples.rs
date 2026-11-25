@@ -937,6 +937,40 @@ fn stdlib_same_in_js_and_wasm() {
     assert!(Command::new(binary).status().unwrap().success());
 }
 
+/// tests/collections.zsc: generic functions bounded by Eq / Ord, and Map / Set, give the same results lowered to Rust
+/// and run as wasm, and run as JS
+#[test]
+fn collections_same_in_js_and_wasm() {
+    let src = root().join("tests/collections.zsc");
+    let mut outs = vec![];
+    for (name, flags) in [("collections-wasm", &[][..]), ("collections-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = compare_build(&src, &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        assert_eq!(d.join("collections.wasm").exists(), flags.is_empty());
+        outs.push(node(
+            &d,
+            "const m = await import('./collections.js'); console.log(JSON.stringify([m.generic(), m.words('a b a  c b a'), m.persistent(), m.order(), m.ids([1n, 2n, 1n])]));",
+        ));
+    }
+    assert_eq!(outs[0], outs[1], "wasm and JS differ");
+    assert_eq!(outs[0], "[[3,2,2,1,9,1,2],[\"a=3\",\"b=2\",\"c=1\"],[2,2,1,0,5,2,2,0,1,2,3,1,2],[\"b\",\"a\",\"3\",\"4\"],2]\n");
+}
+
+/// tests/collections_js.zsc: Map / Set are JS's own; `m = m.insert(k, f(m.get(k)))` changes a local no one else sees
+/// in place, and copies one that another local holds
+#[test]
+fn collections_in_js() {
+    let d = out_dir("collections_js");
+    let o = zsc(&root().join("tests/collections_js.zsc"), &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let out = node(&d, "const m = await import('./collections_js.js'); console.log(m.words('a b a  c b a'), '|', m.shared(), '|', m.grouped());");
+    assert_eq!(out, "a=3,b=2,c=1 | 2 3 three - | a:apple/avocado b:banana/blueberry c:cherry 3,1,2\n");
+    let js = std::fs::read_to_string(d.join("collections_js.js")).unwrap();
+    assert!(js.contains("counts = counts.set(w, ($o_unwrap_or($m_get(counts, w), 0) + 1) | 0);"), "{js}");
+    assert!(js.contains("b = new Map(b).set(3, \"three\");"), "{js}");
+}
+
 /// tests/js_values.zsc: extern types (properties, methods, a setter, a constructor, a module's), `null` from JS as
 /// `None` and `None` to JS as `undefined`, and what JS throws (or a Promise rejects with) as an `Err`
 #[test]

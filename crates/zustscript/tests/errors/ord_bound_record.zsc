@@ -1,0 +1,4 @@
+// expect: P does not satisfy the bound `Ord`
+type P = { n: i32 }
+fn less<T: Ord>(x: T, y: T) -> bool { x < y }
+export fn f() -> bool { less(P { n: 1 }, P { n: 2 }) }
