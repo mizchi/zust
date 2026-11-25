@@ -12339,11 +12339,11 @@ fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem]
         let param_may = |t: Ty| matches!(t, Ty::Param(i) if sm.adt_generics.get(i as usize).is_some_and(|g| sm.adt_unsized.contains(g) && !implies_sized(&adt_b(g))));
         let may = |t: Ty| prog.maybe_unsized_with(t, &param_may);
         let fields: Vec<&[(String, Ty, u32)]> = if sd.is_enum { sd.variants.iter().map(|v| v.fields.as_slice()).collect() } else { vec![sd.fields.as_slice()] };
-        let text = blank_comments(src.get(it.start..it.end).unwrap_or(""));
         for (vi, fs) in fields.iter().enumerate() {
             for (fi, (_, ft, _)) in fs.iter().enumerate() {
                 let bad = if (sd.is_enum || union || fi + 1 < fs.len()) && may(*ft) { Some(*ft) } else { prog.sized_wf_with(*ft, &may, 0) };
                 if let Some(b) = bad {
+                    let text = blank_comments(src.get(it.start..it.end).unwrap_or(""));
                     let (l, c) = field_pos(&text, sd.is_enum, vi, fi).unwrap_or((0, 0));
                     return Some(format!("{}:{}: {}", it.line + l, c + 1, size_msg(b, &sm.adt_generics)));
                 }
@@ -12351,13 +12351,15 @@ fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem]
         }
     }
     for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
-        let text = blank_comments(src.get(items[ii].start..items[ii].end).unwrap_or(""));
-        let head = header_text(&text).to_string();
         // (an impl's self type and trait arguments: `impl Foo for Option<[u8]>`)
         if let Some(st) = &sm.impl_self_ty {
             if matches!(items[ii].kind, ItemKind::Normal | ItemKind::ImplHeader) {
                 let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
                 let gens: Vec<String> = gn.iter().map(|s| s.to_string()).collect();
+                // (the header's text only where the item writes `?Sized`: most impls do not, and reading every item's
+                // tokens costs the check of a large program)
+                let raw = src.get(items[ii].start..items[ii].end).unwrap_or("");
+                let head = if raw.contains("?Sized") { header_text(&blank_comments(raw)).to_string() } else { String::new() };
                 let param_may = |t: Ty| matches!(t, Ty::Param(i) if gens.get(i as usize).is_some_and(|n| maybe_unsized(&head, n)) && !implies_sized(&sm.impl_generics[i as usize].1));
                 let may = |t: Ty| prog.maybe_unsized_with(t, &param_may);
                 for t in std::iter::once(st).chain(sm.impl_trait_args.iter()) {
@@ -12374,11 +12376,10 @@ fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem]
                     let tparams: Vec<&String> = d.trait_generics.iter().map(|g| &g.0).filter(|g| !g.starts_with('#') && *g != "Self").collect();
                     // (the arguments written fill the leading parameters: the rest have defaults, `trait Tr<T, U = ()>`)
                     if sm.impl_trait_args.len() <= tparams.len() {
-                        let dtext = blank_comments(src.get(items[di].start..items[di].end).unwrap_or(""));
-                        let dhead = header_text(&dtext).to_string();
+                        let dhead = || header_text(&blank_comments(src.get(items[di].start..items[di].end).unwrap_or(""))).to_string();
                         for (k, a) in sm.impl_trait_args.iter().enumerate() {
                             let Ok(a) = prog.resolve_g(a, &gn) else { continue };
-                            if may(a) && !maybe_unsized(&dhead, tparams[k]) {
+                            if may(a) && !maybe_unsized(&dhead(), tparams[k]) {
                                 return Some(format!("{}:1: {}", items[ii].line, size_msg(a, &gens)));
                             }
                         }
@@ -12394,6 +12395,21 @@ fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem]
         // impl's parameters are taken as sized: their `?Sized` is not known here)
         for (_, sig) in &sm.fns {
             if sig.trait_of.is_some() || sig.is_extern || !sig.has_body {
+                continue;
+            }
+            // (only a signature that may hold an unsized type: one of its own `?Sized` parameters, or a slice, `str` or
+            // `dyn` written in it)
+            fn writes_unsized(t: &crate::types::TySyn, depth: u32) -> bool {
+                use crate::types::TySyn as S;
+                depth < 16
+                    && match t {
+                        S::Slice(_) | S::Str | S::Dyn(_) => true,
+                        S::Ref(_, i) | S::Ptr(_, i) | S::Array(i, _) | S::Assoc(i, _) => writes_unsized(i, depth + 1),
+                        S::App(_, v) | S::Tuple(v) | S::FnPtr(v) => v.iter().any(|x| writes_unsized(x, depth + 1)),
+                        _ => false,
+                    }
+            }
+            if sig.own_unsized.is_empty() && !sig.params.iter().chain([&sig.ret]).any(|t| writes_unsized(t, 0)) {
                 continue;
             }
             let gn: Vec<&str> = sig.generics.iter().map(|g| g.0.as_str()).collect();
