@@ -1929,7 +1929,8 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                                 }
                                 match tok(q) {
                                     b"<" => d += 1,
-                                    b">" => d -= 1,
+                                    // (not the `>` of `->`, `F: Fn() -> ()`)
+                                    b">" if !(q >= 1 && toks[q - 1].0 == 1 && tok(q - 1) == b"-") => d -= 1,
                                     b"{" if d <= 0 => {
                                         ns = HOIST_NS_TYPE;
                                         break;

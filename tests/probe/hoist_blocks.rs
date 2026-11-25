@@ -111,4 +111,14 @@ fn main() {
         }
         println!("{}", q());
     }
+    // (and one whose generics' bound has an arrow)
+    fn r() -> u8 {
+        16
+    }
+    {
+        struct r<F: Fn() -> ()> {
+            f: F,
+        }
+        println!("{}", r());
+    }
 }
