@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795631205245,
+  "lastUpdate": 1795631207952,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -109161,6 +109161,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/708fc07504fe89182ba08dcd26be2d75bee19f32"
         },
         "date": 1795630784497,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.552,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 77.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 81.818,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 71.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.537,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5beecd0ee9037951f5d73c419be222380ed60f44",
+          "message": "Merge pull request #184 from mizchi/claude/english-comments\n\nComments in English, in the files no open pull request touches (2,550 lines, bit-identical binaries)",
+          "timestamp": "2026-11-26T03:20:41+09:00",
+          "tree_id": "977283baf89be3f4557a8f28720e325ee546e2c6",
+          "url": "https://github.com/mizchi/zust/commit/5beecd0ee9037951f5d73c419be222380ed60f44"
+        },
+        "date": 1795631207440,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
