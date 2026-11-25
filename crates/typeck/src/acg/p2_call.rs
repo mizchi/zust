@@ -247,14 +247,25 @@ impl Cx<'_> {
     fn other_instances_only(&self, id: u32, sid: u32) -> bool {
         let t = Ty::Struct(sid);
         let sg = &self.prog.sigs[id as usize];
-        if !sg.has_self || sg.impl_trait.is_some() || sg.self_ty.is_none() || self.prog.has_param(t) || has_hole(self.prog, t) || self.prog.method(sid, "deref").is_some() {
+        // (only an instance of a generic type has impls for other instances; an impl's own self type fits)
+        if self.prog.structs[sid as usize].base.is_none() || !sg.has_self || sg.impl_trait.is_some() || sg.self_ty.is_none_or(|st| st == t) {
             return false;
+        }
+        // (an impl for every instance, `impl<T> Vec<T>`)
+        if let Some(Ty::Struct(ss)) = sg.self_ty {
+            if self.prog.structs[ss as usize].args.iter().all(|a| matches!(a, Ty::Param(_))) {
+                return false;
+            }
         }
         let fits = |c: u32| {
             let sg = &self.prog.sigs[c as usize];
             sg.self_ty.is_none_or(|st| self.prog.match_ty(st, t, &mut vec![None; sg.generics.len().max(1)]))
         };
-        !fits(id) && self.prog.overloads.get(&self.prog.names[id as usize]).is_none_or(|g| !g.iter().any(|&c| fits(c)))
+        !fits(id)
+            && !self.prog.has_param(t)
+            && !has_hole(self.prog, t)
+            && self.prog.method(sid, "deref").is_none()
+            && self.prog.overloads.get(&self.prog.names[id as usize]).is_none_or(|g| !g.iter().any(|&c| fits(c)))
     }
 
     pub(crate) fn self_fits(&self, i: u32, t: Ty) -> bool {
