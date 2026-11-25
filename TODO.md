@@ -39,6 +39,50 @@ invariants.
 | `rt_box_move_patterns` | the same leak through patterns (`let Pair { a, b } = *b`, `match *b`); no double free (valgrind) |
 | `rt_pattern_partial_move` | what a pattern leaves to `_` / `..` (`let (a, _) = pair();`, `let W { a, .. } = w;`) is never dropped (a leak) |
 
+## Trait solving (`crates/sema/src/traits.rs`, `formal/lean/`)
+
+The program's own traits are solved by the algorithms proved in formal/lean, including E0119, supertrait
+obligations, dyn coercions and auto traits (reports: [part 1](docs/reports/2026-11-23-04-trait-solver.md),
+[part 2](docs/reports/2026-11-23-05-trait-solver-2.md), [part 3](docs/reports/2026-11-23-06-trait-solver-3.md), [part 4](docs/reports/2026-11-23-07-trait-solver-4.md), [part 5](docs/reports/2026-11-24-01-trait-solver-5.md)). Left:
+
+- Associated types ([part 3](docs/reports/2026-11-23-06-trait-solver-3.md)): a generic fn's or a nested opaque return type
+  (`-> Option<impl Tr>`) is not checked against its bounds; projections by a name std also defines (`T::Item`) and
+  generic associated types are not normalized by the solver; type inference still uses `Program::assoc_of`.
+- E0119 against std's impls (`impl<S> Into<S> for GenX<S>`): std's impls are not clauses.
+- Lifetimes in impl heads (fn pointers, higher-ranked bounds) need lifetimes in `Ty`.
+- Type inference through a projection whose definition depends on the trait's arguments, in generic code
+  (unsized/issue-40231-*.rs).
+- Most of std's traits are still judged by `Program::implements` at calls (with known exceptions); the prelude's
+  impls as solver clauses would make both directions exact (measured in part 5: few tests depend on it).
+- Structs with an unsized tail ([slices](docs/reports/2026-11-24-04-dst-struct-tails.md),
+  [`dyn`, boxes, `size_of_val`](docs/reports/2026-11-24-05-dst-dyn-tails.md)): a boxed literal unsized inside
+  `vec![..]`, an array literal or `if` / `match` arms (`vec![Box::new(W { t: [1, 2] })]` as `Vec<Box<W<[u8]>>>`)
+  is a false "mismatched types"; each element should be coerced to the expected type.
+- dangerous_implicit_autorefs: the range-index form (`(*p)[..2]`) is not caught, and an `#[allow]` anywhere turns
+  the lint off for the whole crate (as `overflowing_literals` already does): never a false error, a missed one.
+- A qualified projection whose const argument zustc cannot evaluate (`<S as Pick<{ match .. }>>::Out`) with several
+  impls that may fit, or one whose trait arguments are not resolved: an "unsupported" error (never the wrong impl).
+  Evaluating such const expressions would select the impl.
+- Missed errors (zustc accepts; main did too), from the review of #128: a supertrait's arguments (`trait Sub:
+  Base<u8>` with only `impl Base<u16>`); `<S as Tr<u8>>::Item` falling back to another impl's definition; a
+  binding checked against the trait's arguments (`T: Tr<u8, Item = u8>`); an explicit `unsafe impl Send for W<u8>`
+  taken for every `W<T>`; `<S as Other>::Item` in a method of `impl Own for S` rewritten as `Own`'s.
+- A qualified call names the trait's arguments, which method selection does not match against each impl's
+  (`<S as Tag<u16>>::tag(&s)` with `impl Tag<u8> for S` and `impl Tag<u16> for S` takes `Tag<u8>`'s; main too): a
+  per-impl record of the trait's arguments is needed.
+- `<S as Tr<2>>::get()` with impls of `Tr<1>` and `Tr<2>`: the call takes `Tr<1>`'s method (now a compile error,
+  as the annotation `<S as Tr<2>>::Item` resolves to the right type; main printed the wrong value).
+- A local named like an intrinsic (`let size_of = || 7u8; size_of()`) is a false error, and a program's own
+  `mem::size_of_val` is typed as the intrinsic (main too).
+- From the third review of #128 (main too unless noted):
+  - a non-generic struct with an unsized tail (`struct Tail(u8, [u32])`) is not tagged: `*const Tail` is thin;
+  - `size_of::<*const Tail<[u8]>>()` as an array length is 8: the syntax-level rewrite of `size_of` takes every
+    pointer to a path as thin, before types are known;
+  - `where` found inside an attribute's string (`#[doc = "where"]`) hides the impl's where clause;
+  - an impl header's trait argument that resolves only later (`impl Pick<<Seed as Key>::Arg> for S` before `Seed`'s
+    impl) is kept unread.
+- `impl Tr for [u8; 3]` then a dyn call: "no implementation" (main too).
+
 ## Security: CVEs whose API zustc does not have (`expect: unsupported`)
 
 These cannot happen today. Each case fails as soon as zustc gets the API, and must then become a test of the CVE's
@@ -188,9 +232,8 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   - impls for trait objects with parameters (`impl<R> Tr for dyn Fn() -> R`) are matched by the object's trait's name;
     two impls for instances of one object (`dyn Obj<u8>` / `dyn Obj<u16>`) that override one method call the first
     one's. Equal associated consts of `dyn Fn(..)` impls of each arity are kept once.
-- Found in the review of #139, also so before it:
-  - `<S as Tr<u8>>::Out` beside `<S as Tr<u16>>::Out`: the trait's arguments do not pick the impl (the first one's
-    `Out`).
+- Found in the review of #139, also so before it (`<S as Tr<u8>>::Out` beside `<S as Tr<u16>>::Out` is #128's now: the
+  trait's arguments pick the impl):
   - a struct field of `<W as B>::Out` whose value is `<u8 as B>::Out`, with `impl B for u8` written after W's: the
     field takes the value before that impl is read.
   - `m::f()` finds an `f` that only a fn body in `m` glob-imports (`fn helper() { use crate::a::*; .. }`): accepted

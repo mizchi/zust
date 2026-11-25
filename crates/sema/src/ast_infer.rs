@@ -331,6 +331,7 @@ pub fn infer_ctx_margs(
     let tail = s.block(body);
     let ret = s.ret;
     s.unify(tail, ret);
+    s.finish_unsize();
     s.finish_late_bounds();
     s.finish_collects();
     s.finish_assocs();
@@ -1651,8 +1652,9 @@ impl Inf<'_> {
                 // type) would take the other call's integer default (`Some(22)`))
                 let simple = |e: &Expr| !matches!(e, Expr::Call(..) | Expr::MethodCall(..));
                 // SAFETY: as above
+                // (as `==` does: `&[u8]` against `[1, 2, 3]` only makes the elements one type)
                 if simple(unsafe { &*a }) || simple(unsafe { &*b }) {
-                    self.unify(va, vb);
+                    self.seq_unify(va, vb);
                 }
             }
             return self.known(Ty::Unit);
@@ -1834,6 +1836,12 @@ impl Inf<'_> {
         self.known(Ty::Unit)
     }
 
+    /// The program defines no fn of p's last name that the path could name (a user's own `size_of`)
+    fn fn_by_name_absent(&self, p: &crate::parse::Path) -> bool {
+        let Some(n) = p.segs.last().map(|s| s.name.as_str()) else { return true };
+        !self.prog.index.contains_key(n) || p.segs.len() >= 2
+    }
+
     fn call(&mut self, f: &Expr, args: &[Expr]) -> u32 {
         // `HashMap::from([(1, 2), ..])`: 配列を Vec<要素> として `from(Vec)` を呼ぶ (syn 版は `vec![..]` に書き換える)
         if let (Expr::Path(None, p), [Expr::Array(es)]) = (f, args) {
@@ -1853,6 +1861,18 @@ impl Inf<'_> {
                 let vv = self.adt(vb, vec![el]);
                 let callee = self.fn_by(p);
                 return self.apply(callee, vec![vv], 0);
+            }
+        }
+        // (`mem::size_of::<T>()` / `align_of` / `size_of_val(&x)`: usize, the code generator's intrinsics, so a literal
+        // beside them (`3 + mem::size_of::<Foo>()`) is a usize too)
+        if let Expr::Path(None, p) = f {
+            let last = p.segs.last().map(|s| s.name.as_str());
+            let mem_path = p.segs.len() == 1 || p.segs.iter().rev().nth(1).is_some_and(|s| s.name == "mem");
+            if mem_path && matches!(last, Some("size_of" | "align_of" | "size_of_val" | "align_of_val")) && self.fn_by_name_absent(p) {
+                for a in args {
+                    self.expr(a);
+                }
+                return self.known(Ty::Usize);
             }
         }
         if let Some(x) = self.prim_method_call(f, args) {
@@ -2011,6 +2031,75 @@ impl Inf<'_> {
             let n = p.segs.len();
             if callee.is_none() && n >= 2 && p.segs[n - 1].name == "new" && p.segs[n - 2].name == "Box" && avs.len() == 1 {
                 return self.with(Shape::Bx(avs[0]));
+            }
+        }
+        // (`tr::<u16>()`: the turbofish gives the callee's own type parameters, as the code generator reads them: a free
+        // fn's in order, a member's the last ones; an `impl Trait` argument's hidden parameter is not named)
+        if let (Some(id), Expr::Path(None, p)) = (callee, f) {
+            // (every argument but a lifetime has its slot: a const one (`f::<3, u8>`) is skipped but counted, also a
+            // `true` / `false` written as a type)
+            let tys: Vec<Option<&PTy>> = p.segs.last().map_or(vec![], |s| {
+                s.args
+                    .iter()
+                    .filter(|a| !matches!(a, GArg::Lifetime(_) | GArg::Bind(..)))
+                    .map(|a| match a {
+                        GArg::Ty(t) if crate::ast_types::bool_arg(t).is_none() => Some(t),
+                        _ => None,
+                    })
+                    .collect()
+            });
+            if tys.iter().any(|t| t.is_some()) {
+                let sig = &self.prog.sigs[id as usize];
+                // (the hidden `impl Trait` parameters are `__impl` and digits, as the lowering's hidden_param has it)
+                let named: Vec<usize> = (0..sig.generics.len())
+                    .filter(|&k| {
+                        let n: &str = &sig.generics[k].0;
+                        !(n.starts_with("__impl") && n.len() > 6 && n.as_bytes()[6..].iter().all(|c| c.is_ascii_digit()))
+                    })
+                    .collect();
+                let member = sig.self_ty.is_some() || sig.impl_of.is_some();
+                let start = if member { named.len().saturating_sub(tys.len()) } else { sig.trait_of.is_some() as usize };
+                let mut pre = vec![];
+                for (i, t) in tys.into_iter().enumerate() {
+                    let Some(t) = t else { continue };
+                    if let Some(&k) = named.get(start + i) {
+                        let v = self.ty_var(t);
+                        pre.push((k, v));
+                    }
+                }
+                self.pre_pv = pre;
+            }
+        }
+        // (a parameter that is a fn pointer over the callee's type parameters, `f: fn(T) -> T`, and an argument that
+        // is a fn item that is not generic: its signature gives them, `spawn(1 + 40, double)` with `fn double(isize)`)
+        if let Some(id) = callee {
+            let sig = &self.prog.sigs[id as usize];
+            let mut sol: Vec<Option<Ty>> = vec![None; sig.generics.len()];
+            let mut any = false;
+            for (a, &pt) in args.iter().zip(&sig.params) {
+                if !matches!(pt, Ty::Fn(_)) || !self.prog.has_param(pt) {
+                    continue;
+                }
+                let Expr::Path(None, ap) = a else { continue };
+                if ident(ap).is_some_and(|n| self.lookup(n).is_some()) {
+                    continue;
+                }
+                let Some(fid) = self.fn_by(ap) else { continue };
+                let fs = &self.prog.sigs[fid as usize];
+                if !fs.generics.is_empty() {
+                    continue;
+                }
+                let ft = Ty::Fn(intern_fn(crate::types::FnTy { params: fs.params.clone(), ret: fs.ret }));
+                any |= self.prog.match_ty(pt, ft, &mut sol);
+            }
+            if any {
+                let known: Vec<(usize, Ty)> = sol.iter().enumerate().filter_map(|(k, t)| t.filter(|t| !self.prog.has_param(*t)).map(|t| (k, t))).collect();
+                for (k, t) in known {
+                    if !self.pre_pv.iter().any(|x| x.0 == k) {
+                        let v = self.known(t);
+                        self.pre_pv.push((k, v));
+                    }
+                }
             }
         }
         if callee.is_none() {
@@ -2288,8 +2377,26 @@ impl Inf<'_> {
         if let Some(id) = callee {
             callee = self.pick_inherent_overload(id, rv);
         }
-        // (`x.clone()`: struct で clone を持たない (derive の Copy など) か、整数・浮動小数点・bool・char・生ポインタ)
+        // (`b.clone()` of a Box or an array: the receiver's own type, its variables kept (`Box::new(22).clone()`
+        // where a `Box<isize>` is wanted: the literal is not settled to i32 here))
         let rroot = self.find(rv);
+        {
+            // (the receiver before auto-deref: for a Box, deref_expr gave its contents)
+            // (only when what the Box holds is a numeric literal not settled yet: sharing the variable otherwise would let a
+            // coercion's target (`let c: Box<dyn A> = v.clone()`) flow back into the receiver)
+            let r0 = self.find(r);
+            let lit = match self.shape[r0 as usize] {
+                Some(Shape::Bx(i) | Shape::Arr(i, _)) => {
+                    let ir = self.find(i);
+                    self.shape[ir as usize].is_none() && (self.int_lit[ir as usize] || self.float_lit[ir as usize])
+                }
+                _ => false,
+            };
+            if callee.is_none() && n == "clone" && args.is_empty() && lit {
+                return r;
+            }
+        }
+        // (`x.clone()`: struct で clone を持たない (derive の Copy など) か、整数・浮動小数点・bool・char・生ポインタ)
         let prim = matches!(self.shape[rroot as usize], Some(Shape::Known(t)) if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Ptr(..)));
         if callee.is_none() && n == "clone" && args.is_empty() && (sid.is_some() || prim) {
             // (`r.clone()` with `r: &S` and S a type of the program that is not Clone: the reference's clone, `&S`)
@@ -2674,6 +2781,12 @@ impl Inf<'_> {
             }
         }
         if let Some(t) = recv_ty.filter(|t| t.is_float()) {
+            // (the methods whose arguments are Self: a literal or generic argument (`x.min(black_box(9.0))`) is that type)
+            if matches!(name, "min" | "max" | "powf" | "atan2" | "hypot" | "copysign" | "mul_add" | "clamp" | "rem_euclid" | "div_euclid" | "abs_sub" | "maximum" | "minimum" | "midpoint") {
+                for &a in &avs {
+                    self.unify(a, rv);
+                }
+            }
             return match name {
                 "is_nan" | "is_finite" | "is_infinite" | "is_sign_negative" | "is_sign_positive" | "is_normal" => self.known(Ty::Bool),
                 "to_bits" => self.known(if t == Ty::F32 { Ty::U32 } else { Ty::U64 }),

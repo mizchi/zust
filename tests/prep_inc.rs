@@ -106,3 +106,24 @@ fn prep_inc_matches_full() {
     }
     assert!(same > 500, "same {same}, errors {errs}");
 }
+
+/// An item after an attribute with a `]` in a string (`#[doc = "]"] fn inner`): the incremental preparation falls
+/// back to the full one, and both agree after an edit elsewhere
+#[test]
+fn prep_inc_attr_with_bracket_string() {
+    // (another fn's indented item makes the whole source hoist; the edit is in `outer`'s chunk)
+    let base = "fn other() {\n    fn nested() {}\n    nested()\n}\nfn outer() -> u8 {\n    #[doc = \"]\"] fn inner() -> u8 { 7 } inner()\n}\nfn main() { other(); let _ = outer(); }\n";
+    let edited = base.replace("inner()\n}", "let _q = 1; inner()\n}");
+    assert_ne!(base, edited);
+    let mut memo = PrepMemo::default();
+    for src in [base.to_string(), edited] {
+        let (mut f1, mut f2) = (vec![], vec![]);
+        let full = prep_full(&src, &[], &mut f1, None).map(marked);
+        let inc = prep(&src, &[], &mut f2, None, &mut memo);
+        match (full, inc) {
+            (Ok(a), Ok(b)) => assert!(a == b && f1 == f2, "{src}"),
+            (Err(_), Err(_)) => {}
+            (a, b) => panic!("ok / err differ: full {:?} inc {:?}", a.err(), b.err()),
+        }
+    }
+}

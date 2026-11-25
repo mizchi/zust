@@ -60,7 +60,8 @@ impl Cx<'_> {
         // 負のリテラル (`-128i8` / `-2147483648`) はその場で値にする (検査で MIN の符号反転にしない)
         if op == "-" {
             if let Expr::Lit(t, _) = strip_paren(x) {
-                if let Some(Lit::Int(i)) = lit::lit(t) {
+                // (not `-2f32`: digits with a float's suffix are a float, negated below)
+                if let Some(Lit::Int(i)) = lit::lit(t).filter(|l| !matches!(l, Lit::Int(i) if matches!(i.suffix(), "f32" | "f64"))) {
                     let lit_e: &Expr = strip_paren(x);
                     // (`-129i8` / `let x: i8 = -129;`: past the type, overflowing_literals; `-128i8` is not)
                     if let (Some(t), true) = (Ty::from_suffix(i.suffix()).or(expected.filter(|t| t.is_int())), self.user_code && !self.prog.allow_overflowing_literals) {
@@ -179,6 +180,24 @@ impl Cx<'_> {
         if !assign && self.user_code && is_cmp(op) && self.fn_item(strip_paren(left)).is_some() {
             let pos = if let Expr::Binary(_, _, _, sp) = e { sp.start } else { SP };
             return err(pos, format!("binary operation `{op}` cannot be applied to a fn item (cast it to a fn pointer)"));
+        }
+        // (`()` compares equal to itself and orders as equal: there are no bits to compare; `&()` too. The operands
+        // are still evaluated, for what they do)
+        if !assign && is_cmp(op) {
+            let strip = |t: Option<Ty>| {
+                let mut t = t?;
+                while let Ty::Ref(_, i) = t {
+                    t = *i;
+                }
+                Some(t)
+            };
+            // (the same type on both sides: `() == &()` is E0308, as any comparison of a value with a reference)
+            if strip(self.peek(left)) == Some(Ty::Unit) && strip(self.peek(right)) == Some(Ty::Unit) && self.peek(left) == self.peek(right) {
+                self.expr(left, None)?;
+                self.expr(right, None)?;
+                let v = matches!(op, "==" | "<=" | ">=") as i64;
+                return Ok((Some(self.b.ins().iconst(types::I8, v)), Ty::Bool));
+            }
         }
         // 短絡評価
         // (a chain of one operator (`a && b && c`) is lowered as one: each operand's short-circuit goes to the end, so
@@ -1465,7 +1484,8 @@ impl Cx<'_> {
             Some(base)
         } else {
             match expected {
-                Some(Ty::Struct(e)) if self.prog.base_of(e) == self.prog.base_of(base) && !self.prog.has_param(Ty::Struct(e)) => Some(e),
+                // (an unsized instance (`Wrap<[u8]>`) is no value's type: the fields decide, and the value is coerced)
+                Some(Ty::Struct(e)) if self.prog.base_of(e) == self.prog.base_of(base) && !self.prog.has_param(Ty::Struct(e)) && !Ty::Struct(e).is_dst_struct() => Some(e),
                 _ => None,
             }
         };
@@ -1531,6 +1551,88 @@ impl Cx<'_> {
     }
 
     // --- タプル・配列・スライス ------------------------------------------
+
+    /// `S<[T; N]>` を `S<[T]>` / `S<T>` を `S<dyn Tr>` (最後のフィールドが unsized な struct) に強制変換できるなら、
+    /// 組の後半 (末尾の要素数 N / T の vtable) と unsized な型
+    /// (want may be generic (`&Fat<[T]>` for a parameter): it is matched into sol)
+    pub(crate) fn unsize_tail_sol(&self, want: Ty, got: Ty, sol: &mut [Option<Ty>]) -> Option<(TailMeta, Ty)> {
+        if !want.is_dst_struct() {
+            return None;
+        }
+        let (m, u) = self.unsized_of(Some(want), got)?;
+        let ok = if self.prog.has_param(want) { self.prog.match_ty(want, u, sol) } else { want == u };
+        ok.then_some((m, u))
+    }
+
+    pub(crate) fn unsize_tail(&self, want: Ty, got: Ty) -> Option<TailMeta> {
+        let mut sol = vec![None; 64];
+        self.unsize_tail_sol(want, got, &mut sol).map(|x| x.0)
+    }
+
+    /// The pair for a value at v unsized by m: (v, N) or (v, the vtable)
+    pub(crate) fn make_unsized(&mut self, v: Value, m: TailMeta, span: Sp) -> R<Value> {
+        match m {
+            TailMeta::Len(n) => Ok(self.make_fat(v, n)),
+            TailMeta::Dyn(t, tr) => self.to_dyn(v, t, tr.as_str(), span),
+        }
+    }
+
+    /// The last field's type of a struct instance (a symbolic one (`Fat<[T]>`) has no laid-out fields: from its
+    /// definition's last field)
+    pub(crate) fn struct_tail_of(&self, t: Ty) -> Option<Ty> {
+        let Ty::Struct(s) = t else { return None };
+        let d = &self.prog.structs[s as usize];
+        if let Some(f) = d.fields.last() {
+            return Some(f.1);
+        }
+        let b = &self.prog.structs[d.base? as usize];
+        match b.fields.last()?.1 {
+            Ty::Param(j) => d.args.get(j as usize).copied(),
+            t if !self.prog.has_param(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    /// got (`S<[T; N]>`, `S<T>`) unsized as want asks (`[T]` for an array, `dyn Tr` for a sized type, through
+    /// nested structs' tails): (what the pair's second word is, the unsized type)
+    fn unsized_of(&self, want: Option<Ty>, got: Ty) -> Option<(TailMeta, Ty)> {
+        match (want, got) {
+            (None | Some(Ty::Slice(_)), Ty::Array(e, n)) => return Some((TailMeta::Len(n as i64), Ty::Slice(e))),
+            (Some(Ty::Dyn(tr)), t) if !t.is_unsized() => {
+                return Some((TailMeta::Dyn(t, tr), Ty::Dyn(tr)));
+            }
+            _ => {}
+        }
+        let Ty::Struct(y) = got else { return None };
+        if got.is_dst_struct() || self.prog.structs[y as usize].is_enum {
+            return None;
+        }
+        let d = &self.prog.structs[y as usize];
+        let base = d.base?;
+        if want.is_some_and(|w| !matches!(w, Ty::Struct(x) if self.prog.base_of(x) == base)) {
+            return None;
+        }
+        let (_, tail, _) = *d.fields.last()?;
+        let (m, ut) = self.unsized_of(want.and_then(|w| self.struct_tail_of(w)), tail)?;
+        // (the arguments that make the tail ut: from the definition's last field (`Foo<T>` in `Outer<T>`))
+        let bl = self.prog.structs[base as usize].fields.last()?.1;
+        let mut sol = vec![None; d.args.len()];
+        if !self.prog.match_ty(bl, ut, &mut sol) {
+            return None;
+        }
+        let args: Vec<Ty> = d.args.iter().zip(&sol).map(|(&a, s)| s.unwrap_or(a)).collect();
+        if args == d.args {
+            return None;
+        }
+        let id = self.prog.instantiate(base, args).ok()?;
+        let u = Ty::Struct(id);
+        // (only the tail may change: a parameter the tail mentions is not to be used by another field
+        // (`struct Foo<T: ?Sized>(Box<T>, T)`, E0308 in rustc))
+        let uf = &self.prog.structs[id as usize].fields;
+        let k = d.fields.len() - 1;
+        let same = uf.len() == d.fields.len() && uf[..k].iter().zip(&d.fields[..k]).all(|(a, b)| a.1 == b.1 && a.2 == b.2);
+        (u.is_dst_struct() && same && uf[k].1 == ut).then_some((m, u))
+    }
 
     pub(crate) fn make_fat(&mut self, ptr: Value, len: i64) -> Value {
         let l = self.b.ins().iconst(types::I64, len);
@@ -1844,6 +1946,24 @@ impl Cx<'_> {
             }
             _ => None,
         };
+        // (elements that are distinct closures with no captures and one signature: their fn pointer, as rustc
+        // coerces them; also over the first element's closure type inference may have given)
+        let is_clo = |t: Option<Ty>| matches!(t, Some(Ty::Struct(s)) if self.prog.closure_of_struct.contains_key(&self.prog.base_of(s)));
+        // (also over the first element's `&String`, which inference may have given)
+        let string_ref = |t: Option<Ty>| matches!(t, Some(Ty::Ref(_, Ty::Struct(s))) if self.prog.struct_index.get("String") == Some(&self.prog.base_of(*s)));
+        if elem.is_none() || string_ref(elem) {
+            if let Some(t) = self.str_refs_lub(&elems.iter().collect::<Vec<_>>()) {
+                elem = Some(t);
+            }
+        }
+        if elem.is_none() || is_clo(elem) {
+            if let Some(f) = self.closures_lub(&elems.iter().collect::<Vec<_>>()) {
+                self.lub_fnptr += 1;
+                let r = self.array_lit(e, Some(Ty::Array(crate::types::intern(f), elems.len() as u32)));
+                self.lub_fnptr -= 1;
+                return r;
+            }
+        }
         // (Vec から取った要素の型は目安: 要素の型が違えばそちらにする (`v == ["a"]` で v: Vec<String>))
         let mut soft = matches!(expected, Some(Ty::Struct(_)));
         // `[&a as &dyn Tr, &b]`: 要素のどれかが `&dyn` なら全体をそれに揃える

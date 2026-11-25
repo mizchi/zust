@@ -1742,7 +1742,11 @@ impl Session2 {
         };
         prog.allow_overflowing_literals = src.match_indices("overflowing_literals").any(|(i, _)| {
             let head = &src[src[..i].rfind('(').map(|k| src[..k].rfind(|c: char| c == '[' || c == ',').map_or(0, |b| b + 1)).unwrap_or(i)..i];
-            ["allow(", "warn(", "expect("].iter().any(|a| head.trim_start().starts_with(a)) && !in_text(i)
+            ["allow", "warn", "expect"].iter().any(|a| head.trim_start().strip_prefix(a).is_some_and(|rest| rest.trim_start().starts_with('('))) && !in_text(i)
+        });
+        prog.allow_implicit_autorefs = src.match_indices("dangerous_implicit_autorefs").any(|(i, _)| {
+            let head = &src[src[..i].rfind('(').map(|k| src[..k].rfind(|c: char| c == '[' || c == ',').map_or(0, |b| b + 1)).unwrap_or(i)..i];
+            ["allow", "warn", "expect"].iter().any(|a| head.trim_start().strip_prefix(a).is_some_and(|rest| rest.trim_start().starts_with('('))) && !in_text(i)
         });
         prog.deny_trivial_casts = deny_trivial_casts;
         if deny_must_use {
@@ -1811,10 +1815,290 @@ impl Session2 {
         // (a field or an impl's self type that names a struct of the program's whose parameter's bound does not hold:
         // `struct Hoge<K> { s: S<K> }` with `struct S<T: Tr>`)
         // (only when one of them has a bounded parameter)
-        if sums[..user.min(sums.len())].iter().any(|s| !s.adt_bounds.is_empty()) {
+        // (or a trait of the program's with a bounded parameter: `trait Getter<T: Clone2>`)
+        if sums[..user.min(sums.len())].iter().any(|s| !s.adt_bounds.is_empty() || (s.trait_decl.is_some() && s.trait_generics.iter().any(|g| !g.0.starts_with('#') && g.0 != "Self" && !g.1.is_empty()))) {
             if let Some(e) = wf_error(&prog, &sums, &src, &items, user) {
                 return Err(e);
             }
+        }
+        // (E0119: two impls of a trait of the program's that both apply to one goal, by the trait solver: their heads
+        // unify and both impls' where clauses hold there (crate::traits::TraitDb::conflict))
+        // (an impl's where clauses, from its header's text: the summary keeps those on one of its parameters (`T: Tr`);
+        // the others (`where T::Assoc: Foo`, `where (): Array<Element = &()>`) are read here and added to its clause.
+        // read_all: every where clause of the impl was read)
+        let mut where_all: FxMap<usize, bool> = FxMap::default();
+        for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
+            if sm.impl_self_ty.is_none() || !matches!(items[ii].kind, ItemKind::Normal | ItemKind::ImplHeader) {
+                continue;
+            }
+            let text = blank_comments(src.get(items[ii].start..items[ii].end).unwrap_or(""));
+            let head = text.split('{').next().unwrap_or("");
+            let Some(preds) = where_preds(head) else { continue };
+            let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+            let mut all = true;
+            let mut extra = vec![];
+            for (subj, bounds) in &preds {
+                if subj.starts_with('\'') || gn.contains(&subj.as_str()) {
+                    continue;
+                }
+                let ty = if subj.starts_with("for") && subj[3..].trim_start().starts_with('<') {
+                    None
+                } else {
+                    crate::ast_summary::ty_of_text(subj, sm.impl_self_ty.as_ref()).and_then(|t| prog.resolve_g(&t, &gn).ok())
+                };
+                let Some(ty) = ty else {
+                    all = false;
+                    continue;
+                };
+                let bs: Vec<&str> = bounds.iter().map(|b| b.as_str()).filter(|b| !b.starts_with('\'')).collect();
+                let ps = crate::traits::preds_of(&prog, ty, &bs, &gn);
+                if ps.len() != bs.iter().filter(|b| !b.starts_with('?')).count() {
+                    all = false;
+                }
+                extra.extend(ps);
+            }
+            prog.tdb.add_where(ii, extra, all);
+            where_all.insert(ii, all);
+        }
+        let read_all = |ii: usize| -> bool { where_all.get(&ii).copied().unwrap_or(true) };
+        // (the auto traits among the program's traits' supertraits, which the summaries leave out: `trait Foo: Send`,
+        // `trait Foo where Self: Sync`, from the header's text)
+        if !prog.tdb.user.is_empty() {
+            for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
+                let Some(tr) = sm.trait_decl.as_deref() else { continue };
+                let text = blank_comments(src.get(items[ii].start..items[ii].end).unwrap_or(""));
+                let head = text.split('{').next().unwrap_or("");
+                // (after the name and its parameters: the supertraits and the where clause)
+                let Some(at) = head.find(tr) else { continue };
+                let rest = &head[at + tr.len()..];
+                let mut depth = 0i32;
+                let mut cut = rest.len();
+                for (i, c) in rest.char_indices() {
+                    match c {
+                        '<' => depth += 1,
+                        '>' => depth -= 1,
+                        ':' if depth == 0 => {
+                            cut = i;
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                let sup = &rest[cut.min(rest.len())..];
+                let word = |w: &str| sup.match_indices(w).any(|(i, _)| {
+                    let ok = |c: Option<char>| c.is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+                    ok(sup[..i].chars().next_back()) && ok(sup[i + w.len()..].chars().next())
+                });
+                let autos: Vec<String> = ["Send", "Sync"].iter().filter(|w| word(w)).map(|w| w.to_string()).collect();
+                if !autos.is_empty() {
+                    prog.tdb.auto_supers.insert(tr.to_string(), autos);
+                }
+            }
+        }
+        // (E0277: an impl of a trait of the program's needs its supertraits, all the way up, of its self type, with the
+        // impl's parameters as placeholders whose bounds are all the impl assumes (`impl<T> Complete for T` with `trait
+        // Complete: Partial` and `trait Partial: Copy` needs `T: Copy`))
+        if !prog.tdb.user.is_empty() {
+            for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
+                let (Some(tr), Some(st)) = (sm.impl_trait.as_deref(), sm.impl_self_ty.as_ref()) else { continue };
+                let tr = tr.split('<').next().unwrap_or(tr).trim();
+                let tr = tr.rsplit("::").next().unwrap_or(tr);
+                if !prog.tdb.user.contains(tr) || !matches!(items[ii].kind, ItemKind::Normal | ItemKind::ImplHeader) || !read_all(ii) {
+                    continue;
+                }
+                // (the supertraits, transitively: the program's traits' recorded ones, and the markers (Copy, Clone))
+                let mut supers: Vec<String> = vec![];
+                let mut todo: Vec<String> = vec![tr.to_string()];
+                while let Some(t) = todo.pop() {
+                    for sup in prog.trait_supers.get(&t).into_iter().flatten().chain(prog.trait_marker_supers.get(&t).into_iter().flatten()) {
+                        let sup = sup.trim();
+                        if sup.starts_with('#') || sup.contains('<') || sup.contains('(') || supers.iter().any(|x| x == sup) || sup == tr {
+                            continue;
+                        }
+                        supers.push(sup.to_string());
+                        if prog.tdb.user.contains(sup) {
+                            todo.push(sup.to_string());
+                        }
+                    }
+                    for a in prog.tdb.auto_supers.get(&t).into_iter().flatten() {
+                        if !supers.contains(a) {
+                            supers.push(a.clone());
+                        }
+                    }
+                }
+                if supers.is_empty() {
+                    continue;
+                }
+                let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+                let Ok(t) = prog.resolve_g(st, &gn) else { continue };
+                let rigid: Vec<Ty> = sm.impl_generics.iter().enumerate().map(|(k, (n, bs))| Ty::Struct(prog.placeholder(u32::MAX - ii as u32, k as u32, n, bs))).collect();
+                let t = prog.subst(t, &rigid);
+                // (a supertrait the impl's own where clause assumes (`impl<T> Child for W<T> where W<T>: Parent`): given)
+                let assumed: Vec<String> = {
+                    let text = blank_comments(src.get(items[ii].start..items[ii].end).unwrap_or(""));
+                    let head = text.split('{').next().unwrap_or("");
+                    // (only a predicate on the impl's self type itself (or `Self`): `where T: Parent` gives nothing
+                    // about `W<T>`)
+                    let squash = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+                    let self_txt = head.rfind(" for ").map(|i| {
+                        let rest = &head[i + 5..];
+                        let ok = |c: Option<char>| c.is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+                        let end = rest.match_indices("where").find(|(j, _)| ok(rest[..*j].chars().next_back()) && ok(rest[j + 5..].chars().next())).map_or(rest.len(), |(j, _)| j);
+                        squash(&rest[..end])
+                    });
+                    where_preds(head)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter(|(subj, _)| {
+                            let subj = squash(subj);
+                            subj == "Self" || self_txt.as_deref() == Some(subj.as_str())
+                        })
+                        .flat_map(|(_, bs)| bs)
+                        .map(|b| {
+                            let b = b.trim().split('<').next().unwrap_or("").trim().to_string();
+                            b.rsplit("::").next().unwrap_or(&b).to_string()
+                        })
+                        .collect()
+                };
+                for sup in &supers {
+                    if assumed.contains(sup) {
+                        continue;
+                    }
+                    if prog.tdb.holds_rigid(&prog, t, sup) == crate::traits::Ans::No {
+                        let n = crate::traits::display_ty(&prog, t);
+                        return Err(format!("{}:1: {} (E0277)", items[ii].line, crate::traits::not_held(&n, sup)));
+                    }
+                }
+            }
+        }
+        // (E0277: a trait's method that names `<Self as Tr>::X` needs `Self: Tr`: the trait itself, one of its
+        // supertraits (all the way up), or the method's own `where Self: Tr`; a trait of the program's)
+        if !prog.tdb.user.is_empty() {
+            for (ii, it) in items.iter().enumerate().take(user.min(items.len())) {
+                let ItemKind::TraitMember(h) = it.kind else { continue };
+                let Some(own) = sums.get(h as usize).and_then(|s| s.trait_decl.clone()) else { continue };
+                let text = blank_comments(src.get(it.start..it.end).unwrap_or(""));
+                let head = text.split('{').next().unwrap_or("").split(';').next().unwrap_or("");
+                let mut supers: Vec<String> = vec![own.clone()];
+                // (the trait's own `where Self: Parent`, a supertrait as `trait Child: Parent` is)
+                if let Some(hi) = items.get(h as usize) {
+                    let htext = blank_comments(src.get(hi.start..hi.end).unwrap_or(""));
+                    let hhead = htext.split('{').next().unwrap_or("");
+                    for (subj, bs) in where_preds(hhead).unwrap_or_default() {
+                        if subj == "Self" {
+                            for b in bs {
+                                let b = b.trim().split('<').next().unwrap_or("").trim();
+                                let b = b.rsplit("::").next().unwrap_or(b).to_string();
+                                if !supers.contains(&b) {
+                                    supers.push(b);
+                                }
+                            }
+                        }
+                    }
+                }
+                let mut k = 0;
+                while k < supers.len() {
+                    let t = supers[k].clone();
+                    for sup in prog.trait_supers.get(&t).into_iter().flatten() {
+                        let n = sup.split('<').next().unwrap_or(sup).trim();
+                        let n = n.rsplit("::").next().unwrap_or(n).to_string();
+                        if !n.starts_with('#') && !supers.contains(&n) {
+                            supers.push(n);
+                        }
+                    }
+                    k += 1;
+                }
+                for (at, _) in head.match_indices("<Self as ") {
+                    let rest = &head[at + 9..];
+                    let n: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_' || *c == ':').collect();
+                    let n = n.rsplit("::").next().unwrap_or(&n).to_string();
+                    if !prog.tdb.user.contains(&n) || supers.contains(&n) {
+                        continue;
+                    }
+                    // (the method's own where clause: `where Self: Tr`, or a trait of it whose supertraits (all the
+                    // way up) have Tr: `where Self: Child` with `trait Child: Parent`)
+                    let mut own_bounds: Vec<String> = vec![];
+                    // (split with nesting kept: `Self: Pair<u8, u16> + Parent`)
+                    for (subj, bs) in where_preds(head).unwrap_or_default() {
+                        if subj != "Self" {
+                            continue;
+                        }
+                        for x in bs {
+                            let b = x.trim().split('<').next().unwrap_or("").trim();
+                            own_bounds.push(b.rsplit("::").next().unwrap_or(b).to_string());
+                        }
+                    }
+                    let mut k = 0;
+                    while k < own_bounds.len() {
+                        let t = own_bounds[k].clone();
+                        for sup in prog.trait_supers.get(&t).into_iter().flatten() {
+                            let b = sup.split('<').next().unwrap_or(sup).trim();
+                            let b = b.rsplit("::").next().unwrap_or(b).to_string();
+                            if !b.starts_with('#') && !own_bounds.contains(&b) {
+                                own_bounds.push(b);
+                            }
+                        }
+                        k += 1;
+                    }
+                    let given = own_bounds.contains(&n);
+                    if !given {
+                        return Err(format!("{}:1: the trait bound `Self: {n}` is not satisfied (E0277)", it.line));
+                    }
+                }
+            }
+        }
+        // (E0277 / E0271: a non-generic fn's `-> impl Tr` return: the type its body gives holds Tr, by the trait solver
+        // (`fn test() -> impl Test { () }` with no `impl Test for ()`))
+        if let Some(e) = opaque_bound_error(&prog, &src, &items[..user.min(items.len())])? {
+            return Err(e);
+        }
+        // (E0271 / E0277: the bounds a trait of the program's puts on its associated types (`type Sibling: Bar2<Ok =
+        // Self::Ok>`) hold of each impl's definitions, with the impl's parameters as placeholders: reported at the
+        // definition)
+        if !prog.tdb.user.is_empty() && !prog.assoc_bounds.is_empty() {
+            let mut checks: Vec<(usize, String, String, Ty)> = vec![];
+            for cs in prog.tdb.clauses.values() {
+                for c in cs {
+                    for (n, v) in &c.assocs {
+                        checks.push((c.item, n.clone(), String::new(), *v));
+                    }
+                }
+            }
+            for (ii, n, _, v) in checks {
+                let Some(sm) = sums.get(ii) else { continue };
+                let (Some(tr), Some(st)) = (sm.impl_trait.as_deref(), sm.impl_self_ty.as_ref()) else { continue };
+                let tr = tr.split('<').next().unwrap_or(tr).trim();
+                let tr = tr.rsplit("::").next().unwrap_or(tr).to_string();
+                let Some(bounds) = prog.assoc_bounds.get(&(tr.clone(), n.clone())).cloned() else { continue };
+                if !read_all(ii) {
+                    continue;
+                }
+                let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+                let Ok(st) = prog.resolve_g(st, &gn) else { continue };
+                let rigid: Vec<Ty> = sm.impl_generics.iter().enumerate().map(|(k, (g, bs))| Ty::Struct(prog.placeholder(u32::MAX - ii as u32, k as u32, g, bs))).collect();
+                let (st, v) = (prog.subst(st, &rigid), prog.subst(v, &rigid));
+                // (the definition's line: the member item that defines it)
+                let line = (0..items.len().min(sums.len()))
+                    .find(|&jj| matches!(items[jj].kind, ItemKind::ImplMember(h) if h as usize == ii) && sums[jj].assocs.iter().any(|a| a.name == n))
+                    .map_or(items[ii].line, |jj| items[jj].line);
+                for b in &bounds {
+                    match prog.tdb.assoc_bound(&prog, v, b, st) {
+                        (_, Some((proj, got, want))) => {
+                            return Err(format!("{line}:1: type mismatch resolving `{proj} == {}`: it is `{}` (E0271)", prog.tn(want).replace('#', ""), prog.tn(got).replace('#', "")));
+                        }
+                        (crate::traits::Ans::No, None) => {
+                            let tn = crate::traits::display_ty(&prog, v);
+                            return Err(format!("{line}:1: {} (E0277)", crate::traits::not_held(&tn, b)));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        if let Some((later, _, tr, g)) = prog.tdb.conflict(&prog, &read_all) {
+            let line = items.get(later).map_or(1, |it| it.line);
+            let ty = g.map(|g| format!(" for type `{}`", prog.tn(g).replace("__u_", ""))).unwrap_or_default();
+            return Err(format!("{line}:1: conflicting implementations of trait `{tr}`{ty} (E0119)"));
         }
         // (E0107: an impl giving one of the program's traits the wrong number of generic arguments; only with a trait
         // header and an impl header)
@@ -2026,6 +2310,157 @@ fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
         return Err(format!("cannot infer the `impl Trait` return type of `{}`", prog.names[ids[k] as usize]));
     }
     Ok(())
+}
+
+/// The first `-> impl Tr` of the program's non-generic fns whose type from the body is surely not Tr: the trait solver's
+/// `No` (`solve_no_sound`), for each bound written (`impl Tr + Send`, `impl Tr<Assoc = X>`). A generic fn's type is
+/// each instance's, and a nested `impl` (`Option<impl Tr>`) is not followed
+/// The values of an `if` / `match`'s arms as the paths they name (`S`, `S { .. }`, `S(..)`), into out; false when an
+/// arm's value is another expression (its type is not read here)
+fn arm_heads(e: &crate::parse::Expr, out: &mut Vec<String>, depth: u32) -> bool {
+    use crate::parse::{Expr, Stmt};
+    if depth > 16 {
+        return false;
+    }
+    let path = |p: &crate::parse::Path| p.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::");
+    fn block_tail(b: &crate::parse::Block) -> Option<&Expr> {
+        match b.stmts.last() {
+            Some(Stmt::Expr(t, false)) => Some(t),
+            _ => None,
+        }
+    }
+    match e {
+        Expr::If(_, then, els) => {
+            let Some(t) = block_tail(then) else { return false };
+            let Some(els) = els else { return false };
+            arm_heads(t, out, depth + 1) && arm_heads(els, out, depth + 1)
+        }
+        Expr::Match(_, arms) => !arms.is_empty() && arms.iter().all(|a| arm_heads(&a.body, out, depth + 1)),
+        Expr::Block(_, _, b) => block_tail(b).is_some_and(|t| arm_heads(t, out, depth + 1)),
+        Expr::Paren(x) => arm_heads(x, out, depth + 1),
+        Expr::Path(None, p) | Expr::Struct(p, _, _) => {
+            out.push(path(p));
+            true
+        }
+        Expr::Call(f, _) => match &**f {
+            Expr::Path(None, p) => {
+                out.push(path(p));
+                true
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn opaque_bound_error(prog: &Program, src: &str, items: &[SrcItem]) -> R<Option<String>> {
+    // (a bound as a goal the solver may answer: the program's traits, the auto traits, and std's for the types
+    // `implements` judges exactly (the solver believes its no only there); a std bound whose arguments are all
+    // bindings (`Iterator<Item = &u32>`) is asked without them, which is weaker: its no stands)
+    let check = |t: Ty, b: &str, line: usize| -> Option<String> {
+        let n = b.split('<').next().unwrap_or(b).split('(').next().unwrap_or(b).trim();
+        let n = n.rsplit("::").next().unwrap_or(n);
+        let user = prog.tdb.user.contains(n);
+        let goal = if !user && b.contains('<') {
+            let inner = b[b.find('<')? + 1..].trim_end().strip_suffix('>')?;
+            if inner.split(',').all(|a| a.contains('=')) { n.to_string() } else { return None }
+        } else if user {
+            b.to_string()
+        } else {
+            n.to_string()
+        };
+        let tn = crate::traits::display_ty(prog, t);
+        if user && b.contains('=') {
+            if let Some((proj, got, want)) = prog.tdb.binding_mismatch(prog, t, b, &[], &[]) {
+                return Some(format!("{line}:1: type mismatch resolving `{proj} == {}`: it is `{}` (E0271)", prog.tn(want), prog.tn(got)));
+            }
+        }
+        (prog.tdb.holds(prog, t, &goal) == crate::traits::Ans::No).then(|| format!("{line}:1: {} (E0277)", crate::traits::not_held(&tn, &goal)))
+    };
+    let ground = |t: Ty| !prog.has_param(t) && !prog.names_placeholder(t, 0);
+    for &id in &prog.opaque {
+        let sig = &prog.sigs[id as usize];
+        let t = sig.ret;
+        if sig.is_generic() || !ground(t) {
+            continue;
+        }
+        let Some(ii) = prog.item_of[id as usize].map(|i| i as usize).filter(|&i| i < items.len()) else { continue };
+        let Some(f) = parse_fn(src, &items[ii])? else { continue };
+        let Some(crate::parse::Ty::Impl(bs)) = &f.sig.ret else { continue };
+        let Ok(names) = crate::ast_summary::bound_names(bs) else { continue };
+        // (a tail `if` / `match`: the type recorded is its first arm's; arms of other types are the arms' error
+        // (E0308, "`if` and `else` have incompatible types"), reported by the body's check. Arms whose values all
+        // name one type (`if b { S } else { S }`) are checked as one value)
+        if let Some(crate::parse::Stmt::Expr(tail @ (crate::parse::Expr::If(..) | crate::parse::Expr::Match(..)), false)) = f.block.stmts.last() {
+            let mut heads = vec![];
+            // (a call to a non-generic fn names its return type: `if b { S } else { make_s() }` is one type)
+            let heads: Vec<String> = if arm_heads(tail, &mut heads, 0) {
+                heads
+                    .into_iter()
+                    .map(|h| match prog.index.get(h.as_str()).map(|&g| &prog.sigs[g as usize]) {
+                        Some(s) if !s.is_generic() && ground(s.ret) && !prog.struct_index.contains_key(h.as_str()) => prog.tn(s.ret),
+                        _ => h,
+                    })
+                    .collect()
+            } else {
+                continue;
+            };
+            if heads.windows(2).any(|w| w[0] != w[1]) {
+                continue;
+            }
+        }
+        for b in &names {
+            if let Some(e) = check(t, b, items[ii].line) {
+                return Ok(Some(e));
+            }
+        }
+    }
+    // (a trait's method declared `-> impl Tr` (its declaration's type is a placeholder): each impl's method returns
+    // a type that is Tr, `impl Foo for () { fn bar() -> () {} }` with `fn bar() -> impl Display`)
+    for (fi, sig) in prog.sigs.iter().enumerate() {
+        let Some(tr) = sig.impl_trait.as_deref() else { continue };
+        let tr = tr.split('<').next().unwrap_or(tr).trim();
+        if sig.is_generic() || !ground(sig.ret) || !prog.tdb.user.contains(tr.rsplit("::").next().unwrap_or(tr)) {
+            continue;
+        }
+        let Some(ii) = prog.item_of[fi].map(|i| i as usize).filter(|&i| i < items.len()) else { continue };
+        let m = prog.names[fi].rsplit("::").next().unwrap_or("").split('#').next().unwrap_or("");
+        let Some(&d) = prog.traits.get(tr).into_iter().flatten().find(|&&d| prog.names[d as usize].rsplit("::").next() == Some(m)) else { continue };
+        let Some(di) = prog.item_of[d as usize].map(|i| i as usize).filter(|&i| i < items.len()) else { continue };
+        let text = blank_comments(src.get(items[di].start..items[di].end).unwrap_or(""));
+        let head = text.split('{').next().unwrap_or("").split(';').next().unwrap_or("");
+        let Some(at) = head.find("-> impl ") else { continue };
+        let rest = &head[at + 8..];
+        let rest = rest.split(" where").next().unwrap_or(rest);
+        // (the bounds, split at `+` at depth 0)
+        let mut depth = 0i32;
+        let mut bounds = vec![String::new()];
+        for c in rest.chars() {
+            match c {
+                '<' | '(' => depth += 1,
+                '>' | ')' => depth -= 1,
+                '+' if depth == 0 => {
+                    bounds.push(String::new());
+                    continue;
+                }
+                _ => {}
+            }
+            if let Some(l) = bounds.last_mut() {
+                l.push(c);
+            }
+        }
+        // (a bound that names the trait's parameters or Self is not asked of a concrete type here)
+        for b in bounds.iter().map(|b| b.trim()).filter(|b| !b.is_empty() && !b.starts_with('\'') && !b.contains("Self")) {
+            let decl = &prog.sigs[d as usize];
+            if decl.generics.iter().skip(1).any(|g| b.contains(g.0.as_str())) {
+                continue;
+            }
+            if let Some(e) = check(sig.ret, b, items[ii].line) {
+                return Ok(Some(e));
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// アイテムの中の `行:桁:` のエラーを、ファイルの中の行にする (driver.rs の relocate_err と同じ)。位置がなければアイテムの先頭の行
@@ -6534,6 +6969,58 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
     std::mem::take(&mut g.pending)
 }
 
+/// The where clause of an item's header text: (subject, bounds) of each predicate, split at depth 0 (None: no where)
+fn where_preds(head: &str) -> Option<Vec<(String, Vec<String>)>> {
+    let ok = |c: Option<char>| c.is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+    let (w, _) = head.match_indices("where").find(|(i, _)| ok(head[..*i].chars().next_back()) && ok(head[i + 5..].chars().next()))?;
+    let split = |s: &str, sep: char| -> Vec<String> {
+        let mut depth = 0i32;
+        let mut out = vec![String::new()];
+        let mut prev = ' ';
+        for c in s.chars() {
+            // (the `>` of `->` (`W: Fn() -> u8`) closes nothing)
+            let arrow = c == '>' && prev == '-';
+            prev = c;
+            match c {
+                '>' if arrow => {}
+                '<' | '(' | '[' => depth += 1,
+                '>' | ')' | ']' => depth -= 1,
+                c if c == sep && depth == 0 => {
+                    out.push(String::new());
+                    continue;
+                }
+                _ => {}
+            }
+            if let Some(l) = out.last_mut() {
+                l.push(c);
+            }
+        }
+        out.into_iter().map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect()
+    };
+    let mut preds = vec![];
+    for p in split(&head[w + 5..], ',') {
+        // (the first `:` at depth 0 that is not half of a `::`)
+        let b = p.as_bytes();
+        let mut depth = 0i32;
+        let mut at = None;
+        for i in 0..b.len() {
+            match b[i] {
+                b'>' if i > 0 && b[i - 1] == b'-' => {}
+                b'<' | b'(' | b'[' => depth += 1,
+                b'>' | b')' | b']' => depth -= 1,
+                b':' if depth == 0 && b.get(i + 1) != Some(&b':') && (i == 0 || b[i - 1] != b':') => {
+                    at = Some(i);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let Some(at) = at else { continue };
+        preds.push((p[..at].trim().to_string(), split(&p[at + 1..], '+')));
+    }
+    Some(preds)
+}
+
 /// Well-formedness of the program's struct fields and impl headers: a type that names a struct of the program's whose
 /// parameter is bounded (`struct S<T: Tr>`) needs the bound of what it gives the parameter (E0277). A parameter of
 /// the enclosing item holds it when its own bounds give it, or when the item names the trait anywhere (a where clause
@@ -6710,6 +7197,20 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
         let Ok(t) = prog.resolve_g(st, &gn) else { continue };
         let mut ns = vec![];
         needs(prog, sums, user, t, &mut ns, 0);
+        // (the trait's arguments: the types written in them, and the bounds the trait puts on its parameters
+        // (`trait Getter<T: Clone2>` with `impl Getter<isize> for isize` needs `isize: Clone2`), for a trait of the
+        // program's)
+        let tr = sm.impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
+        let decl = tr.and_then(|tr| sums[..user.min(sums.len())].iter().find(|s| s.trait_decl.as_deref() == Some(tr)));
+        let tparams: Vec<&(String, Vec<String>)> = decl.map(|d| d.trait_generics.iter().filter(|g| !g.0.starts_with('#') && g.0 != "Self").collect()).unwrap_or_default();
+        for (k, a) in sm.impl_trait_args.iter().enumerate() {
+            let Ok(a) = prog.resolve_g(a, &gn) else { continue };
+            needs(prog, sums, user, a, &mut ns, 0);
+            // (only when the arguments line up with the trait's parameters)
+            if tparams.len() == sm.impl_trait_args.len() {
+                ns.extend(tparams[k].1.iter().filter(|b| !b.starts_with(crate::types::CONST_GENERIC) && !b.contains('<')).map(|b| (a, b.clone())));
+            }
+        }
         if ns.is_empty() {
             continue;
         }
@@ -6718,6 +7219,35 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
         let text = blank_comments(src.get(items[ii].start..items[ii].end).unwrap_or(""));
         if let Some(m) = failing(&ns, &gens, &bounds, &text) {
             return Some(format!("{}:1: {m}", items[ii].line));
+        }
+    }
+    // (the signatures of the program's free fns: `fn explode(x: Foo<u32>)` with `struct Foo<T: Trait>`)
+    for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
+        if sm.impl_self_ty.is_some() || sm.trait_decl.is_some() || !matches!(items[ii].kind, ItemKind::Normal) {
+            continue;
+        }
+        for (_, sig) in &sm.fns {
+            if sig.impl_of.is_some() || sig.trait_of.is_some() || sig.is_extern {
+                continue;
+            }
+            let gn: Vec<&str> = sig.generics.iter().map(|g| g.0.as_str()).collect();
+            let mut ns = vec![];
+            for t in sig.params.iter().chain([&sig.ret]) {
+                if let Ok(t) = prog.resolve_g(t, &gn) {
+                    needs(prog, sums, user, t, &mut ns, 0);
+                }
+            }
+            if ns.is_empty() {
+                continue;
+            }
+            let gens: Vec<String> = gn.iter().map(|s| s.to_string()).collect();
+            let bounds = |n: &str| sig.generics.iter().find(|g| g.0 == n).map(|g| g.1.clone()).unwrap_or_default();
+            let text = blank_comments(src.get(items[ii].start..items[ii].end).unwrap_or(""));
+            // (the signature only: a bound written in the body is no bound of the fn's)
+            let head = text.split('{').next().unwrap_or("").to_string();
+            if let Some(m) = failing(&ns, &gens, &bounds, &head) {
+                return Some(format!("{}:1: {m}", items[ii].line));
+            }
         }
     }
     None
@@ -6956,6 +7486,7 @@ fn lint_bits(p: &Program) -> u16 {
         | ((p.edition >= 2021) as u8) << 6
         | (p.allow_overflowing_literals as u8) << 7) as u16
         | (p.deny_unused_mut as u16) << 8
+        | (p.allow_implicit_autorefs as u16) << 9
 }
 
 /// The attributes behind a feature gate, and the feature

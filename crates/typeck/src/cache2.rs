@@ -13,7 +13,7 @@ use crate::program::{CloFact, CloRg, Insts, Program};
 
 pub use crate::key::{Key, KeyHasher};
 
-const MAGIC: &[u8; 8] = b"CRCD0001";
+const MAGIC: &[u8; 8] = b"CRCD0002";
 
 unsafe extern "C" {
     #[link_name = "rename"]
@@ -159,10 +159,16 @@ impl Cache2 {
     }
 }
 
-/// 関数への参照: 普通の関数は名前 (タグ 0)、インスタンスは (元の関数名, 型引数) (タグ 2)、vtable の空欄 (タグ 6)
+/// 関数への参照: 普通の関数は名前 (タグ 0)、インスタンスは (元の関数名, 型引数) (タグ 2)、vtable の空欄 (タグ 6)、vtable の数の欄 (タグ 7)
 fn put_func(out: &mut Vec<u8>, id: u32, prog: &Program, insts: &Insts) {
     if id == u32::MAX {
         out.push(6);
+        return;
+    }
+    // (a vtable's size or alignment entry: the number)
+    if let Some(n) = crate::acg::vt_lit(id) {
+        out.push(7);
+        put_uv(out, n);
         return;
     }
     match insts.get(id) {
@@ -192,6 +198,9 @@ fn get_name<'a>(r: &mut Rd<'a>) -> Option<&'a str> {
 fn get_func(r: &mut Rd, tag: u8, prog: &Program, insts: &Mutex<Insts>) -> Option<u32> {
     if tag == 6 {
         return Some(u32::MAX);
+    }
+    if tag == 7 {
+        return Some(crate::acg::VT_LIT | r.uv()? as u32);
     }
     let name = get_name(r)?;
     let id = *prog.index.get(name)?;

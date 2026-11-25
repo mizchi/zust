@@ -586,6 +586,17 @@ fn string_lit(s: &[u8], mut i: usize) -> Option<usize> {
 mod tests {
     use super::*;
 
+    /// has_inline_item: an item on the same line after `{` / `;` / `}`, also after attributes; an attribute with a
+    /// string or brackets in it (`#[doc = "]"]`) is taken as followed by an item (the full preparation decides)
+    #[test]
+    fn inline_item_after_attributes() {
+        assert!(has_inline_item("fn outer() { fn inner() {} }"));
+        assert!(has_inline_item("fn outer() { #[inline] fn inner() {} }"));
+        assert!(has_inline_item("fn outer() { #[doc = \"]\"] fn inner() {} inner() }"));
+        assert!(!has_inline_item("fn outer() { #[allow(unused)] let x = 1; }"));
+        assert!(!has_inline_item("fn outer() {\n    let x = 1;\n}"));
+    }
+
     /// Edition 2021's reserved prefixes: an identifier right before `#` / `"` / `'`, and what only looks like one
     #[test]
     fn reserved_prefixes() {
@@ -1216,6 +1227,45 @@ pub fn hoist_nested_items(src: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
+/// What an item that hoist_parts_at may move starts with, by its first letter: the qualified fns, impls and traits
+/// too (`unsafe fn`, `async fn`, `unsafe impl`)
+fn hoist_kws(c: u8) -> &'static [&'static str] {
+    match c {
+        b'f' => &["fn "],
+        b's' => &["struct ", "static "],
+        b'e' => &["enum ", "extern "],
+        b'u' => &["use ", "union ", "unsafe extern ", "unsafe fn ", "unsafe impl", "unsafe trait "],
+        b'c' => &["const "],
+        b'm' => &["mod "],
+        b't' => &["trait ", "type "],
+        b'i' => &["impl"],
+        b'p' => &["pub fn ", "pub struct ", "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ", "pub(crate) "],
+        b'a' => &["async fn "],
+        _ => &[],
+    }
+}
+
+/// An item keyword right after a brace or a `;` on a line (`f({ fn inner() {} })`): whether hoist_nested_items moves
+/// such an item depends on the rest of the source (its quick check looks for indented items only), so the incremental
+/// preprocessing, which hoists a chunk alone, cannot reuse chunks of a source that has one
+pub fn has_inline_item(src: &str) -> bool {
+    // (the keywords hoist_parts_at looks for)
+    src.match_indices(['{', ';', '}']).any(|(i, _)| {
+        let mut t = src[i + 1..].trim_start_matches([' ', '\t']);
+        // (after attributes on the same line too: `{ #[inline] fn f() {} }`)
+        while let Some(rest) = t.strip_prefix("#[") {
+            let Some(end) = rest.find(']') else { break };
+            // (an attribute with a string or brackets in it (`#[doc = "]"]`) is not followed: taken as an item, the
+            // full preparation decides)
+            if rest[..end].contains(['"', '[', '\'']) {
+                return true;
+            }
+            t = rest[end + 1..].trim_start_matches([' ', '\t']);
+        }
+        t.as_bytes().first().is_some_and(|&c| hoist_kws(c).iter().any(|k| t.starts_with(k)))
+    })
+}
+
 /// hoist_nested_items を、(元の場所を空白にした本文 (長さと改行は入力と同じ。名前を変えたときは改行だけ同じ),
 /// 移したアイテム (本文での開始位置, テキスト) の列) で返す。末尾に `\n` + テキストを順に並べ、最後に `\n` を付けたものが
 /// hoist_nested_items の結果 (列が空なら本文だけ)
@@ -1391,21 +1441,8 @@ fn brace_close(s: &[u8], toks: &[(u8, usize, usize)], k: usize) -> usize {
 /// depth: 名前を変えてやり直した回数 (壊れたソースで名前の変更が止まらないときは 8 回で止める)
 fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)> {
     // (速く飛ばす: 字下げした行頭の `fn ` などがなければ入れ子のアイテムはない)
-    // (and the qualified fns, impls and traits the scan below moves too: `unsafe fn`, `async fn`, `unsafe impl`)
     // (by the first letter: most lines start with none of them, and a line is tried against that letter's only)
-    let kws: fn(u8) -> &'static [&'static str] = |c| match c {
-        b'f' => &["fn "],
-        b's' => &["struct ", "static "],
-        b'e' => &["enum ", "extern "],
-        b'u' => &["use ", "union ", "unsafe extern ", "unsafe fn ", "unsafe impl", "unsafe trait "],
-        b'c' => &["const "],
-        b'm' => &["mod "],
-        b't' => &["trait ", "type "],
-        b'i' => &["impl"],
-        b'p' => &["pub fn ", "pub struct ", "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ", "pub(crate) "],
-        b'a' => &["async fn "],
-        _ => &[],
-    };
+    let kws = hoist_kws;
     let indented = src.split('\n').any(|l| {
         let t = l.trim_start();
         t.len() < l.len() && t.as_bytes().first().is_some_and(|&c| kws(c).iter().any(|k| t.starts_with(k)))
