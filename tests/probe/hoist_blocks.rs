@@ -1,7 +1,7 @@
 // Items written in blocks of one fn: same-named fns (and structs) in sibling blocks, which call each other, an
 // item in a block that shadows one of its fn's body or a top-level one, same-named items in two fns, and a fn beside
 // a braced struct of its name in a block (a value and a type: each use takes the one of its namespace)
-#![allow(non_camel_case_types, dead_code)]
+#![allow(non_camel_case_types, dead_code, non_upper_case_globals)]
 fn f() -> u8 {
     9
 }
@@ -153,4 +153,13 @@ fn main() {
         println!("{}", p());
     }
     println!("{} {}", p::<u8>(), p::<u8>::mk(20).v);
+    // (a const in a struct literal's field, `f: w | 2`, beside a struct of its name: `|` is an or there)
+    struct w {}
+    struct F {
+        f: u8,
+    }
+    {
+        const w: u8 = 1;
+        println!("{}", F { f: w | 2 }.f);
+    }
 }
