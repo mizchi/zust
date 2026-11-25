@@ -750,8 +750,63 @@ impl<'a> Js<'a> {
                         t
                     }
                 };
+                // (a guard that fails goes on to the next arms: each arm is an `if` of its own in a block the taken
+                // one leaves)
+                if arms.iter().any(|a| a.guard.is_some()) {
+                    let label = format!("$m{}", {
+                        self.tmp += 1;
+                        self.tmp
+                    });
+                    self.line(&format!("{label}: {{"));
+                    self.ind += 1;
+                    for (k, a) in arms.iter().enumerate() {
+                        let conds = self.pat_cond(&a.pat, &subj);
+                        // (the last arm without a guard needs no test: the match is exhaustive)
+                        let open = !(conds.is_empty() || k + 1 == arms.len() && a.guard.is_none());
+                        if open {
+                            self.line(&format!("if ({}) {{", conds.join(" && ")));
+                            self.ind += 1;
+                        }
+                        let mark = self.locals.len();
+                        let mut binds = vec![];
+                        self.pat_binds(&a.pat, &subj, &mut binds);
+                        for (n, v) in binds {
+                            let js = self.bind(&n);
+                            self.line(&format!("const {js} = {v};"));
+                        }
+                        let guarded = if let Some(g) = &a.guard {
+                            let g = self.expr(g);
+                            self.line(&format!("if ({}) {{", unparen(&g)));
+                            self.ind += 1;
+                            true
+                        } else {
+                            false
+                        };
+                        self.stmt_expr(&a.body, d);
+                        let ends = !guarded && !open;
+                        // (a body written as `return` leaves anyway)
+                        if !ends && !matches!(d, Dest::Return) {
+                            self.line(&format!("break {label};"));
+                        }
+                        if guarded {
+                            self.ind -= 1;
+                            self.line("}");
+                        }
+                        self.locals.truncate(mark);
+                        if open {
+                            self.ind -= 1;
+                            self.line("}");
+                        }
+                        if ends {
+                            break;
+                        }
+                    }
+                    self.ind -= 1;
+                    self.line("}");
+                    return;
+                }
                 let mut opened = false;
-                for (k, (p, body)) in arms.iter().enumerate() {
+                for (k, Arm { pat: p, body, .. }) in arms.iter().enumerate() {
                     let last = k + 1 == arms.len();
                     let conds = self.pat_cond(p, &subj);
                     if k == 0 && !(conds.is_empty() || last) {
@@ -830,6 +885,19 @@ impl<'a> Js<'a> {
         match p {
             Pat::Bind(n) => self.bind(n),
             Pat::Tuple(ps) => format!("[{}]", ps.iter().map(|p| if matches!(p, Pat::Wild) { String::new() } else { self.pat_lhs(p) }).collect::<Vec<_>>().join(", ")),
+            Pat::Record(_, fs, _, _) => {
+                let plain = |f: &str| !f.is_empty() && f.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$') && !f.starts_with(|c: char| c.is_ascii_digit());
+                let parts: Vec<String> = fs
+                    .iter()
+                    .filter(|f| !matches!(f.1, Pat::Wild))
+                    .map(|(f, p)| {
+                        let lhs = self.pat_lhs(p);
+                        let key = if plain(f) { f.clone() } else { js_str(f) };
+                        if lhs == key { lhs } else { format!("{key}: {lhs}") }
+                    })
+                    .collect();
+                format!("{{ {} }}", parts.join(", "))
+            }
             _ => self.fresh(),
         }
     }
@@ -850,6 +918,14 @@ impl<'a> Js<'a> {
                 }
                 c
             }
+            Pat::Record(_, fs, _, _) => fs.iter().flat_map(|(f, p)| self.pat_cond(p, &format!("{s}{}", member(f)))).collect(),
+            Pat::Or(alts) => {
+                let cs: Vec<Vec<String>> = alts.iter().map(|a| self.pat_cond(a, s)).collect();
+                if cs.iter().any(|c| c.is_empty()) {
+                    return vec![];
+                }
+                vec![format!("({})", cs.iter().map(|c| if c.len() == 1 { c[0].clone() } else { format!("({})", c.join(" && ")) }).collect::<Vec<_>>().join(" || "))]
+            }
         }
     }
 
@@ -865,6 +941,37 @@ impl<'a> Js<'a> {
                 let en = self.info.variant_of[v].clone();
                 for (k, p) in subs.iter().enumerate() {
                     self.pat_binds(p, &format!("{s}.{}", self.field_key(&en, v, k)), out);
+                }
+            }
+            Pat::Record(_, fs, _, _) => {
+                for (f, p) in fs {
+                    self.pat_binds(p, &format!("{s}{}", member(f)), out);
+                }
+            }
+            // (a name of an `|` is where the alternative that matched has it: `s._0` for both of `A(x) | B(x)`, or
+            // `cond ? s._0 : s._1`)
+            Pat::Or(alts) => {
+                let per: Vec<Vec<(String, String)>> = alts
+                    .iter()
+                    .map(|a| {
+                        let mut b = vec![];
+                        self.pat_binds(a, s, &mut b);
+                        b
+                    })
+                    .collect();
+                for (n, _) in per[0].clone() {
+                    let paths: Vec<String> = per.iter().map(|b| b.iter().find(|x| x.0 == n).map_or("undefined".into(), |x| x.1.clone())).collect();
+                    if paths.iter().all(|p| *p == paths[0]) {
+                        out.push((n, paths[0].clone()));
+                        continue;
+                    }
+                    let mut v = paths.last().unwrap().clone();
+                    for (a, p) in alts.iter().zip(&paths).rev().skip(1) {
+                        let c = self.pat_cond(a, s);
+                        let c = if c.is_empty() { "true".to_string() } else { c.join(" && ") };
+                        v = format!("({c}) ? {p} : {v}");
+                    }
+                    out.push((n, v));
                 }
             }
             _ => {}
@@ -2113,7 +2220,7 @@ fn loop_exit(e: &Expr) -> Option<Pos> {
                 })
                 .or_else(|| tail.as_deref().and_then(walk)),
             EK::If(c, t, el) => walk(c).or_else(|| walk(t)).or_else(|| el.as_deref().and_then(walk)),
-            EK::Match(s, arms) => walk(s).or_else(|| arms.iter().find_map(|a| walk(&a.1))),
+            EK::Match(s, arms) => walk(s).or_else(|| arms.iter().find_map(|a| a.guard.as_ref().and_then(walk).or_else(|| walk(&a.body)))),
             EK::Assign(_, x) | EK::Un(_, x) | EK::Field(x, _) | EK::Cast(x, _) | EK::Try(x) | EK::Await(x) => walk(x),
             EK::Bin(_, a, b) | EK::Index(a, b) => walk(a).or_else(|| walk(b)),
             EK::Call(f, a) => walk(f).or_else(|| a.iter().find_map(walk)),

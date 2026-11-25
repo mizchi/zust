@@ -44,6 +44,24 @@ pub enum Pat {
     Tuple(Vec<Pat>),
     /// (enum named by a path `Shape::Circle`, variant, sub-patterns)
     Variant(Option<String>, String, Vec<Pat>, Pos),
+    /// `A | B(x)`: any of them (each binds the same names, of the same types)
+    Or(Vec<Pat>),
+    /// `Point { x, y: py, .. }`: a record's fields (`..`: the others are not looked at)
+    Record(String, Vec<(String, Pat)>, bool, Pos),
+}
+
+/// An arm of a `match`: `pat if guard => body` (the guard sees the pattern's names)
+#[derive(Clone, Debug)]
+pub struct Arm {
+    pub pat: Pat,
+    pub guard: Option<Expr>,
+    pub body: Expr,
+}
+
+impl Arm {
+    pub fn new(pat: Pat, body: Expr) -> Arm {
+        Arm { pat, guard: None, body }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -65,7 +83,7 @@ pub enum EK {
     Bin(&'static str, Box<Expr>, Box<Expr>),
     Un(&'static str, Box<Expr>),
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
-    Match(Box<Expr>, Vec<(Pat, Expr)>),
+    Match(Box<Expr>, Vec<Arm>),
     Block(Vec<Stmt>, Option<Box<Expr>>),
     Closure(Vec<(String, Option<TyS>)>, Box<Expr>),
     /// `Todo { done: true, ..t }`

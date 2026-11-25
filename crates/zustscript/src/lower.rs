@@ -1118,7 +1118,7 @@ impl<'a> Lower<'a> {
         r
     }
 
-    fn match_(&mut self, m: &Expr, sc: &Expr, arms: &[(Pat, Expr)]) -> LResult<(String, Form)> {
+    fn match_(&mut self, m: &Expr, sc: &Expr, arms: &[Arm]) -> LResult<(String, Form)> {
         let st = self.ty(sc.id);
         let t = self.ty(m.id);
         let (ss, sf) = self.ex(sc)?;
@@ -1138,10 +1138,15 @@ impl<'a> Lower<'a> {
         };
         let mut bodies = vec![];
         let mut pats = vec![];
-        for (p, body) in arms {
+        for Arm { pat: p, guard, body } in arms {
             let r = self.scoped(|l| -> LResult<(String, String, Form)> {
                 let mut pre = String::new();
                 let ps = l.pat(p, &st, by_ref, &roots, &mut pre, body.pos)?;
+                // (`pat if guard`: Rust's own guard, with the pattern's names)
+                let ps = match guard {
+                    Some(g) => format!("{ps} if {}", l.expr(g)?),
+                    None => ps,
+                };
                 let (b, f) = l.ex(body)?;
                 // (a borrow of what the arm binds cannot leave the arm)
                 let names: Vec<String> = own::pat_names(p).into_iter().map(|n| format!("@{n}")).collect();
@@ -1204,6 +1209,26 @@ impl<'a> Lower<'a> {
                     ps.push(self.pat(p, &ft, by_ref, roots, pre, pos)?);
                 }
                 if ps.is_empty() { format!("{}::{v}", rs_type(&en)) } else { format!("{}::{v}({})", rs_type(&en), ps.join(", ")) }
+            }
+            Pat::Or(alts) => {
+                let ps = alts.iter().map(|a| self.pat(a, t, by_ref, roots, pre, pos)).collect::<LResult<Vec<_>>>()?;
+                format!("({})", ps.join(" | "))
+            }
+            Pat::Record(n, fs, _, _) => {
+                self.used.insert(n.clone());
+                let r = &self.info.records[n];
+                let m: HashMap<String, Ty> = match t {
+                    Ty::Named(_, targs) => r.params.iter().cloned().zip(targs.iter().cloned()).collect(),
+                    _ => HashMap::new(),
+                };
+                let fts: Vec<(String, Ty)> = r.fields.iter().map(|(f, ft)| (f.clone(), subst_ty(ft, &m))).collect();
+                let mut ps = vec![];
+                for (f, p) in fs {
+                    let ft = fts.iter().find(|x| x.0 == *f).map(|x| x.1.clone()).unwrap_or(Ty::Unit);
+                    ps.push(format!("{}: {}", local(f), self.pat(p, &ft, by_ref, roots, pre, pos)?));
+                }
+                ps.push("..".into());
+                format!("{} {{ {} }}", rs_type(n), ps.join(", "))
             }
             _ => return not_in_subset(pos, "this pattern (a tuple, a float or a string)"),
         })

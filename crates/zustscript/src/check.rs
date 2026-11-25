@@ -1169,6 +1169,56 @@ impl Checker {
                     self.check_pat(s, ft, *vpos, binds);
                 }
             }
+            Pat::Or(alts) => {
+                // (each alternative binds the same names, of the same types)
+                let mut first: Option<Vec<(String, Ty)>> = None;
+                for a in alts {
+                    let mut b = vec![];
+                    self.check_pat(a, t, pos, &mut b);
+                    match &first {
+                        None => first = Some(b),
+                        Some(f) => {
+                            let names = |v: &[(String, Ty)]| v.iter().map(|x| x.0.clone()).collect::<std::collections::BTreeSet<_>>();
+                            if names(f) != names(&b) {
+                                let (x, y) = (names(f).into_iter().collect::<Vec<_>>().join(", "), names(&b).into_iter().collect::<Vec<_>>().join(", "));
+                                self.err(pos, format!("each pattern of an `|` binds the same names: one binds ({x}), another ({y})"));
+                            }
+                            for (n, ty) in &b {
+                                if let Some((_, ft)) = f.iter().find(|x| x.0 == *n) {
+                                    let ft = ft.clone();
+                                    self.unify(pos, ty, &ft);
+                                }
+                            }
+                        }
+                    }
+                }
+                binds.extend(first.unwrap_or_default());
+            }
+            Pat::Record(n, fs, rest, rpos) => {
+                let Some(r) = self.info.records.get(n) else {
+                    return self.err(*rpos, format!("`{n}` is not a record type"));
+                };
+                let params = r.params.clone();
+                let fields = r.fields.clone();
+                let mut all: Vec<Ty> = fields.iter().map(|f| f.1.clone()).collect();
+                all.extend(params.iter().map(|p| Ty::Param(p.clone())));
+                let inst = self.instantiate(&params, &all);
+                let (ftys, targs) = inst.split_at(fields.len());
+                self.unify(*rpos, t, &Ty::Named(n.clone(), targs.to_vec()));
+                for (f, p) in fs {
+                    match fields.iter().position(|x| x.0 == *f) {
+                        Some(k) => {
+                            let ft = ftys[k].clone();
+                            self.check_pat(p, &ft, *rpos, binds);
+                        }
+                        None => self.err(*rpos, format!("`{n}` has no field `{f}`")),
+                    }
+                }
+                let missing: Vec<&str> = fields.iter().filter(|x| !fs.iter().any(|f| f.0 == x.0)).map(|x| x.0.as_str()).collect();
+                if !rest && !missing.is_empty() {
+                    self.err(*rpos, format!("the pattern leaves out the field(s) {} of `{n}`: name them, or end with `..`", missing.join(", ")));
+                }
+            }
         }
     }
 
@@ -1213,7 +1263,23 @@ impl Checker {
     /// a tuple). Numbers and strings have no finite set of them: only the rows with a wildcard there cover them.
     fn uncovered(&self, tys: &[Ty], rows: &[Vec<&Pat>]) -> bool {
         let Some((t, rest)) = tys.split_first() else { return rows.is_empty() };
+        // (`A | B` in the first column: a row for each)
+        if rows.iter().any(|r| matches!(r[0], Pat::Or(_))) {
+            let mut out: Vec<Vec<&Pat>> = vec![];
+            for r in rows {
+                match r[0] {
+                    Pat::Or(alts) => out.extend(alts.iter().map(|a| std::iter::once(a).chain(r[1..].iter().copied()).collect())),
+                    _ => out.push(r.clone()),
+                }
+            }
+            return self.uncovered(tys, &out);
+        }
         let wild = |p: &Pat| matches!(p, Pat::Wild | Pat::Bind(_));
+        // (a record's fields, in their order: a record pattern is a tuple of them)
+        let rec_fields: Vec<String> = match self.resolve(t) {
+            Ty::Named(n, _) => self.info.records.get(&n).map(|r| r.fields.iter().map(|f| f.0.clone()).collect()).unwrap_or_default(),
+            _ => vec![],
+        };
         // (each constructor: its name and the types of its fields)
         let ctors: Option<Vec<(Option<String>, Vec<Ty>)>> = match self.resolve(t) {
             Ty::Named(n, targs) if self.info.enums.contains_key(&n) => {
@@ -1223,6 +1289,11 @@ impl Checker {
             }
             Ty::Bool => Some(vec![(Some("true".into()), vec![]), (Some("false".into()), vec![])]),
             Ty::Tuple(ts) => Some(vec![(None, ts)]),
+            Ty::Named(n, targs) if self.info.records.contains_key(&n) => {
+                let r = &self.info.records[&n];
+                let m: HashMap<String, Ty> = r.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                Some(vec![(None, r.fields.iter().map(|f| Self::subst_params(&f.1, &m)).collect())])
+            }
             _ => None,
         };
         // (no constructor written in this column: only the rows with a wildcard there match, whatever the value. This
@@ -1240,6 +1311,7 @@ impl Checker {
                         (Pat::Variant(_, v, subs, _), Some(c)) if v == c && subs.len() == fields.len() => subs.iter().collect(),
                         (Pat::Lit(Lit::Bool(b)), Some(c)) if b.to_string() == *c => vec![],
                         (Pat::Tuple(ps), None) if ps.len() == fields.len() => ps.iter().collect(),
+                        (Pat::Record(_, fs, _, _), None) => rec_fields.iter().map(|f| fs.iter().find(|x| x.0 == *f).map_or(&Pat::Wild, |x| &x.1)).collect(),
                         _ => return None,
                     };
                     Some(subs.into_iter().chain(r[1..].iter().copied()).collect())
@@ -1808,15 +1880,20 @@ impl Checker {
                     Some(t) => t.clone(),
                     None => self.fresh(),
                 };
-                for (p, body) in arms {
+                for a in arms {
                     let mut binds = vec![];
-                    self.check_pat(p, &st, body.pos, &mut binds);
+                    self.check_pat(&a.pat, &st, a.body.pos, &mut binds);
                     self.scopes.push(binds.into_iter().collect());
-                    let bt = self.infer(body, Some(&out));
-                    self.unify(body.pos, &bt, &out);
+                    if let Some(g) = &a.guard {
+                        let gt = self.infer(g, Some(&Ty::Bool));
+                        self.unify(g.pos, &gt, &Ty::Bool);
+                    }
+                    let bt = self.infer(&a.body, Some(&out));
+                    self.unify(a.body.pos, &bt, &out);
                     self.pop_scope();
                 }
-                let pats: Vec<&Pat> = arms.iter().map(|a| &a.0).collect();
+                // (an arm with a guard may not match: it covers nothing)
+                let pats: Vec<&Pat> = arms.iter().filter(|a| a.guard.is_none()).map(|a| &a.pat).collect();
                 self.exhaustive(pos, &st, &pats);
                 out
             }
@@ -2400,6 +2477,8 @@ fn irrefutable(p: &Pat) -> bool {
     match p {
         Pat::Wild | Pat::Bind(_) => true,
         Pat::Tuple(ps) => ps.iter().all(irrefutable),
+        Pat::Record(_, fs, _, _) => fs.iter().all(|f| irrefutable(&f.1)),
+        Pat::Or(alts) => alts.iter().any(irrefutable),
         _ => false,
     }
 }
@@ -2549,8 +2628,11 @@ impl EffWalk<'_> {
             }
             EK::Match(s, arms) => {
                 out.extend(self.expr(s));
-                for (_, b) in arms {
-                    out.extend(self.expr(b));
+                for a in arms {
+                    if let Some(g) = &a.guard {
+                        out.extend(self.expr(g));
+                    }
+                    out.extend(self.expr(&a.body));
                 }
             }
             EK::Block(stmts, tail) => {
@@ -2673,7 +2755,7 @@ fn tail_resumes(e: &Expr, k: &str) -> bool {
             }) && tail_resumes(t, k)
         }
         EK::If(c, t, Some(el)) => !mentions(c, k) && tail_resumes(t, k) && tail_resumes(el, k),
-        EK::Match(sc, arms) => !mentions(sc, k) && arms.iter().all(|(_, b)| tail_resumes(b, k)),
+        EK::Match(sc, arms) => !mentions(sc, k) && arms.iter().all(|a| a.guard.as_ref().is_none_or(|g| !mentions(g, k)) && tail_resumes(&a.body, k)),
         _ => false,
     }
 }
@@ -2692,7 +2774,7 @@ pub fn diverges(e: &Expr) -> bool {
             None => stmts.last().is_some_and(|s| matches!(s, Stmt::Expr(x) if diverges(x))),
         },
         EK::If(_, t, Some(el)) => diverges(t) && diverges(el),
-        EK::Match(_, arms) => !arms.is_empty() && arms.iter().all(|a| diverges(&a.1)),
+        EK::Match(_, arms) => !arms.is_empty() && arms.iter().all(|a| diverges(&a.body)),
         _ => false,
     }
 }
@@ -2734,7 +2816,10 @@ pub fn subexprs(e: &Expr) -> Vec<&Expr> {
         }
         EK::Match(sc, arms) => {
             v.push(sc);
-            v.extend(arms.iter().map(|a| &a.1));
+            for a in arms {
+                v.extend(a.guard.as_ref());
+                v.push(&a.body);
+            }
         }
         EK::Block(stmts, tail) => {
             for s in stmts {

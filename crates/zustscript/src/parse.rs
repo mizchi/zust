@@ -749,7 +749,20 @@ impl Parser {
         Ok(self.mk(pos, EK::Block(stmts, tail)))
     }
 
+    /// A pattern, or several separated by `|`
     fn pat(&mut self) -> PResult<Pat> {
+        let first = self.pat_one()?;
+        if !self.is("|")? {
+            return Ok(first);
+        }
+        let mut alts = vec![first];
+        while self.eat("|")? {
+            alts.push(self.pat_one()?);
+        }
+        Ok(Pat::Or(alts))
+    }
+
+    fn pat_one(&mut self) -> PResult<Pat> {
         let t = self.next()?;
         Ok(match t.t {
             T::P("(") => {
@@ -775,6 +788,25 @@ impl Parser {
                 let upper = vn.chars().next().is_some_and(|c| c.is_uppercase());
                 if !upper && en.is_none() {
                     return Ok(Pat::Bind(vn));
+                }
+                // `Point { x, y: py, .. }`: a record's fields
+                if en.is_none() && self.eat("{")? {
+                    let (mut fs, mut rest) = (vec![], false);
+                    while !self.eat("}")? {
+                        if self.eat("..")? {
+                            rest = true;
+                            self.expect("}")?;
+                            break;
+                        }
+                        let (f, _) = self.ident()?;
+                        let p = if self.eat(":")? { self.pat()? } else { Pat::Bind(f.clone()) };
+                        fs.push((f, p));
+                        if !self.eat(",")? {
+                            self.expect("}")?;
+                            break;
+                        }
+                    }
+                    return Ok(Pat::Record(vn, fs, rest, t.pos));
                 }
                 let mut subs = vec![];
                 if self.eat("(")? {
@@ -1013,7 +1045,7 @@ impl Parser {
                     let at = th.pos;
                     self.mk(at, EK::Block(vec![], None))
                 };
-                self.mk(pos, EK::Match(Box::new(s), vec![(p, th), (Pat::Wild, el)]))
+                self.mk(pos, EK::Match(Box::new(s), vec![Arm::new(p, th), Arm::new(Pat::Wild, el)]))
             }
             T::Ident(k) if k == "if" => {
                 let c = self.expr(true)?;
@@ -1089,10 +1121,16 @@ impl Parser {
                 self.expect("{")?;
                 let mut arms = vec![];
                 while !self.eat("}")? {
-                    let p = self.pat()?;
+                    let pat = self.pat()?;
+                    let guard = if self.is_kw("if")? {
+                        self.next()?;
+                        Some(self.expr(true)?)
+                    } else {
+                        None
+                    };
                     self.expect("=>")?;
                     let body = self.expr(false)?;
-                    arms.push((p, body));
+                    arms.push(Arm { pat, guard, body });
                     if !self.eat(",")? {
                         self.expect("}")?;
                         break;

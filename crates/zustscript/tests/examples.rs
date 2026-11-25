@@ -1006,6 +1006,35 @@ console.log(m.plain());"#,
     assert!(out.starts_with("error: ") && out.len() > 8, "{out}");
 }
 
+/// tests/patterns.zsc: `A | B`, guards (`n if n < 0`, also on an `|`) and record patterns give the same results lowered
+/// to Rust and run as wasm, and run as JS
+#[test]
+fn patterns_same_in_js_and_wasm() {
+    let src = root().join("tests/patterns.zsc");
+    let mut outs = vec![];
+    for (name, flags) in [("patterns-wasm", &[][..]), ("patterns-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = compare_build(&src, &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        outs.push(node(&d, "const m = await import('./patterns.js'); console.log(JSON.stringify(m.run()));"));
+    }
+    assert_eq!(outs[0], outs[1], "wasm and JS differ");
+    assert_eq!(outs[0], "[1,2,-1,0,3,9,2,3,5,4,0,0,1,2,3,4,1,2,3,3,1,2,0,0,25]\n");
+}
+
+/// tests/patterns_js.zsc: a record destructured by `let` (JS's own destructuring) and `if let`; a name an `|` binds at
+/// different places; a guard with a `?` (written before its test, in the arm's block)
+#[test]
+fn patterns_in_js() {
+    let d = out_dir("patterns_js");
+    let o = zsc(&root().join("tests/patterns_js.zsc"), &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(node(&d, "const m = await import('./patterns_js.js'); console.log(m.run());"), "ann:30 a@x - 1 8 -1 exit help colon ? over 2 none\n");
+    let js = std::fs::read_to_string(d.join("patterns_js.js")).unwrap();
+    assert!(js.contains("  const { name, age } = u;\n"), "{js}");
+    assert!(js.contains("    const x = (e.TAG === \"Click\") ? e._0 : e._1;\n"), "{js}");
+}
+
 /// tests/js_values.zsc: extern types (properties, methods, a setter, a constructor, a module's), `null` from JS as
 /// `None` and `None` to JS as `undefined`, and what JS throws (or a Promise rejects with) as an `Err`
 #[test]

@@ -180,10 +180,13 @@ impl Resolve {
             }
             EK::Match(sc, arms) => {
                 self.expr(sc);
-                for (p, body) in arms {
+                for a in arms {
                     self.scopes.push(HashMap::new());
-                    self.pat(p, body.id);
-                    self.expr(body);
+                    self.pat(&a.pat, a.body.id);
+                    if let Some(g) = &a.guard {
+                        self.expr(g);
+                    }
+                    self.expr(&a.body);
                     self.scopes.pop();
                 }
             }
@@ -264,6 +267,9 @@ pub fn pat_names(p: &Pat) -> Vec<String> {
         match p {
             Pat::Bind(n) => out.push(n.clone()),
             Pat::Tuple(ps) | Pat::Variant(_, _, ps, _) => ps.iter().for_each(|p| go(p, out)),
+            Pat::Record(_, fs, _, _) => fs.iter().for_each(|f| go(&f.1, out)),
+            // (each alternative binds the same names)
+            Pat::Or(alts) => alts.iter().take(1).for_each(|p| go(p, out)),
             Pat::Wild | Pat::Lit(_) => {}
         }
     }
@@ -285,7 +291,7 @@ fn children(e: &Expr) -> Vec<&Expr> {
         EK::Loop(b) => vec![b],
         EK::Return(x) => x.as_deref().into_iter().collect(),
         EK::Assign(_, x) => vec![x],
-        EK::Match(sc, arms) => std::iter::once(&**sc).chain(arms.iter().map(|a| &a.1)).collect(),
+        EK::Match(sc, arms) => std::iter::once(&**sc).chain(arms.iter().flat_map(|a| a.guard.iter().chain(std::iter::once(&a.body)))).collect(),
         EK::For(_, it, b) => vec![it, b],
         EK::Closure(_, b) => vec![b],
         EK::Block(stmts, tail) => stmts
@@ -456,8 +462,11 @@ impl Lv<'_> {
                 let after = live.clone();
                 let root = self.binding_of(sc);
                 let (mut reads, mut assigns) = (HashSet::new(), HashSet::new());
-                for (_, body) in arms {
-                    self.used(body, &mut reads, &mut assigns);
+                for a in arms {
+                    if let Some(g) = &a.guard {
+                        self.used(g, &mut reads, &mut assigns);
+                    }
+                    self.used(&a.body, &mut reads, &mut assigns);
                 }
                 // (the locals the scrutinee reads: it may borrow from any of them, also through a call that returns
                 // a borrow, `match pick(t) { .. }`)
@@ -484,11 +493,21 @@ impl Lv<'_> {
                 }
                 let n = self.frozen.len();
                 self.frozen.extend(frozen);
-                let mut acc = HashSet::new();
-                for (p, body) in arms {
+                // (a guard that fails goes on to the next arms: what is live after it is its body's and theirs)
+                let mut entries = vec![];
+                for a in arms {
                     let mut l = after.clone();
-                    self.expr(body, &mut l);
-                    self.kill_pat(p, body.id, &mut l);
+                    self.expr(&a.body, &mut l);
+                    entries.push(l);
+                }
+                let all: HashSet<usize> = entries.iter().flatten().copied().collect();
+                let mut acc = HashSet::new();
+                for (a, mut l) in arms.iter().zip(entries) {
+                    if let Some(g) = &a.guard {
+                        l.extend(all.iter().copied());
+                        self.expr(g, &mut l);
+                    }
+                    self.kill_pat(&a.pat, a.body.id, &mut l);
                     acc.extend(l);
                 }
                 self.frozen.truncate(n);
