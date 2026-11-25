@@ -66,6 +66,22 @@ pub type R<T> = Result<T, String>;
 
 /// ポインタ型 (x86-64 前提)
 pub const PTR: Type = types::I64;
+/// A vtable entry that is a number, not a function (the concrete type's size and alignment, after the drop entry):
+/// `VT_LIT | n` with n at most VT_LIT_MAX (function ids stay far below VT_LIT; `u32::MAX`, the null entry, is above
+/// every literal)
+pub const VT_LIT: u32 = 0xC000_0000;
+pub const VT_LIT_MAX: u32 = 0x3FFF_FFFE;
+/// The second word of the pair of a struct with an unsized tail made by a coercion: the tail's length, or the
+/// vtable of the tail's type (`S<T>` to `S<dyn Tr>`)
+#[derive(Clone, Copy)]
+pub(crate) enum TailMeta {
+    Len(i64),
+    Dyn(Ty, &'static String),
+}
+
+pub fn vt_lit(f: u32) -> Option<u64> {
+    (f != u32::MAX && f >= VT_LIT).then_some((f & !VT_LIT) as u64)
+}
 
 /// エラーの場所 (今は使わない)
 /// ソース上の位置 (アイテムの中の行・桁)。分からないところは SP (0 行目)
@@ -485,6 +501,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         closure_bound: None,
         closure_prelude: false,
         closure_fn_only: false,
+        lub_fnptr: 0,
         hr_lost: vec![],
         clo_ann: vec![],
         clo_ret_param: vec![],
@@ -624,7 +641,9 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
             || prog.use_names.contains(n);
         !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_') && !e.contains("(unsupported path)") && !item
     };
-    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e) && !placeholder_mismatch(e, &bound_eqs, &free) && !undeclared(e)) {
+    // (nor what the trait solver proved of a type with no placeholder in it: crate::traits::SOLVED_NO)
+    let solved = |e: &str| e.contains(crate::traits::SOLVED_NO) || e.contains(&crate::traits::SOLVED_NO.replace("E0277", "E0271"));
+    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e) && !placeholder_mismatch(e, &bound_eqs, &free) && !undeclared(e) && !solved(e)) {
         if regionck::debug() {
             eprintln!("regionck: placeholder instance not checked: {}", r.as_ref().err().map(|e| e.as_str()).unwrap_or(""));
         }
@@ -633,6 +652,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     }
     // (a placeholder's type by its parameter's name: `T`, not `T#`)
     let r = if placeholder { r.map_err(|e| e.replace("#`", "`").replace("#>", ">").replace("#,", ",").replace("#:", ":")) } else { r };
+    let r = r.map_err(|e| if solved(&e) { e.replace(crate::traits::SOLVED_NO, "(E0277)").replace(&crate::traits::SOLVED_NO.replace("E0277", "E0271"), "(E0271)") } else { e });
     r?;
     cx.bk_check()?;
     let rerun = cx.rg.rerun && !force_rg;
@@ -799,6 +819,8 @@ pub(crate) fn addr_taken(b: &crate::parse::Block, mut_methods: &crate::fxhash::F
 /// エラーの場所にする位置: メソッド呼び出しはメソッド名 (rustc・syn 版と同じ)、ほかは式の先頭
 pub fn err_pos(e: &Expr) -> Sp {
     match e {
+        // (one the lowering made has no position: its receiver's)
+        Expr::MethodCall(r, _, _, _, s) | Expr::Field(r, _, s) if s.at.line == 0 => expr_start(r),
         Expr::MethodCall(_, _, _, _, s) | Expr::Field(_, _, s) => s.at,
         e => expr_start(e),
     }
@@ -827,6 +849,8 @@ pub fn block_end_pos(b: &crate::parse::Block) -> Sp {
 /// 式の先頭のソース上の位置 (syn の `e.span()` の始まり)。位置を持つ式か、その一番左の子から。分からなければ SP
 pub fn expr_start(e: &Expr) -> Sp {
     match e {
+        // (one the lowering made has no position (`&v[..]` for `&*v`): that of its first operand)
+        Expr::Unary(_, x, s) | Expr::Binary(_, x, _, s) | Expr::AssignOp(_, x, _, s) | Expr::MethodCall(x, _, _, _, s) | Expr::Index(x, _, s) if s.start.line == 0 => expr_start(x),
         Expr::Unary(_, _, s) | Expr::Binary(_, _, _, s) | Expr::AssignOp(_, _, _, s) | Expr::MethodCall(_, _, _, _, s) | Expr::Index(_, _, s) | Expr::Macro(_, _, s) => s.start,
         Expr::Field(_, _, s) => s.start,
         Expr::Call(x, _) | Expr::Cast(x, _) | Expr::Try(x) | Expr::Paren(x) | Expr::Assign(x, _) => expr_start(x),
@@ -883,6 +907,24 @@ pub fn ident_of(p: &Path) -> Option<&str> {
 pub fn is_ident(p: &Path, n: &str) -> bool {
     ident_of(p) == Some(n)
 }
+
+/// A `&mut T` wanted of a reference to a reference with a shared one on the way (`&mut &T`, `&&mut T`): the deref
+/// coercion would borrow mutably through a `&`, rustc's E0596 where the value is coerced
+pub(crate) fn mut_through_shared(t: Ty, want: Ty) -> bool {
+    let Ty::Ref(true, w) = want else { return false };
+    let (mut cur, mut shared) = (t, false);
+    for depth in 0..8 {
+        let Ty::Ref(m, inner) = cur else { return false };
+        shared |= !m;
+        if depth >= 1 && *inner == *w {
+            return shared;
+        }
+        cur = *inner;
+    }
+    false
+}
+
+pub(crate) const MUT_THROUGH_SHARED: &str = "cannot borrow data in a `&` reference as mutable (E0596)";
 
 /// 名前だけのパス
 pub fn path_of(n: &str) -> Path {
@@ -1037,6 +1079,9 @@ pub struct Cx<'p> {
     pub closure_prelude: bool,
     /// The closure being lowered is passed where a bound wants `Fn`: it may not mutate what it captures
     pub closure_fn_only: bool,
+    /// >0 while lowering match arms / array or vec! elements whose fn-pointer type came from closures_lub: a closure
+    /// local there is coerced to its fn pointer (nowhere else: calling a closure local must not become a fn pointer)
+    pub lub_fnptr: u32,
     /// Closures made where nothing was expected (their kind, signature: from the body), by their definition: the
     /// parameters with no type written that are references (one region each, not higher-ranked)
     pub hr_lost: Vec<(u32, Vec<usize>)>,
@@ -1211,7 +1256,9 @@ impl Cx<'_> {
             return self.prog.consts[ci as usize].stat.is_none();
         }
         let Expr::Path(None, path) = path_expr(n) else { return false };
-        self.prog.variant_by_p(&PPath::of(&path), self.self_sid).is_some()
+        let pp = PPath::of(&path);
+        // (or a unit struct: `let Unit = u;` binds nothing, nor moves u)
+        self.prog.variant_by_p(&pp, self.self_sid).is_some() || self.prog.struct_by_p(&pp, self.self_sid).is_some_and(|s| self.unit_struct_pat(n, Ty::Struct(s)))
     }
 }
 
@@ -1649,6 +1696,7 @@ impl Cx<'_> {
         // captures none, so its hidden type's regions are 'static too (E0700 in rustc). Not with type parameters,
         // which it captures)
         self.bk.lint_mut = self.prog.deny_unused_mut && self.user_code && self.bk_on() && self.bk.level >= 2;
+        self.bk.ret_impl = matches!(&f.sig.ret, Some(crate::parse::Ty::Impl(_)));
         self.bk.ret_no_capture = self.bk_on()
             && self.user_code
             && self.prog.opaque.contains(&self.rg.base)
@@ -1783,7 +1831,7 @@ impl Cx<'_> {
                             continue;
                         }
                         let Ok(t) = self.parse_ty(subj) else { continue };
-                        let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                        let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 0, derived: None };
                         let mut codes = vec![];
                         sl.slots(subj, false, &mut codes);
                         let lts = self.rg.lts.clone();
@@ -1995,6 +2043,29 @@ impl Cx<'_> {
         (None, Ty::Never)
     }
 
+    /// A block's value that is a `Copy` aggregate read out of a place that what the block drops may own (`v[0]` of a
+    /// Vec local, `b.0` of a Box): copied out first, as rustc evaluates the tail before the drops. So is the deref
+    /// coercion to the type expected of it (`let c = &v[0]; c` returned as a `&str`): what it reads is read before
+    fn detach_tail(&mut self, r: V, t0: usize, want: Option<Ty>) -> V {
+        let depth = self.scopes.len() - 1;
+        if r.0.is_none() || !(self.temps.len() > t0 || self.owned.iter().any(|o| o.depth >= depth)) {
+            return r;
+        }
+        let (v, t) = match want {
+            Some(w @ Ty::Ref(..)) if r.1 != w && matches!(r.1, Ty::Ref(_, Ty::Ref(..))) => self.deref_coerce(r.0, r.1, w),
+            _ => r,
+        };
+        // (not a stack slot's address (a local's, a match's result): no drop frees it)
+        if let Some(v) = v {
+            if t.is_agg() && !self.fresh.contains_key(&v.0) && !self.b.is_stack_addr(v) {
+                let a = self.temp_fresh(t);
+                self.copy(a, v, t);
+                return (Some(a), t);
+            }
+        }
+        (v, t)
+    }
+
     pub fn block(&mut self, blk: &crate::parse::Block, expected: Option<Ty>) -> R<V> {
         let saved = self.stmt_i;
         let r = self.block_stmts(blk, expected);
@@ -2072,9 +2143,20 @@ impl Cx<'_> {
                 Stmt::Let(pat, ann_ty, init, els, ..) if !is_simple_let(pat) || els.is_some() || self.names_variant_or_const(pat) => {
                     // 分解する let (`let S { x, y } = s;`): 反駁不能パターンとして束縛だけ行う
                     let Some(init) = init else {
+                        // (a pattern that binds no name declares nothing: `let S { field: _, .. };`, libc 0.2's
+                        //  `offset_of!`, whose check that the field exists rustc makes and zustc does not yet)
+                        if matches!(pat, Pat::Struct(..)) && !pat_binds_any(pat) {
+                            continue;
+                        }
                         return err(SP, "`let` without initializer is not supported");
                     };
                     let ann = ann_ty.as_ref().and_then(|t| self.parse_ty(t).ok());
+                    // (`let Some(n): &mut Option<i32> = &mut &Some(5) else { .. }`: E0596, as for a plain `let`)
+                    if let (Some(a), true) = (ann, self.bk_on()) {
+                        if self.peek(init).is_some_and(|t| mut_through_shared(t, a)) {
+                            return Err(self.at(expr_start(init), MUT_THROUGH_SHARED.to_string()));
+                        }
+                    }
                     // (an annotation that writes `'static`: checked from here on, as a `let x: &'static T`, from
                     // its initializer, whose calls are lowered with the check on)
                     if let Some(a) = ann_ty {
@@ -2155,13 +2237,16 @@ impl Cx<'_> {
                     self.bk.scrut_place = scrut_saved.1;
                     self.rg.scrut = scrut_saved.2;
                     let ob = self.owned_binds;
+                    let pm = self.bk.pat_moves;
                     let pre = if is_place_expr(init) { self.moved_flag(init) } else { None };
                     self.bk_bind_begin();
                     let r = self.pat_bind(pat, place, BindMode::Move);
                     self.bk_bind_end();
                     r?;
-                    if self.owned_binds > ob {
+                    if self.owned_binds > ob || self.bk.pat_moves > pm {
                         self.deref_move_check(init)?;
+                    }
+                    if self.owned_binds > ob {
                         match pre {
                             Some(f) => self.clear_flag(f),
                             None => {
@@ -2238,6 +2323,9 @@ impl Cx<'_> {
                             continue;
                         }
                         if let Some(a) = full.filter(|&a| a != t) {
+                            if self.bk_on() && mut_through_shared(t, a) {
+                                return Err(self.at(expr_start(init), MUT_THROUGH_SHARED.to_string()));
+                            }
                             let (v2, t2) = self.deref_coerce(v, t, a);
                             if t2 == a {
                                 v = v2;
@@ -2289,7 +2377,7 @@ impl Cx<'_> {
                             .lets
                             .get(&crate::ast_infer::stmt_key(st))
                             .copied()
-                            .filter(|t| !matches!(t, Ty::Slice(_) | Ty::Str | Ty::Dyn(_))),
+                            .filter(|t| !t.is_unsized()),
                     };
                     // (assert_eq! の展開: 右の値の型は左と同じ)
                     let hintable = |e: &Expr| {
@@ -2474,6 +2562,9 @@ impl Cx<'_> {
                     let mut ann = ann.filter(|&a| !has_hole(self.prog, a));
                     // (型推論の結果 (注釈なし) と違う: `&&str` → `&str` は deref の強制変換、それでも違えば実際の型)
                     if let Some(a) = ann.filter(|&a| a != t) {
+                        if self.bk_on() && mut_through_shared(t, a) {
+                            return Err(self.at(expr_start(init), MUT_THROUGH_SHARED.to_string()));
+                        }
                         let (v2, t2) = self.deref_coerce(v, t, a);
                         if t2 == a {
                             v = v2;
@@ -2518,7 +2609,7 @@ impl Cx<'_> {
                         diverged = true;
                     }
                     if last && !*semi {
-                        result = r;
+                        result = self.detach_tail(r, t0, None);
                         self.drop_tail_temps(t0, result);
                     } else {
                         self.drop_temps(t0);
@@ -2656,7 +2747,7 @@ impl Cx<'_> {
                         diverged = true;
                     }
                     if last && !*semi {
-                        result = r;
+                        result = self.detach_tail(r, t0, exp);
                         self.drop_tail_temps(t0, result);
                     } else {
                         if !*semi && !matches!(r.1, Ty::Unit | Ty::Never) {
@@ -2833,6 +2924,31 @@ impl Cx<'_> {
                         Ty::Array(e, _) => return Some(*e),
                         Ty::Ref(_, Ty::Slice(e)) => return Some(**e),
                         Ty::Ref(_, i) => t = *i,
+                        // (a type's own `Index`: what its `index` returns a reference to, so a field read through its
+                        // `Deref` is found (`v[0].f` with `Output = MyPtr<Foo>`))
+                        // (of the program's own types: the prelude's (`Vec`) are read where they are lowered)
+                        Ty::Struct(sid) if self.prog.struct_item.get(self.prog.base_of(sid) as usize).is_some_and(|&i| i < self.prog.prelude_from) => {
+                            let id = self.prog.method(sid, "index")?;
+                            // (not where it has several (`Index<usize>` and `Index<&str>`): which one the index takes is
+                            // not known here)
+                            let gname = &self.prog.names[id as usize];
+                            if self.prog.overloads.get(gname.split('#').next().unwrap_or(gname)).is_some_and(|c| c.len() > 1) {
+                                return None;
+                            }
+                            let sig = &self.prog.sigs[id as usize];
+                            let mut sol = vec![None; sig.generics.len()];
+                            if sig.trait_of.is_some() {
+                                if let Some(s0) = sol.first_mut() {
+                                    *s0 = Some(Ty::Struct(sid));
+                                }
+                            } else if let Some(st) = sig.self_ty {
+                                self.prog.match_ty(st, Ty::Struct(sid), &mut sol);
+                            }
+                            return match self.prog.partial_subst(sig.ret, &sol) {
+                                Ty::Ref(_, i) if !self.prog.has_param(*i) => Some(*i),
+                                _ => None,
+                            };
+                        }
                         _ => return None,
                     }
                 }
@@ -3217,6 +3333,17 @@ pub(crate) fn plainly_irrefutable(p: &Pat) -> bool {
 }
 
 /// p binds a name by `ref mut` somewhere
+/// Whether a pattern binds a name (an identifier pattern anywhere in it)
+pub(crate) fn pat_binds_any(p: &Pat) -> bool {
+    match p {
+        Pat::Ident(..) => true,
+        Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Slice(ps) | Pat::Or(ps) => ps.iter().any(pat_binds_any),
+        Pat::Struct(_, fs, _) => fs.iter().any(|(_, q)| pat_binds_any(q)),
+        Pat::Ref(_, q) => pat_binds_any(q),
+        _ => false,
+    }
+}
+
 pub(crate) fn pat_binds_ref_mut(p: &Pat) -> bool {
     match p {
         Pat::Ident(r, m, _, sub) => (*r && *m) || sub.as_deref().is_some_and(pat_binds_ref_mut),

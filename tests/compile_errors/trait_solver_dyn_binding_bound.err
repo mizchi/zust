@@ -1,0 +1,1 @@
+ 7:5: the trait bound `dyn X < Y = str >: X` is not satisfied (for `T`) (E0277)

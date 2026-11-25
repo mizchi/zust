@@ -1,0 +1,1 @@
+ 13:1: type mismatch resolving `<Foo2 as Bar2>::Ok == ()`: it is `u32` (E0271)

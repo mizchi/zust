@@ -1101,6 +1101,23 @@ impl<'a> PreludeScan<'a> {
     }
 }
 
+/// Whether src writes a C string literal, `c"..."` / `cr"..."`: a `c` that starts a token (not the end of `"abc"` or of a
+/// name)
+fn has_cstr_literal(src: &str) -> bool {
+    let b = src.as_bytes();
+    let mut i = 0;
+    while let Some(k) = src[i..].find('c') {
+        let at = i + k;
+        let starts = at == 0 || !(b[at - 1].is_ascii_alphanumeric() || matches!(b[at - 1], b'_' | b'"' | b'\''));
+        let rest = &b[at + 1..];
+        if starts && (rest.first() == Some(&b'"') || (rest.first() == Some(&b'r') && matches!(rest.get(1), Some(b'"' | b'#')))) {
+            return true;
+        }
+        i = at + 1;
+    }
+    false
+}
+
 pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCache) -> String {
     let all = items();
     // ユーザの識別子のうち、prelude が定義する名前 (と関係する名前) に当たるものだけを集める。
@@ -1187,6 +1204,12 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         cache.map.insert(it.hash, (names, c));
     }
     let mut sc = PreludeScan::new(user_src, user_items, &mut cache.scan);
+    // (`c"..."`: codegen makes it a call of __exr_cstr_lit, a `&'static CStr`; before the `no_std` return, which a
+    //  program needing nothing else takes)
+    if has_cstr_literal(user_src) {
+        need.insert("__exr_cstr_lit");
+        need.insert("CStr");
+    }
     // (std のプログラムは panic のハンドラを必ず使うので、何も使わなくても prelude を付ける)
     if need.is_empty() && sc.has("no_std") {
         return String::new();
@@ -1243,6 +1266,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     let producer = ["iter", "iter_mut", "into_iter"].iter().any(|n| need.contains(n));
     if sc.has("ptr::eq") {
         need.insert("__exr_ptr_eq");
+    }
+    // (`__core_ptr_swap`, whose definition is looked up as `ptr_swap`)
+    if sc.has("ptr::swap") {
+        need.insert("ptr_swap");
     }
     for (path, f) in [("Ref::map", "__exr_ref_map"), ("RefMut::map", "__exr_refmut_map"), ("Ref::clone", "__exr_ref_clone")] {
         if sc.has(path) {
@@ -1707,7 +1734,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         || ["split", "split_whitespace", "lines"].iter().any(|n| need.contains(n))
         || need.contains("chars")
         || chain
-        || (producer && need.contains("next"));
+        || (producer && need.contains("next"))
+        // (a slice iterator's type named: `xs: &mut std::slice::Iter<'a, T>`, iterated with no `iter()` of its own)
+        || ["Iter", "IterMut"].iter().any(|n| need.contains(n));
     // 大小比較: `<` は識別子として現れないので、比較を使いそうな名前 (Ord / sort / cmp など) で glue を付ける
     // (イテレータの max / min も中で `>=` を使う)
     const ORD_NAMES: &[&str] = &[
@@ -2011,4 +2040,19 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
 
     out
+}
+
+#[cfg(test)]
+mod cstr_literal_tests {
+    /// A C string literal starts a token: `"c"` and `abc"` are ordinary strings (examples/shared.rs took the C string
+    /// helpers for `Node::new("c", 4)`)
+    #[test]
+    fn c_string_literal_starts_a_token() {
+        assert!(super::has_cstr_literal("let s = c\"hi\";"));
+        assert!(super::has_cstr_literal("f(cr\"raw\")"));
+        assert!(super::has_cstr_literal("c\"at the start\""));
+        assert!(!super::has_cstr_literal("Node::new(\"c\", 4)"));
+        assert!(!super::has_cstr_literal("let abc\" = 1;"));
+        assert!(!super::has_cstr_literal("let spec\"x\" = 1;"));
+    }
 }

@@ -91,6 +91,10 @@ pub enum EK {
     Handle(Box<Expr>, Vec<HArm>),
     /// `` `hi ${name}, ${n}` ``: the literal parts (one more than the holes) and the holes (strings, numbers, bools)
     Interp(Vec<String>, Vec<Expr>),
+    /// `await e`: the value of the `Promise<T>` `e` (in an `async fn` or an `async` closure)
+    Await(Box<Expr>),
+    /// `async (x) => e`: the closure inside, which gives a `Promise` of its body's value
+    Async(Box<Expr>),
 }
 
 #[derive(Clone, Debug)]
@@ -272,7 +276,8 @@ pub enum Item {
     /// (`wasm`: written `@wasm fn`: lowered to Rust and compiled to wasm, see lower.rs)
     /// (`simd`: written `@simd fn`: an array kernel vectorized with v128, see simd.rs)
     /// (`relaxed`: `@simd(relaxed)`: relaxed SIMD allowed: fused multiply-add, relaxed min / max)
-    Fn { name: String, public: bool, wasm: bool, simd: bool, relaxed: bool, generics: Vec<String>, bounds: Vec<(String, String)>, args: Vec<(String, TyS)>, ret: Option<TyS>, body: Expr, pos: Pos },
+    /// (`is_async`: written `async fn`: its callers get a `Promise<T>` of its result `T`, and its body may `await`)
+    Fn { name: String, public: bool, wasm: bool, simd: bool, relaxed: bool, is_async: bool, generics: Vec<String>, bounds: Vec<(String, String)>, args: Vec<(String, TyS)>, ret: Option<TyS>, body: Expr, pos: Pos },
     /// `extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";`
     Extern { name: String, module: Option<String>, generics: Vec<String>, args: Vec<TyS>, ret: TyS, js: String, pos: Pos },
     /// `wasm fn` (the text is the whole Rust function, handed to zustc)

@@ -73,12 +73,28 @@
       "path": "docs/ja/reports/2026-11-23-04-region-check-16.md",
       "role": "historical"
     },
+    "docs_reports_2026-11-23-04-trait-solver.en": {
+      "path": "docs/reports/2026-11-23-04-trait-solver.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-23-04-trait-solver.ja": {
+      "path": "docs/ja/reports/2026-11-23-04-trait-solver.md",
+      "role": "historical"
+    },
     "docs_reports_2026-11-23-05-test-time.en": {
       "path": "docs/reports/2026-11-23-05-test-time.md",
       "role": "historical"
     },
     "docs_reports_2026-11-23-05-test-time.ja": {
       "path": "docs/ja/reports/2026-11-23-05-test-time.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-23-05-trait-solver-2.en": {
+      "path": "docs/reports/2026-11-23-05-trait-solver-2.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-23-05-trait-solver-2.ja": {
+      "path": "docs/ja/reports/2026-11-23-05-trait-solver-2.md",
       "role": "historical"
     },
     "docs_reports_2026-11-23-06-region-check-17.en": {
@@ -89,12 +105,28 @@
       "path": "docs/ja/reports/2026-11-23-06-region-check-17.md",
       "role": "historical"
     },
+    "docs_reports_2026-11-23-06-trait-solver-3.en": {
+      "path": "docs/reports/2026-11-23-06-trait-solver-3.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-23-06-trait-solver-3.ja": {
+      "path": "docs/ja/reports/2026-11-23-06-trait-solver-3.md",
+      "role": "historical"
+    },
     "docs_reports_2026-11-23-07-region-check-18.en": {
       "path": "docs/reports/2026-11-23-07-region-check-18.md",
       "role": "historical"
     },
     "docs_reports_2026-11-23-07-region-check-18.ja": {
       "path": "docs/ja/reports/2026-11-23-07-region-check-18.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-23-07-trait-solver-4.en": {
+      "path": "docs/reports/2026-11-23-07-trait-solver-4.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-23-07-trait-solver-4.ja": {
+      "path": "docs/ja/reports/2026-11-23-07-trait-solver-4.md",
       "role": "historical"
     },
     "docs_reports_2026-11-23-08-rust-frontier-survey.en": {
@@ -113,12 +145,36 @@
       "path": "docs/ja/reports/2026-11-24-01-region-check-19.md",
       "role": "historical"
     },
+    "docs_reports_2026-11-24-01-trait-solver-5.en": {
+      "path": "docs/reports/2026-11-24-01-trait-solver-5.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-01-trait-solver-5.ja": {
+      "path": "docs/ja/reports/2026-11-24-01-trait-solver-5.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-02-inference-coercions.en": {
+      "path": "docs/reports/2026-11-24-02-inference-coercions.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-02-inference-coercions.ja": {
+      "path": "docs/ja/reports/2026-11-24-02-inference-coercions.md",
+      "role": "historical"
+    },
     "docs_reports_2026-11-24-02-parallel-check.en": {
       "path": "docs/reports/2026-11-24-02-parallel-check.md",
       "role": "historical"
     },
     "docs_reports_2026-11-24-02-parallel-check.ja": {
       "path": "docs/ja/reports/2026-11-24-02-parallel-check.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-03-inference-coercions-2.en": {
+      "path": "docs/reports/2026-11-24-03-inference-coercions-2.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-03-inference-coercions-2.ja": {
+      "path": "docs/ja/reports/2026-11-24-03-inference-coercions-2.md",
       "role": "historical"
     },
     "docs_reports_2026-11-24-03-polonius-alpha.en": {
@@ -129,12 +185,28 @@
       "path": "docs/ja/reports/2026-11-24-03-polonius-alpha.md",
       "role": "historical"
     },
+    "docs_reports_2026-11-24-04-dst-struct-tails.en": {
+      "path": "docs/reports/2026-11-24-04-dst-struct-tails.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-04-dst-struct-tails.ja": {
+      "path": "docs/ja/reports/2026-11-24-04-dst-struct-tails.md",
+      "role": "historical"
+    },
     "docs_reports_2026-11-24-04-region-check-20.en": {
       "path": "docs/reports/2026-11-24-04-region-check-20.md",
       "role": "historical"
     },
     "docs_reports_2026-11-24-04-region-check-20.ja": {
       "path": "docs/ja/reports/2026-11-24-04-region-check-20.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-05-dst-dyn-tails.en": {
+      "path": "docs/reports/2026-11-24-05-dst-dyn-tails.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-05-dst-dyn-tails.ja": {
+      "path": "docs/ja/reports/2026-11-24-05-dst-dyn-tails.md",
       "role": "historical"
     },
     "docs_reports_2026-11-24-05-region-check-21.en": {
@@ -199,6 +271,54 @@
     },
     "docs_reports_2026-11-24-12-region-check-26.ja": {
       "path": "docs/ja/reports/2026-11-24-12-region-check-26.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-13-region-check-27.en": {
+      "path": "docs/reports/2026-11-24-13-region-check-27.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-13-region-check-27.ja": {
+      "path": "docs/ja/reports/2026-11-24-13-region-check-27.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-14-region-check-28.en": {
+      "path": "docs/reports/2026-11-24-14-region-check-28.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-14-region-check-28.ja": {
+      "path": "docs/ja/reports/2026-11-24-14-region-check-28.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-15-projection-goals.en": {
+      "path": "docs/reports/2026-11-24-15-projection-goals.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-15-projection-goals.ja": {
+      "path": "docs/ja/reports/2026-11-24-15-projection-goals.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-25-01-region-check-29.en": {
+      "path": "docs/reports/2026-11-25-01-region-check-29.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-25-01-region-check-29.ja": {
+      "path": "docs/ja/reports/2026-11-25-01-region-check-29.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-25-02-region-check-30.en": {
+      "path": "docs/reports/2026-11-25-02-region-check-30.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-25-02-region-check-30.ja": {
+      "path": "docs/ja/reports/2026-11-25-02-region-check-30.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-25-03-region-check-31.en": {
+      "path": "docs/reports/2026-11-25-03-region-check-31.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-25-03-region-check-31.ja": {
+      "path": "docs/ja/reports/2026-11-25-03-region-check-31.md",
       "role": "historical"
     }
   },
@@ -303,6 +423,17 @@
       }
     },
     {
+      "id": "docs_reports_2026-11-23-04-trait-solver",
+      "topic": "The Japanese file docs/ja/reports/2026-11-23-04-trait-solver.md is a faithful translation of docs/reports/2026-11-23-04-trait-solver.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-23-04-trait-solver.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-23-04-trait-solver.ja"
+      }
+    },
+    {
       "id": "docs_reports_2026-11-23-05-test-time",
       "topic": "The Japanese file docs/ja/reports/2026-11-23-05-test-time.md is a faithful translation of docs/reports/2026-11-23-05-test-time.md",
       "mode": "translation",
@@ -311,6 +442,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-23-05-test-time.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-23-05-trait-solver-2",
+      "topic": "The Japanese file docs/ja/reports/2026-11-23-05-trait-solver-2.md is a faithful translation of docs/reports/2026-11-23-05-trait-solver-2.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-23-05-trait-solver-2.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-23-05-trait-solver-2.ja"
       }
     },
     {
@@ -325,6 +467,17 @@
       }
     },
     {
+      "id": "docs_reports_2026-11-23-06-trait-solver-3",
+      "topic": "The Japanese file docs/ja/reports/2026-11-23-06-trait-solver-3.md is a faithful translation of docs/reports/2026-11-23-06-trait-solver-3.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-23-06-trait-solver-3.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-23-06-trait-solver-3.ja"
+      }
+    },
+    {
       "id": "docs_reports_2026-11-23-07-region-check-18",
       "topic": "The Japanese file docs/ja/reports/2026-11-23-07-region-check-18.md is a faithful translation of docs/reports/2026-11-23-07-region-check-18.md",
       "mode": "translation",
@@ -333,6 +486,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-23-07-region-check-18.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-23-07-trait-solver-4",
+      "topic": "The Japanese file docs/ja/reports/2026-11-23-07-trait-solver-4.md is a faithful translation of docs/reports/2026-11-23-07-trait-solver-4.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-23-07-trait-solver-4.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-23-07-trait-solver-4.ja"
       }
     },
     {
@@ -358,6 +522,28 @@
       }
     },
     {
+      "id": "docs_reports_2026-11-24-01-trait-solver-5",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-01-trait-solver-5.md is a faithful translation of docs/reports/2026-11-24-01-trait-solver-5.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-01-trait-solver-5.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-01-trait-solver-5.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-02-inference-coercions",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-02-inference-coercions.md is a faithful translation of docs/reports/2026-11-24-02-inference-coercions.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-02-inference-coercions.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-02-inference-coercions.ja"
+      }
+    },
+    {
       "id": "docs_reports_2026-11-24-02-parallel-check",
       "topic": "The Japanese file docs/ja/reports/2026-11-24-02-parallel-check.md is a faithful translation of docs/reports/2026-11-24-02-parallel-check.md",
       "mode": "translation",
@@ -366,6 +552,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-24-02-parallel-check.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-03-inference-coercions-2",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-03-inference-coercions-2.md is a faithful translation of docs/reports/2026-11-24-03-inference-coercions-2.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-03-inference-coercions-2.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-03-inference-coercions-2.ja"
       }
     },
     {
@@ -380,6 +577,17 @@
       }
     },
     {
+      "id": "docs_reports_2026-11-24-04-dst-struct-tails",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-04-dst-struct-tails.md is a faithful translation of docs/reports/2026-11-24-04-dst-struct-tails.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-04-dst-struct-tails.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-04-dst-struct-tails.ja"
+      }
+    },
+    {
       "id": "docs_reports_2026-11-24-04-region-check-20",
       "topic": "The Japanese file docs/ja/reports/2026-11-24-04-region-check-20.md is a faithful translation of docs/reports/2026-11-24-04-region-check-20.md",
       "mode": "translation",
@@ -388,6 +596,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-24-04-region-check-20.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-05-dst-dyn-tails",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-05-dst-dyn-tails.md is a faithful translation of docs/reports/2026-11-24-05-dst-dyn-tails.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-05-dst-dyn-tails.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-05-dst-dyn-tails.ja"
       }
     },
     {
@@ -476,6 +695,72 @@
       },
       "target": {
         "source": "docs_reports_2026-11-24-12-region-check-26.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-13-region-check-27",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-13-region-check-27.md is a faithful translation of docs/reports/2026-11-24-13-region-check-27.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-13-region-check-27.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-13-region-check-27.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-14-region-check-28",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-14-region-check-28.md is a faithful translation of docs/reports/2026-11-24-14-region-check-28.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-14-region-check-28.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-14-region-check-28.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-15-projection-goals",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-15-projection-goals.md is a faithful translation of docs/reports/2026-11-24-15-projection-goals.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-15-projection-goals.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-15-projection-goals.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-25-01-region-check-29",
+      "topic": "The Japanese file docs/ja/reports/2026-11-25-01-region-check-29.md is a faithful translation of docs/reports/2026-11-25-01-region-check-29.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-25-01-region-check-29.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-25-01-region-check-29.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-25-02-region-check-30",
+      "topic": "The Japanese file docs/ja/reports/2026-11-25-02-region-check-30.md is a faithful translation of docs/reports/2026-11-25-02-region-check-30.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-25-02-region-check-30.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-25-02-region-check-30.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-25-03-region-check-31",
+      "topic": "The Japanese file docs/ja/reports/2026-11-25-03-region-check-31.md is a faithful translation of docs/reports/2026-11-25-03-region-check-31.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-25-03-region-check-31.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-25-03-region-check-31.ja"
       }
     }
   ]

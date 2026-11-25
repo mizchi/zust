@@ -1,0 +1,3 @@
+// expect: write its result as the value (`-> T`), callers get `Promise<T>`
+extern fn p() -> Promise<i32> = "p";
+export async fn f() -> Promise<i32> { p() }

@@ -89,11 +89,25 @@ impl Ty {
     #[inline]
     pub fn is_fat(self) -> bool {
         match self {
-            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) => matches!(i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)),
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) => i.is_unsized(),
             _ => false,
         }
     }
+    /// A type without a size known statically: `[T]`, `str`, `dyn Tr`, a struct with such a tail (what a pointer to
+    /// is a pair)
+    #[inline]
+    pub fn is_unsized(self) -> bool {
+        matches!(self, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) || self.is_dst_struct()
+    }
+    /// 最後のフィールドが unsized な struct のインスタンス (`Foo<[u8]>`): 番号に `DST_TAG` が付いている
+    #[inline]
+    pub fn is_dst_struct(self) -> bool {
+        matches!(self, Ty::Struct(s) if s & DST_TAG != 0)
+    }
 }
+
+/// 最後のフィールドが unsized な struct のインスタンスの番号に付ける印 (`&Foo<[u8]>` も fat pointer になる)
+pub const DST_TAG: u32 = 1 << 31;
 
 /// 文字列の intern 表 (`dyn` の trait 境界)
 /// (`Ty` を 16 byte に保つため、fat な `&str` ではなく `&String` を持つ)
@@ -289,6 +303,10 @@ pub struct SigSyn {
     pub ret_from: u64,
     /// The regions of the signature (None: it writes no reference and no lifetime, so every region in it is elided)
     pub regions: Option<Box<RSigSyn>>,
+    /// The fn's own where clauses on other than a parameter (`where T::A: Bar`, `where <T as Tr>::A: Bar`, `where
+    /// W<T>: Bar`): the type, the trait of a qualified path (`Tr`; empty otherwise), the bounds. The trait solver
+    /// proves them as goals once the parameters are known (issue #2)
+    pub preds: Vec<(TySyn, String, Vec<String>)>,
 }
 
 // ---- regions of signatures (region checking; `Ty` itself carries none) ----
@@ -335,6 +353,12 @@ pub struct RSigSyn {
     /// An impl's method: the region slots of the impl's self type (it is well formed: implied in the body, required
     /// of a call)
     pub self_slots: Vec<u8>,
+    /// The outlives that a bound on a type implies of its parts (`D<'a>: 'b`: 'a: 'b), with the names of the paths
+    /// the part is in (`D`, comma-separated): the program adds them where none of those is a type alias, whose
+    /// lifetimes may not be in what it stands for (`type Erased<'a> = ();`)
+    pub derived: Vec<(String, u8, u8)>,
+    /// The same for type parameters (`E<'a, T>: 'b`: T: 'b): (paths, parameter, code)
+    pub derived_ty: Vec<(String, String, u8)>,
 }
 
 /// The regions of a struct / enum definition
@@ -366,6 +390,10 @@ pub struct RImplSyn {
     /// The codes of the lifetimes an impl's trait path writes as its arguments (`impl<'a, 'd: 'a> Visitor<'d> for
     /// &'a ()`: 'd's), in order: a projection that selects the impl gives them those it writes there
     pub trait_lts: Vec<u8>,
+    /// For each region of the self type, the names of the types around it (comma separated, outermost first):
+    /// `Self: 'b` in a method implies what `'a: 'b` it may only where none of them is a type alias, which may drop
+    /// the lifetime (`impl<'a> Tr for Erased<'a>` with `type Erased<'a> = ();`)
+    pub self_paths: Vec<(String, u8)>,
 }
 
 /// enum のバリアント (要約に保存する形)
@@ -427,6 +455,9 @@ pub struct Summary {
     /// The plain trait bounds on those parameters (`struct S<T: Tr>`: ("T", ["Tr"])), only the parameters that have
     /// some: a static's type is checked against them
     pub adt_bounds: Vec<(String, Vec<String>)>,
+    /// Those parameters declared `?Sized` (`struct Foo<T: ?Sized>`): only they may be an unsized type, in the last
+    /// field
+    pub adt_unsized: Vec<String>,
     /// The defaults of those parameters, by place (`struct W<T, F = fn() -> T>`: [None, Some(fn() -> T)])
     pub adt_defaults: Vec<Option<TySyn>>,
     /// The regions of an impl / trait header (None: it names no lifetime)
@@ -469,6 +500,11 @@ pub struct Summary {
     /// The concrete (non-parameter, non-primitive) types bounded in the item's where clauses (`where Local: Any`):
     /// Program checks that they exist
     pub where_types: Vec<String>,
+    /// A member of `impl<T> Tr for &T` / `&mut T`: the method it defines (the impl's methods are not called: a call on
+    /// the reference reaches T's through the deref)
+    pub ref_impl_fns: Vec<String>,
+    /// That method, when T is bounded by Tr and it does more than forward to T's method (ast_summary::forwards_to_referent)
+    pub ref_impl_bad: Vec<String>,
 }
 
 /// A trait's declaration: the lifetimes Self must outlive (`trait Wedding<'t>: 't`) are the item `#outlives` of
@@ -518,6 +554,9 @@ pub struct ClosureSyn {
     pub n_parent: u64,
     /// The variables the body reads only by `let _ = place;` (ast_closure::fake_reads): not captured
     pub fake_reads: Vec<String>,
+    /// Per capture: a parameter of the fn that is a shared reference (`h: &T`, `&self`), used in the body only through
+    /// a deref of it (ast_closure::deref_uses_only). From edition 2021 it is held by value: the closure captures `*h`
+    pub deref: Vec<bool>,
 }
 
 /// impl / trait のメンバの所有者

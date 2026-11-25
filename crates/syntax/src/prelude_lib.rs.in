@@ -137,6 +137,15 @@ pub unsafe fn __core_read<T>(p: *const T) -> T {
 pub unsafe fn __core_write<T>(p: *mut T, v: T) {
     unsafe { p.write(v) }
 }
+// (`ptr::swap`: of two raw pointers, which may be the same. Not `mem::swap`'s two `&mut`, which the borrow check
+// would take for two unique borrows (`ptr::swap(test, test)`))
+pub unsafe fn __core_ptr_swap<T>(a: *mut T, b: *mut T) {
+    unsafe {
+        let t = a.read();
+        a.write(b.read());
+        b.write(t);
+    }
+}
 // `T::default()` / `Default::default()` / derive(Default): 本体は型ごとに codegen が作る
 // (0 で埋めてから、手書きの impl Default を持つフィールドはそれを呼ぶ)
 fn __exr_default<T>() -> T {
@@ -5531,6 +5540,10 @@ pub trait __FWr {
         s.push(c);
         self.write_str(&s)
     }
+    // (`fmt::Write::write_fmt(&mut w, format_args!(..))`: format_args! makes a String here, an `Arguments` holds one)
+    fn write_fmt<A: Display>(&mut self, args: A) -> Result<(), __FmtError> {
+        self.write_str(&format!("{}", args))
+    }
 }
 
 impl __FWr for String {
@@ -6786,17 +6799,34 @@ impl FromStr for SocketAddr {
     }
 }
 
-// --- std::ffi::CString / CStr: bytes with no 0 in them (the 0 at the end is not stored). CStr has CString's layout,
-// so a CString is borrowed as one; `Box<CStr>` holds one ---
+// --- std::ffi::CString / CStr: bytes with no 0 in them, and the 0 at the end (stored: `as_ptr()` is a C string). CStr
+// has CString's layout, so a CString is borrowed as one; `Box<CStr>` holds one. A `&CStr` of C's memory
+// (`CStr::from_ptr`) and of a literal `c"..."` is a copy that lives to the end of the program ---
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug)]
+// (b always ends in the 0: the empty one is `[0]`, from `new("")` and `default()` alike, so they compare equal)
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct CString {
     b: Vec<u8>,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct CStr {
     b: Vec<u8>,
+}
+
+/// The bytes before the 0 of a CString's / CStr's b (empty: the default's)
+fn __exr_cstr_body(b: &[u8]) -> &[u8] {
+    if b.is_empty() { b } else { &b[..b.len() - 1] }
+}
+
+/// A pointer to b as a C string (the default's: a static 0)
+fn __exr_cstr_ptr(b: &[u8]) -> *const i8 {
+    if b.is_empty() { b"\0".as_ptr() as *const i8 } else { b.as_ptr() as *const i8 }
+}
+
+/// `c"..."`: the bytes with their 0 (codegen calls it with them)
+pub fn __exr_cstr_lit(b: &[u8]) -> &'static CStr {
+    Box::leak(Box::new(CStr { b: b.to_vec() }))
 }
 
 /// `CString::new` of bytes with a 0 in them: where it is, and the bytes
@@ -6844,6 +6874,13 @@ impl<'a> __CStrBytes for &'a [u8] {
 }
 
 impl CString {
+    /// (an inherent fn, not `impl Default`: the prelude keeps a trait's impl only where the trait is used)
+    pub fn default() -> CString {
+        // (not `vec![0u8]`: the prelude selects vec!'s helpers by the program's text, which may not write `vec`)
+        let mut b = Vec::new();
+        b.push(0u8);
+        CString { b }
+    }
     pub fn new<T: __CStrBytes>(t: T) -> Result<CString, NulError> {
         let b = t.__cstr_bytes();
         let mut i = 0;
@@ -6853,16 +6890,35 @@ impl CString {
             }
             i += 1;
         }
+        let mut b = b;
+        b.push(0);
         Ok(CString { b })
     }
     pub fn as_bytes(&self) -> &[u8] {
-        &self.b
+        __exr_cstr_body(&self.b)
     }
     pub fn to_bytes(&self) -> &[u8] {
-        &self.b
+        __exr_cstr_body(&self.b)
+    }
+    pub fn as_bytes_with_nul(&self) -> &[u8] {
+        if self.b.is_empty() { b"\0" } else { &self.b }
     }
     pub fn into_bytes(self) -> Vec<u8> {
-        self.b
+        let mut b = self.b;
+        b.pop();
+        b
+    }
+    pub fn into_bytes_with_nul(self) -> Vec<u8> {
+        if self.b.is_empty() {
+            let mut b = Vec::new();
+            b.push(0u8);
+            b
+        } else {
+            self.b
+        }
+    }
+    pub fn as_ptr(&self) -> *const i8 {
+        __exr_cstr_ptr(&self.b)
     }
     pub fn as_c_str(&self) -> &CStr {
         unsafe { &*(self as *const CString as *const CStr) }
@@ -6873,11 +6929,40 @@ impl CString {
 }
 
 impl CStr {
+    /// (a copy of the C string at p, up to its 0)
+    pub unsafe fn from_ptr<'a>(p: *const i8) -> &'a CStr {
+        let mut b: Vec<u8> = Vec::new();
+        let mut i = 0usize;
+        loop {
+            let c = unsafe { *(p as *const u8).add(i) };
+            b.push(c);
+            if c == 0 {
+                break;
+            }
+            i += 1;
+        }
+        Box::leak(Box::new(CStr { b }))
+    }
     pub fn to_bytes(&self) -> &[u8] {
-        &self.b
+        __exr_cstr_body(&self.b)
+    }
+    pub fn to_bytes_with_nul(&self) -> &[u8] {
+        if self.b.is_empty() { b"\0" } else { &self.b }
+    }
+    pub fn count_bytes(&self) -> usize {
+        __exr_cstr_body(&self.b).len()
+    }
+    pub fn is_empty(&self) -> bool {
+        __exr_cstr_body(&self.b).is_empty()
+    }
+    pub fn as_ptr(&self) -> *const i8 {
+        __exr_cstr_ptr(&self.b)
     }
     pub fn to_str(&self) -> Result<&str, Utf8Error> {
-        str::from_utf8(&self.b)
+        str::from_utf8(__exr_cstr_body(&self.b))
+    }
+    pub fn to_string_lossy(&self) -> String {
+        String::from_utf8_lossy(__exr_cstr_body(&self.b)).to_string()
     }
     pub fn to_owned(&self) -> CString {
         CString { b: self.b.clone() }

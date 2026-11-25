@@ -8,3 +8,4 @@ pub mod ast_infer;
 pub mod program;
 pub mod simd_sig;
 pub mod solver;
+pub mod traits;

@@ -30,14 +30,22 @@ fn has_attr(attrs: &[String], name: &str) -> bool {
 }
 
 /// `#[derive(A, B)]` の名前 (1 つの識別子のものだけ)
+/// (also as std's prelude writes it, `#[::core::prelude::v1::derive(::core::clone::Clone, ::core::marker::Copy)]`, as
+/// libc 0.2's `s!` does: a std trait by its path is its name)
 fn derive_names(attrs: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     for a in attrs {
         let c = compact(a);
-        let Some(inner) = c.strip_prefix("#[derive(").and_then(|x| x.strip_suffix(")]")) else { continue };
+        let Some(rest) = c.strip_prefix("#[") else { continue };
+        let rest = rest.strip_prefix("::").unwrap_or(rest);
+        let rest = ["core::prelude::v1::", "std::prelude::v1::"].iter().find_map(|p| rest.strip_prefix(p)).unwrap_or(rest);
+        let Some(inner) = rest.strip_prefix("derive(").and_then(|x| x.strip_suffix(")]")) else { continue };
         for part in inner.split(',') {
-            if !part.is_empty() && part.chars().all(|ch| ch == '_' || ch.is_alphanumeric()) {
-                out.push(part.to_string());
+            let p = part.strip_prefix("::").unwrap_or(part);
+            let std_path = ["core::", "std::", "alloc::"].iter().any(|r| p.starts_with(r));
+            let name = if std_path { p.rsplit("::").next().unwrap_or(p) } else { p };
+            if !name.is_empty() && name.chars().all(|ch| ch == '_' || ch.is_alphanumeric()) {
+                out.push(name.to_string());
             }
         }
     }
@@ -303,6 +311,23 @@ fn where_types(item: &Item, owner: Option<&Owner>, out: &mut Vec<String>) {
 }
 
 /// The plain trait bounds (one-segment paths without arguments, not `?Sized`) on a struct / enum's parameters
+/// The type parameters declared `?Sized` (in the parameter list or a where clause)
+fn adt_unsized(g: &Generics) -> Vec<String> {
+    let maybe = |bs: &[Bound]| bs.iter().any(|b| matches!(b, Bound::Trait(true, p) if p.segs.last().is_some_and(|s| s.name == "Sized")));
+    let mut v: Vec<String> = g.params.iter().filter_map(|p| match p {
+        GParam::Ty(n, bs, _) if maybe(bs) => Some(n.clone()),
+        _ => None,
+    }).collect();
+    for (t, bs) in &g.preds {
+        if let PTy::Path(None, tp) = t {
+            if tp.segs.len() == 1 && maybe(bs) && !v.contains(&tp.segs[0].name) {
+                v.push(tp.segs[0].name.clone());
+            }
+        }
+    }
+    v
+}
+
 fn adt_bounds(g: &Generics) -> Vec<(String, Vec<String>)> {
     let mut v = Vec::new();
     for p in &g.params {
@@ -740,6 +765,10 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         None => format!("_x{name}"),
     };
     let is_trait = owner.is_some_and(|o| o.is_trait);
+    let preds = {
+        let names: Vec<&str> = generics.iter().map(|g| g.0.as_str()).collect();
+        other_preds(&sig.generics, self_ty, &names)
+    };
     Ok(SigSyn {
         params: params,
         ret: ret,
@@ -761,7 +790,37 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
             crate::regions::sig_regions(sig, owner.and_then(|o| o.regions.as_deref()), &otp)
         },
         is_unsafe: sig.quals.iter().any(|q| q == "unsafe") || (is_extern && !sig.quals.iter().any(|q| q == "safe")),
+        preds: preds,
     })
+}
+
+/// The where clauses on other than a parameter (SigSyn::preds): `where T::A: Bar`, `where <T as Tr>::A: Bar`,
+/// `where W<T>: Bar`, `where S: Bar`. Lifetimes', `Self`'s and bare parameters' (of `params`) are not (collect_generics has those), nor one whose type is not
+/// written in a way the summary takes
+fn other_preds(g: &Generics, self_ty: Option<&TySyn>, params: &[&str]) -> Vec<(TySyn, String, Vec<String>)> {
+    let mut out = vec![];
+    for (t, bs) in &g.preds {
+        let tr = match t {
+            // (a parameter's, `Self`'s and a lifetime's are not; a concrete type's are, `where S: Bar`)
+            PTy::Path(None, p)
+                if !p.global
+                    && p.segs.len() == 1
+                    && p.segs[0].args.is_empty()
+                    && p.segs[0].fn_args.is_none()
+                    && (params.contains(&p.segs[0].name.as_str()) || p.segs[0].name == "Self" || p.segs[0].name.starts_with('\'')) =>
+            {
+                continue
+            }
+            // (`<T as Tr>::A`: the trait is the segment before the name)
+            PTy::Path(Some(_), p) => p.segs.len().checked_sub(2).map(|i| p.segs[i].name.clone()).unwrap_or_default(),
+            _ => String::new(),
+        };
+        let (Ok(ts), Ok(names)) = (tysyn(t, self_ty), bound_names(bs)) else { continue };
+        if !names.is_empty() {
+            out.push((ts, tr, names));
+        }
+    }
+    out
 }
 
 thread_local! {
@@ -1591,6 +1650,40 @@ pub fn parse_fn_bound(s: &str) -> Option<(String, Vec<TySyn>, TySyn)> {
     Some((kind.to_string(), args, ret))
 }
 
+/// A bound `a::Tr<A, B>` (or `Tr<A, Item = X>`) as its trait's name and its type arguments, without its
+/// associated-type bindings: None when a type argument cannot be read (a lifetime is left out)
+pub fn bound_args(s: &str) -> Option<(String, Vec<TySyn>)> {
+    let Some(lt) = s.find('<') else {
+        let n = s.trim();
+        return Some((n.rsplit("::").next().unwrap_or(n).to_string(), vec![]));
+    };
+    let f = parse_file(&format!("type __B = dyn {s};")).ok()?;
+    let ItemKind::Type(_, _, _, Some(PTy::Dyn(bs))) = &f.items.first()?.kind else { return None };
+    let Some(Bound::Trait(_, p)) = bs.first() else { return None };
+    let last = p.segs.last()?;
+    if last.fn_args.is_some() {
+        return None;
+    }
+    let mut args = Vec::new();
+    for a in &last.args {
+        match a {
+            crate::parse::GArg::Ty(t) => args.push(tysyn(t, None).ok()?),
+            // (a const argument as impl headers keep it (`Tr<2>`): not left out, or `Tr<1>`'s impl would answer)
+            crate::parse::GArg::Const(e) => args.push(crate::ast_types::const_arg_syn(e).ok()?),
+            _ => {}
+        }
+    }
+    let n = s[..lt].trim();
+    Some((n.rsplit("::").next().unwrap_or(n).to_string(), args))
+}
+
+/// A type written as text (`<T as Tr>::Assoc`, `W<u8>`, `()`), as a TySyn; self_ty: what `Self` is
+pub fn ty_of_text(s: &str, self_ty: Option<&TySyn>) -> Option<TySyn> {
+    let f = parse_file(&format!("type __W = {s};")).ok()?;
+    let ItemKind::Type(_, _, _, Some(t)) = &f.items.first()?.kind else { return None };
+    tysyn(t, self_ty).ok()
+}
+
 /// The arguments a call through a closure bound (`Fn(&T) -> &T`) returns a borrow of, by its lifetimes: those whose
 /// types name a lifetime its result names (`for<'a> Fn(&'a T, &u8) -> &'a T`: the first), or the only one with a
 /// reference when the result's is elided (`Fn(&T) -> &T`). Not a `'static` result's. Empty when it returns none
@@ -1976,8 +2069,20 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
         };
         let assigns = ast_closure::assigns_capture(c, &caps);
         let mut moved: Vec<bool> = Vec::new();
+        let mut deref: Vec<bool> = Vec::new();
         for n in &caps {
             moved.push(*mv || (ast_closure::moves_capture(c, &[n.clone()]) && !assigns));
+            // (a parameter that is a shared reference (`h: &T`, `&self`), used only through a deref of it: edition 2021
+            // captures `*h` by reference, the same as a copy of h, which the closure may then hold past the fn. Not
+            // where the fn's body binds the name again)
+            // (`&self` / `&'a self`, not `&mut self`)
+            let shared_ref = (n == "self" && sig_ast.recv.as_deref().is_some_and(|r| r.starts_with('&') && !r.contains("mut ") && r.ends_with("self")))
+                || sig_ast.params.iter().any(|(p, t)| pat_name(p) == Some(n.as_str()) && matches!(t, PTy::Ref(_, false, _)));
+            deref.push(!*mv && shared_ref && ast_closure::deref_uses_only(c, n) && !body.stmts.iter().any(|s| match s {
+                Stmt::Let(p, _, init, _, ..) => ast_closure::pat_binds_name_pub(p, n) || init.as_ref().is_some_and(|x| ast_closure::binds_name(x, n, 0)),
+                Stmt::Expr(x, _) => ast_closure::binds_name(x, n, 0),
+                _ => false,
+            }));
         }
         let by_move = *mv || (!moved.is_empty() && moved.iter().all(|&m| m));
         out.push(ClosureSyn {
@@ -1990,6 +2095,7 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
             ret_ann: ret_ann,
             n_parent: n_parent,
             fake_reads: ast_closure::fake_reads(c).into_iter().filter(|n| bound.contains(n)).collect(),
+            deref,
         });
     }
     // `-> impl Fn(A) -> B { move |x| .. }`: 型は末尾のクロージャの struct
@@ -2218,6 +2324,130 @@ fn anon_bound_err(item: &Item) -> Option<String> {
     g.preds.iter().find_map(|(_, bs)| bs_err(bs))
 }
 
+/// E0597: the initializer of a const or a static, a block that ends in a borrow of one of its own `let` locals
+/// (`const Z: &isize = { let p = 3; &p };`, also of a field or an element of it): the value lives for 'static, the
+/// local only to the end of the block (`\u{3}line\u{3}msg`, at the local's line)
+fn const_local_borrow_err(item: &Item) -> Option<String> {
+    let (e, what, ty) = match &item.kind {
+        ItemKind::Const(_, t, Some(e)) => (e, "constant", t.as_ref()),
+        ItemKind::Static(_, _, t, e) => (e, "static", Some(t)),
+        _ => return None,
+    };
+    // (the initializer's own block, or one in it whose value it uses: `mem::transmute({ .. { let s = [0; 10]; &s } })`)
+    let (line, name, inited) = block_borrowing_own_local(e, 0)?;
+    // (a local with no value (`let x; &x`): the borrow of what is not initialized, E0381 there)
+    if !inited {
+        return Some(format!("\u{3}{line}\u{3}used binding `{name}` isn't initialized (E0381)"));
+    }
+    // (of a raw pointer's type (`const FOO: *const u32 = { let x = 42; &x };`): no borrow check error, as a pointer
+    // has no lifetime, but rustc's evaluation of the constant finds the pointer dangling, at the item)
+    if matches!(ty, Some(PTy::Ptr(..))) {
+        return Some(format!("\u{3}1\u{3}encountered dangling pointer in final value of {what}"));
+    }
+    Some(format!("\u{3}{line}\u{3}`{name}` does not live long enough (borrowed value must outlive the {what}) (E0597)"))
+}
+
+/// A block in e (not in a closure's body) whose tail borrows one of its own locals: that local's line and name, and
+/// whether its `let` gives it a value
+fn block_borrowing_own_local(e: &Expr, d: u32) -> Option<(u32, String, bool)> {
+    if d > 32 {
+        return None;
+    }
+    match e {
+        Expr::Closure(..) => None,
+        Expr::Block(_, _, b) | Expr::Const(b) => tail_borrows_own_local(b).or_else(|| {
+            b.stmts.iter().find_map(|st| match st {
+                Stmt::Expr(x, _) => block_borrowing_own_local(x, d + 1),
+                // (a `let` of a raw pointer's type coerces its block's tail before the block ends: `let _: *const
+                // u32 = { let x = 42; &x };` borrows x no longer than the block. Its statements are looked at)
+                Stmt::Let(_, Some(PTy::Ptr(..)), Some(x), ..) => {
+                    let mut x = x;
+                    while let Expr::Paren(i) = x {
+                        x = i;
+                    }
+                    match x {
+                        Expr::Block(_, _, ib) | Expr::Const(ib) => {
+                            let n = ib.stmts.len() - matches!(ib.stmts.last(), Some(Stmt::Expr(_, false))) as usize;
+                            ib.stmts[..n].iter().find_map(|st| match st {
+                                Stmt::Expr(y, _) => block_borrowing_own_local(y, d + 2),
+                                Stmt::Let(_, _, Some(y), ..) => block_borrowing_own_local(y, d + 2),
+                                _ => None,
+                            })
+                        }
+                        x => block_borrowing_own_local(x, d + 1),
+                    }
+                }
+                Stmt::Let(_, _, Some(x), ..) => block_borrowing_own_local(x, d + 1),
+                _ => None,
+            })
+        }),
+        _ => {
+            let mut found = None;
+            ast_closure::each_child_pub(e, &mut |c| {
+                if found.is_none() {
+                    found = block_borrowing_own_local(c, d + 1);
+                }
+            });
+            found
+        }
+    }
+}
+
+/// The block's tail borrows one of its own locals (`{ let p = 3; &p }`, `&p.0` of a local tuple): its line and name,
+/// and whether its `let` gives it a value
+fn tail_borrows_own_local(b: &Block) -> Option<(u32, String, bool)> {
+    let Some(Stmt::Expr(tail, false)) = b.stmts.last() else { return None };
+    let mut x = tail;
+    while let Expr::Paren(i) = x {
+        x = i;
+    }
+    let Expr::Ref(_, inner) = x else { return None };
+    let mut r = &**inner;
+    let mut through = false;
+    loop {
+        match r {
+            Expr::Field(b, _, _) | Expr::Index(b, _, _) => {
+                through = true;
+                r = b;
+            }
+            Expr::Paren(b) => r = b,
+            _ => break,
+        }
+    }
+    let Expr::Path(None, p) = r else { return None };
+    let [seg] = p.segs.as_slice() else { return None };
+    // (the local's `let`, the last one before the tail)
+    let Some((ann, init)) = b.stmts.iter().rev().find_map(|st| match st {
+        Stmt::Let(Pat::Ident(_, _, n, _), ann, init, ..) if *n == seg.name => Some((ann, init)),
+        _ => None,
+    }) else {
+        return None;
+    };
+    // (a field or an element of the local is its own storage only where the local holds the aggregate, not a
+    // reference the access derefs (`let p = &DATA; &p.0` borrows DATA): a written tuple or array type, or a value
+    // built there (a literal, a tuple, an array, a struct). A written path may name an alias of a reference
+    // (`type Alias = &'static (i32,);`), which the summary does not know: its value decides)
+    if through {
+        let mut i = init.as_ref();
+        while let Some(Expr::Paren(x)) = i {
+            i = Some(x);
+        }
+        let built = matches!(i, Some(Expr::Lit(..) | Expr::Tuple(_) | Expr::Array(_) | Expr::Repeat(..) | Expr::Struct(..)));
+        let owned = match ann {
+            Some(PTy::Tuple(_) | PTy::Array(..)) => true,
+            Some(PTy::Ref(..) | PTy::Ptr(..)) => false,
+            _ => built,
+        };
+        if !owned {
+            return None;
+        }
+    }
+    if p.pos.line == 0 {
+        return None;
+    }
+    Some((p.pos.line, seg.name.clone(), init.is_some()))
+}
+
 /// 1 つのアイテムの要約 (front.rs の summarize)
 pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
     if item_elision_err(item) {
@@ -2232,7 +2462,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
     }
     // (the program's items: the prelude writes no lifetimes in its bounds, `Iterator<Item = &T>`; the driver
     // reports it)
-    sm.adt_err = anon_bound_err(item);
+    sm.adt_err = anon_bound_err(item).or_else(|| const_local_borrow_err(item));
     match &item.kind {
         ItemKind::Type(n, g, _, Some(t)) if owner.is_some() => {
             let ow = owner.unwrap();
@@ -2274,7 +2504,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 let (lts, self_slots) = ow.regions.as_deref().map(|r| (r.lts.clone(), r.self_slots.as_slice())).unwrap_or_default();
                 {
                     let tps: Vec<&str> = ow.generics.iter().map(|g| g.0.as_str()).collect();
-                    let mut s = crate::regions::Slots { lts, tparams: tps, self_slots, any: false, in_fn: 0 };
+                    let mut s = crate::regions::Slots { lts, tparams: tps, self_slots, self_paths: &[], any: false, in_fn: 0, derived: None };
                     let mut v = vec![];
                     s.slots(t, false, &mut v);
                     // (a value the codes do not follow (`<() as Base>::Out`) keeps the header's outlives all the same:
@@ -2293,6 +2523,24 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
         }
         ItemKind::Fn(fs, Some(body)) if owner.is_some() => {
             let ow = owner.unwrap();
+            // (a method of `impl<T> Tr for &T` / `&mut T`: noted for Program, which asks the impl to define each default
+            // method of the trait. Its methods are not called: where T is bounded by the trait itself, a call on `&X`
+            // reaches X's impl through the deref, which is what a method that forwards to T's does. One that does
+            // more is noted too: the driver reports it where the program calls a method of that name. (With another
+            // bound, thiserror's `impl<T: Display> AsDisplay for &T`, X has no impl of its own to reach)
+            if let (false, Some(trn), TySyn::Ref(_, inner)) = (ow.is_trait, ow.impl_trait.as_deref(), &ow.self_ty) {
+                let trn = trn.split('<').next().unwrap_or(trn);
+                if let TySyn::Named(param) = &**inner {
+                    if ow.generics.iter().any(|g| g.0 == *param) {
+                        sm.ref_impl_fns.push(fs.name.clone());
+                        let bounded = ow.generics.iter().any(|g| g.0 == *param && g.1.iter().any(|b| b.split('<').next().unwrap_or(b).trim() == trn));
+                        let mut_ref = matches!(&ow.self_ty, TySyn::Ref(true, _));
+                        if bounded && fs.recv.is_some() && !forwards_to_referent(fs, body, param, trn, mut_ref) {
+                            sm.ref_impl_bad.push(fs.name.clone());
+                        }
+                    }
+                }
+            }
             let mut sig = parse_sig(fs, false, false, Some(ow))?;
             // (E0106: a method with no receiver elides as a free fn; the program's, not the prelude's, which writes no
             // lifetimes: the driver reports it of the program's items)
@@ -2721,7 +2969,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             // (an impl's whose type names the impl's lifetimes: its codes against them)
             if let Some(r) = owner.and_then(|o| o.regions.as_deref()).filter(|r| !r.lts.is_empty() && crate::regions::names_lt(t)) {
                 let tps: Vec<&str> = owner.map(|o| o.generics.iter().map(|g| g.0.as_str()).collect()).unwrap_or_default();
-                let mut s = crate::regions::Slots { lts: r.lts.clone(), tparams: tps, self_slots: &r.self_slots, any: false, in_fn: 0 };
+                let mut s = crate::regions::Slots { lts: r.lts.clone(), tparams: tps, self_slots: &r.self_slots, self_paths: &[], any: false, in_fn: 0, derived: None };
                 let mut v = vec![];
                 s.slots(t, false, &mut v);
                 if s.any && !v.contains(&crate::types::R_UNKNOWN) && v.iter().any(|&c| (c as usize) < r.lts.len()) {
@@ -2812,6 +3060,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             sm.adt_generics = adt_params(g)?;
             sm.adt_defaults = adt_defaults(g, &sm.adt_generics)?;
             sm.adt_bounds = adt_bounds(g);
+            sm.adt_unsized = adt_unsized(g);
             {
                 let tys: Vec<&PTy> = vars.iter().flat_map(|(_, f, _)| match f {
                     Fields::Unit => vec![],
@@ -2920,6 +3169,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             sm.adt_generics = adt_params(g)?;
             sm.adt_defaults = adt_defaults(g, &sm.adt_generics)?;
             sm.adt_bounds = adt_bounds(g);
+            sm.adt_unsized = adt_unsized(g);
             {
                 let tys: Vec<&PTy> = match fields {
                     Fields::Named(v) => v.iter().map(|x| &x.1).collect(),
@@ -3084,6 +3334,66 @@ fn const_param_in_op(t: &PTy, consts: &[&str]) -> bool {
         }
         PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) => const_param_in_op(i, consts),
         PTy::Tuple(v) => v.iter().any(|x| const_param_in_op(x, consts)),
+        _ => false,
+    }
+}
+
+/// A method of `impl<T: Tr> Tr for &T` / `&mut T` that only forwards to T's: `(**self).m(a, b)` / `(*self).m(a, b)`, or
+/// `T::m(&**self, a, b)` / `Tr::m(&mut **self, a, b)` / `Tr::m(*self, a, b)`, passing its own parameters in order (and
+/// a turbofish only of its own generic parameters, in order: `(**self).m::<N>()`). A call on the reference reaches T's
+/// method through the deref, which is what such a body does. Not `(*self).m()` for a `&self` method of an impl for
+/// `&mut T`: `*self` is the `&mut T`, whose method lookup takes the impl's own `m` (through `&&mut T`) before T's, so
+/// it calls itself (mut_ref: the impl is for `&mut T`)
+fn forwards_to_referent(fs: &PSig, body: &Block, param: &str, tr: &str, mut_ref: bool) -> bool {
+    if !matches!(fs.recv.as_deref(), Some("&self" | "&mut self")) {
+        return false;
+    }
+    let [st] = body.stmts.as_slice() else { return false };
+    let e = match st {
+        Stmt::Expr(e, semi) if !*semi || fs.ret.is_none() => e,
+        _ => return false,
+    };
+    fn strip(mut e: &Expr) -> &Expr {
+        while let Expr::Paren(i) = e {
+            e = i;
+        }
+        e
+    }
+    let one = |e: &Expr, n: &str| matches!(strip(e), Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == n && p.segs[0].args.is_empty());
+    let deref1 = |e: &Expr| matches!(strip(e), Expr::Unary(o, j, _) if o == "*" && one(j, "self"));
+    let deref2 = |e: &Expr| matches!(strip(e), Expr::Unary(o, i, _) if o == "*" && deref1(i));
+    let Some(names) = fs.params.iter().map(|(p, _)| if let Pat::Ident(_, false, n, None) = p { Some(n.as_str()) } else { None }).collect::<Option<Vec<&str>>>() else {
+        return false;
+    };
+    let args_ok = |args: &[Expr]| args.len() == names.len() && args.iter().zip(&names).all(|(a, n)| one(a, n));
+    // (a turbofish passes the method's own type and const parameters, in their order, or there is none)
+    let own: Vec<&str> = fs.generics.params.iter().filter_map(|g| match g {
+        GParam::Ty(n, ..) | GParam::Const(n, _) => Some(n.as_str()),
+        GParam::Lifetime(_) => None,
+    }).collect();
+    let targs_ok = |targs: &[crate::parse::GArg]| {
+        targs.is_empty()
+            || (targs.len() == own.len()
+                && targs.iter().zip(&own).all(|(a, n)| match a {
+                    crate::parse::GArg::Ty(PTy::Path(None, p)) => p.segs.len() == 1 && p.segs[0].name == *n && p.segs[0].args.is_empty(),
+                    crate::parse::GArg::Const(e) => one(e, n),
+                    _ => false,
+                }))
+    };
+    // (`(*self).m(..)`: `*self` is the `&T`, whose own method is T's through the deref too; but not the `&mut T` of a
+    // `&self` method, see above)
+    let deref1_recv = !(mut_ref && fs.recv.as_deref() == Some("&self"));
+    match strip(e) {
+        Expr::MethodCall(r, m, targs, args, _) => *m == fs.name && (deref2(r) || (deref1_recv && deref1(r))) && targs_ok(targs) && args_ok(args),
+        Expr::Call(f, args) => {
+            let Expr::Path(None, p) = strip(f) else { return false };
+            p.segs.len() == 2
+                && (p.segs[0].name == param || p.segs[0].name == tr)
+                && p.segs[1].name == fs.name
+                && targs_ok(&p.segs[1].args)
+                && args.first().is_some_and(|a| matches!(strip(a), Expr::Ref(_, i) if deref2(i)) || deref1(a))
+                && args_ok(&args[1..])
+        }
         _ => false,
     }
 }

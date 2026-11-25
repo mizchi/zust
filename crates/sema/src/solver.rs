@@ -73,6 +73,11 @@ pub struct Solver<'p> {
     pub clo_info: crate::fxhash::FxMap<u32, (u32, Vec<u32>, Vec<usize>)>,
     /// 後でもう一度見る関連型の境界 (呼び先, 型パラメータの型変数)
     pub late: Vec<(u32, Vec<Option<u32>>)>,
+    /// the callee's type parameters a turbofish gives (index, variable), for the next apply_self (`tr::<u16>()`)
+    pub pre_pv: Vec<(usize, u32)>,
+    /// (a type argument of `S<..>` passed where `S<[T]>` is expected (a coercion), the `T`): the argument may be
+    /// any `[T; N]`, so only its element is unified, once the argument is known to be an array (finish_unsize)
+    pub unsize_later: Vec<(u32, u32)>,
 }
 
 impl<'p> Solver<'p> {
@@ -104,6 +109,8 @@ impl<'p> Solver<'p> {
             clo_ctx: None,
             clo_info: Default::default(),
             late: vec![],
+            pre_pv: vec![],
+            unsize_later: vec![],
         }
     }
 }
@@ -210,6 +217,14 @@ impl Solver<'_> {
     pub fn seq_unify(&mut self, a: u32, b: u32) {
         let (fa, fb) = (self.find(a), self.find(b));
         let elem = |s: &mut Self, v: u32| -> Option<u32> {
+            // (`&[T]` against `[U; N]` (`PartialEq<[U; N]> for &[T]`): the slice's element)
+            let v = match s.shape[v as usize] {
+                Some(Shape::Ref(_, i)) => {
+                    let i = s.find(i);
+                    if matches!(s.shape[i as usize], Some(Shape::Slc(_))) { i } else { v }
+                }
+                _ => v,
+            };
             match s.shape[v as usize] {
                 Some(Shape::Arr(x, _)) | Some(Shape::Slc(x)) => Some(x),
                 Some(Shape::Adt(vb, st, 1)) if s.is_vec(vb) => Some(s.adt_args[st as usize]),
@@ -246,11 +261,11 @@ impl Solver<'_> {
         }
     }
 
-    /// 要素の型: 片方がまだ決まっていなければ単一化する (数のリテラルを相手の型にする)
+    /// 要素の型: 片方がまだ決まっていなければ単一化する (整数・浮動小数のリテラルを相手の型にする)
     pub fn elem_hint(&mut self, x: u32, y: u32) {
         let (fx, fy) = (self.find(x), self.find(y));
         // (数のリテラルだけ: 要素の型がまだ決まっていない Vec と文字列の配列は単一化しない)
-        let lit = |s: &Self, v: u32| s.shape[v as usize].is_none() && s.int_lit[v as usize];
+        let lit = |s: &Self, v: u32| s.shape[v as usize].is_none() && (s.int_lit[v as usize] || s.float_lit[v as usize]);
         if lit(self, fx) || lit(self, fy) {
             self.unify(x, y);
         }
@@ -357,7 +372,8 @@ impl Solver<'_> {
                             matches!(s.shape[r as usize], Some(Shape::Known(Ty::Struct(sid)))
                                 if s.prog.structs[sid as usize].base.is_none() && s.prog.structs[sid as usize].name == "String")
                         };
-                        let coerce = (slc(self, x) && seqish(self, y))
+                        let coerce = self.unsize_pair(x, y)
+                            || (slc(self, x) && seqish(self, y))
                             || (slc(self, y) && seqish(self, x))
                             || (is_str(self, x) && is_string(self, y))
                             || (is_str(self, y) && is_string(self, x));
@@ -382,6 +398,31 @@ impl Solver<'_> {
                             self.unify(x, i);
                             return;
                         }
+                        // (`&&T` を `&T` に、`&&&u8` を `&&u8` に (deref の強制変換): 参照の深さが違えば参照どうしは
+                        //  つながず、最も内側の T どうしを単一化する。つなぐと、`let c = &v[0]; c` (v: Vec<&str>、
+                        //  `&str` を返す) の c が `&str` になる。深さは、参照でない分かった形で終わるときだけ数える)
+                        let depth = |s: &mut Self, v: u32| -> Option<(u32, u32)> {
+                            let (mut v, mut d) = (v, 0u32);
+                            loop {
+                                let r = s.find(v);
+                                match s.shape[r as usize] {
+                                    Some(Shape::Ref(_, i)) if d < 16 => {
+                                        v = i;
+                                        d += 1;
+                                    }
+                                    Some(Shape::Ref(..)) | None => return None,
+                                    Some(_) => return Some((d, v)),
+                                }
+                            }
+                        };
+                        if !coerce {
+                            if let (Some((dx, ix)), Some((dy, iy))) = (depth(self, x), depth(self, y)) {
+                                if dx != dy {
+                                    self.unify(ix, iy);
+                                    return;
+                                }
+                            }
+                        }
                         // (`&mut T` を `&T` に渡すのも強制変換: つなぐと、`let x = &mut v; f(x);` (f が `&T` を取る) の
                         //  x が `&T` になり、後の `*x = ..` を `&` 越しの書き込みとしてしまう)
                         if !coerce && ma == mb {
@@ -399,11 +440,24 @@ impl Solver<'_> {
             (Some(Shape::Slc(x)), Some(Shape::Slc(y)))
             | (Some(Shape::Bx(x)), Some(Shape::Bx(y)))
             | (Some(Shape::Ptr(_, x)), Some(Shape::Ptr(_, y))) => {
-                self.link(a, b);
+                // (`Box<S<[T; N]>>` to `Box<S<[T]>>`: a coercion, not one type)
+                if !self.unsize_pair(x, y) {
+                    self.link(a, b);
+                }
                 self.unify(x, y);
             }
+            // (two instances of one struct that may have an unsized tail, with arguments known to differ
+            // (`[&Foo<u8>, &Foo<u64>]` as `[&Foo<dyn Tr>; 2]`, each coerced): not one type, nothing to unify)
+            (Some(Shape::Adt(x, s1, l1)), Some(Shape::Adt(y, s2, l2)))
+                if x == y
+                    && self.prog.unsized_params.contains_key(&x)
+                    && self.adt_vars_of(s1, l1).into_iter().zip(self.adt_vars_of(s2, l2)).any(|(p, q)| self.clash(p, q)) => {}
             (Some(Shape::Adt(x, s1, l1)), Some(Shape::Adt(y, s2, l2))) if x == y => {
-                self.link(a, b);
+                // (`S<[T; N]>` passed as `S<[T]>` (a coercion, a struct with an unsized tail): not one type, only
+                // the arguments are unified (an array's element with the slice's))
+                if !self.unsize_pair(a, b) {
+                    self.link(a, b);
+                }
                 for (p, q) in self
                     .adt_vars_of(s1, l1)
                     .into_iter()
@@ -423,9 +477,22 @@ impl Solver<'_> {
                     } else {
                         (b, a)
                     };
-                self.link(adt_root, known_root);
+                // (`&S<[T; N]>` を `&S<[T]>` に渡す (強制変換): 同じ型ではないので引数だけ単一化する)
+                if !Ty::Struct(i).is_dst_struct() {
+                    self.link(adt_root, known_root);
+                }
+                let dst = Ty::Struct(i).is_dst_struct();
                 let args = self.prog.structs[i as usize].args.clone();
                 for (p, t) in self.adt_vars_of(st, l).into_iter().zip(args) {
+                    if let (true, Ty::Slice(e)) = (dst, t) {
+                        let k = self.known(*e);
+                        self.unsize_elem(p, k);
+                        continue;
+                    }
+                    // (`S<T>` to `S<dyn Tr>`: T is any type implementing Tr)
+                    if let (true, Ty::Dyn(_)) = (dst, t) {
+                        continue;
+                    }
                     let k = self.known(t);
                     self.unify(p, k);
                 }
@@ -502,7 +569,13 @@ impl Solver<'_> {
                     .iter()
                     .map(|t| self.prog.resolve_env(t, self.env).ok())
                     .collect::<Option<Vec<Ty>>>()?;
-                Some((ps, self.prog.resolve_env(&r, self.env).ok()?))
+                let r = self.prog.resolve_env(&r, self.env).ok()?;
+                // (a callee's `dyn Fn(T) -> T` whose T is not given: its parameter's mark (Program::dyn_canon) is
+                // the callee's, not a type here)
+                if ps.iter().chain([&r]).any(|&t| self.prog.has_param(t)) {
+                    return None;
+                }
+                Some((ps, r))
             }
             _ => None,
         }
@@ -917,6 +990,11 @@ impl Solver<'_> {
                         pv[i] = v;
                     }
                 }
+                for (k, v) in std::mem::take(&mut self.pre_pv) {
+                    if let Some(slot) = pv.get_mut(k) {
+                        *slot = Some(v);
+                    }
+                }
                 if let (Some(t), true) = (self_ty, sig.trait_of.is_some()) {
                     pv[0] = Some(self.known(t));
                 }
@@ -981,6 +1059,102 @@ impl Solver<'_> {
         }
     }
 
+    /// x and y have shapes that are certainly different types (a scalar and another scalar or a compound type, two
+    /// different structs): what a coercion may join (`&Foo<u8>` and `&Foo<(u16, u32)>`, both to `&Foo<dyn Tr>`)
+    fn clash(&mut self, x: u32, y: u32) -> bool {
+        let (x, y) = (self.find(x), self.find(y));
+        let scalar = |t: Ty| !matches!(t, Ty::Struct(_) | Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_) | Ty::Array(..) | Ty::Slice(_) | Ty::Assoc(_) | Ty::Param(_) | Ty::Fn(_) | Ty::Dyn(_) | Ty::Never);
+        match (self.shape[x as usize], self.shape[y as usize]) {
+            (Some(Shape::Known(a)), Some(Shape::Known(b))) => a != b && (scalar(a) || scalar(b)),
+            (Some(Shape::Known(a)), Some(_)) | (Some(_), Some(Shape::Known(a))) => scalar(a),
+            (Some(Shape::Adt(a, ..)), Some(Shape::Adt(b, ..))) => a != b,
+            _ => false,
+        }
+    }
+
+    /// x and y are a struct with an array tail and the same struct with a slice tail (`S<[T; N]>` and `S<[T]>`,
+    /// in either order): what a reference or a box to one coerces to one to the other
+    pub fn unsize_pair(&mut self, x: u32, y: u32) -> bool {
+        self.unsize_pair_d(x, y, 0)
+    }
+
+    fn unsize_pair_d(&mut self, x: u32, y: u32, depth: u32) -> bool {
+        let (x, y) = (self.find(x), self.find(y));
+        // (one type is no coercion; and the walk is bounded (shared children are not visited twice per level))
+        if x == y || depth > 16 {
+            return false;
+        }
+        let base = |s: &Self, v: u32| match s.shape[v as usize] {
+            Some(Shape::Adt(b, ..)) => Some((b, false)),
+            Some(Shape::Known(t @ Ty::Struct(i))) => Some((s.prog.base_of(i), t.is_dst_struct())),
+            _ => None,
+        };
+        match (base(self, x), base(self, y)) {
+            (Some((b1, d1)), Some((b2, d2))) if b1 == b2 => {
+                let may_unsize = self.prog.unsized_params.contains_key(&b1);
+                if d1 != d2 {
+                    return true;
+                }
+                // (two generic shapes: an argument that is an array on one side and a slice on the other)
+                let args = |s: &mut Self, v: u32| -> Vec<u32> {
+                    match s.shape[v as usize] {
+                        Some(Shape::Adt(_, st, l)) => s.adt_vars_of(st, l),
+                        _ => vec![],
+                    }
+                };
+                let (p, q) = (args(self, x), args(self, y));
+                let mut seen: Vec<(u32, u32)> = vec![];
+                p.into_iter().zip(q).any(|(p, q)| {
+                    let (p, q) = (self.find(p), self.find(q));
+                    if p == q || seen.contains(&(p, q)) {
+                        return false;
+                    }
+                    seen.push((p, q));
+                    // (two array tails of different lengths (`vec![Box::new(W { t: [1, 2] }), Box::new(W { t: [3] })]`
+                    // as `Vec<Box<W<[u8]>>>`): both coerce to the slice tail)
+                    matches!(
+                        (&self.shape[p as usize], &self.shape[q as usize]),
+                        (Some(Shape::Slc(_)), Some(Shape::Arr(..))) | (Some(Shape::Arr(..)), Some(Shape::Slc(_)))
+                    ) || (may_unsize && matches!((&self.shape[p as usize], &self.shape[q as usize]), (Some(Shape::Arr(_, n)), Some(Shape::Arr(_, m))) if n != m))
+                        || self.unsize_pair_d(p, q, depth + 1)
+                })
+            }
+            _ => false,
+        }
+    }
+
+    /// the element of an array argument where a slice one is expected (`S<[u8; 3]>` to `S<[u8]>`); later, if the
+    /// argument is not known yet
+    fn unsize_elem(&mut self, p: u32, k: u32) {
+        let r = self.find(p);
+        match self.shape[r as usize] {
+            Some(Shape::Arr(x, _) | Shape::Slc(x)) => self.unify(x, k),
+            Some(Shape::Known(Ty::Array(e, _) | Ty::Slice(e))) => {
+                let x = self.known(*e);
+                self.unify(x, k)
+            }
+            None => self.unsize_later.push((p, k)),
+            _ => {}
+        }
+    }
+
+    pub fn finish_unsize(&mut self) {
+        for _ in 0..2 {
+            let ls = std::mem::take(&mut self.unsize_later);
+            for (p, k) in ls {
+                self.unsize_elem(p, k);
+            }
+        }
+        // (an argument nothing else told: the slice itself (`&Wrap<[u8]>` passed where `&Wrap<T>` is taken))
+        for (p, k) in std::mem::take(&mut self.unsize_later) {
+            let r = self.find(p);
+            if self.shape[r as usize].is_none() {
+                let s = self.with(Shape::Slc(k));
+                self.unify(p, s);
+            }
+        }
+    }
+
     pub fn finish_late_bounds(&mut self) {
         let ls = std::mem::take(&mut self.late);
         for (id, mut pv) in ls {
@@ -1004,43 +1178,63 @@ impl Solver<'_> {
     pub fn finish_collects(&mut self) {
         let cs = std::mem::take(&mut self.collects);
         for (recv, r) in cs {
-            let Some(item) = self.assoc_var(recv, "Item") else { continue };
+            self.collect_into(recv, r);
+        }
+    }
+
+    /// The `collect`s whose iterator's item and result's type are known now (a `let` with `Vec<_>` written): their
+    /// elements are taken from the item, as rustc selects the `FromIterator` impl before the statements after it.
+    /// The others wait for finish_collects
+    pub fn ready_collects(&mut self) {
+        let cs = std::mem::take(&mut self.collects);
+        for (recv, r) in cs {
             let root = self.find(r);
-            let (b, vars) = match self.shape[root as usize] {
-                Some(Shape::Adt(b, st, l)) => (b, self.adt_vars_of(st, l)),
-                Some(Shape::Known(Ty::Struct(sid))) => {
-                    let args = self.prog.structs[sid as usize].args.clone();
-                    (self.prog.base_of(sid), args.into_iter().map(|a| self.known(a)).collect())
-                }
-                _ => continue,
-            };
-            let name = self.prog.structs[b as usize].name.clone();
-            if matches!(name.as_str(), "Vec" | "BinaryHeap") && vars.len() == 1 {
-                self.unify(item, vars[0]);
-            } else if matches!(name.as_str(), "Option" | "Result") && !vars.is_empty() {
-                // `Option<Vec<T>>` / `Result<Vec<T>, E>`: 要素は Option<T> / Result<T, E>
-                let r0 = self.find(vars[0]);
-                let inner = match self.shape[r0 as usize] {
-                    Some(Shape::Adt(ib, st, l)) if self.prog.structs[ib as usize].name == "Vec" => {
-                        self.adt_vars_of(st, l).first().copied()
-                    }
-                    Some(Shape::Known(Ty::Struct(s))) if self.prog.structs[self.prog.base_of(s) as usize].name == "Vec" => {
-                        self.prog.structs[s as usize].args.first().copied().map(|a| self.known(a))
-                    }
-                    _ => None,
-                };
-                if let Some(t) = inner {
-                    let mut a = vec![t];
-                    a.extend(vars[1..].iter().copied());
-                    let it = self.adt(b, a);
-                    self.unify(item, it);
-                }
-            } else if name == "HashMap" && vars.len() == 2 {
-                let tb = self.prog.tuple_base(2);
-                let t = self.adt(tb, vec![vars[0], vars[1]]);
-                self.unify(item, t);
+            let known = matches!(self.shape[root as usize], Some(Shape::Adt(..) | Shape::Known(Ty::Struct(_))));
+            let rr = self.find(recv);
+            if !known || self.shape[rr as usize].is_none() || !self.collect_into(recv, r) {
+                self.collects.push((recv, r));
             }
         }
+    }
+
+    /// A `collect`'s elements from its iterator's item (false: not known yet)
+    fn collect_into(&mut self, recv: u32, r: u32) -> bool {
+        let Some(item) = self.assoc_var(recv, "Item") else { return false };
+        let root = self.find(r);
+        let (b, vars) = match self.shape[root as usize] {
+            Some(Shape::Adt(b, st, l)) => (b, self.adt_vars_of(st, l)),
+            Some(Shape::Known(Ty::Struct(sid))) => {
+                let args = self.prog.structs[sid as usize].args.clone();
+                (self.prog.base_of(sid), args.into_iter().map(|a| self.known(a)).collect())
+            }
+            _ => return false,
+        };
+        let name = self.prog.structs[b as usize].name.clone();
+        if matches!(name.as_str(), "Vec" | "BinaryHeap") && vars.len() == 1 {
+            self.unify(item, vars[0]);
+        } else if matches!(name.as_str(), "Option" | "Result") && !vars.is_empty() {
+            // `Option<Vec<T>>` / `Result<Vec<T>, E>`: 要素は Option<T> / Result<T, E>
+            let r0 = self.find(vars[0]);
+            let inner = match self.shape[r0 as usize] {
+                Some(Shape::Adt(ib, st, l)) if self.prog.structs[ib as usize].name == "Vec" => {
+                    self.adt_vars_of(st, l).first().copied()
+                }
+                Some(Shape::Known(Ty::Struct(s))) if self.prog.structs[self.prog.base_of(s) as usize].name == "Vec" => {
+                    self.prog.structs[s as usize].args.first().copied().map(|a| self.known(a))
+                }
+                _ => None,
+            };
+            let Some(t) = inner else { return false };
+            let mut a = vec![t];
+            a.extend(vars[1..].iter().copied());
+            let it = self.adt(b, a);
+            self.unify(item, it);
+        } else if name == "HashMap" && vars.len() == 2 {
+            let tb = self.prog.tuple_base(2);
+            let t = self.adt(tb, vec![vars[0], vars[1]]);
+            self.unify(item, t);
+        }
+        true
     }
 
     /// 算術・比較の被演算子: 整数 (か未知) への参照なら中身

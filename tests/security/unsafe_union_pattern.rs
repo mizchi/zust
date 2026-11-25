@@ -1,6 +1,5 @@
 //! Neighbor of unsafe_union_field: reading a union field by a pattern is a read too (E0133).
 //@ pattern: E0133 context
-//@ todo: rejected, but as an unsupported pattern (a union pattern of one field), not as E0133
 //@ expect: reject
 union U {
     i: usize,
