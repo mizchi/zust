@@ -266,7 +266,7 @@ fn gated_trait(h: usize) -> Option<&'static str> {
                     return None;
                 }
                 it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).find(|w| {
-                    matches!(*w, "Hasher" | "Hash" | "__BoolThen" | "__AsBytes" | "__PathExt" | "__AsPathStr" | "BufRead" | "Read" | "Write" | "__FWr" | "ExactSizeIterator" | "BuildHasher")
+                    matches!(*w, "Hasher" | "Hash" | "__BoolThen" | "__AsBytes" | "__PathExt" | "__AsPathStr" | "BufRead" | "Read" | "Seek" | "Write" | "__FWr" | "ExactSizeIterator" | "BuildHasher")
                 })
             })
             .collect()
@@ -286,7 +286,7 @@ fn gated_impl(h: usize) -> Option<&'static str> {
                 }
                 let ws: Vec<&'static str> = it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).collect();
                 match ws.as_slice() {
-                    ["impl", t, "for", ..] if matches!(*t, "Read" | "BufRead" | "Write" | "__FWr") => Some(*t),
+                    ["impl", t, "for", ..] if matches!(*t, "Read" | "BufRead" | "Seek" | "Write" | "__FWr") => Some(*t),
                     // (`{:?}` of a range: only for a program that formats with Debug)
                     ["impl", "T", "Debug", "for", r, ..] if matches!(*r, "Range" | "RangeInclusive") => Some("__range_debug"),
                     _ => None,
@@ -1101,6 +1101,23 @@ impl<'a> PreludeScan<'a> {
     }
 }
 
+/// Whether src writes a C string literal, `c"..."` / `cr"..."`: a `c` that starts a token (not the end of `"abc"` or of a
+/// name)
+fn has_cstr_literal(src: &str) -> bool {
+    let b = src.as_bytes();
+    let mut i = 0;
+    while let Some(k) = src[i..].find('c') {
+        let at = i + k;
+        let starts = at == 0 || !(b[at - 1].is_ascii_alphanumeric() || matches!(b[at - 1], b'_' | b'"' | b'\''));
+        let rest = &b[at + 1..];
+        if starts && (rest.first() == Some(&b'"') || (rest.first() == Some(&b'r') && matches!(rest.get(1), Some(b'"' | b'#')))) {
+            return true;
+        }
+        i = at + 1;
+    }
+    false
+}
+
 pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCache) -> String {
     let all = items();
     // ユーザの識別子のうち、prelude が定義する名前 (と関係する名前) に当たるものだけを集める。
@@ -1119,7 +1136,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             "cloned", "format", "print", "println", "eprint", "eprintln", "write", "writeln",
             "split", "split_whitespace", "lines", "trim", "starts_with", "ends_with", "contains",
             "clamp", "from_u32", "char", "join", "concat", "drain", "default", "f64", "f32", "i128", "u128", "Iterator", "into", "split_at_mut",
-            "copy_from_slice", "clone_from_slice", "BufRead", "Read", "Write", "__FWr", "Cursor", "ExactSizeIterator", "BuildHasher", "split_first_chunk", "first_chunk", "chunks_exact", "chunks_mut", "chunks_exact_mut", "is_sorted", "is_sorted_by", "is_sorted_by_key",
+            "copy_from_slice", "clone_from_slice", "BufRead", "Read", "Seek", "SeekFrom", "Write", "__FWr", "Cursor", "ExactSizeIterator", "BuildHasher", "split_first_chunk", "first_chunk", "chunks_exact", "chunks_mut", "chunks_exact_mut", "is_sorted", "is_sorted_by", "is_sorted_by_key",
         ]);
         // (先頭の 1 byte, 長さ) ごとの候補。prelude の名前が増えても 1 識別子あたりの比較は 0〜1 回
         let mut t: Vec<Vec<&'static str>> = vec![vec![]; 256 * 32];
@@ -1187,6 +1204,12 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         cache.map.insert(it.hash, (names, c));
     }
     let mut sc = PreludeScan::new(user_src, user_items, &mut cache.scan);
+    // (`c"..."`: codegen makes it a call of __exr_cstr_lit, a `&'static CStr`; before the `no_std` return, which a
+    //  program needing nothing else takes)
+    if has_cstr_literal(user_src) {
+        need.insert("__exr_cstr_lit");
+        need.insert("CStr");
+    }
     // (std のプログラムは panic のハンドラを必ず使うので、何も使わなくても prelude を付ける)
     if need.is_empty() && sc.has("no_std") {
         return String::new();
@@ -2017,4 +2040,19 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
 
     out
+}
+
+#[cfg(test)]
+mod cstr_literal_tests {
+    /// A C string literal starts a token: `"c"` and `abc"` are ordinary strings (examples/shared.rs took the C string
+    /// helpers for `Node::new("c", 4)`)
+    #[test]
+    fn c_string_literal_starts_a_token() {
+        assert!(super::has_cstr_literal("let s = c\"hi\";"));
+        assert!(super::has_cstr_literal("f(cr\"raw\")"));
+        assert!(super::has_cstr_literal("c\"at the start\""));
+        assert!(!super::has_cstr_literal("Node::new(\"c\", 4)"));
+        assert!(!super::has_cstr_literal("let abc\" = 1;"));
+        assert!(!super::has_cstr_literal("let spec\"x\" = 1;"));
+    }
 }

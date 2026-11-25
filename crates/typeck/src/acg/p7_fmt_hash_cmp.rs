@@ -60,16 +60,22 @@ pub(crate) fn parse_fmt(
             i += 2;
             continue;
         }
+        // (an error is `\u{6}index\u{6}msg`: at that char of the string, which the caller places in the literal)
         if c == '}' {
-            return err(span, "invalid format string: unmatched `}`");
+            return err(span, format!("\u{6}{i}\u{6}invalid format string: unmatched `}}` found"));
         }
         if c != '{' {
             lit.push(c);
             i += 1;
             continue;
         }
+        // (`{ x}`: no white space before the argument, as rustc reads it; `{ }` and `{x }` are fine)
+        let k = (i + 1..cs.len()).find(|&k| !cs[k].is_whitespace()).unwrap_or(cs.len());
+        if k > i + 1 && k < cs.len() && !matches!(cs[k], '}' | ':') {
+            return err(span, format!("\u{6}{k}\u{6}invalid format string: expected `}}`, found `{}`", cs[k]));
+        }
         let Some(end) = cs[i..].iter().position(|&x| x == '}').map(|p| p + i) else {
-            return err(span, "invalid format string: unmatched `{`");
+            return err(span, format!("\u{6}{}\u{6}invalid format string: expected `}}` but string was terminated", cs.len()));
         };
         let inner: String = cs[i + 1..end].iter().collect();
         i = end + 1;
@@ -348,7 +354,19 @@ impl Cx<'_> {
             }
         }
         let mut names = named.clone();
-        let mut pieces = parse_fmt(&fmt_s, pos.len(), &mut names, span)?;
+        // (a format string's error at its char in the literal, escapes and lines counted, as rustc points)
+        let mut pieces = parse_fmt(&fmt_s, pos.len(), &mut names, span).map_err(|m| {
+            match m.strip_prefix('\u{6}').and_then(|r| r.split_once('\u{6}')) {
+                Some((k, msg)) => match (fmt_arg, k.parse::<usize>()) {
+                    (Some(Expr::Lit(t, at)), Ok(k)) if at.line != 0 => match lit_char_pos(t, *at, k) {
+                        Some(p) => self.at(p, msg.to_string()),
+                        None => self.at(*at, msg.to_string()),
+                    },
+                    _ => msg.to_string(),
+                },
+                None => m,
+            }
+        })?;
         if newline {
             pieces.push(FmtPiece::Lit("\n".into()));
         }
@@ -1376,4 +1394,75 @@ impl Cx<'_> {
 fn dyn_has_fmt(s: &str, debug: bool) -> bool {
     let want = if debug { "Debug" } else { "Display" };
     s.split('+').any(|p| p.trim().rsplit("::").next() == Some(want))
+}
+
+/// Where the k-th char of a string literal's value is in its source text `t` (which starts at `start`): escapes,
+/// `\` line continuations and raw strings counted; k past the end is the closing quote
+pub(crate) fn lit_char_pos(t: &str, start: Sp, k: usize) -> Option<Sp> {
+    let cs: Vec<char> = t.chars().collect();
+    let (mut line, mut col) = (start.line, start.col);
+    let mut i = 0;
+    let step = |i: &mut usize, line: &mut u32, col: &mut u32| {
+        if cs[*i] == '\n' {
+            *line += 1;
+            *col = 0;
+        } else {
+            *col += 1;
+        }
+        *i += 1;
+    };
+    // (the prefix: `b` / `c`, then `r` and its `#`s, then the quote)
+    while i < cs.len() && matches!(cs[i], 'b' | 'c') {
+        step(&mut i, &mut line, &mut col);
+    }
+    let raw = i < cs.len() && cs[i] == 'r';
+    let mut hashes = 0;
+    if raw {
+        step(&mut i, &mut line, &mut col);
+        while i < cs.len() && cs[i] == '#' {
+            hashes += 1;
+            step(&mut i, &mut line, &mut col);
+        }
+    }
+    if i >= cs.len() || cs[i] != '"' {
+        return None;
+    }
+    step(&mut i, &mut line, &mut col);
+    let mut n = 0;
+    while i < cs.len() {
+        let at = Sp { line, col };
+        // (the closing quote)
+        if cs[i] == '"' && (!raw || cs[i + 1..].iter().take(hashes).filter(|&&c| c == '#').count() == hashes) {
+            return Some(at);
+        }
+        if !raw && cs[i] == '\\' && i + 1 < cs.len() {
+            if cs[i + 1] == '\n' {
+                // (a line continuation: the newline and the white space after it are no chars of the value)
+                step(&mut i, &mut line, &mut col);
+                while i < cs.len() && cs[i].is_whitespace() {
+                    step(&mut i, &mut line, &mut col);
+                }
+                continue;
+            }
+            if n == k {
+                return Some(at);
+            }
+            let len = match cs[i + 1] {
+                'x' => 4,
+                'u' => cs[i..].iter().position(|&c| c == '}').map_or(2, |p| p + 1),
+                _ => 2,
+            };
+            for _ in 0..len.min(cs.len() - i) {
+                step(&mut i, &mut line, &mut col);
+            }
+            n += 1;
+            continue;
+        }
+        if n == k {
+            return Some(at);
+        }
+        step(&mut i, &mut line, &mut col);
+        n += 1;
+    }
+    None
 }

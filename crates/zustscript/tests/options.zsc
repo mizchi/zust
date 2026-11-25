@@ -1,0 +1,187 @@
+// The prelude's Option / Result (not declared here), `?`, `if let`, and their methods
+
+type Draft = { title: String, body: String }
+type Todo = { id: i32, title: String }
+enum FormError { Empty(String), TooLong(String, i32) }
+
+extern fn note(s: String) -> () = "globalThis.note";
+
+fn non_empty(field: String, s: String) -> Result<String, FormError> {
+  if s.trim().len() == 0 { Err(Empty(field)) } else { Ok(s.trim()) }
+}
+
+fn at_most(field: String, s: String, n: i32) -> Result<String, FormError> {
+  if s.len() > n { Err(TooLong(field, n)) } else { Ok(s) }
+}
+
+fn validate(d: Draft, id: i32) -> Result<Todo, FormError> {
+  let t = non_empty("title", d.title)?;
+  let title = at_most("title", t, 8)?;
+  Ok(Todo { id, title })
+}
+
+fn message(e: FormError) -> String {
+  match e {
+    Empty(f) => `${f} is empty`,
+    TooLong(f, n) => `${f} is longer than ${n}`,
+  }
+}
+
+fn find(todos: Array<Todo>, id: i32) -> Option<Todo> {
+  let mut found = None;
+  for t in todos {
+    if t.id == id { found = Some(t); }
+  }
+  found
+}
+
+// Option's `?`, in the middle of a call: the argument before it is evaluated first
+fn titles_of(todos: Array<Todo>, a: i32, b: i32) -> Option<String> {
+  Some(join2(logged("left"), (find(todos, a)?).title, (find(todos, b)?).title))
+}
+
+fn logged(s: String) -> String {
+  note(`eval ${s}`);
+  s
+}
+
+fn join2(a: String, b: String, c: String) -> String { `${a}:${b}+${c}` }
+
+// `?` in a branch (written as statements, not `? :`), in a template's hole, in a loop
+fn describe(todos: Array<Todo>, id: i32, loud: bool) -> Option<String> {
+  let t = if loud { (find(todos, id)?).title.to_upper() } else { "quiet" };
+  Some(`<${t}|${(find(todos, id + 1)?).title}>`)
+}
+
+fn total(xs: Array<String>) -> Result<i32, FormError> {
+  let mut n = 0;
+  for x in xs {
+    n += (non_empty("item", x)?).len();
+  }
+  Ok(n)
+}
+
+// in a closure: the `?` returns from the closure
+fn checked(ds: Array<Draft>) -> Array<Result<Todo, FormError>> {
+  ds.map((d) => {
+    let t = non_empty("title", d.title)?;
+    Ok(Todo { id: 0, title: t })
+  })
+}
+
+fn all_valid(ds: Array<Draft>) -> Result<Array<Todo>, FormError> {
+  ds |> .try_map((d) => validate(d, 7))
+}
+
+fn all_found(todos: Array<Todo>, ids: Array<i32>) -> Option<Array<String>> {
+  ids.try_map((i) => find(todos, i).map((t) => t.title))
+}
+
+fn methods(todos: Array<Todo>) -> String {
+  let a = find(todos, 1) |> .map((t) => t.title) |> .unwrap_or("(none)");
+  let b = find(todos, 9).map((t) => t.title).unwrap_or_else(() => "(computed)");
+  let c = find(todos, 2).and_then((t) => find(todos, t.id + 1)).is_some();
+  let d = find(todos, 1).filter((t) => t.id > 5).is_none();
+  let e = find(todos, 9).ok_or("missing").map_err((s) => s.to_upper());
+  let f = match e { Ok(_) => "ok", Err(s) => s };
+  let g = validate(Draft { title: "  ", body: "" }, 1).map_err(message).unwrap_or_else((m) => Todo { id: 0, title: m }).title;
+  let h = validate(Draft { title: "hi", body: "" }, 1).ok().is_some();
+  let i = non_empty("x", "").is_err();
+  `${a} ${b} ${c} ${d} ${f} [${g}] ${h} ${i}`
+}
+
+fn first_title(todos: Array<Todo>) -> String {
+  if let Some(t) = find(todos, 2) { t.title } else { "-" }
+}
+
+fn report(d: Draft) -> String {
+  match validate(d, 3) {
+    Ok(t) => `ok ${t.id} ${t.title}`,
+    Err(e) => message(e),
+  }
+}
+
+export fn run() -> String {
+  let todos = [Todo { id: 1, title: "one" }, Todo { id: 2, title: "two" }, Todo { id: 3, title: "three" }];
+  let r1 = report(Draft { title: " write ", body: "" });
+  let r2 = report(Draft { title: "   ", body: "" });
+  let r3 = report(Draft { title: "a very long title", body: "" });
+  let t1 = titles_of(todos, 1, 2).unwrap_or("none");
+  let t2 = titles_of(todos, 1, 5).unwrap_or("none");
+  let d1 = describe(todos, 1, true).unwrap_or("none");
+  let d2 = describe(todos, 3, false).unwrap_or("none");
+  let n1 = match total(["ab", " c "]) { Ok(n) => n.to_string(), Err(e) => message(e) };
+  let n2 = match total(["ab", " "]) { Ok(n) => n.to_string(), Err(e) => message(e) };
+  let c = checked([Draft { title: "x", body: "" }, Draft { title: "", body: "" }]).map((r) => r.is_ok());
+  let v1 = match all_valid([Draft { title: "a", body: "" }, Draft { title: "b", body: "" }]) { Ok(ts) => ts.len().to_string(), Err(e) => message(e) };
+  let v2 = match all_valid([Draft { title: "a", body: "" }, Draft { title: "", body: "" }]) { Ok(ts) => ts.len().to_string(), Err(e) => message(e) };
+  let f1 = all_found(todos, [3, 1]).map((ts) => ts.join(",")).unwrap_or("none");
+  let f2 = all_found(todos, [3, 4]).map((ts) => ts.join(",")).unwrap_or("none");
+  `${r1}; ${r2}; ${r3}; ${t1}; ${t2}; ${d1}; ${d2}; ${n1}; ${n2}; ${c.map((b) => b.to_string()).join(",")}; ${v1}; ${v2}; ${f1}; ${f2}; ${methods(todos)}; ${first_title(todos)}`
+}
+
+export fn lookup(todos: Array<Todo>, id: i32) -> Option<Todo> {
+  find(todos, id)
+}
+
+export fn parse_draft(d: Draft) -> Result<Todo, FormError> {
+  validate(d, 1)
+}
+
+// (review of mizchi/zust#164) the order of evaluation around a `?`
+fn some_fn(ok: bool) -> Option<fn(i32) -> i32> {
+  note("callee");
+  if ok { Some((x) => x + 1) } else { None }
+}
+fn some_arg(ok: bool) -> Option<i32> {
+  note("arg");
+  if ok { Some(1) } else { None }
+}
+fn pair(a: i32, b: i32) -> String { `${a},${b}` }
+fn order(f: bool, a: bool) -> Option<String> {
+  let mut x = 1;
+  let p = pair(x, { x = 2; Some(3) }?);
+  let s = "<" + logged("cat") + ">" + (some_arg(a)?).to_string();
+  let n = ((some_arg(a)?) as f64).max(0.5);
+  let r = range(0, (some_arg(a)?) + 2).map((i) => i * 10).len();
+  // (a local read before an operand that assigns it: an operator's left side, a method's receiver)
+  let y = x + ({ x = 3; Some(1) }?);
+  let mut t = "ab";
+  let k = t.contains({ t = "zz"; Some("a") }?);
+  let mut w = 1;
+  let none: Array<i32> = [];
+  let fw = none.fold(w, { w = 2; Some(add2) }?);
+  let mut c = 1;
+  let fc = (c as f64) + ({ c = 2; Some(3.0) }?);
+  let mut g = add2;
+  let fg = g({ g = sub2; Some(5) }?, 1);
+  Some(`${some_fn(f)?(some_arg(a)?)} ${p} ${s} ${n} ${r} ${x} ${y} ${k} ${fw} ${fc} ${fg}`)
+}
+
+export fn orders() -> String {
+  `${order(true, true).unwrap_or("none")} | ${order(false, true).unwrap_or("none")} | ${order(true, false).unwrap_or("none")}`
+}
+
+// an async closure whose `?` makes it a Result, and whose tail is a Promise of one (JS adopts it)
+async fn later(n: i32) -> Result<i32, String> { if n > 0 { Ok(n * 2) } else { Err("not positive") } }
+export async fn async_tail(r: Result<i32, String>) -> Result<i32, String> {
+  let f = async () => { let x = r?; later(x) };
+  await f()
+}
+
+// the function of a range's map is evaluated after the bounds, as written
+fn mapper(ok: bool) -> Option<fn(i32) -> i32> {
+  note("mapper");
+  if ok { Some((i) => i * 3) } else { None }
+}
+fn bound(n: i32) -> i32 {
+  note(`bound ${n}`);
+  n
+}
+export fn ranged(ok: bool) -> Option<String> {
+  let xs = range(bound(0), bound(3)).map(mapper(ok)?);
+  Some(xs.map((x) => x.to_string()).join(","))
+}
+
+fn add2(a: i32, b: i32) -> i32 { a + b }
+fn sub2(a: i32, b: i32) -> i32 { a - b }

@@ -42,7 +42,7 @@ pub(crate) fn closure_synth(c: &Expr) -> ItemFn {
             ret: None,
             quals: vec![],
         },
-        block: Block { stmts },
+        block: Block { stmts, spos: Default::default() },
     }
 }
 
@@ -66,6 +66,42 @@ impl Cx<'_> {
     /// lifetime_arity of the program's own structs and enums a signature's type t names (not in fn pointer, `dyn` and
     /// `impl` types, nor a type parameter tps names). Not the prelude's, some of which leave out lifetimes std's have
     /// (`Cow<'a, B>`)
+    /// E0616: a field of a struct or union of another module, not `pub`, where the access is written outside the
+    /// module it is visible within (`s.x` with `mod a { pub struct S { x: u8 } }`). Known for the program's own
+    /// structs by Program::field_priv; a position of no line (a rewrite's) is not read
+    pub(crate) fn field_privacy(&self, sid: u32, fname: &str, at: Sp) -> R<()> {
+        let Some(fp) = self.prog.field_priv.as_deref() else { return Ok(()) };
+        // (the root crate's own code: line_base is the item's line before its first, a dependency's is tagged above
+        // 1 << 20)
+        if !self.user_code || at.line == 0 || self.line_base >= 1 << 20 {
+            return Ok(());
+        }
+        let base = self.prog.structs[sid as usize].base.unwrap_or(sid);
+        let name = &self.prog.structs[base as usize].name;
+        let Some((what, fs)) = fp.fields.get(name.as_str()) else { return Ok(()) };
+        let Some(&(_, scope)) = fs.iter().find(|f| f.0 == fname) else { return Ok(()) };
+        match fp.module_of(self.line_base + at.line) {
+            Some(site) if !fp.within(site, scope) => Err(self.at(at, format!("field `{fname}` of {what} `{name}` is private (E0616)"))),
+            _ => Ok(()),
+        }
+    }
+
+    /// E0624: a method call `x.f()` of a fn of an inherent impl of another module, not `pub`, written outside the
+    /// module it is visible within (Program::field_priv)
+    pub(crate) fn method_privacy(&self, sid: u32, mname: &str, at: Sp) -> R<()> {
+        let Some(fp) = self.prog.field_priv.as_deref() else { return Ok(()) };
+        if !self.user_code || at.line == 0 || self.line_base >= 1 << 20 {
+            return Ok(());
+        }
+        let base = self.prog.structs[sid as usize].base.unwrap_or(sid);
+        let Some(ms) = fp.methods.get(self.prog.structs[base as usize].name.as_str()) else { return Ok(()) };
+        let Some(&(_, scope)) = ms.iter().find(|f| f.0 == mname) else { return Ok(()) };
+        match fp.module_of(self.line_base + at.line) {
+            Some(site) if !fp.within(site, scope) => Err(self.at(at, format!("method `{mname}` is private (E0624)"))),
+            _ => Ok(()),
+        }
+    }
+
     /// The type of a place `let _ = place;` names (a variable and its fields), when known: E0609 for a field its type
     /// does not have (through references and boxes; not through a `Deref` of the program's, which is not followed)
     pub(crate) fn wild_place_ty(&self, e: &Expr) -> R<Option<Ty>> {
@@ -80,7 +116,10 @@ impl Cx<'_> {
                 }
                 let Ty::Struct(sid) = t else { return Ok(None) };
                 match self.prog.field(sid, f) {
-                    Some((ft, _)) => Ok(Some(ft)),
+                    Some((ft, _)) => {
+                        self.field_privacy(sid, f, sp.at)?;
+                        Ok(Some(ft))
+                    }
                     None if self.prog.method(sid, "deref").is_some() || self.prog.is_placeholder(sid) => Ok(None),
                     None => Err(self.at(sp.at, format!("no field `{f}` on type `{}` (E0609)", self.prog.tn(t)))),
                 }
@@ -439,7 +478,7 @@ impl Cx<'_> {
                     },
                 }
             }
-            Expr::Field(base, fname, _) => {
+            Expr::Field(base, fname, fsp) => {
                 // (フィールドがなく Deref を実装した型 (`self.prog` で self: &Inf): `(*self.deref()).prog`)
                 if let Some(Ty::Struct(sid)) = self.peek(base).map(|t| self.strip_refs(t)) {
                     if self.prog.field(sid, fname).is_none() {
@@ -495,7 +534,20 @@ impl Cx<'_> {
                 }
                 let (a, o, sid) = self.struct_base(base)?;
                 match self.prog.field(sid, fname) {
-                    Some((ft, foff)) => Ok(Place::Mem(a, o + foff as i32, ft)),
+                    Some((ft, foff)) => {
+                        // (not a read `..base` makes of the fields a literal leaves out, whose span starts at its
+                        // field: rustc's privacy pass reports that one, E0451)
+                        if fsp.start != fsp.at {
+                            self.field_privacy(sid, fname, fsp.at)?;
+                        }
+                        // (a struct with an unsized tail is a place of its (data, length) pair: a field is at the data
+                        // address, the tail is a pair of its own (its address, the same length))
+                        if Ty::Struct(sid).is_dst_struct() {
+                            Ok(self.dst_field(a, o, ft, foff))
+                        } else {
+                            Ok(Place::Mem(a, o + foff as i32, ft))
+                        }
+                    }
                     None => err(SP, format!("no field `{fname}` on type `{}`", self.prog.structs[sid as usize].name)),
                 }
             }
@@ -532,11 +584,15 @@ impl Cx<'_> {
                     // patterns on it bind by value)
                     // (a fat pointer's value is the address of its two words, which is what a slice place holds)
                     (Some(fat), Ty::Ref(_, Ty::Slice(e)) | Ty::Box(Ty::Slice(e))) => Ok(Place::Mem(fat, 0, Ty::Slice(e))),
+                    (Some(fat), Ty::Ref(_, i) | Ty::Box(i)) if i.is_dst_struct() => Ok(Place::Mem(fat, 0, *i)),
+                    // (`*b` with b: `Box<dyn Tr>` / `&str`: a place of the pair too; reading it as a value is E0277)
+                    (Some(fat), Ty::Ref(_, i @ (Ty::Str | Ty::Dyn(_))) | Ty::Box(i @ (Ty::Str | Ty::Dyn(_)))) => Ok(Place::Mem(fat, 0, *i)),
                     (Some(_), Ty::Ptr(..)) if self.unsafe_ok == 0 && sp.start.line != 0 => {
                         err(sp.start, "dereference of raw pointer is unsafe and requires unsafe block (E0133)")
                     }
                     // (a fat raw pointer is the address of its two words, as a fat reference is)
                     (Some(fat), Ty::Ptr(_, Ty::Slice(e))) => Ok(Place::Mem(fat, 0, Ty::Slice(e))),
+                    (Some(fat), Ty::Ptr(_, i)) if i.is_dst_struct() => Ok(Place::Mem(fat, 0, *i)),
                     (Some(fat), Ty::Ptr(_, i @ (Ty::Str | Ty::Dyn(_)))) => Ok(Place::Mem(fat, 0, *i)),
                     (Some(_), t) if t.is_fat() => err(SP, "dereferencing a slice is not supported (index it instead)"),
                     (Some(_), Ty::Ptr(..)) if self.unsafe_ok == 0 && sp.start.line != 0 => {
@@ -690,6 +746,9 @@ impl Cx<'_> {
         loop {
             p = match p {
                 Place::Mem(a, o, Ty::Struct(sid)) => return Ok((a, o, sid)),
+                // (a reference to a struct with an unsized tail: its two words are the place's (data, length) pair)
+                Place::Mem(a, o, Ty::Ref(_, i) | Ty::Box(i) | Ty::Ptr(_, i)) if i.is_dst_struct() => Place::Mem(self.addr_plus(a, o), 0, *i),
+                Place::Var(v, Ty::Ref(_, i) | Ty::Box(i) | Ty::Ptr(_, i)) if i.is_dst_struct() => Place::Mem(self.b.use_var(v), 0, *i),
                 Place::Mem(a, o, Ty::Ref(_, i) | Ty::Box(i)) => {
                     let ptr = self.b.ins().load(PTR, mf(), a, o);
                     Place::Mem(ptr, 0, *i)
@@ -708,7 +767,30 @@ impl Cx<'_> {
     // --- 式 -------------------------------------------------------------
 
     /// 式を評価し、期待型への暗黙の変換 (`&[T; N]` → `&[T]`) をする
+    /// The deny-by-default lint dangerous_implicit_autorefs, where rustc 1.100 fires it: `(*p).len()` /
+    /// `(*p).is_empty()` and `(*p)[a..b]` with p a raw pointer to a slice or str (an implicit `&*p`)
+    fn implicit_autoref(&self, e: &Expr) -> R<()> {
+        let raw_deref = |r: &Expr| match strip_paren(r) {
+            Expr::Unary(op, x, _) if op == "*" => matches!(self.peek(x), Some(Ty::Ptr(_, Ty::Slice(_) | Ty::Str))),
+            _ => false,
+        };
+        let hit = match e {
+            Expr::MethodCall(recv, m, _, args, _) => args.is_empty() && matches!(m.as_str(), "len" | "is_empty") && raw_deref(recv),
+            Expr::Index(b, k, _) => matches!(&**k, Expr::Range(..)) && raw_deref(b),
+            _ => false,
+        };
+        if hit && !self.prog.allow_implicit_autorefs {
+            return err(expr_start(e), "implicit autoref creates a reference to the dereference of a raw pointer (dangerous_implicit_autorefs)");
+        }
+        Ok(())
+    }
+
     pub(crate) fn expr(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
+        // (no value has an unsized type: `&S { .. }` where `&S<[T]>` is expected makes an `S<[T; N]>`, then coerced)
+        let expected = expected.filter(|t| !t.is_dst_struct());
+        if self.user_code && matches!(e, Expr::MethodCall(..) | Expr::Index(..)) {
+            self.implicit_autoref(e)?;
+        }
         // (a returned position: what is borrowed and read in it is returned (Bk::ret_leaves))
         if !self.bk.ret_leaves.is_empty() && self.bk.ret_leaves.contains(&(e as *const Expr as usize)) {
             self.bk.in_ret += 1;
@@ -821,9 +903,27 @@ impl Cx<'_> {
         })?;
         // `&Box<T>` → `&T` (deref の強制変換: `e = x;` で x: &Box<Expr>)
         if let (Some(want @ Ty::Ref(m2, we)), Some(val), Ty::Ref(m1, Ty::Box(bi))) = (expected, v, t) {
-            if *we == **bi && !matches!(bi, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) && (m1 || !m2) {
+            if *we == **bi && !bi.is_unsized() && (m1 || !m2) {
                 let p = self.b.ins().load(PTR, mf(), val, 0);
                 return Ok((Some(p), want));
+            }
+        }
+        // (a value of a closure type with no captures where a fn pointer is expected: its fn-pointer instance)
+        if let (Some(want @ Ty::Fn(_)), Ty::Struct(sid), true) = (expected, t, self.lub_fnptr > 0 && matches!(e, Expr::Path(None, p) if p.segs.len() == 1)) {
+            let b = self.prog.base_of(sid);
+            if let Some(&cid) = self.prog.closure_of_struct.get(&b) {
+                if self.prog.structs[sid as usize].fields.is_empty() && self.closure_sig(t).is_some_and(|s| matches!(want, Ty::Fn(f) if f.params == s.0 && f.ret == s.1)) {
+                    let args = self.prog.structs[sid as usize].args.clone();
+                    let (iid, sig) = {
+                        let mut g = self.insts.lock().unwrap();
+                        let iid = g.request_fnptr(self.prog, cid, args).or_else(|e| err(SP, e))?;
+                        (iid, g.sig(self.prog, iid).clone())
+                    };
+                    self.requested.push(iid);
+                    let fr = self.fref(iid, &sig);
+                    let v = self.b.ins().func_addr(PTR, fr);
+                    return Ok((Some(v), want));
+                }
             }
         }
         // `&T` / `&mut T` → `*const T` / `*mut T`
@@ -831,10 +931,34 @@ impl Cx<'_> {
             if pe == re && (m1 || !m2) {
                 return Ok((v, want));
             }
+            // (`&[T; N]` → `*const [T]`: the fat pointer (address, N), as the cast makes it; `&[T]` is one already)
+            match (pe, re, v) {
+                (Ty::Slice(we), Ty::Array(ge, n), Some(v)) if we == ge && (m1 || !m2) => {
+                    let fat = self.make_fat(v, *n as i64);
+                    return Ok((Some(fat), want));
+                }
+                (Ty::Slice(we), Ty::Slice(ge), _) if we == ge && (m1 || !m2) => return Ok((v, want)),
+                _ => {}
+            }
         }
         if let (Some(want @ Ty::Ref(m2, Ty::Slice(we))), Some(v), Ty::Ref(m1, Ty::Array(ge, n))) = (expected, v, t) {
             if we == ge && (m1 || !m2) {
                 let fat = self.make_fat(v, *n as i64);
+                return Ok((Some(fat), want));
+            }
+        }
+        // `&S<[T; N]>` → `&S<[T]>` (and to `*const S<[T]>`, `Box<S<[T; N]>>` → `Box<S<[T]>>`): the address and N
+        if let (Some(want @ (Ty::Ref(m2, wi) | Ty::Ptr(m2, wi))), Some(v), Ty::Ref(m1, gi) | Ty::Ptr(m1, gi)) = (expected, v, t) {
+            if (m1 || !m2) && !(matches!(want, Ty::Ref(..)) && matches!(t, Ty::Ptr(..))) {
+                if let Some(m) = self.unsize_tail(*wi, *gi) {
+                    let fat = self.make_unsized(v, m, expr_start(e))?;
+                    return Ok((Some(fat), want));
+                }
+            }
+        }
+        if let (Some(want @ Ty::Box(wi)), Some(v), Ty::Box(gi)) = (expected, v, t) {
+            if let Some(m) = self.unsize_tail(*wi, *gi) {
+                let fat = self.make_unsized(v, m, expr_start(e))?;
                 return Ok((Some(fat), want));
             }
         }
@@ -869,6 +993,12 @@ impl Cx<'_> {
         // `&Box<[T]>` → `&[T]` (what the reference points to is the (pointer, length) pair, a `&[T]`'s value)
         if let (Some(want @ Ty::Ref(m2, Ty::Slice(we))), Some(v), Ty::Ref(m1, Ty::Box(Ty::Slice(ge)))) = (expected, v, t) {
             if we == ge && (m1 || !m2) {
+                return Ok((Some(v), want));
+            }
+        }
+        // (`&Box<Foo<[T]>>` → `&Foo<[T]>`: the same)
+        if let (Some(want @ Ty::Ref(m2, wi)), Some(v), Ty::Ref(m1, Ty::Box(gi))) = (expected, v, t) {
+            if *wi == **gi && wi.is_dst_struct() && (m1 || !m2) {
                 return Ok((Some(v), want));
             }
         }
@@ -1016,6 +1146,11 @@ impl Cx<'_> {
                 // (`&mut T` read where no reference type is expected is moved, not reborrowed: `{src}` / `let b = a;`)
                 let exp_none = self.bk.exp_none;
                 let p = self.place(e)?;
+                // (a field of an unsized type read as a value (`let t = r.tail;` with r: `&S<[u8]>`): its size is not
+                // known, as for `*slice`; a borrow of it (`&r.tail`) is a place, not here)
+                if p.ty().is_unsized() {
+                    return err(expr_start(e), format!("the size for values of type `{}` cannot be known at compilation time (E0277)", self.prog.tn(p.ty())));
+                }
                 let r = self.read(p);
                 if self.bk_on() && (!self.bk_ty(r.1).0 || exp_none && matches!(r.1, Ty::Ref(true, _))) {
                     if !self.bk_ty(r.1).0 {
@@ -1135,15 +1270,16 @@ impl Cx<'_> {
                 }
                 let p = p?;
                 // (`*slice` as a value: its size is not known; only a place (a pattern, `&*s`) can be one)
-                if matches!(p.ty(), Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) {
+                if p.ty().is_unsized() {
                     return err(expr_start(e), format!("the size for values of type `{}` cannot be known at compilation time", self.prog.tn(p.ty())));
                 }
                 // (a `&mut` a `let` with no type written is initialized from (`let y = unsafe { *p };`): moved, not
                 // reborrowed)
                 let mut_moved = self.bk.plain_init == e as *const Expr as usize && self.bk.level >= 2 && matches!(p.ty(), Ty::Ref(true, _));
                 if self.bk_on() && (!self.bk_ty(p.ty()).0 || mut_moved) {
-                    // (`*x` with x a raw pointer: what it points to is not owned, E0507)
-                    if matches!(self.peek(x), Some(Ty::Ptr(..))) && self.bk.level >= 1 {
+                    // (`*x` with x a raw pointer: what it points to is not owned, E0507; also with x a reference that
+                    // is no place (`*&x`, `*v.first().unwrap()`))
+                    if self.bk.level >= 1 && (matches!(self.peek(x), Some(Ty::Ptr(..))) || !is_place_expr(x)) {
                         self.drop_move_check(e)?;
                     }
                     // (`*rc` with rc an Rc / a Deref type of the program's: its deref gives a reference, which cannot
@@ -1499,7 +1635,10 @@ impl Cx<'_> {
                         v
                     }
                     None => {
-                        self.same(SP, Ty::Unit, ret)?;
+                        // (E0069: `return;` in a fn of another return type, `!` too)
+                        if self.same(SP, Ty::Unit, ret).is_err() {
+                            return err(SP, "`return;` in a function whose return type is not `()` (E0069)");
+                        }
                         None
                     }
                 };
@@ -1774,12 +1913,19 @@ impl Cx<'_> {
                     // (a raw slice pointer is the address of its (data, length) pair here: as a thin pointer, the data
                     // word)
                     // (a raw dyn pointer, the address of its (data, vtable) pair: likewise the data word)
-                    (Ty::Ptr(_, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)), Ty::Ptr(_, b)) if !matches!(b, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
+                    (Ty::Ptr(_, a), Ty::Ptr(_, b)) if a.is_unsized() && !b.is_unsized() => {
                         return Ok((v.map(|a| self.b.ins().load(PTR, mf(), a, 0)), to));
                     }
                     // (`p as usize` of a fat raw pointer: its address, the data word)
-                    (Ty::Ptr(_, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)), t) if matches!(t, Ty::Usize | Ty::U64 | Ty::Isize | Ty::I64) => {
+                    (Ty::Ptr(_, a), t) if a.is_unsized() && matches!(t, Ty::Usize | Ty::U64 | Ty::Isize | Ty::I64) => {
                         return Ok((v.map(|a| self.b.ins().load(PTR, mf(), a, 0)), to));
+                    }
+                    // (`p as *const S<[T]>` with p: `*const S<[T; N]>` / `*const S<T>` to `*const S<dyn Tr>`: the
+                    // unsizing of a struct's tail, the address and N or the vtable)
+                    (Ty::Ptr(m, gi), Ty::Ptr(pm, wi)) if wi.is_dst_struct() && (m || !pm) && self.unsize_tail(*wi, *gi).is_some() => {
+                        let Some(a) = v else { return Ok((None, to)) };
+                        let meta = self.unsize_tail(*wi, *gi).unwrap();
+                        return Ok((Some(self.make_unsized(a, meta, SP)?), to));
                     }
                     // (`p as *const dyn Tr` with p: `*const S`: the unsizing to a (data, vtable) pair)
                     (Ty::Ptr(m, inner), Ty::Ptr(pm, Ty::Dyn(tr))) if !matches!(inner, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str) && (m || !pm) => {
@@ -1810,10 +1956,10 @@ impl Cx<'_> {
                         return Ok((v, to));
                     }
                     // (a narrower or wider integer and a raw pointer: through usize, as `as` does)
-                    (t, Ty::Ptr(_, i)) if t.is_int() && t.bits() <= 64 && !matches!(i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
+                    (t, Ty::Ptr(_, i)) if t.is_int() && t.bits() <= 64 && !i.is_unsized() => {
                         return Ok((v.map(|x| self.convert(x, t, Ty::Usize)), to));
                     }
-                    (Ty::Ptr(_, i), t) if t.is_int() && t.bits() <= 64 && !matches!(i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
+                    (Ty::Ptr(_, i), t) if t.is_int() && t.bits() <= 64 && !i.is_unsized() => {
                         return Ok((v.map(|x| self.convert(x, Ty::Usize, t)), to));
                     }
                     _ => {}
@@ -1914,7 +2060,13 @@ impl Cx<'_> {
             }
             Expr::Try(_) => self.try_(e),
             // `const { .. }` (an inline const): its value, computed where it is (the same value as at compile time)
-            Expr::Const(b) => self.block(b, expected),
+            Expr::Const(b) => {
+                // (E0435: an inline const reads no local of the code around it: `if let Some(v) = .. { const { v } }`)
+                if let Some(at) = self.const_reads_local(e) {
+                    return Err(self.at(at, "attempt to use a non-constant value in a constant (E0435)".into()));
+                }
+                self.block(b, expected)
+            }
             e => {
                 let k = format!("{e:?}");
                 let k = k.split(|c: char| !c.is_alphanumeric()).next().unwrap_or("").to_string();
@@ -2200,7 +2352,7 @@ impl Cx<'_> {
             }
             return match pl {
                 // `&mut v[i]` (v: Vec<Box<T>>) を `&mut T` の位置に: Box の中身を指す (deref の強制変換)
-                Place::Mem(a, o, Ty::Box(x)) if matches!(expected, Some(Ty::Ref(_, e)) if *e == *x) && !matches!(x, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
+                Place::Mem(a, o, Ty::Box(x)) if matches!(expected, Some(Ty::Ref(_, e)) if *e == *x) && !x.is_unsized() => {
                     let p = self.b.ins().load(PTR, mf(), a, o);
                     Ok((Some(p), Ty::Ref(m, x)))
                 }
@@ -2308,11 +2460,12 @@ impl Cx<'_> {
                 if fid.parse::<u32>().is_ok() {
                     return err(SP, "expected a field name");
                 }
+                // (at the field, as rustc: its value's position, on its line)
                 let Some(fi) = v.fields.iter().position(|f| f.0 == *fid) else {
-                    return err(SP, format!("variant `{}` has no field named `{fid}`", v.name));
+                    return Err(self.at(err_pos(fe), format!("variant `{}` has no field named `{fid}`", v.name)));
                 };
                 if args.iter().any(|&(i, _)| i == fi) {
-                    return err(SP, format!("field `{fid}` specified more than once"));
+                    return Err(self.at(err_pos(fe), format!("field `{fid}` specified more than once")));
                 }
                 args.push((fi, fe));
             }
@@ -2384,6 +2537,7 @@ impl Cx<'_> {
                 let mut nfields = sfields.clone();
                 for f in all {
                     if !sfields.iter().any(|fv| fv.0 == f) {
+                        // (a span that starts at its field: field_privacy leaves it to the privacy pass's E0451)
                         let at = expr_start(base);
                         nfields.push((f.clone(), Expr::Field(Box::new(base.clone()), f, crate::parse::Span { start: at, at })));
                     }
@@ -2409,7 +2563,7 @@ impl Cx<'_> {
                     }
                 }
                 stmts.push(crate::parse::Stmt::Expr(Expr::Struct(path.clone(), nfields, Some(base.clone())), false));
-                let ne: &Expr = self.keep_expr(Expr::Block(None, false, crate::parse::Block { stmts }));
+                let ne: &Expr = self.keep_expr(Expr::Block(None, false, crate::parse::Block { stmts, spos: Default::default() }));
                 return self.expr(ne, expected);
             }
         }
@@ -2476,13 +2630,20 @@ impl Cx<'_> {
             return Ok(r);
         }
         let fields = self.prog.structs[sid as usize].fields.clone();
+        // (`Result { .. }`: an enum's name where a struct goes, E0574, at the literal)
+        if self.prog.structs[self.prog.base_of(sid) as usize].is_enum {
+            let n = self.prog.tn(Ty::Struct(self.prog.base_of(sid)));
+            let n = n.split('<').next().unwrap_or(&n).to_string();
+            return err(SP, format!("expected struct, variant or union type, found enum `{n}` (E0574)"));
+        }
         let mut args = vec![];
         for (name, fe) in sfields {
+            // (at the field, as rustc: its value's position, on its line)
             let Some(fi) = fields.iter().position(|f| f.0 == *name) else {
-                return err(SP, format!("struct `{}` has no field named `{name}`", self.prog.structs[sid as usize].name));
+                return Err(self.at(err_pos(fe), format!("struct `{}` has no field named `{name}`", self.prog.structs[sid as usize].name)));
             };
             if args.iter().any(|&(i, _)| i == fi) {
-                return err(SP, format!("field `{name}` specified more than once"));
+                return Err(self.at(err_pos(fe), format!("field `{name}` specified more than once")));
             }
             args.push((fi, fe));
         }
@@ -2588,7 +2749,10 @@ impl Cx<'_> {
             let ct = if by_move { t } else { Ty::Ptr(true, intern(t)) };
             sol[cd.n_parent + i] = Some(ct);
             caps.push((loc, t));
+            // (a guard's checks of the arm's bindings (bk_ev) of a closure's captures: only a mutable borrow)
+            let gc = std::mem::replace(&mut self.bk.guard_cap, true);
             copy_caps.push(self.bk_capture(c, n, loc, t, by_move));
+            self.bk.guard_cap = gc;
         }
         // (a capture held by value (a `move` closure's) of a local not declared `mut`, which the body assigns or borrows
         // mutably: E0594 / E0596 at the mutation; one held by reference is a `&mut` loan the borrow check reports)
@@ -3038,16 +3202,24 @@ impl Cx<'_> {
                 Ty::Struct(sid) => self.prog.closure_of_struct.get(&self.prog.base_of(sid)).copied(),
                 _ => None,
             };
-            let Some(cid) = cid else {
-                return err(span, format!("`{}` is not a closure", self.prog.tn(t)));
-            };
-            let Ty::Struct(sid) = t else { unreachable!() };
-            let args = self.prog.structs[sid as usize].args.clone();
-            let mut g = self.insts.lock().unwrap();
-            let iid = g.request(self.prog, cid, args).or_else(|e| err(span, e))?;
-            drop(g);
-            self.requested.push(iid);
-            fns.push(iid);
+            // (a placeholder bounded by `Fn(..)` / `FnMut(..)` / `FnOnce(..)` (zustc check of a generic fn nothing
+            // calls, `Box::new(f)` as a `Box<dyn FnMut(bool)>`): it has no body for the vtable's call to point at, and
+            // the instance is only checked, never run. Its entry is left empty, as a method dyn cannot call is)
+            let fn_placeholder = matches!(t, Ty::Struct(sid) if self.prog.is_placeholder(sid)
+                && self.prog.structs[sid as usize].placeholder.as_ref().is_some_and(|bs| bs.iter().any(|b| crate::ast_summary::parse_fn_bound(b).is_some())));
+            match cid {
+                Some(cid) => {
+                    let Ty::Struct(sid) = t else { unreachable!() };
+                    let args = self.prog.structs[sid as usize].args.clone();
+                    let mut g = self.insts.lock().unwrap();
+                    let iid = g.request(self.prog, cid, args).or_else(|e| err(span, e))?;
+                    drop(g);
+                    self.requested.push(iid);
+                    fns.push(iid);
+                }
+                None if fn_placeholder => fns.push(u32::MAX),
+                None => return err(span, format!("`{}` is not a closure", self.prog.tn(t))),
+            }
         } else {
             // (`dyn Foo<isize>`: the trait's own parameters are the arguments written)
             let tr0 = tr;
@@ -3059,8 +3231,24 @@ impl Cx<'_> {
                 return err(span, format!("cannot find trait `{tr}`"));
             }
             let decls = if auto { vec![] } else { self.prog.dyn_methods(tr) };
-            if !auto && !self.prog.implements(t, tr) {
+            // (a trait of the program's: by the trait solver (an impl for a reference or an array, a blanket impl with
+            // where clauses); std's: implements, unless the solver knows better (`()`'s impls))
+            let own = self.prog.tdb.user.contains(tr);
+            let no = if own || t == Ty::Unit {
+                !self.prog.has_param(t) && self.prog.tdb.holds(self.prog, t, tr) == crate::traits::Ans::No
+            } else {
+                !self.prog.implements(t, tr)
+            };
+            if !auto && no {
                 return err(span, format!("the trait `{tr}` is not implemented for `{}`", self.prog.tn(t)));
+            }
+            // (a trait of the program's with its arguments, by the trait solver: `Struct` to `dyn Trait<isize>` needs
+            // `Struct: Trait<isize>`, not some `Trait<&str>`)
+            if !auto && self.prog.tdb.user.contains(tr) && !self.prog.has_param(t) && !self.prog.names_placeholder(t, 0) {
+                let b = tr0.split('+').next().unwrap_or(tr0).trim();
+                if self.prog.tdb.holds(self.prog, t, b) == crate::traits::Ans::No {
+                    return err(span, format!("the trait bound `{}: {}` is not satisfied (E0277)", self.prog.tn(t), crate::traits::bound_text(b)));
+                }
             }
             // (E0191: every associated type of the trait is bound in the dyn type: `dyn Iterator<Item = u32>`)
             {
@@ -3125,6 +3313,14 @@ impl Cx<'_> {
         // 最後の欄は drop glue (`Box<dyn ..>` の drop で使う)
         let de = self.vtable_drop_entry(t);
         fns.push(de);
+        // (then the size and the alignment: a struct with this type as its unsized tail places the tail by them,
+        // size_of_val reads them)
+        let (size, align) = self.prog.size_align(t);
+        if size > VT_LIT_MAX {
+            return err(span, format!("`{}` is too large for a trait object ({size} bytes)", self.prog.tn(t)));
+        }
+        fns.push(VT_LIT | size);
+        fns.push(VT_LIT | align);
         let k = match self.vtables.iter().position(|x| *x == fns) {
             Some(k) => k,
             None => {
@@ -3426,6 +3622,163 @@ impl Cx<'_> {
         let names: Vec<&str> = sig.generics.iter().map(|g| g.0.as_str()).collect();
         let ps = ps.iter().map(|t| self.prog.resolve_g(t, &names).ok()).collect::<Option<Vec<Ty>>>()?;
         Some((ps, self.prog.resolve_g(&r, &names).ok()?, text))
+    }
+
+    /// The fn pointer type that expressions es all coerce to when they are two or more distinct closures with no
+    /// captures and one signature (rustc's coercion of a match's arms or an array's elements to their least upper
+    /// bound). None otherwise, also when they are one closure type
+    /// The element type that `&String` and `&str` elements coerce to together (`vec![&string, "abc"]`: `&str`), when
+    /// both kinds are among them and nothing else
+    pub(crate) fn str_refs_lub(&self, es: &[&Expr]) -> Option<Ty> {
+        let string = self.prog.struct_index.get("String").copied();
+        let (mut strs, mut strings) = (0, 0);
+        for e in es {
+            match self.peek(e)? {
+                Ty::Ref(false, Ty::Str) => strs += 1,
+                Ty::Ref(_, Ty::Struct(s)) if Some(self.prog.base_of(*s)) == string => strings += 1,
+                _ => return None,
+            }
+        }
+        (strs > 0 && strings > 0).then(|| Ty::Ref(false, crate::types::intern(Ty::Str)))
+    }
+
+    pub(crate) fn closures_lub(&self, es: &[&Expr]) -> Option<Ty> {
+        if es.len() < 2 {
+            return None;
+        }
+        // (each member: a closure with no captures (an expression, or a local of such a closure's type), a fn item
+        // that is not generic, a fn pointer, or an arm that diverges (`unimplemented!()`), which asks nothing. The
+        // signature from those whose types are known; a closure whose parameters are not written takes it when it has
+        // as many)
+        let mut sig: Option<(Vec<Ty>, Ty)> = None;
+        let mut open_arity: Vec<usize> = vec![];
+        let mut kinds: Vec<Option<Ty>> = vec![];
+        let mut fn_items: Vec<u32> = vec![];
+        let mut members = 0;
+        let mut any_closure = false;
+        let mut agree = |sig: &mut Option<(Vec<Ty>, Ty)>, s: (Vec<Ty>, Ty)| -> bool {
+            if s.0.iter().chain([&s.1]).any(|&x| self.prog.has_param(x)) {
+                return false;
+            }
+            match sig {
+                Some(prev) => *prev == s,
+                None => {
+                    *sig = Some(s);
+                    true
+                }
+            }
+        };
+        for e in es {
+            let c = strip_paren(e);
+            match c {
+                Expr::Macro(p, _, _) if matches!(p.segs.last().map(|s| s.name.as_str()), Some("panic" | "todo" | "unimplemented" | "unreachable")) => continue,
+                Expr::Closure(_, ps, ret_ann, _, _) => {
+                    let k = self.closure_ix.get(&format!("@{}", c as *const Expr as usize)).or_else(|| self.closure_ix.get(&crate::ast_closure::closure_key(c)));
+                    match k.and_then(|k| self.prog.closure_by.get(&(self.root, *k))) {
+                        Some(cid) => {
+                            if !self.prog.closures[cid].captures.is_empty() {
+                                return None;
+                            }
+                        }
+                        None => {
+                            if crate::ast_closure::free_vars(c).iter().any(|n| self.lookup(n).is_some()) {
+                                return None;
+                            }
+                        }
+                    }
+                    let written: Option<Vec<Ty>> = ps.iter().map(|(_, t)| t.as_ref().and_then(|t| self.parse_ty(t).ok())).collect();
+                    let ret = match ret_ann {
+                        Some(t) => self.parse_ty(t).ok(),
+                        None => self.peek(e).filter(|t| !matches!(t, Ty::Struct(s) if self.prog.closure_of_struct.contains_key(&self.prog.base_of(*s)))),
+                    };
+                    match (written, ret) {
+                        (Some(params), Some(ret)) => {
+                            if !agree(&mut sig, (params, ret)) {
+                                return None;
+                            }
+                        }
+                        _ => open_arity.push(ps.len()),
+                    }
+                    kinds.push(None);
+                    any_closure = true;
+                }
+                Expr::Path(None, p) if p.segs.len() == 1 && self.lookup(&p.segs[0].name).is_some() => {
+                    let (_, t) = self.lookup(&p.segs[0].name)?;
+                    match t {
+                        Ty::Struct(sid) if self.prog.closure_of_struct.contains_key(&self.prog.base_of(sid)) => {
+                            if !self.prog.structs[sid as usize].fields.is_empty() {
+                                return None;
+                            }
+                            // (a parameter or result with a reference: its lifetime (`|x: &'static u32|`) is not in the
+                            // fn pointer type, and the region check of an explicit cast (rg_closure_fnptr) would not run;
+                            // not coerced, as before)
+                            let cs = self.closure_sig(t)?;
+                            if cs.0.iter().chain([&cs.1]).any(|&p| has_ref(p, 0)) {
+                                return None;
+                            }
+                            if !agree(&mut sig, cs) {
+                                return None;
+                            }
+                            any_closure = true;
+                        }
+                        Ty::Fn(f) => {
+                            if !agree(&mut sig, (f.params.clone(), f.ret)) {
+                                return None;
+                            }
+                        }
+                        _ => return None,
+                    }
+                    kinds.push(Some(t));
+                }
+                _ => {
+                    // (a fn item that is not generic, or a value of a fn pointer type (`foo as FnPointer`))
+                    let ft = match self.fn_item(c) {
+                        Some(fid) if self.prog.sigs[fid as usize].generics.is_empty() => {
+                            let fs = &self.prog.sigs[fid as usize];
+                            kinds.push(Some(Ty::Param(crate::program::HOLE)));
+                            fn_items.push(fid);
+                            (fs.params.clone(), fs.ret)
+                        }
+                        Some(_) => return None,
+                        None => match self.peek(c)? {
+                            Ty::Fn(f) => {
+                                kinds.push(Some(Ty::Fn(f)));
+                                (f.params.clone(), f.ret)
+                            }
+                            _ => return None,
+                        },
+                    };
+                    if !agree(&mut sig, ft) {
+                        return None;
+                    }
+                }
+            }
+            members += 1;
+        }
+        let (params, ret) = sig?;
+        if members < 2 || open_arity.iter().any(|&n| n != params.len()) {
+            return None;
+        }
+        // (one closure type alone is no coercion: `[|x| x; 2]`-like arms of the same closure, or one closure local
+        // used twice (`[c, c]`), stay it. The types: each closure written is one of its own; a local's, a fn item's
+        // (by the item) and a fn pointer's are as many as they are different)
+        let mut types: Vec<String> = vec![];
+        let mut items = fn_items.iter();
+        for (i, k) in kinds.iter().enumerate() {
+            let key = match k {
+                None => format!("literal#{i}"),
+                Some(Ty::Param(crate::program::HOLE)) => format!("item#{}", items.next().copied().unwrap_or(u32::MAX)),
+                Some(t) => format!("{t:?}"),
+            };
+            if !types.contains(&key) {
+                types.push(key);
+            }
+        }
+        let distinct_closures = types.len() >= 2;
+        if !any_closure && !kinds.iter().any(|k| matches!(k, Some(Ty::Param(_)))) {
+            return None;
+        }
+        distinct_closures.then(|| Ty::Fn(crate::types::intern_fn(crate::types::FnTy { params, ret })))
     }
 
     /// クロージャの型 (struct のインスタンス) なら、その引数と戻り値の型
@@ -3907,11 +4260,34 @@ impl Cx<'_> {
 
     fn call_inner(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Call(func, cargs) = c else { return err(SP, "internal: expected a call") };
+        // (E0040: `Drop::drop(&mut x)`, `<S as Drop>::drop(..)`)
+        if let (true, Expr::Path(_, p)) = (self.user_code, &**func) {
+            if p.segs.len() >= 2 && p.segs[p.segs.len() - 1].name == "drop" && p.segs[p.segs.len() - 2].name == "Drop" {
+                return Err(self.at(p.pos, "explicit use of destructor method (E0040)".to_string()));
+            }
+        }
         // (`f1(x)` after `let f1 = f;` (f generic): `f(x)`)
         if let (false, Expr::Path(None, p)) = (self.fn_aliases.is_empty(), strip_paren(func)) {
             if let Some(&(_, target)) = ident_of(p).and_then(|n| self.fn_aliases.iter().rev().find(|a| a.0 == n)) {
                 let ne: &Expr = self.keep_expr(Expr::Call(Box::new(target.clone()), cargs.clone()));
                 return self.expr(ne, expected);
+            }
+        }
+        // (`core::mem::MaybeUninit::<S>::uninit()` / `std::vec::Vec::<u8>::new()`: std's modules before a type of the
+        //  prelude with type arguments are left out, as without them (libc 0.2's offset_of!))
+        if let Expr::Path(None, p) = strip_paren(func) {
+            let n = p.segs.len();
+            if n >= 4 && matches!(p.segs[0].name.as_str(), "std" | "core" | "alloc") {
+                let k = (1..n - 1).find(|&k| !p.segs[k].args.is_empty());
+                if let Some(k) = k.filter(|&k| {
+                    k >= 2
+                        && p.segs[1..k].iter().all(|s| s.args.is_empty() && s.name.starts_with(|c: char| c.is_ascii_lowercase()))
+                        && self.prog.struct_index.contains_key(p.segs[k].name.as_str())
+                }) {
+                    let np = crate::parse::Path { global: false, segs: p.segs[k..].to_vec(), pos: p.pos };
+                    let ne: &Expr = self.keep_expr(Expr::Call(Box::new(Expr::Path(None, np)), cargs.clone()));
+                    return self.expr(ne, expected);
+                }
             }
         }
         // `(*f)(x)` with f: `Box<dyn Fn ..>` / `&dyn Fn ..` / a closure behind a reference: `f(x)`
@@ -4356,6 +4732,47 @@ fn diverging_tail(e: &Expr) -> bool {
         Expr::Loop(..) => !has_break(tail(e)),
         Expr::Return(_) => true,
         Expr::Macro(p, _, _) if p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")) => has_unit_return(e),
+        _ => false,
+    }
+}
+
+impl Cx<'_> {
+    /// Where an inline const `const { .. }` names a local of the code around it (None if it does not, or if it binds
+    /// names of its own with a `let` or a closure, which this does not follow)
+    pub(crate) fn const_reads_local(&self, c: &Expr) -> Option<Sp> {
+        fn walk(e: &Expr, out: &mut Vec<(String, Sp)>, own: &mut bool) {
+            match e {
+                Expr::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() => out.push((p.segs[0].name.clone(), p.pos)),
+                Expr::Closure(..) | Expr::Let(..) | Expr::Match(..) | Expr::For(..) | Expr::Macro(..) => *own = true,
+                Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => {
+                    for st in &b.stmts {
+                        match st {
+                            Stmt::Expr(x, _) => walk(x, out, own),
+                            _ => *own = true,
+                        }
+                    }
+                }
+                e => crate::ast_closure::each_child_pub(e, &mut |x| walk(x, out, own)),
+            }
+        }
+        let (mut names, mut own) = (vec![], false);
+        walk(c, &mut names, &mut own);
+        if own {
+            return None;
+        }
+        names.into_iter().find(|(n, p)| p.line != 0 && self.lookup(n).is_some()).map(|(_, p)| p)
+    }
+}
+
+/// t holds a reference (in a fn pointer's parameters, a struct's arguments ..)
+fn has_ref(t: Ty, depth: u32) -> bool {
+    if depth > 16 {
+        return true;
+    }
+    match t {
+        Ty::Ref(..) => true,
+        Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => has_ref(*i, depth + 1),
+        Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&x| has_ref(x, depth + 1)),
         _ => false,
     }
 }

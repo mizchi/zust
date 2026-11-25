@@ -4806,3 +4806,695 @@ fn g() {
 fn main() {}
 "#, &[(10, "cannot assign to `e` because it is borrowed")], "ro");
 }
+
+#[test]
+fn part33_pattern_moves_and_guards() {
+    // (each case checked with rustc 1.97: zustc reports each fn's first error on rustc's line)
+    // (a `ref mut` binding where the default binding mode is by shared reference: E0596 at the binding (2, 5); an
+    // explicit `&` pattern's binding through a `&` is the borrow check's (8); through a `&mut`, accepted (11))
+    errors_at(r#"enum Foo { Bar(i32) }
+fn a(arr: Vec<Foo>) { if let (Some(Foo::Bar(ref mut val)), _) = (&arr.get(0), 0) { *val = 1; } }
+fn b(o: &Option<i32>) {
+    match o {
+        Some(ref mut v) => *v = 1,
+        None => {}
+    }
+}
+fn c(o: &(i32, i32)) { let &(ref mut x, _) = o; *x = 1; }
+fn d(o: &mut Option<(i32, String)>) { if let Some((ref mut x, ref mut s)) = o { *x = 1; s.push('x'); } }
+fn main() {}
+"#, &[(2, "cannot borrow data in a `&` reference as mutable"), (5, "cannot borrow data in a `&` reference as mutable"), (9, "as mutable")], "rm");
+    // (a pattern that moves a field reached through an overloaded deref: E0507 at the scrutinee, also where the
+    // binding needs no drop (6, 9); a Copy field and a `ref` binding are accepted (12, 15); a `Box`'s field moves (18))
+    errors_at(r#"use std::ops::Deref;
+struct Wrap<T>(T);
+struct NonCopy(());
+struct St { field: Option<NonCopy>, n: Option<i32>, s: Option<String> }
+impl<T> Deref for Wrap<T> { type Target = T; fn deref(&self) -> &T { &self.0 } }
+fn a(w: Wrap<St>) -> usize { if let Some(_v) = w.field { 1 } else { 0 } }
+fn b(w: Wrap<St>) -> usize {
+    match w.s {
+        Some(v) => v.len(),
+        None => 0,
+    }
+}
+fn c(w: Wrap<St>) -> i32 { if let Some(n) = w.n { n } else { 0 } }
+fn d(w: Wrap<St>) -> usize {
+    match w.s { Some(ref v) => v.len(), None => 0 }
+}
+fn e(w: Box<St>) -> usize {
+    match w.s { Some(v) => v.len(), None => 0 }
+}
+fn main() {}
+"#, &[(6, "cannot move out of dereference of `Wrap<St>`"), (8, "cannot move out of dereference of `Wrap<St>`")], "od");
+    // (a move out of what a reference that is no place points to: E0507 (2, 3, 5); a borrow of it, a Copy part, a
+    // method call through it are accepted (6))
+    errors_at(r#"struct A(String);
+fn a(x: A) { let _y = *&x; }
+fn b(v: Vec<String>) -> String { *v.first().unwrap() }
+fn id<T>(x: &T) -> &T { x }
+fn c(v: String) -> String { *id(&v) }
+fn d(v: Vec<String>) -> usize { let r = &*v.first().unwrap(); let n = (*v.first().unwrap()).len(); r.len() + n }
+fn main() {}
+"#, &[(2, "cannot move out of a shared reference"), (3, "cannot move out of a shared reference"), (5, "cannot move out of a shared reference")], "nr");
+    // (in a match guard the arm's bindings are seen by shared reference: a move (3), an assignment (9), a mutable
+    // borrow (14), one through a `&mut` binding (19) are E0507 / E0594 / E0596; reads, clones and the arm's own uses
+    // are accepted (23))
+    errors_at(r#"fn a(x: Option<String>) -> usize {
+    match x {
+        Some(v) if { drop(v); false } => 1,
+        _ => 0,
+    }
+}
+fn b(x: Option<i32>) -> usize {
+    match x {
+        Some(mut y) if { y += 1; false } => 1,
+        _ => 0,
+    }
+}
+fn c(x: Option<Vec<i32>>) -> usize {
+    match x { Some(v) if { v.push(1); true } => 1, _ => 0 }
+}
+fn d(o: Option<&mut Vec<i32>>) -> usize {
+    match o {
+        Some(r) if r.len() > 1 => { r.push(1); r.len() }
+        Some(r) if { r.push(1); true } => 0,
+        _ => 0,
+    }
+}
+fn e(x: Option<String>) -> usize {
+    match x { Some(v) if { let w = v.clone(); w.len() > 1 } => v.len(), Some(mut v) => { v.push('a'); v.len() }, None => 0 }
+}
+fn main() {}
+"#, &[(3, "cannot move out of `v` in pattern guard"), (9, "cannot assign to `y`, as it is immutable for the pattern guard"), (14, "cannot borrow `v` as mutable, as it is immutable for the pattern guard"), (19, "cannot borrow `*r` as mutable, as it is immutable for the pattern guard")], "pg");
+}
+
+#[test]
+fn part33_receivers_returned_closures_and_aggregates() {
+    // (each case checked with rustc 1.97: zustc reports each fn's first error on rustc's line)
+    // (a `self: Box<Self>` or `self: Pin<&mut Self>` receiver moves into the call: a use after is E0382 (10, 16))
+    errors_at(r#"use std::pin::Pin;
+struct Foo(i32);
+impl Foo {
+    fn bar(self: Box<Self>) {}
+    fn baz(self: Pin<&mut Self>) {}
+}
+fn a() {
+    let b = Box::new(Foo(1));
+    b.bar();
+    b.bar();
+}
+fn c() {
+    let mut f = Foo(1);
+    let p = Pin::new(&mut f);
+    p.baz();
+    p.baz();
+}
+fn main() {}
+"#, &[(10, "use of moved value: `b`"), (16, "use of moved value: `p`")], "rv");
+    // (a closure that borrows a local, held in a local returned as an `impl Trait`: rustc's E0597 at the use in its
+    // body of what it captures (7, the `p` that `println!` names, not `p.x`); returned itself or in a `Box<dyn ..>`,
+    // E0373 at the closure (13))
+    errors_at(r#"#[derive(Debug)]
+struct Point { x: i32, y: i32 }
+fn foo() -> impl FnMut() {
+    let mut p = Point { x: 1, y: 2 };
+    let c = || {
+        p.x += 5;
+        println!("{:?}", p);
+    };
+    c
+}
+fn bar() -> Box<dyn Fn() -> i32> {
+    let p = Point { x: 1, y: 2 };
+    let d = || p.x;
+    Box::new(d)
+}
+fn main() {}
+"#, &[(7, "`p` does not live long enough"), (13, "closure may outlive the current function")], "rc");
+    // (a tuple, an array or a struct's literal returned holds what its parts borrow: E0515 also where the signature
+    // has one region (1, 2, 3))
+    errors_at(r#"fn a(x: &str) -> (&str, &&str) { (x, &x) }
+fn b(x: &i32) -> [&i32; 1] { let y = *x; [&y] }
+struct W<'a> { r: &'a i32 }
+fn c(x: &i32) -> W<'_> { let y = *x; W { r: &y } }
+fn d(x: &i32) -> (&i32, u8) { (x, 1) }
+fn main() {}
+"#, &[(1, "cannot return"), (2, "cannot return"), (4, "cannot return")], "ag");
+}
+
+#[test]
+fn part33_review_of_159() {
+    // (the minor findings of #159's third review, each checked with rustc 1.97: a variant written through a type alias
+    // of the enum (`A::V`) captures nothing (5: no error); a guard's write to another field of a union the pattern
+    // tests is E0510 (13), as one to the field itself (21))
+    errors_at(r#"enum E { V }
+type A = E;
+fn f() {
+    let mut e = E::V;
+    let c = || match e { A::V => 1 };
+    e = E::V;
+    c();
+}
+union U { a: u32, b: u32 }
+fn g(mut u: U) {
+    unsafe {
+        match u {
+            U { a: 0 } if { u.b = 1; true } => (),
+            _ => (),
+        }
+    }
+}
+fn h(mut u: U) {
+    unsafe {
+        match u {
+            U { a: 0 } if { u.a = 1; true } => (),
+            _ => (),
+        }
+    }
+}
+fn main() {}
+"#, &[(13, "cannot assign `u.b` in match guard"), (21, "cannot assign `u.a` in match guard")], "r3");
+}
+
+#[test]
+fn part33_review_of_160() {
+    // (#160's review, each checked with rustc 1.97: a unit struct's name in a `let` binds and moves nothing, through a
+    // Deref too (no error); a struct update whose base gives only fields that hold no reference keeps none of the
+    // base's loans (no E0515 at 13), one whose base gives a reference field does (E0515 at 19))
+    errors_at(r#"use std::ops::Deref;
+#[derive(Debug)]
+struct Unit;
+struct W(Unit);
+impl Deref for W { type Target = Unit; fn deref(&self) -> &Unit { &self.0 } }
+fn a() { let w = W(Unit); let Unit = *w; }
+fn b() { let u = Unit; let Unit = u; println!("{:?}", u); }
+struct S<'a> { r: &'a i32, n: usize }
+fn c<'a>(x: &'a i32) -> S<'a> {
+    let y = 5;
+    let s = S { r: &y, n: 1 };
+    let _ = s.r;
+    S { r: x, ..s }
+}
+struct V<'a> { r: &'a i32, q: &'a i32 }
+fn d<'a>(x: &'a i32) -> V<'a> {
+    let y = 5;
+    let s = V { r: &y, q: x };
+    V { r: x, ..s }
+}
+fn main() { a(); b(); let z = 3; c(&z); d(&z); }
+"#, &[(19, "`y` is dropped when the function returns")], "rv1");
+    // (where a written field may hold a reference too, the base's loan may be in its region only: kept for a struct
+    // of one lifetime that a given field has (E0515 at 6), not for one of two (2), a field of 'static (4) or type
+    // parameters (8))
+    errors_at(r#"struct V<'a, 'b> { r: &'a i32, q: &'b i32 }
+fn d<'a, 'b>(x: &'a i32, z: &'b i32) -> V<'a, 'b> { let y = 5; let s = V { r: &y, q: z }; V { r: x, ..s } }
+struct S<'a> { st: &'static str, r: &'a i32 }
+fn a<'a>(x: &'a i32) -> S<'a> { let y = 5; let s = S { st: "x", r: &y }; S { r: x, ..s } }
+struct T2<'a> { r: &'a i32, v: Vec<&'a i32> }
+fn b<'a>(x: &'a i32) -> T2<'a> { let y = 5; let s = T2 { r: &y, v: vec![] }; T2 { r: x, ..s } }
+struct G<A, B> { a: A, b: B }
+fn c<'a>(x: &'a i32) -> G<&'a i32, &'static i32> { let y = 5; let s = G { a: &y, b: &3 }; G { a: x, ..s } }
+fn main() { let z = 3; d(&z, &z); a(&z); b(&z); c(&z); }
+"#, &[(6, "`y` is dropped when the function returns")], "rv3");
+    // (in a guard, a closure that borrows an arm's binding mutably (E0596 at 4), and a write to an outer arm's binding
+    // in a guard nested in its guard (E0594 at 12))
+    errors_at(r#"fn e() {
+    let x = Some(3);
+    match x {
+        Some(mut y) if { let mut c = || { y += 1; }; c(); true } => { let _ = y; }
+        _ => {}
+    }
+}
+fn f() {
+    let x = Some(3);
+    match x {
+        Some(mut y) if match 0 {
+            _ if { y += 1; true } => true,
+            _ => false,
+        } => { let _ = y; }
+        _ => {}
+    }
+}
+fn main() { e(); f(); }
+"#, &[(4, "cannot borrow `y` as mutable, as it is immutable for the pattern guard"), (12, "cannot assign to `y`, as it is immutable for the pattern guard")], "rv2");
+}
+
+#[test]
+fn part34_static_bounds_of_impl_args_and_fields() {
+    // (an `impl Trait + 'static` argument's bound reaches the caller, as a written `T: 'static` does: E0310 at 2,
+    // named `impl Debug` as rustc names it; one bounded so itself passes it on (4). Each checked with rustc 1.97)
+    errors_at(r#"use std::fmt::Debug;
+fn foo(d: impl Debug) { bar(d); }
+fn bar(d: impl Debug + 'static) { let _ = d; }
+fn ok(d: impl Debug + 'static) { bar(d); }
+fn main() {}
+"#, &[(2, "the parameter type `impl Debug` may not live long enough")], "sb1");
+    // (a field that passes a type parameter to a type of the program that bounds it by 'static: rustc does not infer
+    // `U: 'static` from it (RFC 2093), E0310 at the field; also in an enum's variant, through a Vec)
+    errors_at(r#"struct Bar<T: 'static> { x: T }
+struct Foo<U> { bar: Bar<U> }
+fn main() {}
+"#, &[(2, "the parameter type `U` may not live long enough")], "sb2");
+    errors_at(r#"struct Bar<T: 'static> { x: T }
+enum E<U> { A(Vec<Bar<U>>) }
+fn main() {}
+"#, &[(2, "the parameter type `U` may not live long enough")], "sb3");
+    // (declared inline, in a where clause, through a trait that implies it (Any), or of 'static data: accepted; a
+    // fn's parameter type is implied well formed)
+    errors_at(r#"struct Bar<T: 'static> { x: T }
+struct Ok1<U: 'static> { bar: Bar<U> }
+struct Ok2<U> where U: 'static { bar: Bar<U> }
+struct Ok3<U: std::any::Any> { bar: Bar<U> }
+struct Ok4 { b: Bar<&'static str> }
+fn f<T>(x: Bar<T>) { let _ = x; }
+fn main() {}
+"#, &[], "sb4");
+}
+
+#[test]
+fn part34_array_element_coercions_and_cell_stores() {
+    // (an array's and a repeat's element coerced by deref to the element type the context gives: `[&x, x]` with x:
+    // `&[u8]` as `[&[u8]; 2]`, `[&s, "b"]` of a String as `[&str; 2]`. Checked with rustc 1.97)
+    errors_at(r#"fn g(x: &[u8]) -> [&[u8]; 2] { [&x, x] }
+fn h(x: &[u8]) -> [&[u8]; 1] { [&x; 1] }
+fn main() { let s = String::from("a"); let a: [&str; 2] = [&s, "b"]; let _ = a; let v = vec![1u8]; g(&v); h(&v); }
+"#, &[], "ac1");
+    // (a Cell's `set` stores what its argument borrows in the cell: a value whose Drop may see it, holding a borrow
+    // of one dropped before it (6), or of itself (10), also through a Vec's element (15), is E0597 at the borrow; a
+    // type with no Drop is accepted (19-23))
+    errors_at(r#"use std::cell::Cell;
+struct D<'a>(Cell<Option<&'a D<'a>>>);
+impl Drop for D<'_> { fn drop(&mut self) {} }
+fn a() {
+    let (d1, d2) = (D(Cell::new(None)), D(Cell::new(None)));
+    d1.0.set(Some(&d2));
+}
+fn b() {
+    let d = D(Cell::new(None));
+    d.0.set(Some(&d));
+}
+struct C<'a> { v: Vec<D<'a>> }
+fn c() {
+    let (c1, c2) = (C { v: vec![D(Cell::new(None))] }, C { v: vec![] });
+    c1.v[0].0.set(Some(&c2.v[0]));
+}
+struct N<'a>(Cell<Option<&'a N<'a>>>);
+fn n() {
+    let d = N(Cell::new(None));
+    d.0.set(Some(&d));
+    let (n1, n2) = (N(Cell::new(None)), N(Cell::new(None)));
+    n1.0.set(Some(&n2));
+    n2.0.set(Some(&n1));
+}
+fn main() { a(); b(); c(); n(); }
+"#, &[(6, "`d2` does not live long enough"), (10, "`d` does not live long enough"), (15, "`c2` does not live long enough")], "cs1");
+}
+
+#[test]
+fn part34_review_of_161() {
+    // (#161's review, each checked with rustc 1.97: an `impl Trait + 'static` inside a parameter's type requires what
+    // the argument borrows to be 'static, as a top-level one does (E0597 at 5, the fn's first); `let _ = d;` is no drop,
+    // so a value with no Drop holding a loan of itself is accepted there (13); a move of a Drop value on one path does
+    // not hide a loan of itself on another (E0597 at 20))
+    errors_at(r#"fn take(_: Option<impl Copy + 'static>) {}
+fn take2(_: impl Copy + 'static) {}
+fn a() {
+    let x = 1;
+    take(Some(&x));
+    take2(&x);
+}
+use std::cell::Cell;
+struct N<'a>(Cell<Option<&'a N<'a>>>);
+fn b() {
+    let d = N(Cell::new(None));
+    d.0.set(Some(&d));
+    let _ = d;
+}
+struct D<'a>(Cell<Option<&'a D<'a>>>);
+impl Drop for D<'_> { fn drop(&mut self) {} }
+fn c(k: bool) {
+    let d = D(Cell::new(None));
+    if k {
+        d.0.set(Some(&d));
+    } else {
+        drop(d);
+    }
+}
+fn main() { a(); b(); c(true); }
+"#, &[(5, "`x` does not live long enough"), (20, "`d` does not live long enough")], "rv1");
+    // (a cell reached through a deref (`Rc<Cell<..>>`) stores the borrow in the local it is rooted at (E0597 at 7);
+    // an array's element coerced from a `&mut &mut i32` reborrows `**rr`, which the array holds (E0506 at 13))
+    errors_at(r#"use std::rc::Rc;
+use std::cell::Cell;
+fn a() {
+    let c: Rc<Cell<Option<&i32>>> = Rc::new(Cell::new(None));
+    {
+        let x = 1;
+        c.set(Some(&x));
+    }
+    let _ = c.get();
+}
+fn b(rr: &mut &mut i32) {
+    let a: [&mut i32; 1] = [rr];
+    **rr = 1;
+    println!("{}", *a[0]);
+}
+fn main() { a(); let mut v = 0; let mut r = &mut v; b(&mut r); }
+"#, &[(7, "`x` does not live long enough"), (13, "cannot assign to `**rr` because it is borrowed")], "rv2");
+}
+
+#[test]
+fn part35_elided_lifetimes_in_impl_headers_and_async_fns() {
+    // (an impl header writes a path's lifetimes: `impl MyTrait for Foo` with `struct Foo<'a>` is E0726 at Foo (4), as
+    // `impl Lt for u32` with `trait Lt<'a>` is at Lt; `Foo<'_>` and the impl's own are accepted (5-7). Each checked
+    // with rustc 1.97)
+    errors_at(r#"trait MyTrait {}
+trait Lt<'a> {}
+struct Foo<'a>(&'a u8);
+impl MyTrait for Foo {}
+impl MyTrait for &Foo<'_> {}
+impl<'a> Lt<'a> for Foo<'a> {}
+impl Lt<'_> for u32 {}
+fn main() {}
+"#, &[(4, "implicit elided lifetime not allowed here (E0726)")], "el1");
+    errors_at(r#"trait Lt<'a> {}
+impl Lt for u32 {}
+fn main() {}
+"#, &[(2, "implicit elided lifetime not allowed here (E0726)")], "el2");
+    // (an `async fn`'s parameter too: its future captures the lifetime; a fn that is not async elides it (6))
+    errors_at(r#"struct HasLifetime<'a>(&'a bool);
+async fn error(lt: HasLifetime) {
+    if *lt.0 {}
+}
+async fn ok(lt: HasLifetime<'_>) { if *lt.0 {} }
+fn no_error(lt: HasLifetime) { if *lt.0 {} }
+fn main() {}
+"#, &[(2, "implicit elided lifetime not allowed here (E0726)")], "el3");
+}
+
+#[test]
+fn part35_drop_of_a_type_that_holds_no_reference() {
+    // (#161's last finding, checked with rustc 1.97: the `Drop` of a type that holds no reference (`Token`) sees no
+    // loan, so a tuple with it that holds a borrow of its own field (5), or of a local gone before it (11), is accepted;
+    // a `Drop` type that holds the borrow still sees it (E0597 at 21))
+    errors_at(r#"use std::cell::Cell;
+struct Token;
+impl Drop for Token { fn drop(&mut self) {} }
+fn a() {
+    let d = (Cell::new(None), 1, Token);
+    d.0.set(Some(&d.1));
+}
+fn b() {
+    let mut d = (None, Token);
+    {
+        let x = 1;
+        d.0 = Some(&x);
+    }
+}
+struct D<'a>(Option<&'a i32>);
+impl Drop for D<'_> { fn drop(&mut self) {} }
+fn c() {
+    let mut d = D(None);
+    {
+        let x = 1;
+        d.0 = Some(&x);
+    }
+}
+fn main() { a(); b(); c(); }
+"#, &[(21, "`x` does not live long enough")], "dk1");
+}
+
+#[test]
+fn part36_fn_bounded_parameters_boxed_as_trait_objects() {
+    // (zustc check of a generic fn nothing calls boxes a placeholder bounded by `FnMut(..)` into a `Box<dyn FnMut(..)>`:
+    // it was "not a closure", so the fn went unchecked. Each was checked with rustc 1.97: f is moved (E0382 at 3), F
+    // must outlive `'static` for a `Box<dyn FnMut(bool)>` (E0310 at 6), and the body's other errors are found (E0382
+    // at 11); d and e are accepted)
+    errors_at(r#"fn a<F: FnMut(bool)>(f: F) {
+    let b: Box<dyn FnMut(bool)> = Box::new(f);
+    drop(f);
+}
+fn b<F: FnMut(bool)>(f: F) -> Box<dyn FnMut(bool)> {
+    Box::new(f)
+}
+fn c<F: FnMut(bool) + 'static>(f: F) -> Box<dyn FnMut(bool)> {
+    let s = String::new();
+    drop(s);
+    drop(s);
+    Box::new(f)
+}
+fn d<F: Fn() + 'static>(f: F) -> Box<dyn Fn()> {
+    Box::new(f)
+}
+fn e<'a, F: FnOnce() -> u8 + 'a>(f: F) -> Box<dyn FnOnce() -> u8 + 'a> {
+    Box::new(f)
+}
+fn main() {}
+"#, &[(3, "use of moved value: `f`"), (6, "the parameter type `F` may not live long enough"), (11, "use of moved value: `s`")], "fb1");
+}
+
+#[test]
+fn part36_items_in_const_and_static_initializers() {
+    // (a fn written in a `const` / `static` initializer's block is hoisted as one in a fn body is, so it is checked:
+    // E0507 at 3 and E0596 at 9, as in rustc 1.97 (borrowck/borrowck-fn-in-const-a.rs, span/borrowck-fn-in-const-b.rs);
+    // the two `broken` are two fns)
+    errors_at(r#"const MOVE: fn(&String) -> String = {
+    fn broken(x: &String) -> String {
+        return *x
+    }
+    broken
+};
+static MUTATE: fn(&Vec<String>) = {
+    fn broken(x: &Vec<String>) {
+        x.push(String::new());
+    }
+    broken
+};
+const OK: fn() -> i32 = {
+    fn fine() -> i32 { 1 }
+    fine
+};
+fn main() { let _ = OK(); }
+"#, &[(3, "cannot move out of `*x`"), (9, "cannot borrow `*x` as mutable")], "ci1");
+}
+
+#[test]
+fn part36_bindings_after_at() {
+    // (rustc's check of `x @ sub` patterns, and the moves of their bindings, each checked with rustc 1.97 at the same
+    // position (the parameter's, at its fn): a by-move x with a `ref` in sub (5, 12), a `ref` x with a move in sub
+    // (6, 13), `ref mut` with `ref` (7, 9) and with `ref mut` (8), and x moved after sub moved a part of it (10) or all
+    // of it (11). Copy parts, two `ref`s, `ref x @ copy` and default binding modes are accepted, as is `ref x` as a
+    // parameter)
+    errors_at(r#"struct U;
+#[derive(Clone, Copy)]
+struct C;
+struct NC<A, B>(A, B);
+fn a() { let a @ ref b = U; }
+fn b() { let ref a @ b = U; }
+fn c() { let ref mut a @ ref b = U; }
+fn d() { let ref mut a @ ref mut b = U; }
+fn e() { let ref a @ ref mut b = U; }
+fn f() { let a @ NC(b, c @ NC(d, e)) = NC(C, NC(C, C)); }
+fn g() { let a @ b = U; }
+fn h(x: Option<String>) { match x { s @ Some(ref t) => {} None => {} } }
+fn i(ref a @ b: U) {}
+fn ok() {
+    let a @ NC(b, c) = NC(C, C);
+    let ref a @ ref b = U;
+    let ref a @ b = C;
+    match &Some(U) { a @ Some(b) => {} None => {} }
+}
+fn ok2(ref x: U) -> usize { let _ = x; 0 }
+fn main() { ok(); ok2(U); }
+"#, &[
+        (5, "borrow of moved value"),
+        (6, "cannot move out of value because it is borrowed"),
+        (7, "cannot borrow value as immutable because it is also borrowed as mutable"),
+        (8, "cannot borrow value as mutable more than once at a time"),
+        (9, "cannot borrow value as mutable because it is also borrowed as immutable"),
+        (10, "use of partially moved value: `a`"),
+        (11, "use of moved value: `a`"),
+        (12, "borrow of moved value"),
+        (13, "cannot move out of value because it is borrowed"),
+    ], "at1");
+}
+
+#[test]
+fn part36_lifetime_bounds_of_impl_methods() {
+    // (checked with rustc 1.97: a trait method's lifetime that a where clause bounds a type by (`where T: 'a`) is
+    // early-bound, so the impl's, which nothing bounds, does not match it (E0195 at 9); a type parameter of an impl's
+    // method bounded by `'static` where the trait's is bounded by its `'a` is stricter (E0276 at 7), not where the
+    // impl gives the trait `'static` (C); a GAT's `where 'b2: 'a2` for the trait's `where 'a1: 'b1` is stricter (E0276
+    // at 7, the bound), its `'a2: 'b2` is not)
+    errors_at(r#"use std::fmt::Debug;
+struct State;
+trait Foo<T> {
+    fn foo<'a>(&self, state: &'a State) -> &'a T
+    where
+        T: 'a;
+}
+impl<T> Foo<T> for Vec<T> {
+    fn foo<'a>(&self, state: &'a State) -> &'a T {
+        &self[0]
+    }
+}
+fn main() {}
+"#, &[(9, "lifetime parameters or bounds on method `foo` do not match the trait declaration")], "lb1");
+    errors_at(r#"use std::fmt::Debug;
+trait A<'a> {
+    fn put<F>(&mut self, f: F) where F: Debug + 'a;
+}
+struct B;
+impl<'a> A<'a> for B {
+    fn put<F>(&mut self, f: F) where F: Debug + 'static {}
+}
+struct C;
+impl A<'static> for C {
+    fn put<F>(&mut self, f: F) where F: Debug + 'static {}
+}
+fn main() {}
+"#, &[(7, "impl has stricter requirements than trait")], "lb2");
+    errors_at(r#"trait G {
+    type T<'a1, 'b1>
+    where
+        'a1: 'b1;
+}
+impl G for () {
+    type T<'a2, 'b2> = () where 'b2: 'a2;
+}
+impl G for u8 {
+    type T<'a2, 'b2> = () where 'a2: 'b2;
+}
+fn main() {}
+"#, &[(7, "impl has stricter requirements than trait")], "lb3");
+}
+
+#[test]
+fn part36_moves_of_at_patterns_after_a_return() {
+    // (by-move-sub-pat-unreachable.rs: the moves of `a @ (b, c)` are the borrow check's, which rustc does not give the
+    // code after `return;`; its check of the pattern itself still holds there (a by-move `a @ ref b`))
+    errors_at(r#"fn f() {
+    return;
+    struct S;
+    let a @ (b, c) = (S, S);
+}
+fn g() {
+    return;
+    struct S;
+    let a @ ref b = S;
+}
+fn main() { f(); g(); }
+"#, &[(9, "borrow of moved value")], "at2");
+}
+
+#[test]
+fn part36_review_of_182() {
+    // (#182's review, each checked with rustc 1.97: a `'static` bound the trait's signature implies (`x: &'static T`)
+    // is not stricter (rv1); a GAT's outlives that follows through the trait's own lifetime (`'a: 't, 't: 'b`) is not
+    // compared (rv2); a comment in a bound is no bound (rv3); a `;` in an array type ends no item, so the fn in a
+    // `const _: [(); 1]` block is checked (rv4) and one in a fn with an array parameter is hoisted (rv7); a `rest @ ..`
+    // is one of the bindings of an `x @ sub` (rv5); the verdict of a method's bounds is by its impl's header too (rv6))
+    errors_at(r#"trait Tr {
+    fn f<T>(x: &'static T);
+}
+impl Tr for () {
+    fn f<T: 'static>(x: &'static T) {}
+}
+fn main() {}
+"#, &[], "rv1");
+    errors_at(r#"trait Tr<'t> {
+    type A<'a, 'b> where 'a: 't, 't: 'b;
+}
+impl<'t> Tr<'t> for () {
+    type A<'a, 'b> = () where 'a: 't, 't: 'b, 'a: 'b;
+}
+fn main() {}
+"#, &[], "rv2");
+    errors_at(r#"trait G {
+    type T<'a1, 'b1>
+    where
+        'a1: /* c */ 'b1;
+}
+impl G for () {
+    type T<'a2, 'b2> = () where 'a2: 'b2;
+}
+fn main() {}
+"#, &[], "rv3");
+    errors_at(r#"const _: [(); 1] = {
+    fn bad<'a>(x: &'a u8) -> &'static u8 { x }
+    [()]
+};
+fn main() {}
+"#, &[(2, "lifetime may not live long enough")], "rv4");
+    errors_at(r#"fn f() {
+    return;
+    let ref mut a @ [ref b @ ..] = [1u8];
+}
+fn g() {
+    let ref mut a @ [ref b @ ..] = [1u8];
+}
+fn h() {
+    let ref a @ [ref b @ ..] = [1u8];
+}
+fn main() { f(); g(); h(); }
+"#, &[(3, "cannot borrow value as immutable because it is also borrowed as mutable"), (6, "cannot borrow value as immutable because it is also borrowed as mutable")], "rv5");
+    errors_at(r#"trait Tr<'a> { fn f<T: 'a>(); }
+struct A;
+struct B;
+impl Tr<'static> for A { fn f<T: 'static>() {} }
+impl<'a> Tr<'a> for B { fn f<T: 'static>() {} }
+fn main() {}
+"#, &[(5, "impl has stricter requirements than trait")], "rv6");
+    errors_at(r#"fn foo(a: [u8; 4]) -> u8 {
+    fn inner() -> u8 { 1 }
+    inner() + a[0]
+}
+fn main() { println!("{}", foo([1, 2, 3, 4])); }
+"#, &[], "rv7");
+}
+
+#[test]
+fn part36_second_review_of_182() {
+    // (#182's second review, checked with rustc 1.97: a `'static` in the trait's signature implies nothing of a type
+    // parameter it does not name (`x: &'static u8`), so the impl's `T: 'static` is stricter (rv8); `mut b @ ..` where
+    // the default binding mode is by reference binds by value before edition 2024, so it borrows nothing beside the
+    // `ref mut a` around it (rv9))
+    errors_at(r#"trait Tr {
+    fn f<T>(x: &'static u8);
+}
+impl Tr for () {
+    fn f<T: 'static>(x: &'static u8) {}
+}
+fn main() {}
+"#, &[(5, "impl has stricter requirements than trait")], "rv8");
+    errors_at(r#"fn main() {
+    let ref mut a @ [mut b @ ..] = &[1u8];
+    let _ = (a, b);
+}
+"#, &[], "rv9");
+}
+
+#[test]
+fn part36_third_review_of_182() {
+    // (#182's review of 68c598c, checked with rustc 1.97: a `'static` implies a type parameter's bound only in the
+    // type of a parameter or of the result that names both: `x: T, s: &'static str` does not, so `T: 'static` is
+    // stricter (rv10); `x: W<'static, T>` with `struct W<'a, T: 'a>` may, and is accepted, as in rustc (rv11))
+    errors_at(r#"trait Tr {
+    fn f<T>(x: T, s: &'static str);
+}
+impl Tr for () {
+    fn f<T: 'static>(x: T, s: &'static str) {}
+}
+fn main() {}
+"#, &[(5, "impl has stricter requirements than trait")], "rv10");
+    errors_at(r#"struct W<'a, T: 'a>(&'a T);
+trait Tr {
+    fn f<T>(x: W<'static, T>);
+}
+impl Tr for () {
+    fn f<T: 'static>(x: W<'static, T>) {}
+}
+fn main() {}
+"#, &[], "rv11");
+}

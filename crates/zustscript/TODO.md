@@ -76,15 +76,21 @@ zsc に小さなコードを通して確かめた(機能ごとに 1 つの `.zsc
 2. **済: 非同期**(README の「非同期」)。`async fn`、`await`、`async (..) =>`、`Promise<T>`(JS の async / await のまま。`.d.ts` は `Promise<T>`)
    - 残り
      - effect を perform する async fn(段階 3 の「async の effect」: Promise で継続を再開する)
-     - `Promise.all` などの組み合わせ、async の中の `try` / `catch`(7 と一緒に)
+     - `Promise.all` などの組み合わせ(reject は 7 の `Promise<Result<T, E>>` で受けられる)
      - async の React コンポーネント(Server Components)は対象外
-3. **`Option` / `Result` と `?`**(提案 003)
-   - 自前の enum なら書けるが、標準の型(prelude)、`?`、`if let`、任意のフィールド `x?: T` がない
-   - `import type` で TS の任意のフィールドを読むのも、これが前提
-4. **JS の値の型**
-   - `extern type Element;` のような中身の見えない型がない。`extern` は関数だけで、DOM、`Date`、`Response` などを型として持てない
-   - JS のオブジェクトのメソッドやプロパティを呼ぶ方法もない(今は `extern fn` を 1 つずつ書く)
-   - 上の「ターゲットと JS 相互運用」の `@js` の DOM ラッパー([docs/target-spec.md](docs/target-spec.md))と重なるので、一緒に設計する
+3. **済: `Option` / `Result` と `?`**(README の「Option / Result と `?`」。提案 003 の A / B / D)。prelude、`?`、`if let`、メソッドと `try_map`
+   - 残り
+     - 任意のフィールド `x?: T` と、TS との境界での `undefined` の変換(提案 003 の C)。`import type` で TS の任意のフィールドを読むのも、これが前提
+     - `zsc-prelude.d.ts`(今は `.d.ts` ごとに `Option` / `Result` を宣言するので、TS 側で 2 つのモジュールを `export *` すると衝突する)
+     - `@wasm` での `Option` / `Result` のメソッド(今は Rust の enum `ZsOption`。std の `Option` に下ろすか)
+     - `unwrap()` / `expect()`、`while let`、JSX の子の `Option<Jsx>`(提案 003 の E)
+     - ユーザーの enum の `None` と prelude の `None` を同じファイルで使うこと(001 の修飾と一緒に)
+4. **済: JS の値の型**(README の「JS の値」)。`extern type`、そのプロパティ・メソッド・代入、`new X` のコンストラクタ、`null` を `None` に
+   - 残り
+     - `==`(同じ値か)、型引数を持つメソッド、静的メソッド(今は `extern fn` で `Math.max` などと書く)
+     - TS の `.d.ts`(`lib.dom.d.ts` など)からの自動の取り込み(`import type` を関数とクラスに広げる)
+     - `@wasm` での extern type(JS の値を handle として渡す)
+     - 上の「ターゲットと JS 相互運用」の `@js` の DOM ラッパー([docs/target-spec.md](docs/target-spec.md))との整理
 5. **標準ライブラリ**: 今あるのは、配列の `len` `map` `filter` `fold` `any` `all` `push` `concat` `join`、文字列の `len` `to_upper` `trim` `contains` `split`、数値の `to_string` `floor` `round` `sqrt` `abs` `max` `min` だけ
    - 配列: `sort`(比較関数つき)、`find` / `find_index` / `index_of`、`slice`、`reverse`、`flat_map`、`includes`、`enumerate` 相当
    - 文字列: `slice`、`starts_with` / `ends_with`、`replace`、`to_lower`、`index_of`、文字の取り出し、数値への `parse`(失敗は `Option` で。3 が前提)
@@ -92,7 +98,8 @@ zsc に小さなコードを通して確かめた(機能ごとに 1 つの `.zsc
    - キーつきの集まり(`Map` / `Set`)と JSON
    - いずれも JS と `@wasm` で同じ意味にする(文字列の長さと順序は UTF-16 の単位。README の「文字列と `==`」と同じ方針)
 6. **パターン**: or パターン(`A | B =>`)とガード(`n if n > 1 =>`)(提案 004)
-7. **例外**: 例外を投げる JS の関数(`JSON.parse`、`fetch`)を受ける手段がない。`extern` を `-> Result<T, String>` で受ける(003 の未決事項)のが候補
+7. **済: 例外**(README の「JS の値」)。`extern` の結果を `Result<T, String>`(メッセージ)か `Result<T, E>`(E は extern type: 投げた値)にすると、throw を `Err` で受ける。`Promise<Result<T, E>>` は reject も
+   - 残り: zustscript の側で投げる手段(`panic` 相当)、境界の `pub fn` の `Result` を TS の例外にするか(下の 003 の未決事項)
 
 ### P1: 使い心地
 
@@ -148,7 +155,7 @@ zsc に小さなコードを通して確かめた(機能ごとに 1 つの `.zsc
 ### 003 Option / Result
 
 - `?.` と `??` の意味(今は予約。`?.` は Rust の意味 / TS の意味 / 予約のまま、`??` は `unwrap_or_else` の略記か)
-- `if let Some(x) = o`(または `if o is Some(x)`)
+- **決定: `if let Some(x) = o { .. } else { .. }`**(済。`match` に読み替える)。`while let` と、`if o is Some(x)` の形は未決
 - `unwrap()` / `expect()`、`or` / `or_else` / `filter` / `flatten`
 - `handle` の本体と arm の中の `?` を、どの関数から返すことにするか
 - 関数の任意の引数(`fn f(x?: i32)`)と、バリアントの任意のフィールド

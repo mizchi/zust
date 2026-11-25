@@ -1,0 +1,2 @@
+{"schema":"jev-lint-ledger-1","namespace":"jev-lint-documents-judgments-1","written":"2026-11-25T10:02:56.333Z","model":"jev-1.14.0"}
+{"key":"c759b9c3467bccdd3b8e5254466ef102cb01bc69b22abe8ef86337ccd1104aa6","at":"2026-11-25T10:02:56.329Z","value":{"judgment":{"choice":"supports","confidence":0.96,"probabilities":{"supports":0.97,"contradicts":0.02,"unrelated":0,"insufficient_context":0.01}},"comparisonId":"docs_reports_2026-11-25-06-region-check-34","target":"docs/ja/reports/2026-11-25-06-region-check-34.md"}}

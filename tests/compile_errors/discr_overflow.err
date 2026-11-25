@@ -1,1 +1,1 @@
-1:1: enum discriminant overflowed (E0370): `B`
+2:1: enum discriminant overflowed (E0370): `B`

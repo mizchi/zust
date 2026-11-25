@@ -33,6 +33,192 @@ struct Rule {
     body: Vec<Pt>,
 }
 
+/// rustc's fragment specifiers
+const FRAGS: &[&str] = &["block", "expr", "expr_2021", "ident", "item", "lifetime", "literal", "meta", "pat", "pat_param", "path", "stmt", "tt", "ty", "vis"];
+
+thread_local! {
+    /// The first fragment specifier of a `macro_rules!` matcher that is none of rustc's (`$x:id`), met while the
+    /// definitions are read: the driver reports it, "invalid fragment specifier"
+    pub static BAD_FRAGMENT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+thread_local! {
+    /// A matcher's fragment that a token rustc does not allow after it follows (`$e:expr +`): the fragment as
+    /// written, `$e:expr`, and rustc's message; the driver finds its place in the source
+    pub static BAD_FOLLOW: std::cell::RefCell<Option<(String, String)>> = const { std::cell::RefCell::new(None) };
+    /// Whether a `pat` fragment matches `a | b` (edition 2021 on): `|` cannot follow one then
+    pub static PAT_WITH_OR: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+thread_local! {
+    /// Whether a `macro_rules!` definition was read that rustc rejects (no rule, a matcher outside delimiters, a rule
+    /// cut short): macro_def_err finds it in the source then
+    pub static BAD_DEF: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// rustc's error for the first `macro_rules!` definition of src it rejects when it reads the definitions, used or not:
+/// one delimited by parentheses or brackets with no `;` after it, one with no rule, a matcher that is no delimited
+/// group, a rule without its `=>` or its body
+#[cold]
+pub fn macro_def_err(src: &str) -> Option<String> {
+    let b = src.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let (close, _) = brackets(b, &toks);
+    let sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && b[toks[k].1] == c;
+    let open = |k: usize| (sym(k, b'(') || sym(k, b'[') || sym(k, b'{')) && close[k] != usize::MAX;
+    let err = |k: usize, m: &str| {
+        let off = toks[k].1;
+        let line = 1 + b[..off].iter().filter(|&&c| c == b'\n').count();
+        let col = src[..off].chars().rev().take_while(|&c| c != '\n').count() + 1;
+        Some(format!("{line}:{col}: {m}"))
+    };
+    let mut i = 0;
+    while i + 3 < toks.len() {
+        if !(toks[i].0 == 0 && &b[toks[i].1..toks[i].2] == b"macro_rules" && sym(i + 1, b'!') && toks[i + 2].0 == 0 && open(i + 3)) {
+            i += 1;
+            continue;
+        }
+        let (o, c) = (i + 3, close[i + 3]);
+        if !sym(o, b'{') && !sym(c + 1, b';') {
+            return err(o, "macros that expand to items must be delimited with braces or followed by a semicolon");
+        }
+        if o + 1 == c {
+            return err(i, "macros must contain at least one rule");
+        }
+        let mut j = o + 1;
+        while j < c {
+            // (a rule's attribute, `#[doc = ".."]`)
+            if sym(j, b'#') && sym(j + 1, b'[') && open(j + 1) {
+                j = close[j + 1] + 1;
+                continue;
+            }
+            // (an attribute's or a derive's rule, `attr(args) (input) => ..`: E0658 without its feature, at the
+            // definition; with it, its matcher follows the arguments)
+            let w = &b[toks[j].1..toks[j].2];
+            if toks[j].0 == 0 && (w == b"attr" || w == b"derive") && open(j + 1) {
+                let (feat, what) = if w == b"attr" { ("macro_attr", "attributes") } else { ("macro_derive", "derives") };
+                if !src.contains(feat) {
+                    return err(i, &format!("`macro_rules!` {what} are unstable (E0658)"));
+                }
+                j = close[j + 1] + 1;
+            }
+            if !open(j) {
+                return err(j, "invalid macro matcher; matchers must be contained in balanced delimiters");
+            }
+            let m = close[j];
+            let mut seen: Vec<&[u8]> = vec![];
+            for q in j + 1..m.saturating_sub(2) {
+                if sym(q, b'$') && toks[q + 1].0 == 0 && sym(q + 2, b':') {
+                    let n = &b[toks[q + 1].1..toks[q + 1].2];
+                    if seen.contains(&n) {
+                        return err(q, "duplicate matcher binding");
+                    }
+                    seen.push(n);
+                }
+            }
+            j = m + 1;
+            if j >= c {
+                return err(m, "expected `=>`, found end of macro arguments");
+            }
+            if !(sym(j, b'=') && sym(j + 1, b'>') && toks[j].2 == toks[j + 1].1) {
+                return None;
+            }
+            j += 2;
+            if j >= c {
+                return err(j - 1, "macro definition ended unexpectedly");
+            }
+            if !open(j) {
+                return None;
+            }
+            j = close[j] + 1;
+            if sym(j, b';') {
+                j += 1;
+            } else if j < c {
+                return None;
+            }
+        }
+        i = c + 1;
+    }
+    None
+}
+
+thread_local! {
+    /// A `$name` of a rule's body that its matcher does not bind, kept in the expansion (an inner `macro_rules!`'s, else
+    /// rustc's "cannot find macro parameter"): its name, and whether it is in a repetition of no variable bound there
+    pub static UNBOUND: std::cell::RefCell<Option<(String, bool)>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cold]
+fn unbound(n: &str, rep: bool) {
+    UNBOUND.with(|c| {
+        if c.borrow().is_none() {
+            *c.borrow_mut() = Some((n.to_string(), rep));
+        }
+    });
+}
+
+/// rustc's error for a rule's `$name` its matcher does not bind, when it is left in the expansion (`expanded`): at its
+/// first use in a rule's body in src (not a matcher's `$name:frag`), "cannot find macro parameter `$name` in this
+/// scope"; or, in a repetition (`rep`), "attempted to repeat an expression containing no syntax variables matched as
+/// repeating at this depth" at the repetition's `$`
+#[cold]
+pub fn unbound_err(expanded: &str, src: &str, name: &str, rep: bool) -> Option<String> {
+    let has = |s: &str| -> Option<(Vec<(u8, usize, usize)>, Vec<usize>)> {
+        let b = s.as_bytes();
+        let toks = crate::lexer::tokenize(b);
+        let at: Vec<usize> = (1..toks.len())
+            .filter(|&k| toks[k - 1].0 == 1 && b[toks[k - 1].1] == b'$' && toks[k].0 == 0 && &b[toks[k].1..toks[k].2] == name.as_bytes())
+            .filter(|&k| !(k + 1 < toks.len() && toks[k + 1].0 == 1 && b[toks[k + 1].1] == b':'))
+            .collect();
+        (!at.is_empty()).then_some((toks, at))
+    };
+    // (most expansions keep no `$`: one byte search first)
+    if !expanded.contains('$') {
+        return None;
+    }
+    has(expanded)?;
+    let (toks, at) = has(src)?;
+    let b = src.as_bytes();
+    let mut k = at[0] - 1;
+    if rep {
+        // (the `$(` around it)
+        let (close, _) = brackets(b, &toks);
+        let o = (1..k).rev().find(|&j| toks[j - 1].0 == 1 && b[toks[j - 1].1] == b'$' && toks[j].0 == 1 && b[toks[j].1] == b'(' && close[j] > k)?;
+        k = o - 1;
+    }
+    let off = toks[k].1;
+    let line = 1 + b[..off].iter().filter(|&&c| c == b'\n').count();
+    let col = src[..off].chars().rev().take_while(|&c| c != '\n').count() + 1;
+    Some(if rep {
+        format!("{line}:{col}: attempted to repeat an expression containing no syntax variables matched as repeating at this depth")
+    } else {
+        format!("{line}:{col}: cannot find macro parameter `${name}` in this scope")
+    })
+}
+
+thread_local! {
+    /// The name of a `#[macro_export]` macro defined twice (E0428), met while the definitions are read
+    pub static DUP_EXPORT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cold]
+fn dup_export(n: &str) {
+    DUP_EXPORT.with(|c| {
+        if c.borrow().is_none() {
+            *c.borrow_mut() = Some(n.to_string());
+        }
+    });
+}
+
+#[cold]
+fn bad_fragment(k: &str) {
+    BAD_FRAGMENT.with(|c| {
+        if c.borrow().is_none() {
+            *c.borrow_mut() = Some(k.to_string());
+        }
+    });
+}
+
 fn parse_pt(ts: TokenStream, is_pat: bool) -> Vec<Pt> {
     let toks: Vec<TokenTree> = ts.into_iter().collect();
     let mut out = vec![];
@@ -56,7 +242,11 @@ fn parse_pt(ts: TokenStream, is_pat: bool) -> Vec<Pt> {
                         && matches!(&toks[i + 2], TokenTree::Punct(c) if c.as_char() == ':')
                     {
                         if let TokenTree::Ident(k) = &toks[i + 3] {
-                            out.push(Pt::Var(id.to_string(), k.to_string()));
+                            let k = k.to_string();
+                            if !FRAGS.contains(&k.as_str()) {
+                                bad_fragment(&k);
+                            }
+                            out.push(Pt::Var(id.to_string(), k));
                             i += 4;
                             continue;
                         }
@@ -746,6 +936,7 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
                     if name == "crate" {
                         out.push_str("crate");
                     } else {
+                        unbound(name, false);
                         out.push('$');
                         out.push_str(name);
                     }
@@ -758,6 +949,9 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
                 // (no variable of it bound here: a repetition of an inner `macro_rules!` that this body holds (a module
                 // file put in a macro's body, serde_core's `crate_root!`): kept as written, for that macro)
                 if names.iter().all(|v| binds.get(v).is_none()) {
+                    if let Some(n) = names.first() {
+                        unbound(n, true);
+                    }
                     out.push_str("$(");
                     transcribe(inner, binds, out, lets)?;
                     out.push_str(") ");
@@ -798,16 +992,208 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
     Ok(())
 }
 
+#[cold]
+fn bad_follow(e: (String, String)) {
+    BAD_FOLLOW.with(|c| {
+        if c.borrow().is_none() {
+            *c.borrow_mut() = Some(e);
+        }
+    });
+}
+
+/// A token that can come first in a part of a matcher, as rustc's FIRST sets have it: a token's text (`=>` as one), a
+/// fragment (its name and kind), or the end of a delimited group
+#[derive(Clone)]
+enum Ft {
+    Tok(String),
+    Frag(String, String),
+    Close,
+}
+
+/// The tokens one of rustc's (`=>`, `>>`, `::`) is made of, written together
+const GLUED: &[&str] = &["..=", "...", "<<=", ">>=", "=>", ">>", "<<", "::", "->", "<-", "==", "!=", "<=", ">=", "&&", "||", "..", "+=", "-=", "*=", "/=", "%=", "^=", "&=", "|="];
+
+/// The first token of seq[i..] when seq[i] is no repetition
+fn first_tok(seq: &[Pt], i: usize) -> Ft {
+    match &seq[i] {
+        Pt::Tok(TokenTree::Punct(p)) => {
+            let mut s = p.as_char().to_string();
+            let (mut k, mut sp) = (i, p.spacing());
+            while sp == Spacing::Joint && s.len() < 3 {
+                let Some(Pt::Tok(TokenTree::Punct(q))) = seq.get(k + 1) else { break };
+                s.push(q.as_char());
+                k += 1;
+                sp = q.spacing();
+            }
+            while s.len() > 1 && !GLUED.contains(&s.as_str()) {
+                s.pop();
+            }
+            Ft::Tok(s)
+        }
+        Pt::Tok(t) => Ft::Tok(t.to_string()),
+        Pt::Group(d, _) => Ft::Tok(match d {
+            Delimiter::Parenthesis => "(",
+            Delimiter::Bracket => "[",
+            Delimiter::Brace => "{",
+            Delimiter::None => "",
+        }.to_string()),
+        Pt::Var(n, k) => Ft::Frag(n.clone(), k.clone()),
+        Pt::Rep(..) => Ft::Close,
+    }
+}
+
+/// FIRST of a matcher's sequence: its tokens, and whether it can match nothing (rustc's FirstSets)
+fn first_of(seq: &[Pt]) -> (Vec<Ft>, bool) {
+    let mut out = vec![];
+    for i in 0..seq.len() {
+        let Pt::Rep(inner, sep, op) = &seq[i] else {
+            out.push(first_tok(seq, i));
+            return (out, false);
+        };
+        let (f, empty) = first_of(inner);
+        out.extend(f);
+        if empty {
+            if let Some(s) = sep {
+                out.push(Ft::Tok(s.to_string()));
+            }
+        }
+        if *op == '+' && !empty {
+            return (out, false);
+        }
+    }
+    (out, true)
+}
+
+/// Whether a fragment of kind k may be followed by t (rustc 1.100's is_in_follow; `vis` taken as followed by anything)
+fn in_follow(t: &Ft, k: &str, pat_with_or: bool) -> bool {
+    let tok = |s: &str| matches!(t, Ft::Tok(x) if x == s);
+    match t {
+        Ft::Close => return true,
+        Ft::Frag(_, fk) if fk.is_empty() => return true,
+        _ => {}
+    }
+    match k {
+        "expr" | "expr_2021" | "stmt" => tok("=>") || tok(",") || tok(";"),
+        "pat" | "pat_param" => tok("=>") || tok(",") || tok("=") || tok("if") || tok("in") || (tok("|") && !(k == "pat" && pat_with_or)),
+        "path" | "ty" => ["=>", ",", "=", "|", ";", ":", ">", ">>", "[", "{", "as", "where"].iter().any(|s| tok(s)) || matches!(t, Ft::Frag(_, fk) if fk == "block"),
+        _ => true,
+    }
+}
+
+/// rustc's check_matcher: each fragment of seq against what can follow it (follow: what follows seq). Ok(the
+/// fragments that can end seq, whether seq can match nothing), or Err((the fragment, rustc's message))
+fn check_follow<'a>(seq: &'a [Pt], follow: &[Ft], pat_with_or: bool) -> Result<(Vec<(&'a str, &'a str)>, bool), (String, String)> {
+    let mut last: Vec<(&str, &str)> = vec![];
+    let mut empty = true;
+    for i in 0..seq.len() {
+        let (mut next, rest_empty) = first_of(&seq[i + 1..]);
+        if rest_empty {
+            next.extend(follow.iter().cloned());
+        }
+        match &seq[i] {
+            Pt::Var(n, k) => {
+                last = vec![(n.as_str(), k.as_str())];
+                empty = false;
+            }
+            Pt::Tok(_) => {
+                last.clear();
+                empty = false;
+            }
+            Pt::Group(_, inner) => {
+                check_follow(inner, &[Ft::Close], pat_with_or)?;
+                last.clear();
+                empty = false;
+            }
+            Pt::Rep(inner, sep, _) => {
+                let mut mine = next.clone();
+                if let Some(s) = sep {
+                    mine.push(Ft::Tok(s.to_string()));
+                }
+                let (l, e) = check_follow(inner, &mine, pat_with_or)?;
+                if e {
+                    last.extend(l);
+                } else {
+                    last = l;
+                    empty = false;
+                }
+            }
+        }
+        for &(n, k) in &last {
+            if let Some(t) = next.iter().find(|t| !in_follow(t, k, pat_with_or)) {
+                let shown = match t {
+                    Ft::Tok(x) => x.clone(),
+                    Ft::Frag(m, mk) => format!("${m}:{mk}"),
+                    Ft::Close => String::new(),
+                };
+                return Err((format!("${n}:{k}"), format!("`${n}:{k}` is followed by `{shown}`, which is not allowed for `{k}` fragments")));
+            }
+        }
+    }
+    Ok((last, empty))
+}
+
+/// Where a fragment `$name:kind` rustc rejects what follows is (BAD_FOLLOW): `line:col: msg` at its first such
+/// fragment in src
+#[cold]
+pub fn follow_err(src: &str, frag: &str, msg: &str) -> Option<String> {
+    let (n, k) = frag.strip_prefix('$')?.split_once(':')?;
+    let b = src.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let tx = |q: usize| &b[toks[q].1..toks[q].2];
+    let q = (0..toks.len().saturating_sub(3)).find(|&q| tx(q) == b"$" && tx(q + 1) == n.as_bytes() && tx(q + 2) == b":" && tx(q + 3) == k.as_bytes())?;
+    let off = toks[q].1;
+    let line = 1 + b[..off].iter().filter(|&&c| c == b'\n').count();
+    let col = src[..off].chars().rev().take_while(|&c| c != '\n').count() + 1;
+    Some(format!("{line}:{col}: {msg}"))
+}
+
+/// Whether a matcher binds a name twice, in its repetitions too (seen: the names bound before)
+fn dup_binder<'a>(pat: &'a [Pt], seen: &mut Vec<&'a str>) -> bool {
+    pat.iter().any(|p| match p {
+        Pt::Var(n, k) if !k.is_empty() => seen.contains(&n.as_str()) || {
+            seen.push(n);
+            false
+        },
+        Pt::Group(_, inner) | Pt::Rep(inner, ..) => dup_binder(inner, seen),
+        _ => false,
+    })
+}
+
 /// 規則の並び `(matcher) => {transcriber}; ..` (macro_rules! の `{ .. }` の中身のテキスト)
 fn parse_rules(inner: &str) -> Result<Vec<Rule>, String> {
     let ts = TokenStream::from_str(inner).map_err(|e| format!("1:1: {e}"))?;
     let body: Vec<TokenTree> = ts.into_iter().collect();
+    // (no rule, or one rustc rejects: noted, for the driver to read where it is)
+    if body.is_empty() {
+        BAD_DEF.with(|c| c.set(true));
+    }
     let mut rules = vec![];
     let mut j = 0;
     while j < body.len() {
-        let TokenTree::Group(m) = &body[j] else { j += 1; continue };
-        let Some(TokenTree::Group(t)) = body.get(j + 3) else { break };
-        rules.push(Rule { pat: parse_pt(m.stream(), true), body: parse_pt(t.stream(), false) });
+        // (a rule's doc comment or attribute, `/// doc` before its matcher: rustc's unused_doc_comments warns of it)
+        if matches!(&body[j], TokenTree::Punct(p) if p.as_char() == '#') && matches!(body.get(j + 1), Some(TokenTree::Group(g)) if g.delimiter() == proc_macro2::Delimiter::Bracket) {
+            j += 2;
+            continue;
+        }
+        let TokenTree::Group(m) = &body[j] else {
+            BAD_DEF.with(|c| c.set(true));
+            j += 1;
+            continue;
+        };
+        let Some(TokenTree::Group(t)) = body.get(j + 3) else {
+            BAD_DEF.with(|c| c.set(true));
+            break;
+        };
+        let pat = parse_pt(m.stream(), true);
+        // (`($a:ident, $a:ident)`: a name bound twice, rustc's "duplicate matcher binding")
+        if dup_binder(&pat, &mut vec![]) {
+            BAD_DEF.with(|c| c.set(true));
+        }
+        // (`($e:expr +)`: a token after a fragment that rustc does not allow there)
+        if let Err(e) = check_follow(&pat, &[], PAT_WITH_OR.with(|c| c.get())) {
+            bad_follow(e);
+        }
+        rules.push(Rule { pat, body: parse_pt(t.stream(), false) });
         j += 4;
         if let Some(TokenTree::Punct(p)) = body.get(j) {
             if p.as_char() == ';' {
@@ -1049,6 +1435,8 @@ fn collect_defs(text: &mut String, macros: &mut HashMap<String, Vec<Rule>>, mut 
         let tk = |k: usize| -> &[u8] { &b[toks[k].1..toks[k].2] };
         let sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && b[toks[k].1] == c;
         let mut cut: Vec<(usize, usize)> = vec![];
+        // (the `#[macro_export]` ones defined here: two of one name are E0428, as both are at the crate's root)
+        let mut exported_here: Vec<String> = vec![];
         let mut i = 0;
         while i + 3 < toks.len() {
             let is_def = toks[i].0 == 0 && tk(i) == b"macro_rules" && sym(i + 1, b'!') && toks[i + 2].0 == 0 && close[i + 3] != usize::MAX;
@@ -1086,6 +1474,12 @@ fn collect_defs(text: &mut String, macros: &mut HashMap<String, Vec<Rule>>, mut 
                 } else {
                     break;
                 }
+            }
+            if st != toks[i].1 && text[st..toks[i].1].contains("macro_export") {
+                if exported_here.contains(&name) {
+                    dup_export(&name);
+                }
+                exported_here.push(name.clone());
             }
             if let Some(f) = first.as_deref_mut() {
                 let exported = st != toks[i].1 && text[st..toks[i].1].contains("macro_export");

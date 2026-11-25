@@ -14,6 +14,36 @@ impl Cx<'_> {
         if let Expr::Binary(_, _, _, sp) | Expr::AssignOp(_, _, _, sp) = e { sp.start } else { SP }
     }
 
+    /// E0277 for arithmetic of a float and an unsuffixed integer literal (`x + 100` with `x: f32`), where the literal
+    /// `lit` (an operand of `e`) reported a mismatch when read as the float; else the error `m` as it is. rustc points
+    /// at the operator
+    fn int_float_op(&self, e: &Expr, lit: &Expr, m: String) -> String {
+        let (Expr::Binary(op, l, r, sp) | Expr::AssignOp(op, l, r, sp)) = e else { return m };
+        let at_lit = matches!(strip_paren(lit), Expr::Lit(t, _) if t.as_ptr() as usize == self.int_as_float);
+        if !at_lit || !matches!(op.as_str(), "+" | "-" | "*" | "/" | "%") {
+            return m;
+        }
+        let float = |x: &Expr| self.peek(x).filter(|t| t.is_float()).map(|t| self.prog.tn(t));
+        let right = std::ptr::eq(lit, &**r);
+        let Some((lt, rt)) = (if right { float(l).map(|t| (t, "{integer}".to_string())) } else { float(r).map(|t| ("{integer}".to_string(), t)) }) else {
+            return m;
+        };
+        let (l, r) = (lt, rt);
+        let msg = match (op.as_str(), matches!(e, Expr::AssignOp(..))) {
+            ("+", false) => format!("cannot add `{r}` to `{l}`"),
+            ("-", false) => format!("cannot subtract `{r}` from `{l}`"),
+            ("*", false) => format!("cannot multiply `{l}` by `{r}`"),
+            ("/", false) => format!("cannot divide `{l}` by `{r}`"),
+            ("%", false) => format!("cannot calculate the remainder of `{l}` divided by `{r}`"),
+            ("+", true) => format!("cannot add-assign `{r}` to `{l}`"),
+            ("-", true) => format!("cannot subtract-assign `{r}` from `{l}`"),
+            ("*", true) => format!("cannot multiply-assign `{l}` by `{r}`"),
+            ("/", true) => format!("cannot divide-assign `{l}` by `{r}`"),
+            _ => format!("cannot calculate and assign the remainder of `{l}` divided by `{r}`"),
+        };
+        self.at(sp.at, format!("{msg} (E0277)"))
+    }
+
     /// rustc's E0369 message for `l op r` (a placeholder `T#` shown as `T`, an unsuffixed literal as `{integer}` /
     /// `{float}`, an unknown type as `_`)
     fn cannot_op(&self, op: &str, lt: Ty, right: &Expr) -> String {
@@ -51,7 +81,8 @@ impl Cx<'_> {
         // 負のリテラル (`-128i8` / `-2147483648`) はその場で値にする (検査で MIN の符号反転にしない)
         if op == "-" {
             if let Expr::Lit(t, _) = strip_paren(x) {
-                if let Some(Lit::Int(i)) = lit::lit(t) {
+                // (not `-2f32`: digits with a float's suffix are a float, negated below)
+                if let Some(Lit::Int(i)) = lit::lit(t).filter(|l| !matches!(l, Lit::Int(i) if matches!(i.suffix(), "f32" | "f64"))) {
                     let lit_e: &Expr = strip_paren(x);
                     // (`-129i8` / `let x: i8 = -129;`: past the type, overflowing_literals; `-128i8` is not)
                     if let (Some(t), true) = (Ty::from_suffix(i.suffix()).or(expected.filter(|t| t.is_int())), self.user_code && !self.prog.allow_overflowing_literals) {
@@ -170,6 +201,24 @@ impl Cx<'_> {
         if !assign && self.user_code && is_cmp(op) && self.fn_item(strip_paren(left)).is_some() {
             let pos = if let Expr::Binary(_, _, _, sp) = e { sp.start } else { SP };
             return err(pos, format!("binary operation `{op}` cannot be applied to a fn item (cast it to a fn pointer)"));
+        }
+        // (`()` compares equal to itself and orders as equal: there are no bits to compare; `&()` too. The operands
+        // are still evaluated, for what they do)
+        if !assign && is_cmp(op) {
+            let strip = |t: Option<Ty>| {
+                let mut t = t?;
+                while let Ty::Ref(_, i) = t {
+                    t = *i;
+                }
+                Some(t)
+            };
+            // (the same type on both sides: `() == &()` is E0308, as any comparison of a value with a reference)
+            if strip(self.peek(left)) == Some(Ty::Unit) && strip(self.peek(right)) == Some(Ty::Unit) && self.peek(left) == self.peek(right) {
+                self.expr(left, None)?;
+                self.expr(right, None)?;
+                let v = matches!(op, "==" | "<=" | ">=") as i64;
+                return Ok((Some(self.b.ins().iconst(types::I8, v)), Ty::Bool));
+            }
         }
         // 短絡評価
         // (a chain of one operator (`a && b && c`) is lowered as one: each operand's short-circuit goes to the end, so
@@ -409,7 +458,7 @@ impl Cx<'_> {
             let rhint = if matches!(op, "<<" | ">>") { self.peek(right) } else { lt1 };
             // (a literal takes the place's type, whatever type inference recorded for it: `c[0] *= 10` with c a
             // chunk whose element type inference did not reach)
-            let (r, rt) = self.expr(right, rhint.or(lt1))?;
+            let (r, rt) = self.expr(right, rhint.or(lt1)).map_err(|m| self.int_float_op(e, right, m))?;
             let p = match lhs {
                 Some(p) => p,
                 None => self.place(left)?,
@@ -458,7 +507,7 @@ impl Cx<'_> {
             t => t,
         };
         let hint = deref_num(hint);
-        let (l, lt) = self.operand(left, hint, cmp)?;
+        let (l, lt) = self.operand(left, hint, cmp).map_err(|m| self.int_float_op(e, left, m))?;
         let Some(mut l) = l else {
             return Ok((None, Ty::Never));
         };
@@ -484,7 +533,7 @@ impl Cx<'_> {
         // (文字列・バイト列のリテラルは自分の型 (`v == b"crate"` の v: Vec<u8> を期待型にしない))
         let lit_str = matches!(strip_paren(right), Expr::Lit(t, _) if matches!(lit::lit(t), Some(Lit::ByteStr(_) | Lit::Str(_))));
         let rhint = if lit_str && matches!(self.strip_refs(lt), Ty::Struct(_)) { None } else { rhint.or(Some(lt)) };
-        let (r, rt) = self.operand(right, rhint, cmp)?;
+        let (r, rt) = self.operand(right, rhint, cmp).map_err(|m| self.int_float_op(e, right, m))?;
         let Some(r) = r else {
             return Ok((None, Ty::Never));
         };
@@ -1304,7 +1353,7 @@ impl Cx<'_> {
                             let ne: &Expr = self.keep_expr(nested);
                             return self.expr(ne, expected).map_err(|m| self.at(at, m));
                         }
-                        body = crate::parse::Block { stmts: vec![Stmt::Expr(nested, false)] };
+                        body = crate::parse::Block { stmts: vec![Stmt::Expr(nested, false)], spos: Default::default() };
                     }
                 }
             }
@@ -1343,6 +1392,15 @@ impl Cx<'_> {
 
         self.b.switch_to_block(then_blk);
         let (tv, tt) = self.block(then_branch, expected)?;
+        // (`if c { false }` with no `else`, where no value is wanted: the block must be `()`, at its tail as rustc
+        // points (E0308); where one is wanted, E0317 below)
+        if else_branch.is_none() && expected.is_none_or(|t| t == Ty::Unit) && !matches!(tt, Ty::Unit | Ty::Never) && self.user_code {
+            let at = block_end_pos(then_branch);
+            if at.line != 0 {
+                let t = self.prog.tn(tt).replace('#', "");
+                return Err(self.at(at, format!("mismatched types: expected `()`, found `{t}`")));
+            }
+        }
         self.finish_arm(tv, tt, merge, &mut result_ty, &mut param, SP)?;
 
         self.b.switch_to_block(else_blk);
@@ -1454,7 +1512,8 @@ impl Cx<'_> {
             Some(base)
         } else {
             match expected {
-                Some(Ty::Struct(e)) if self.prog.base_of(e) == self.prog.base_of(base) && !self.prog.has_param(Ty::Struct(e)) => Some(e),
+                // (an unsized instance (`Wrap<[u8]>`) is no value's type: the fields decide, and the value is coerced)
+                Some(Ty::Struct(e)) if self.prog.base_of(e) == self.prog.base_of(base) && !self.prog.has_param(Ty::Struct(e)) && !Ty::Struct(e).is_dst_struct() => Some(e),
                 _ => None,
             }
         };
@@ -1520,6 +1579,88 @@ impl Cx<'_> {
     }
 
     // --- タプル・配列・スライス ------------------------------------------
+
+    /// `S<[T; N]>` を `S<[T]>` / `S<T>` を `S<dyn Tr>` (最後のフィールドが unsized な struct) に強制変換できるなら、
+    /// 組の後半 (末尾の要素数 N / T の vtable) と unsized な型
+    /// (want may be generic (`&Fat<[T]>` for a parameter): it is matched into sol)
+    pub(crate) fn unsize_tail_sol(&self, want: Ty, got: Ty, sol: &mut [Option<Ty>]) -> Option<(TailMeta, Ty)> {
+        if !want.is_dst_struct() {
+            return None;
+        }
+        let (m, u) = self.unsized_of(Some(want), got)?;
+        let ok = if self.prog.has_param(want) { self.prog.match_ty(want, u, sol) } else { want == u };
+        ok.then_some((m, u))
+    }
+
+    pub(crate) fn unsize_tail(&self, want: Ty, got: Ty) -> Option<TailMeta> {
+        let mut sol = vec![None; 64];
+        self.unsize_tail_sol(want, got, &mut sol).map(|x| x.0)
+    }
+
+    /// The pair for a value at v unsized by m: (v, N) or (v, the vtable)
+    pub(crate) fn make_unsized(&mut self, v: Value, m: TailMeta, span: Sp) -> R<Value> {
+        match m {
+            TailMeta::Len(n) => Ok(self.make_fat(v, n)),
+            TailMeta::Dyn(t, tr) => self.to_dyn(v, t, tr.as_str(), span),
+        }
+    }
+
+    /// The last field's type of a struct instance (a symbolic one (`Fat<[T]>`) has no laid-out fields: from its
+    /// definition's last field)
+    pub(crate) fn struct_tail_of(&self, t: Ty) -> Option<Ty> {
+        let Ty::Struct(s) = t else { return None };
+        let d = &self.prog.structs[s as usize];
+        if let Some(f) = d.fields.last() {
+            return Some(f.1);
+        }
+        let b = &self.prog.structs[d.base? as usize];
+        match b.fields.last()?.1 {
+            Ty::Param(j) => d.args.get(j as usize).copied(),
+            t if !self.prog.has_param(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    /// got (`S<[T; N]>`, `S<T>`) unsized as want asks (`[T]` for an array, `dyn Tr` for a sized type, through
+    /// nested structs' tails): (what the pair's second word is, the unsized type)
+    fn unsized_of(&self, want: Option<Ty>, got: Ty) -> Option<(TailMeta, Ty)> {
+        match (want, got) {
+            (None | Some(Ty::Slice(_)), Ty::Array(e, n)) => return Some((TailMeta::Len(n as i64), Ty::Slice(e))),
+            (Some(Ty::Dyn(tr)), t) if !t.is_unsized() => {
+                return Some((TailMeta::Dyn(t, tr), Ty::Dyn(tr)));
+            }
+            _ => {}
+        }
+        let Ty::Struct(y) = got else { return None };
+        if got.is_dst_struct() || self.prog.structs[y as usize].is_enum {
+            return None;
+        }
+        let d = &self.prog.structs[y as usize];
+        let base = d.base?;
+        if want.is_some_and(|w| !matches!(w, Ty::Struct(x) if self.prog.base_of(x) == base)) {
+            return None;
+        }
+        let (_, tail, _) = *d.fields.last()?;
+        let (m, ut) = self.unsized_of(want.and_then(|w| self.struct_tail_of(w)), tail)?;
+        // (the arguments that make the tail ut: from the definition's last field (`Foo<T>` in `Outer<T>`))
+        let bl = self.prog.structs[base as usize].fields.last()?.1;
+        let mut sol = vec![None; d.args.len()];
+        if !self.prog.match_ty(bl, ut, &mut sol) {
+            return None;
+        }
+        let args: Vec<Ty> = d.args.iter().zip(&sol).map(|(&a, s)| s.unwrap_or(a)).collect();
+        if args == d.args {
+            return None;
+        }
+        let id = self.prog.instantiate(base, args).ok()?;
+        let u = Ty::Struct(id);
+        // (only the tail may change: a parameter the tail mentions is not to be used by another field
+        // (`struct Foo<T: ?Sized>(Box<T>, T)`, E0308 in rustc))
+        let uf = &self.prog.structs[id as usize].fields;
+        let k = d.fields.len() - 1;
+        let same = uf.len() == d.fields.len() && uf[..k].iter().zip(&d.fields[..k]).all(|(a, b)| a.1 == b.1 && a.2 == b.2);
+        (u.is_dst_struct() && same && uf[k].1 == ut).then_some((m, u))
+    }
 
     pub(crate) fn make_fat(&mut self, ptr: Value, len: i64) -> Value {
         let l = self.b.ins().iconst(types::I64, len);
@@ -1833,6 +1974,24 @@ impl Cx<'_> {
             }
             _ => None,
         };
+        // (elements that are distinct closures with no captures and one signature: their fn pointer, as rustc
+        // coerces them; also over the first element's closure type inference may have given)
+        let is_clo = |t: Option<Ty>| matches!(t, Some(Ty::Struct(s)) if self.prog.closure_of_struct.contains_key(&self.prog.base_of(s)));
+        // (also over the first element's `&String`, which inference may have given)
+        let string_ref = |t: Option<Ty>| matches!(t, Some(Ty::Ref(_, Ty::Struct(s))) if self.prog.struct_index.get("String") == Some(&self.prog.base_of(*s)));
+        if elem.is_none() || string_ref(elem) {
+            if let Some(t) = self.str_refs_lub(&elems.iter().collect::<Vec<_>>()) {
+                elem = Some(t);
+            }
+        }
+        if elem.is_none() || is_clo(elem) {
+            if let Some(f) = self.closures_lub(&elems.iter().collect::<Vec<_>>()) {
+                self.lub_fnptr += 1;
+                let r = self.array_lit(e, Some(Ty::Array(crate::types::intern(f), elems.len() as u32)));
+                self.lub_fnptr -= 1;
+                return r;
+            }
+        }
         // (Vec から取った要素の型は目安: 要素の型が違えばそちらにする (`v == ["a"]` で v: Vec<String>))
         let mut soft = matches!(expected, Some(Ty::Struct(_)));
         // `[&a as &dyn Tr, &b]`: 要素のどれかが `&dyn` なら全体をそれに揃える
@@ -1848,11 +2007,23 @@ impl Cx<'_> {
             }
         }
         let mut vals = vec![];
+        // (an element type the context gives: each element is coerced to it by deref, as at a coercion site
+        // (`[&x]` with x: `&[u8]` where `[&[u8]; 1]` is expected))
+        let given = !soft && matches!(elem, Some(Ty::Ref(..)));
         for e in elems {
             let (v, t) = self.expr(e, elem)?;
             if t == Ty::Never {
                 return Ok((None, Ty::Never));
             }
+            // (a coercion site, as a struct literal's field: a place of a `&mut` is reborrowed, and the array holds the
+            // loan (`[rr]` of rr: `&mut &mut i32` as a `[&mut i32; 1]`, then `**rr = 1` while it lives, E0506))
+            if let (true, Some(w @ Ty::Ref(..))) = (given, elem) {
+                self.bk_reborrow_let(e, w);
+            }
+            let (v, t) = match elem {
+                Some(et) if given && t != et && matches!(t, Ty::Ref(_, Ty::Ref(..))) => self.deref_coerce(v, t, et),
+                _ => (v, t),
+            };
             match elem {
                 Some(et) if soft && t != et => elem = Some(t),
                 Some(et) => self.same(SP, t, et)?,
@@ -1881,6 +2052,10 @@ impl Cx<'_> {
                 i.base10_digits().parse::<u32>().or_else(|er| err(SP, er))
             }
             Expr::Path(..) if self.const_generic(e).is_some() => Ok(self.const_generic(e).unwrap()),
+            // (E0435: a local where a constant goes, `let n = 3; [0; n]`, at its name)
+            Expr::Path(None, p) if self.user_code && self.const_of(e).is_none() && ident_of(p).is_some_and(|n| self.lookup(n).is_some()) => {
+                Err(self.at(p.pos, "attempt to use a non-constant value in a constant (E0435)".to_string()))
+            }
             Expr::Path(_, p) if ident_of(p).is_some() || self.const_of(e).is_some() => {
                 // (関連定数 `S::N` は const の名前 `S::N` で引く)
                 let name = match self.const_of(e) {
@@ -1929,6 +2104,14 @@ impl Cx<'_> {
         if elem == Ty::Never {
             return Ok((None, Ty::Never));
         }
+        // (coerced to the expected element type by deref, as array_lit's elements, and reborrowed as they are)
+        if let Some(w @ Ty::Ref(..)) = exp {
+            self.bk_reborrow_let(x, w);
+        }
+        let (v, elem) = match exp {
+            Some(et @ Ty::Ref(..)) if elem != et && matches!(elem, Ty::Ref(_, Ty::Ref(..))) => self.deref_coerce(v, elem, et),
+            _ => (v, elem),
+        };
         // (E0277: two or more copies of a value need it to be Copy; a constant (`[C; 4]`, `[const { .. }; 4]`) is
         // evaluated for each)
         let constant = match strip_paren(x) {

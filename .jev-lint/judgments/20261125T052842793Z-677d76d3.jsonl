@@ -1,0 +1,2 @@
+{"schema":"jev-lint-ledger-1","namespace":"jev-lint-documents-judgments-1","written":"2026-11-25T05:28:42.793Z","model":"jev-1.14.0"}
+{"key":"87b6ccfb5d7a52f91689b7e04203b4d340137053efe64bd4c59717f727a8e192","at":"2026-11-25T05:28:42.774Z","value":{"judgment":{"choice":"supports","confidence":0.88,"probabilities":{"supports":0.91,"contradicts":0.04,"unrelated":0,"insufficient_context":0.05}},"comparisonId":"docs_reports_2026-11-24-15-projection-goals","target":"docs/ja/reports/2026-11-24-15-projection-goals.md"}}

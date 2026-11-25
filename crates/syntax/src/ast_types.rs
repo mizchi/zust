@@ -327,12 +327,38 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
                 Some("Add" | "Sub" | "Mul" | "Div" | "Rem" | "Neg" | "Not" | "BitAnd" | "BitOr" | "BitXor" | "Shl" | "Shr" | "Deref" | "DerefMut")
             );
             let name = if tr.is_some() && !std_tr && matches!(name.as_str(), "Output" | "Target") { format!("{NO_STD_ASSOC}{name}") } else { name };
+            // (`<S as Trait<usize>>::Assoc`: the trait's type arguments choose the impl, as the trait solver's matching
+            // of heads does. The associated type `#targs:Trait#Assoc` of the tuple (S, usize), as for a generic
+            // associated type; Program::resolve takes it apart)
+            // (const arguments too, as impl headers keep them: `<S as Tr<2>>::Item`)
+            let targs: Vec<&crate::parse::GArg> = p.segs.len().checked_sub(2).map(|i| &p.segs[i]).map_or(vec![], |sg| {
+                sg.args.iter().filter(|a| matches!(a, crate::parse::GArg::Ty(_) | crate::parse::GArg::Const(_))).collect()
+            });
+            // (a const argument that cannot be lowered (`{ match .. }`): a hole, the trait kept; Program::resolve takes
+            // the impl only when one value fits whatever the hole is)
+            let lowered: Option<Vec<TySyn>> = targs
+                .iter()
+                .map(|a| match a {
+                    crate::parse::GArg::Ty(t) => tysyn(t, self_ty).ok(),
+                    crate::parse::GArg::Const(e) => Some(const_arg_syn(e).unwrap_or(TySyn::Infer)),
+                    _ => None,
+                })
+                .collect();
+            if let (Some(tr), false, false, Some(lowered)) = (tr, targs.is_empty(), std_tr, lowered) {
+                let mut parts = vec![tysyn(q, self_ty)?];
+                parts.extend(lowered);
+                return Ok(TySyn::Assoc(Box::new(TySyn::Tuple(parts)), format!("{TARGS_PREFIX}{tr}#{name}")));
+            }
             TySyn::Assoc(Box::new(tysyn(q, self_ty)?), name)
         }
         PTy::Path(None, p) => path_ty(p, self_ty)?,
         _ => return Err("unsupported type".to_string()),
     })
 }
+
+/// The name of a qualified path's associated type whose trait has type arguments: `#targs:Trait#Assoc` of the tuple of
+/// the self type and the arguments (`<S as Trait<usize>>::Assoc` is `#targs:Trait#Assoc` of `(S, usize)`)
+pub const TARGS_PREFIX: &str = "#targs:";
 
 /// The name a generic associated type's application has: `P::Pointer<String>` is the associated type
 /// `#gat:Pointer` of the tuple `(P, String)` (Program::assoc_of takes it apart)
@@ -415,6 +441,9 @@ fn path_ty(p: &Path, self_ty: Option<&TySyn>) -> R<TySyn> {
     if last.fn_args.is_some() {
         return Err("unsupported type path".to_string());
     }
+    if !last.args.is_empty() && (n == 1 || p.segs[n - 2].name == "primitive") && (Ty::prim(&last.name).is_some() || last.name == "str") {
+        return Err(builtin_args_err(last));
+    }
     let s = last.name.clone();
     let mut generic_args = Vec::new();
     for a in &last.args {
@@ -462,4 +491,11 @@ fn self_name(a: &str, self_ty: Option<&TySyn>) -> String {
         }
         _ => a.to_string(),
     }
+}
+
+/// E0109: `u32<i32>` / `str<'static>`, generic arguments on a builtin type
+#[cold]
+fn builtin_args_err(last: &crate::parse::Seg) -> String {
+    let kind = if last.args.iter().any(|a| matches!(a, GArg::Ty(_) | GArg::Const(_))) { "type" } else { "lifetime" };
+    format!("{kind} arguments are not allowed on builtin type `{}` (E0109)", last.name)
 }

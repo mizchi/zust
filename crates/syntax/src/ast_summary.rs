@@ -30,18 +30,42 @@ fn has_attr(attrs: &[String], name: &str) -> bool {
 }
 
 /// `#[derive(A, B)]` の名前 (1 つの識別子のものだけ)
+/// (also as std's prelude writes it, `#[::core::prelude::v1::derive(::core::clone::Clone, ::core::marker::Copy)]`, as
+/// libc 0.2's `s!` does: a std trait by its path is its name)
 fn derive_names(attrs: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     for a in attrs {
         let c = compact(a);
-        let Some(inner) = c.strip_prefix("#[derive(").and_then(|x| x.strip_suffix(")]")) else { continue };
+        let Some(rest) = c.strip_prefix("#[") else { continue };
+        let rest = rest.strip_prefix("::").unwrap_or(rest);
+        let rest = ["core::prelude::v1::", "std::prelude::v1::"].iter().find_map(|p| rest.strip_prefix(p)).unwrap_or(rest);
+        let Some(inner) = rest.strip_prefix("derive(").and_then(|x| x.strip_suffix(")]")) else { continue };
         for part in inner.split(',') {
-            if !part.is_empty() && part.chars().all(|ch| ch == '_' || ch.is_alphanumeric()) {
-                out.push(part.to_string());
+            let p = part.strip_prefix("::").unwrap_or(part);
+            let std_path = ["core::", "std::", "alloc::"].iter().any(|r| p.starts_with(r));
+            let name = if std_path { p.rsplit("::").next().unwrap_or(p) } else { p };
+            if !name.is_empty() && name.chars().all(|ch| ch == '_' || ch.is_alphanumeric()) {
+                out.push(name.to_string());
             }
         }
     }
     out
+}
+
+/// The std crate a derive's path names `name` right under, `#[derive(core::name)]` / `#[derive(::std::name)]`
+#[cold]
+fn derive_root_of(attrs: &[String], name: &str) -> Option<&'static str> {
+    for a in attrs {
+        let c = compact(a);
+        let Some(inner) = c.find("derive(").and_then(|i| c[i + 7..].strip_suffix(")]")) else { continue };
+        for part in inner.split(',') {
+            let p = part.strip_prefix("::").unwrap_or(part);
+            if let Some(k) = ["core", "std", "alloc"].into_iter().find(|k| p.strip_prefix(k).and_then(|r| r.strip_prefix("::")) == Some(name)) {
+                return Some(k);
+            }
+        }
+    }
+    None
 }
 
 /// The integer type of `#[repr(u8)]` / `#[repr(C, i16)]`
@@ -303,6 +327,23 @@ fn where_types(item: &Item, owner: Option<&Owner>, out: &mut Vec<String>) {
 }
 
 /// The plain trait bounds (one-segment paths without arguments, not `?Sized`) on a struct / enum's parameters
+/// The type parameters declared `?Sized` (in the parameter list or a where clause)
+fn adt_unsized(g: &Generics) -> Vec<String> {
+    let maybe = |bs: &[Bound]| bs.iter().any(|b| matches!(b, Bound::Trait(true, p) if p.segs.last().is_some_and(|s| s.name == "Sized")));
+    let mut v: Vec<String> = g.params.iter().filter_map(|p| match p {
+        GParam::Ty(n, bs, _) if maybe(bs) => Some(n.clone()),
+        _ => None,
+    }).collect();
+    for (t, bs) in &g.preds {
+        if let PTy::Path(None, tp) = t {
+            if tp.segs.len() == 1 && maybe(bs) && !v.contains(&tp.segs[0].name) {
+                v.push(tp.segs[0].name.clone());
+            }
+        }
+    }
+    v
+}
+
 fn adt_bounds(g: &Generics) -> Vec<(String, Vec<String>)> {
     let mut v = Vec::new();
     for p in &g.params {
@@ -544,12 +585,17 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         return err("missing lifetime specifier (E0106)");
     }
     let mut generics = owner.map(|o| o.generics.clone()).unwrap_or_default();
+    // (the lifetime bounds of the parameters' `impl Trait`s, by the type parameters they are lifted to: regions)
+    let mut impl_lts: Vec<(String, String)> = vec![];
     collect_generics(&sig.generics, &mut generics)?;
     if is_extern && !generics.is_empty() {
         return err("extern fns cannot be generic");
     }
     if is_main && !generics.is_empty() {
         return err("`main` cannot be generic");
+    }
+    if is_main && !sig.generics.preds.is_empty() {
+        return err("`main` function is not allowed to have a `where` clause (E0646)");
     }
     let self_ty = owner.map(|o| &o.self_ty);
     let mut params = Vec::new();
@@ -667,7 +713,19 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
             }
         }
     }
-    for (_, t) in &sig.params {
+    // (E0277: a returned value needs a size too, a `str` or `[T]` (a `dyn Trait` is E0746, checked elsewhere); a
+    // trait's declaration without a body does not)
+    if let Some(r) = sig.ret.as_ref().filter(|_| !owner.is_some_and(|o| o.is_trait) && !is_extern) {
+        if let Some(u) = unsized_value(r).filter(|u| !u.starts_with("dyn")) {
+            let m = format!("the size for values of type `{u}` cannot be known at compilation time (E0277)");
+            return Err(match crate::wf::pos_of(r) {
+                Some(p) => format!("{}:{}: {m}", p.line, p.col + 1),
+                None => m,
+            });
+        }
+    }
+    let mut lifted_params: Vec<(usize, PTy)> = vec![];
+    for (k, (_, t)) in sig.params.iter().enumerate() {
         // (E0277: a parameter's value needs a size; a trait's declaration without a body does not)
         if !owner.is_some_and(|o| o.is_trait) && !is_extern {
             if let Some(u) = unsized_value(t) {
@@ -681,6 +739,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         };
         if let PTy::Impl(bs) = inner {
             let g = fresh_impl_name(&generics);
+            impl_lts.extend(bs.iter().filter_map(|b| if let Bound::Lifetime(l) = b { Some((g.clone(), l.clone())) } else { None }));
             generics.push((g.clone(), bound_names(bs)?));
             let n = TySyn::Named(g);
             params.push(match rf {
@@ -689,12 +748,30 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
             });
         } else if nested_impl(t) {
             // (`Option<&[impl AsRef<str>]>`: each `impl Trait` inside is a type parameter without a name, too)
-            let lifted = lift_impls(t, &mut generics)?;
+            let lifted = lift_impls(t, &mut generics, &mut impl_lts)?;
             params.push(tysyn(&lifted, self_ty)?);
+            lifted_params.push((k, lifted));
         } else {
             params.push(tysyn(t, self_ty)?);
         }
     }
+    // (the regions of a parameter with an `impl Trait` inside are those of the type it is lifted to, with the hidden
+    // type parameter in place of the `impl`: `Option<impl Copy + 'static>` holds what its `__impl0` does, which the
+    // bound requires to be 'static at the call (`take(Some(&x))`, E0597))
+    let lifted_sig = (!lifted_params.is_empty()).then(|| {
+        let mut rs = sig.clone();
+        for (k, t) in std::mem::take(&mut lifted_params) {
+            rs.params[k].1 = t;
+        }
+        // (with their lifetime bounds, which the lifted type no longer writes: the signature names a lifetime)
+        for (g, _) in generics.iter().filter(|g| g.0.starts_with("__impl")) {
+            if !rs.generics.params.iter().any(|p| matches!(p, GParam::Ty(n, ..) if n == g)) {
+                let bs = impl_lts.iter().filter(|(n, _)| n == g).map(|(_, l)| Bound::Lifetime(l.clone())).collect();
+                rs.generics.params.push(GParam::Ty(g.clone(), bs, None));
+            }
+        }
+        rs
+    });
     let ret = match &sig.ret {
         None => TySyn::Prim(Ty::Unit),
         // (`-> impl ?Sized` with no other trait: a return value must have a size)
@@ -762,7 +839,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         ret_from: ret_from(sig),
         regions: {
             let otp: Vec<&str> = owner.map(|o| o.generics.iter().map(|g| g.0.as_str()).collect()).unwrap_or_default();
-            crate::regions::sig_regions(sig, owner.and_then(|o| o.regions.as_deref()), &otp)
+            crate::regions::sig_regions(lifted_sig.as_ref().unwrap_or(sig), owner.and_then(|o| o.regions.as_deref()), &otp, &impl_lts)
         },
         is_unsafe: sig.quals.iter().any(|q| q == "unsafe") || (is_extern && !sig.quals.iter().any(|q| q == "safe")),
         preds: preds,
@@ -1027,6 +1104,87 @@ fn unsized_elem(t: &PTy) -> Option<String> {
         }),
         _ => None,
     }
+}
+
+/// A struct's, an enum's or a union's field whose type passes a type parameter of the item to a struct or enum of the
+/// program that bounds that parameter by 'static (`bar: Bar<U>` with `struct Bar<T: 'static>`). Unlike `T: 'a`,
+/// rustc does not infer `U: 'static` from the fields: the item must declare it (E0310). statics: the short names of
+/// such structs and enums, and the indexes of their type and const parameters that must be 'static. (line, col, msg)
+pub fn static_field_unmet(src: &str, it: &SrcItem, statics: &crate::fxhash::FxMap<&str, Vec<usize>>) -> Option<(usize, usize, String)> {
+    let text = src.get(it.start..it.end)?;
+    let f = parse_file(text).ok()?;
+    let item = f.items.first()?;
+    let (g, tys): (&Generics, Vec<&PTy>) = match &item.kind {
+        ItemKind::Struct(_, g, fields) | ItemKind::Union(_, g, fields) => (g, match fields {
+            Fields::Named(v) => v.iter().map(|x| &x.1).collect(),
+            Fields::Tuple(v) => v.iter().collect(),
+            Fields::Unit => vec![],
+        }),
+        ItemKind::Enum(_, g, vs) => (g, vs.iter().flat_map(|v| match &v.1 {
+            Fields::Named(f) => f.iter().map(|x| &x.1).collect::<Vec<_>>(),
+            Fields::Tuple(f) => f.iter().collect(),
+            Fields::Unit => vec![],
+        }).collect()),
+        _ => return None,
+    };
+    let mut k = crate::wf::Known::default();
+    k.add_generics(g);
+    if k.tparams.is_empty() {
+        return None;
+    }
+    fn walk(t: &PTy, k: &crate::wf::Known, statics: &crate::fxhash::FxMap<&str, Vec<usize>>, depth: u32) -> Option<(crate::parse::Pos, String)> {
+        if depth > 16 {
+            return None;
+        }
+        match t {
+            PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => walk(i, k, statics, depth + 1),
+            PTy::Tuple(ts) => ts.iter().find_map(|t| walk(t, k, statics, depth + 1)),
+            PTy::Fn(ps, r) => ps.iter().chain(std::iter::once(&**r)).find_map(|t| walk(t, k, statics, depth + 1)),
+            PTy::Path(None, p) => {
+                let s = p.segs.last()?;
+                // (one of the program's by its name alone: not a parameter of the item's of that name)
+                let req = (p.segs.len() == 1 && s.fn_args.is_none() && !k.tparams.contains(&s.name)).then(|| statics.get(s.name.as_str())).flatten();
+                let args: Vec<Option<&PTy>> = s
+                    .args
+                    .iter()
+                    .filter_map(|a| match a {
+                        crate::parse::GArg::Ty(t) => Some(Some(t)),
+                        crate::parse::GArg::Const(_) => Some(None),
+                        _ => None,
+                    })
+                    .collect();
+                if let Some(req) = req {
+                    for &i in req {
+                        let Some(Some(a)) = args.get(i) else { continue };
+                        // (the item's type parameters the argument holds, each declared to outlive 'static or not)
+                        let Some(sub) = k.sub_of(a) else { continue };
+                        if let Some(n) = sub.iter().find(|n| k.tparams.contains(n) && !k.vague.contains(n) && !k.outlives(n, "'static")) {
+                            return Some((p.pos, format!("the parameter type `{n}` may not live long enough (it must outlive `'static`, which the type `{}` requires) (E0310)", s.name)));
+                        }
+                    }
+                }
+                args.iter().flatten().find_map(|t| walk(t, k, statics, depth + 1)).or_else(|| {
+                    s.args.iter().find_map(|a| match a {
+                        crate::parse::GArg::Bind(_, t) => walk(t, k, statics, depth + 1),
+                        _ => None,
+                    })
+                })
+            }
+            PTy::Dyn(bs) | PTy::Impl(bs) => bs.iter().find_map(|b| match b {
+                Bound::Trait(_, p) => p.segs.iter().find_map(|s| {
+                    s.args.iter().find_map(|a| match a {
+                        crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t) => walk(t, k, statics, depth + 1),
+                        _ => None,
+                    })
+                    .or_else(|| s.fn_args.as_ref().and_then(|(ps, r)| ps.iter().chain(r.as_deref()).find_map(|t| walk(t, k, statics, depth + 1))))
+                }),
+                Bound::Lifetime(_) => None,
+            }),
+            _ => None,
+        }
+    }
+    let (p, m) = tys.iter().find_map(|t| walk(t, &k, statics, 0))?;
+    Some((it.line + p.line.max(1) as usize - 1, p.col as usize + 1, m))
 }
 
 /// What an item's types require of traits' `Self: 'x` bounds (the driver checks them against the traits, which
@@ -1387,7 +1545,12 @@ fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields
     let derives = derive_names(attrs);
     for d in &derives {
         if !matches!(d.as_str(), "Clone" | "Copy" | "Debug" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Default") {
-            return Err(format!("cannot find derive macro `{d}` in this scope"));
+            // (`\u{5}word\u{5}msg`: at the word in the item's text, the derive's name)
+            // (`#[derive(core::RustcDecodable)]`: a name std's root does not have)
+            if let Some(k) = derive_root_of(attrs, d) {
+                return Err(format!("\u{5}{d}\u{5}cannot find `{d}` in `{k}`"));
+            }
+            return Err(format!("\u{5}{d}\u{5}cannot find derive macro `{d}` in this scope"));
         }
     }
     if union {
@@ -1395,7 +1558,7 @@ fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields
             return err("unions cannot have zero fields");
         }
         if let Some(d) = derives.iter().find(|d| !matches!(d.as_str(), "Clone" | "Copy")) {
-            return Err(format!("this trait cannot be derived for unions: `{d}`"));
+            return Err(format!("\u{5}{d}\u{5}this trait cannot be derived for unions: `{d}`"));
         }
         if derives.iter().any(|d| d == "Clone") && !derives.iter().any(|d| d == "Copy") {
             return err("the trait bound `Copy` is not satisfied: a union can derive `Clone` only with `Copy`");
@@ -1408,7 +1571,12 @@ fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields
                 _ => false,
             };
             if owning {
-                return err("field must implement `Copy` or be wrapped in `ManuallyDrop<...>` to be used in a union");
+                // (at the field's type, as rustc)
+                let m = "field must implement `Copy` or be wrapped in `ManuallyDrop<...>` to be used in a union";
+                return Err(match crate::wf::pos_of(t) {
+                    Some(p) => format!("\u{3}{}\u{3}{m}", p.line),
+                    None => m.to_string(),
+                });
             }
         }
     }
@@ -1623,6 +1791,40 @@ pub fn parse_fn_bound(s: &str) -> Option<(String, Vec<TySyn>, TySyn)> {
         Some(t) => tysyn(&t, None).ok()?,
     };
     Some((kind.to_string(), args, ret))
+}
+
+/// A bound `a::Tr<A, B>` (or `Tr<A, Item = X>`) as its trait's name and its type arguments, without its
+/// associated-type bindings: None when a type argument cannot be read (a lifetime is left out)
+pub fn bound_args(s: &str) -> Option<(String, Vec<TySyn>)> {
+    let Some(lt) = s.find('<') else {
+        let n = s.trim();
+        return Some((n.rsplit("::").next().unwrap_or(n).to_string(), vec![]));
+    };
+    let f = parse_file(&format!("type __B = dyn {s};")).ok()?;
+    let ItemKind::Type(_, _, _, Some(PTy::Dyn(bs))) = &f.items.first()?.kind else { return None };
+    let Some(Bound::Trait(_, p)) = bs.first() else { return None };
+    let last = p.segs.last()?;
+    if last.fn_args.is_some() {
+        return None;
+    }
+    let mut args = Vec::new();
+    for a in &last.args {
+        match a {
+            crate::parse::GArg::Ty(t) => args.push(tysyn(t, None).ok()?),
+            // (a const argument as impl headers keep it (`Tr<2>`): not left out, or `Tr<1>`'s impl would answer)
+            crate::parse::GArg::Const(e) => args.push(crate::ast_types::const_arg_syn(e).ok()?),
+            _ => {}
+        }
+    }
+    let n = s[..lt].trim();
+    Some((n.rsplit("::").next().unwrap_or(n).to_string(), args))
+}
+
+/// A type written as text (`<T as Tr>::Assoc`, `W<u8>`, `()`), as a TySyn; self_ty: what `Self` is
+pub fn ty_of_text(s: &str, self_ty: Option<&TySyn>) -> Option<TySyn> {
+    let f = parse_file(&format!("type __W = {s};")).ok()?;
+    let ItemKind::Type(_, _, _, Some(t)) = &f.items.first()?.kind else { return None };
+    tysyn(t, self_ty).ok()
 }
 
 /// The arguments a call through a closure bound (`Fn(&T) -> &T`) returns a borrow of, by its lifetimes: those whose
@@ -1845,12 +2047,14 @@ fn fresh_impl_name(generics: &[(String, Vec<String>)]) -> String {
     format!("__impl{k}")
 }
 
-/// t with each `impl Trait` in it replaced by a new type parameter `__implN` (added to generics with its bounds)
-fn lift_impls(t: &PTy, generics: &mut Vec<(String, Vec<String>)>) -> R<PTy> {
+/// t with each `impl Trait` in it replaced by a new type parameter `__implN` (added to generics with its bounds; its
+/// lifetime bounds to lts, `impl Debug + 'static`: (`__implN`, `'static`))
+fn lift_impls(t: &PTy, generics: &mut Vec<(String, Vec<String>)>, lts: &mut Vec<(String, String)>) -> R<PTy> {
     use crate::parse::{GArg, Seg};
     Ok(match t {
         PTy::Impl(bs) => {
             let g = fresh_impl_name(generics);
+            lts.extend(bs.iter().filter_map(|b| if let Bound::Lifetime(l) = b { Some((g.clone(), l.clone())) } else { None }));
             generics.push((g.clone(), bound_names(bs)?));
             PTy::Path(None, Path { global: false, segs: vec![Seg { name: g.clone(), args: vec![], fn_args: None, text: g }], pos: Default::default() })
         }
@@ -1859,17 +2063,17 @@ fn lift_impls(t: &PTy, generics: &mut Vec<(String, Vec<String>)>) -> R<PTy> {
             for s in &mut p.segs {
                 for a in &mut s.args {
                     if let GArg::Ty(x) | GArg::Bind(_, x) = a {
-                        *x = lift_impls(x, generics)?;
+                        *x = lift_impls(x, generics, lts)?;
                     }
                 }
             }
             PTy::Path(q.clone(), p)
         }
-        PTy::Ref(l, m, i) => PTy::Ref(l.clone(), *m, Box::new(lift_impls(i, generics)?)),
-        PTy::Ptr(m, i) => PTy::Ptr(*m, Box::new(lift_impls(i, generics)?)),
-        PTy::Slice(i) => PTy::Slice(Box::new(lift_impls(i, generics)?)),
-        PTy::Array(i, n) => PTy::Array(Box::new(lift_impls(i, generics)?), n.clone()),
-        PTy::Tuple(v) => PTy::Tuple(v.iter().map(|x| lift_impls(x, generics)).collect::<R<Vec<_>>>()?),
+        PTy::Ref(l, m, i) => PTy::Ref(l.clone(), *m, Box::new(lift_impls(i, generics, lts)?)),
+        PTy::Ptr(m, i) => PTy::Ptr(*m, Box::new(lift_impls(i, generics, lts)?)),
+        PTy::Slice(i) => PTy::Slice(Box::new(lift_impls(i, generics, lts)?)),
+        PTy::Array(i, n) => PTy::Array(Box::new(lift_impls(i, generics, lts)?), n.clone()),
+        PTy::Tuple(v) => PTy::Tuple(v.iter().map(|x| lift_impls(x, generics, lts)).collect::<R<Vec<_>>>()?),
         t => t.clone(),
     })
 }
@@ -2878,9 +3082,11 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             let mut sig = parse_sig(fs, false, (named_main && !generic) || entry, None)?;
             let result_ret = matches!(&sig.ret, TySyn::App(n, _) if n == "Result");
             let bad_main = named_main && (generic || !sig.params.is_empty() || (sig.ret != TySyn::Prim(Ty::Unit) && !result_ret));
-            if bad_main {
+            // (an `async fn main` cannot be the entry either (E0752): its symbol tells it from the others)
+            let async_main = named_main && fs.quals.iter().any(|q| q == "async");
+            if bad_main || async_main {
                 sig.is_main = false;
-                sig.symbol = format!("_x{name}");
+                sig.symbol = if async_main { "_xmain.async".to_string() } else { format!("_x{name}") };
             }
             if entry && (!sig.params.is_empty() || sig.ret != TySyn::Prim(Ty::Unit)) {
                 return err("`main` must be `fn main()`");
@@ -2931,6 +3137,19 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             sm.statics.push((n.clone(), tysyn(t, None)?, item.init_text.clone(), *m));
         }
         ItemKind::Extern(items) => {
+            // (E0428: two foreign items of one name in the value namespace, at the second's start, its `pub` included)
+            let mut names: Vec<&str> = vec![];
+            for fi in items {
+                let n = match &fi.kind {
+                    ItemKind::Fn(fs, _) => fs.name.as_str(),
+                    ItemKind::Static(_, n, ..) => n.as_str(),
+                    _ => continue,
+                };
+                if names.contains(&n) {
+                    return Err(format!("{}:1: the name `{n}` is defined multiple times (E0428)", fi.line));
+                }
+                names.push(n);
+            }
             for fi in items {
                 // (`static X: T;`: the symbol X (or its link_name) of what the program links with)
                 if let ItemKind::Static(m, n, t, _) = &fi.kind {
@@ -2955,6 +3174,10 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     continue;
                 }
                 let ItemKind::Fn(fs, None) = &fi.kind else {
+                    // (a fn with a body: what a foreign fn may not have)
+                    if matches!(fi.kind, ItemKind::Fn(_, Some(_))) {
+                        return Err(format!("{}:1: incorrect function inside `extern` block", fi.line));
+                    }
                     return err("only fns and statics are supported in extern blocks");
                 };
                 if link_name(&fi.attrs).unwrap_or_else(|| fs.name.clone()).starts_with("__enzyme_") {
@@ -3001,6 +3224,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             sm.adt_generics = adt_params(g)?;
             sm.adt_defaults = adt_defaults(g, &sm.adt_generics)?;
             sm.adt_bounds = adt_bounds(g);
+            sm.adt_unsized = adt_unsized(g);
             {
                 let tys: Vec<&PTy> = vars.iter().flat_map(|(_, f, _)| match f {
                     Fields::Unit => vec![],
@@ -3109,6 +3333,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             sm.adt_generics = adt_params(g)?;
             sm.adt_defaults = adt_defaults(g, &sm.adt_generics)?;
             sm.adt_bounds = adt_bounds(g);
+            sm.adt_unsized = adt_unsized(g);
             {
                 let tys: Vec<&PTy> = match fields {
                     Fields::Named(v) => v.iter().map(|x| &x.1).collect(),

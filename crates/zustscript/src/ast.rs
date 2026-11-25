@@ -95,6 +95,9 @@ pub enum EK {
     Await(Box<Expr>),
     /// `async (x) => e`: the closure inside, which gives a `Promise` of its body's value
     Async(Box<Expr>),
+    /// `e?`: the value inside the `Result` / `Option` `e`; an `Err` / `None` is returned from the innermost function
+    /// or closure as it is
+    Try(Box<Expr>),
 }
 
 #[derive(Clone, Debug)]
@@ -233,6 +236,16 @@ impl Elem {
     }
 }
 
+/// A property or a method of an `extern type`, and its name in JS
+#[derive(Clone, Debug)]
+pub enum Member {
+    /// `status: i32` / `text: String = "textContent"`: read with `x.status`
+    Prop { name: String, ty: TyS, js: String, pos: Pos },
+    /// `fn json() -> Promise<Json>;` / `fn set(k: String, v: String) = "setItem";`: called with `x.json()`. A JS name
+    /// that ends with `=` (`"textContent="`) assigns that property to the one argument
+    Method { name: String, args: Vec<TyS>, ret: TyS, js: String, pos: Pos },
+}
+
 /// Where a record read from TS comes from
 #[derive(Clone, Debug)]
 pub struct TsFrom {
@@ -279,9 +292,63 @@ pub enum Item {
     /// (`is_async`: written `async fn`: its callers get a `Promise<T>` of its result `T`, and its body may `await`)
     Fn { name: String, public: bool, wasm: bool, simd: bool, relaxed: bool, is_async: bool, generics: Vec<String>, bounds: Vec<(String, String)>, args: Vec<(String, TyS)>, ret: Option<TyS>, body: Expr, pos: Pos },
     /// `extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";`
-    Extern { name: String, module: Option<String>, generics: Vec<String>, args: Vec<TyS>, ret: TyS, js: String, pos: Pos },
+    /// (`zsc`: an `export fn` of another zustscript module (zscimport.rs): its values are zustscript's, not converted
+    /// as JS's are)
+    Extern { name: String, module: Option<String>, generics: Vec<String>, args: Vec<TyS>, ret: TyS, js: String, pos: Pos, zsc: bool },
+    /// `extern type Response;` / `extern "react" type RefObject<T>;` / `extern type El = "HTMLElement" { .. }`: a JS
+    /// value zustscript does not look inside, with the properties and methods declared for it. `ts`: its name in
+    /// TS (and in JS, for a module's: the name imported)
+    /// (`origin`: the .zsc file that declares it, when it came from another module: one declaration reached through
+    /// two imports is the same type)
+    ExternType { name: String, module: Option<String>, params: Vec<String>, ts: String, members: Vec<Member>, pos: Pos, origin: Option<std::path::PathBuf> },
     /// `wasm fn` (the text is the whole Rust function, handed to zustc)
     WasmFn { name: String, public: bool, args: Vec<(String, WTy)>, ret: WTy, text: String, pos: Pos },
     /// `wasm { .. }`: Rust items for the wasm side only (helpers, structs)
     WasmRaw(String),
+}
+
+/// The prelude's types, which a file uses without declaring them: `enum Option<T> { None, Some(T) }` and
+/// `enum Result<T, E> { Ok(T), Err(E) }` (ordinary enums otherwise: the same JS, `.d.ts` and Rust as if declared)
+/// (name, type parameters, variants with their fields' types)
+pub type PreludeType = (&'static str, &'static [&'static str], &'static [(&'static str, &'static [&'static str])]);
+pub const PRELUDE: &[PreludeType] = &[("Option", &["T"], &[("None", &[]), ("Some", &["T"])]), ("Result", &["T", "E"], &[("Ok", &["T"]), ("Err", &["E"])])];
+
+/// A prelude type is at line 0 (no source line is)
+pub fn is_prelude(pos: Pos) -> bool {
+    pos.line == 0
+}
+
+/// Does `variants` declare the prelude type `name` as the prelude does (a file written before the prelude)
+pub fn prelude_shaped(name: &str, params: &[String], variants: &[(String, Vec<TyS>, Option<TyS>)]) -> bool {
+    let Some((_, ps, vs)) = PRELUDE.iter().find(|p| p.0 == name) else { return false };
+    params.len() == ps.len()
+        && variants.len() == vs.len()
+        && variants.iter().zip(vs.iter()).all(|((v, ts, r), (pv, pts))| {
+            v == pv
+                && r.is_none()
+                && ts.len() == pts.len()
+                && ts.iter().zip(pts.iter()).all(|(t, pt)| matches!(t, TyS::Name(n, a, _) if a.is_empty() && Some(n) == ps.iter().position(|p| p == pt).map(|k| &params[k])))
+        })
+}
+
+/// The items with the prelude's types in front, each unless the file declares a type of its name, or a variant of
+/// another enum takes one of its variants' names (variant names are unique in a file: that enum keeps its own)
+pub fn with_prelude(items: Vec<Item>) -> Vec<Item> {
+    let p0 = Pos { line: 0, col: 0 };
+    let mut out = vec![];
+    for (name, ps, vs) in PRELUDE {
+        let taken = items.iter().any(|it| match it {
+            Item::Record { name: n, .. } => n == name,
+            Item::Enum { name: n, variants, .. } => n == name || variants.iter().any(|v| vs.iter().any(|pv| pv.0 == v.0)),
+            _ => false,
+        });
+        if taken {
+            continue;
+        }
+        let params: Vec<String> = ps.iter().map(|p| p.to_string()).collect();
+        let variants = vs.iter().map(|(v, ts)| (v.to_string(), ts.iter().map(|t| TyS::Name(t.to_string(), vec![], p0)).collect(), None)).collect();
+        out.push(Item::Enum { name: name.to_string(), params, variants, pos: p0, from: None });
+    }
+    out.extend(items);
+    out
 }

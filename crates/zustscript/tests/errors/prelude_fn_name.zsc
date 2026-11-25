@@ -1,0 +1,2 @@
+// expect: `Ok` is a variant of the prelude's `Result`: a function cannot have this name
+fn Ok(x: i32) -> i32 { x }

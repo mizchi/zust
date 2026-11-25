@@ -1,0 +1,1 @@
+ 4:1: `Holder<Rc<i8>>` cannot be sent between threads safely (E0277)

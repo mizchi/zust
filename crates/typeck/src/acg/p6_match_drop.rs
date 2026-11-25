@@ -158,6 +158,21 @@ impl Cx<'_> {
         let Expr::Match(scrut, arms) = m else {
             return err(SP, "internal: match_ on a non-match expression");
         };
+        // (arms that are distinct closures with no captures and one signature, with nothing expected: rustc coerces
+        // them to that fn pointer)
+        // (inference may have given the match its first arm's closure type: that is no fn pointer either)
+        let lub = || self.closures_lub(&arms.iter().map(|a| &a.body).collect::<Vec<_>>());
+        let lubbed = match expected {
+            None => lub(),
+            Some(Ty::Struct(s)) if self.prog.closure_of_struct.contains_key(&self.prog.base_of(s)) => lub(),
+            _ => None,
+        };
+        if lubbed.is_some() {
+            self.lub_fnptr += 1;
+            let r = self.match_(m, lubbed);
+            self.lub_fnptr -= 1;
+            return r;
+        }
         // (an arm with a guard and an or-pattern: the guard runs for each alternative that matches, left to right.
         // The arm becomes one arm per alternative)
         if arms.iter().any(|a| a.guard.is_some() && has_or(&a.pat)) {
@@ -193,6 +208,7 @@ impl Cx<'_> {
                     crate::parse::Stmt::Let(Pat::Ident(false, false, tk.clone(), None), None, Some((**scrut).clone()), None, Default::default()),
                     crate::parse::Stmt::Expr(Expr::Match(Box::new(path_expr(&tk)), arms.clone()), false),
                 ],
+                spos: Default::default(),
             };
             let ne: &Expr = self.keep_expr(Expr::Block(None, false, blk));
             // (the move into the local is the rewrite's, not the program's: `match cap { None => .., Some(x) => cap =
@@ -229,7 +245,16 @@ impl Cx<'_> {
         let scrut_drop = self.bk.scrut_drop.take();
         // (E0004: the arms must cover the scrutinee's type; user code only)
         if self.user_code {
+            // (first E0170: such a binding is a catch-all arm in rustc, which zustc reads as the variant)
+            if let Some(e) = self.variant_binding(arms, place.ty()) {
+                return Err(e);
+            }
             if let Some(w) = self.non_exhaustive(arms, place.ty()) {
+                // (no arms at all: rustc names the type, `match () {}`)
+                if arms.is_empty() {
+                    let t = self.prog.tn(place.ty()).replace('#', "");
+                    return Err(self.at(expr_start(scrut), format!("non-exhaustive patterns: type `{t}` is non-empty (E0004)")));
+                }
                 return Err(self.at(expr_start(scrut), format!("non-exhaustive patterns: `{w}` not covered (E0004)")));
             }
             if self.prog.deny_unreachable {
@@ -272,6 +297,8 @@ impl Cx<'_> {
             self.pat_test(&arm.pat, place, next).map_err(|m| self.at(arm.pos, m))?;
             self.scopes.push(vec![]);
             let ob = self.owned_binds;
+            let pm = self.bk.pat_moves;
+            let bk_l0 = self.bk.locals.len() as u32;
             self.bk.scrut = bk_ss.clone();
             self.bk.scrut_place = bk_sp.clone();
             self.rg.scrut = rg_ss.clone();
@@ -285,6 +312,8 @@ impl Cx<'_> {
             r?;
             if self.owned_binds > ob {
                 self.release_outer(scrut, sflag)?;
+            } else if self.bk.pat_moves > pm {
+                self.deref_move_check(scrut)?;
             }
             // (a guard must not change what the match tests: rustc's fake borrows (E0510). The places the patterns
             // test (`.0` of `(None, _)`; `match x { y if .. }` and `S { .. }` test nothing), and the deref prefixes of
@@ -347,6 +376,16 @@ impl Cx<'_> {
                     return Err(self.at(at, msg));
                 }
             }
+            // (the locals the arm's pattern bound, which the guard sees by shared reference: see bk_ev)
+            // (pushed on those of the guards it is in: theirs are seen so in it too)
+            let guard_saved = if arm.guard.is_some() && self.bk_on() {
+                let hi = self.bk.locals.len() as u32;
+                let n = self.bk.guard_binds.len();
+                self.bk.guard_binds.push((bk_l0, hi));
+                Some(n)
+            } else {
+                None
+            };
             if let Some(g) = &arm.guard {
                 // (`P if let Q = e && c => ..`: each `let` of the guard tests and binds in the arm's scope, each other
                 // condition must hold; a failure goes to the next arm)
@@ -389,6 +428,12 @@ impl Cx<'_> {
                     if let Some(c) = c {
                         self.require(c, next);
                     }
+                }
+            }
+            if let Some(n) = guard_saved {
+                self.bk.guard_binds.truncate(n);
+                if let Some((sp, m)) = self.bk.guard_err.take() {
+                    return Err(self.at(sp, m));
                 }
             }
             if guard_place.is_some() {
@@ -444,12 +489,15 @@ impl Cx<'_> {
         self.pat_test(lpat, place, else_blk)?;
         self.scopes.push(vec![]);
         let ob = self.owned_binds;
+        let pm = self.bk.pat_moves;
         self.bk_bind_begin();
         let r = self.pat_bind(lpat, place, BindMode::Move);
         self.bk_bind_end();
         r?;
         if self.owned_binds > ob {
             self.release_outer(lexpr, sflag)?;
+        } else if self.bk.pat_moves > pm {
+            self.deref_move_check(lexpr)?;
         }
         let (tv, tt) = self.block(then_branch, expected)?;
         // (the pattern's bindings first: one may borrow from a temporary, a guard of a cell the temporary owns)
@@ -514,12 +562,15 @@ impl Cx<'_> {
         self.pat_test(pat, place, exit)?;
         self.scopes.push(vec![]);
         let ob = self.owned_binds;
+        let pm = self.bk.pat_moves;
         self.bk_bind_begin();
         let r = self.pat_bind(pat, place, BindMode::Move);
         self.bk_bind_end();
         r?;
         if self.owned_binds > ob {
             self.release_outer(e, sflag)?;
+        } else if self.bk.pat_moves > pm {
+            self.deref_move_check(e)?;
         }
         self.loops.push(Loop {
             cont: header,
@@ -583,10 +634,27 @@ impl Cx<'_> {
         self.b.switch_to_block(next);
     }
 
+    /// Where an error of a `x @ sub` pattern is reported: at the arm, at the `let`'s pattern, or at the scrutinee (the
+    /// pattern has no position of its own)
+    pub(crate) fn at_pat_pos(&self) -> Sp {
+        self.at_pat_at.or(self.bk.arm_at).or(self.bk.scrut_place.as_ref().map(|x| x.1)).filter(|s| s.line != 0).unwrap_or(SP)
+    }
+
+    /// A `ref mut` binding where the default binding mode is by shared reference (`if let Some(ref mut v) = o` with
+    /// o: `&Option<i32>`): a mutable borrow through the `&`, rustc's E0596 at the binding (edition 2024 also rejects
+    /// the `ref mut` written there). At the arm, or at the scrutinee
+    pub(crate) fn ref_mut_through_shared(&mut self) -> String {
+        let at = self.bk.arm_at.or(self.bk.scrut_place.as_ref().map(|x| x.1)).filter(|s| s.line != 0).unwrap_or(SP);
+        self.at(at, "cannot borrow data in a `&` reference as mutable (E0596)".to_string())
+    }
+
     /// 参照に対して参照でないパターンを当てるときは自動で deref し、束縛モードを Ref にする
     pub(crate) fn pat_deref(&mut self, mut p: Place, mut mode: BindMode) -> (Place, BindMode) {
         loop {
             let (ptr, m, inner) = match p {
+                // (a reference to a struct with an unsized tail: the place of its pair is the struct's)
+                Place::Var(v, Ty::Ref(m, i)) if i.is_dst_struct() => (self.b.use_var(v), m, *i),
+                Place::Mem(a, o, Ty::Ref(m, i)) if i.is_dst_struct() => (self.addr_plus(a, o), m, *i),
                 Place::Var(v, Ty::Ref(m, i)) => (self.b.use_var(v), m, *i),
                 Place::Mem(a, o, Ty::Ref(m, i)) => (self.b.ins().load(PTR, mf(), a, o), m, *i),
                 _ => return (p, mode),
@@ -599,10 +667,185 @@ impl Cx<'_> {
         }
     }
 
+    /// A field (type fty, offset off) of a struct with an unsized tail, whose place is its pair at a + o: a sized
+    /// field is at the data address + off; the tail is a pair of its own (its address, the same length or vtable).
+    /// A tail that is (or ends in) `dyn Tr` is placed by the concrete type's alignment, which the vtable holds
+    pub(crate) fn dst_field(&mut self, a: Value, o: i32, fty: Ty, off: u32) -> Place {
+        let data = self.b.ins().load(PTR, mf(), a, o);
+        if !fty.is_unsized() {
+            return Place::Mem(data, off as i32, fty);
+        }
+        let meta = self.b.ins().load(types::I64, mf(), a, o + 8);
+        let p = self.dst_tail_addr(data, meta, fty, off);
+        Place::Mem(self.make_fat_v(p, meta), 0, fty)
+    }
+
+    /// The address of an unsized tail (type fty, static offset off) of the struct at data, with meta the pair's
+    /// second word: a `dyn` tail's offset is rounded up to its type's alignment, from the vtable
+    fn dst_tail_addr(&mut self, data: Value, meta: Value, fty: Ty, off: u32) -> Value {
+        match self.tail_dyn_align(meta, fty) {
+            // (off rounded up to the alignment: (off + al - 1) & -al)
+            Some(al) => {
+                let x = self.b.ins().iadd_imm(al, off as i64 - 1);
+                let neg = self.b.ins().ineg(al);
+                let off = self.b.ins().band(x, neg);
+                self.b.ins().iadd(data, off)
+            }
+            None => self.b.ins().iadd_imm(data, off as i64),
+        }
+    }
+
+    /// The size and alignment of a value of the unsized type t, with meta its pointer's second word (a length or a
+    /// vtable): a struct's tail is placed at its offset rounded up to the tail's alignment, and the whole is rounded
+    /// up to the struct's alignment
+    pub(crate) fn unsized_size_align(&mut self, meta: Value, t: Ty) -> (Value, Value) {
+        match t {
+            Ty::Slice(e) => {
+                let (es, ea) = self.prog.size_align(*e);
+                let size = self.b.ins().imul_imm_s(meta, es as i64);
+                (size, self.b.ins().iconst(types::I64, ea as i64))
+            }
+            Ty::Str => (meta, self.b.ins().iconst(types::I64, 1)),
+            Ty::Dyn(tr) => {
+                let idx = self.vtable_drop_index(tr.as_str());
+                let size = self.b.ins().load(types::I64, mf(), meta, 8 * (idx as i32 + 1));
+                let align = self.b.ins().load(types::I64, mf(), meta, 8 * (idx as i32 + 2));
+                (size, align)
+            }
+            Ty::Struct(s) if t.is_dst_struct() => {
+                let (tt, toff, sa) = {
+                    let d = &self.prog.structs[s as usize];
+                    let Some(&(_, tt, toff)) = d.fields.last() else { return (self.b.ins().iconst(types::I64, 0), self.b.ins().iconst(types::I64, 1)) };
+                    (tt, toff, d.align)
+                };
+                let (ts, ta) = self.unsized_size_align(meta, tt);
+                let sa = self.b.ins().iconst(types::I64, sa as i64);
+                let align = self.b.ins().umax(ta, sa);
+                let round = |me: &mut Self, x: Value, a: Value| {
+                    let y = me.b.ins().iadd(x, a);
+                    let y = me.b.ins().iadd_imm(y, -1);
+                    let n = me.b.ins().ineg(a);
+                    me.b.ins().band(y, n)
+                };
+                let toff = self.b.ins().iconst(types::I64, toff as i64);
+                let off = round(self, toff, ta);
+                let end = self.b.ins().iadd(off, ts);
+                (round(self, end, align), align)
+            }
+            _ => {
+                let (sz, al) = self.prog.size_align(t);
+                (self.b.ins().iconst(types::I64, sz as i64), self.b.ins().iconst(types::I64, al as i64))
+            }
+        }
+    }
+
+    /// Drops the fields of the struct t with an unsized tail, at data, with meta its pair's second word (the
+    /// contents of a `Box<Foo<[T]>>` / `Box<Foo<dyn Tr>>`)
+    fn drop_dst_struct(&mut self, data: Value, meta: Value, t: Ty) -> R<()> {
+        let Ty::Struct(s) = t else { return Ok(()) };
+        // (first its own `impl Drop`, with `&mut self` the (data, metadata) pair, then its fields)
+        if self.prog.drop_impls.contains(&self.prog.base_of(s)) {
+            if let Some(m) = self.prog.method(s, "drop") {
+                let recv = [Ty::Ref(true, intern(t))];
+                let mut fid = m;
+                let ms = &self.prog.sigs[m as usize];
+                if ms.is_generic() {
+                    let mut sol = vec![None; ms.generics.len()];
+                    if let Some(st) = ms.self_ty {
+                        self.prog.match_ty(st, t, &mut sol);
+                    }
+                    fid = self.resolve_call(m, &recv, sol, None, SP)?.0;
+                }
+                let fs = self.insts.lock().unwrap().sig(self.prog, fid).clone();
+                let f = self.fref(fid, &fs);
+                let pair = self.make_fat_v(data, meta);
+                self.b.ins().call(f, &[pair]);
+            }
+        }
+        let fs = self.prog.structs[s as usize].fields.clone();
+        let Some(((_, tt, toff), prefix)) = fs.split_last() else { return Ok(()) };
+        for &(_, ft, off) in prefix {
+            if self.needs_drop(ft) {
+                let a = self.b.ins().iadd_imm(data, off as i64);
+                self.drop_in_place(a, ft);
+            }
+        }
+        let tail = self.dst_tail_addr(data, meta, *tt, *toff);
+        match *tt {
+            Ty::Slice(e) if self.needs_drop(*e) => self.drop_elems(tail, meta, *e),
+            Ty::Dyn(tr) => self.vtable_drop_call(meta, tr.as_str(), tail),
+            t if t.is_dst_struct() => self.drop_dst_struct(tail, meta, t)?,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Calls the drop entry of the vtable vt (trait tr) on data, if it has one
+    fn vtable_drop_call(&mut self, vt: Value, tr: &str, data: Value) {
+        let idx = self.vtable_drop_index(tr);
+        let dfn = self.b.ins().load(PTR, mf(), vt, 8 * idx as i32);
+        let call = self.b.create_block();
+        let done = self.b.create_block();
+        self.b.ins().brif(dfn, call, &[], done, &[]);
+        self.b.switch_to_block(call);
+        let mut s = Signature::default();
+        s.params.push(AbiParam::new(PTR));
+        let sr = self.b.import_signature(s);
+        self.b.ins().call_indirect(sr, dfn, &[data]);
+        self.b.ins().jump(done, &[]);
+        self.b.switch_to_block(done);
+    }
+
+    /// Drops n elements of type e from ptr
+    fn drop_elems(&mut self, ptr: Value, n: Value, e: Ty) {
+        let (size, _) = self.prog.size_align(e);
+        let i = self.b.declare_var(types::I64);
+        let z = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(i, z);
+        let head = self.b.create_block();
+        let body = self.b.create_block();
+        let done = self.b.create_block();
+        self.b.ins().jump(head, &[]);
+        self.b.switch_to_block(head);
+        let iv = self.b.use_var(i);
+        let more = self.b.ins().icmp(IntCC::UnsignedLessThan, iv, n);
+        self.b.ins().brif(more, body, &[], done, &[]);
+        self.b.switch_to_block(body);
+        let off = self.b.ins().imul_imm_s(iv, size as i64);
+        let a = self.b.ins().iadd(ptr, off);
+        self.drop_in_place(a, e);
+        let next = self.b.ins().iadd_imm_s(iv, 1);
+        self.b.def_var(i, next);
+        self.b.ins().jump(head, &[]);
+        self.b.switch_to_block(done);
+    }
+
+    /// The alignment of an unsized tail t that is (or ends in) `dyn Tr`, from the vtable vt; None for a slice tail
+    /// (its alignment is known statically)
+    fn tail_dyn_align(&mut self, vt: Value, t: Ty) -> Option<Value> {
+        match t {
+            Ty::Dyn(tr) => {
+                let idx = self.vtable_drop_index(tr.as_str()) + 2;
+                Some(self.b.ins().load(types::I64, mf(), vt, 8 * idx as i32))
+            }
+            Ty::Struct(s) if t.is_dst_struct() => {
+                let (inner, sa) = {
+                    let d = &self.prog.structs[s as usize];
+                    (d.fields.last()?.1, d.align)
+                };
+                let a = self.tail_dyn_align(vt, inner)?;
+                let sa = self.b.ins().iconst(types::I64, sa as i64);
+                Some(self.b.ins().umax(a, sa))
+            }
+            _ => None,
+        }
+    }
+
     /// 構造体・列挙・タプルの値 p のフィールド (オフセット off、型 fty) の場所。p がメモリにない (パターンが値の型に
     /// 合わない: `let Ok(0) = 42u8;`) なら型の不一致のエラー
-    pub(crate) fn field_place(p: Place, fty: Ty, off: u32) -> R<Place> {
+    pub(crate) fn field_place(&mut self, p: Place, fty: Ty, off: u32) -> R<Place> {
         match p {
+            Place::Mem(a, o, t) if t.is_dst_struct() => Ok(self.dst_field(a, o, fty, off)),
             Place::Mem(a, o, _) => Ok(Place::Mem(a, o + off as i32, fty)),
             _ => err(SP, "mismatched types: this pattern does not match the type of the value"),
         }
@@ -716,9 +959,13 @@ impl Cx<'_> {
                         Err(_) => push(out, place),
                     },
                     Pat::Struct(_, named, _) => {
+                        // (a union's field is marked, as an expression's is: a guard's write to another field of the
+                        // union is to the tested memory (E0510))
+                        let union = self.prog.unions.contains(&self.prog.structs[self.prog.base_of(sid) as usize].name);
                         for (n, q) in named {
+                            let fname = if union { format!("{}{n}", borrowck::UNION_FIELD) } else { n.clone() };
                             match fs.iter().find(|f| f.0 == *n) {
-                                Some(f) => self.tested_places(q, &field(place, n.clone()), f.1, out, depth + 1),
+                                Some(f) => self.tested_places(q, &field(place, fname), f.1, out, depth + 1),
                                 None => push(out, place),
                             }
                         }
@@ -730,7 +977,67 @@ impl Cx<'_> {
         }
     }
 
-    /// パターン列 (`V(a, .., z)`) とフィールド列の対応 (`..` は途中を飛ばす)
+    /// bindings_with_variant_name (E0170, deny by default): an arm whose pattern is only a binding by value (behind `&`s)
+    /// of a name the scrutinee's enum has a unit variant of, `Nil => ..` where `Stack::Nil` is not in scope, at the
+    /// arm (rustc 1.100's message)
+    #[cold]
+    #[inline(never)]
+    fn variant_binding(&self, arms: &[crate::parse::Arm], t: Ty) -> Option<String> {
+        let Ty::Struct(sid) = self.strip_refs(t) else { return None };
+        let sd = &self.prog.structs[sid as usize];
+        let base = self.prog.base_of(sid);
+        let name = &self.prog.structs[base as usize].name;
+        // (the program's own enums, whose variants no `use` may bring into scope: zustc resolves a variant's name
+        // alone as the variant, as if it were imported)
+        let prelude = self.prog.struct_item.get(base as usize).is_none_or(|&ii| ii >= self.prog.prelude_from);
+        if !sd.is_enum || prelude || self.prog.use_prefixes.iter().any(|u| u == name) {
+            return None;
+        }
+        for arm in arms {
+            let mut p = &arm.pat;
+            while let Pat::Ref(_, q) = p {
+                p = q;
+            }
+            let Pat::Ident(false, false, n, None) = p else { continue };
+            if !sd.variants.iter().any(|v| v.name == *n && v.kind == crate::types::VariantKind::Unit) {
+                continue;
+            }
+            // (a constant of the name is no binding)
+            if self.prog.const_index.contains_key(n.as_str()) {
+                continue;
+            }
+            return Some(self.at(arm.pos, format!("pattern binding `{n}` is named the same as one of the variants of the type `{name}` (E0170)")));
+        }
+        None
+    }
+
+    /// E0533: a path pattern of a tuple or struct variant, at the path
+    #[cold]
+    fn unit_pat_err(&self, path: &crate::parse::Path, k: crate::types::VariantKind) -> String {
+        let name = path.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::");
+        let kind = if k == crate::types::VariantKind::Tuple { "tuple variant" } else { "struct variant" };
+        self.at(path.pos, format!("expected unit struct, unit variant or constant, found {kind} `{name}` (E0533)"))
+    }
+
+    /// A tuple struct pattern (`V(..)`) of a unit variant (E0532) or a struct variant (E0164; E0532 by its name alone),
+    /// at its path, with rustc 1.100's message
+    fn tuple_pat_of_variant(&self, path: &crate::parse::Path, sid: u32, vi: usize) -> R<()> {
+        // (a type the program has no variants of, as an unresolved projection's: its own error comes later)
+        let (kind, code) = match self.prog.structs[sid as usize].variants.get(vi).map(|v| v.kind) {
+            Some(crate::types::VariantKind::Unit) => ("unit variant", "E0532"),
+            Some(crate::types::VariantKind::Struct) => ("struct variant", "E0164"),
+            _ => return Ok(()),
+        };
+        let name = path.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::");
+        // (a struct variant by its name alone (`use E::V;`) is none in the value namespace)
+        if code == "E0164" && path.segs.len() == 1 {
+            return Err(self.at(path.pos, format!("cannot find tuple struct or tuple variant `{name}` in this scope (E0532)")));
+        }
+        Err(self.at(path.pos, format!("expected tuple struct or tuple variant, found {kind} `{name}` ({code})")))
+    }
+
+    /// パターン列 (`V(a, .., z)`) とフィールド列の対応 (`..` は途中を飛ばす)。数が合わなければ "this pattern has N fields, but
+    /// the corresponding variant has M" (e0023 makes it rustc's where the pattern's path is known)
     pub(crate) fn tuple_fields<'e>(elems: impl Iterator<Item = &'e Pat>, nfields: usize, span: Sp) -> R<Vec<(usize, &'e Pat)>> {
         let elems: Vec<&Pat> = elems.collect();
         let rest = elems.iter().position(|p| matches!(p, Pat::Rest));
@@ -1105,21 +1412,31 @@ impl Cx<'_> {
                         let Some((sid, vi)) = self.variant_on(path, t) else {
                             return err(SP, self.no_variant_msg(path));
                         };
+                        // (E0533: `E::V` of a tuple or struct variant, which a path pattern cannot be)
+                        if self.user_code {
+                            let kind = self.prog.structs[sid as usize].variants.get(vi).map(|v| v.kind);
+                            if let Some(k @ (crate::types::VariantKind::Tuple | crate::types::VariantKind::Struct)) = kind {
+                                return Err(self.unit_pat_err(path, k));
+                            }
+                        }
                         self.variant_turbofish(path, sid)?;
                         self.test_variant(p, sid, vi, SP, fail)
                     }
                     Pat::TupleStruct(path, elems) => {
-                        let fields = match self.variant_on(path, t) {
+                        let on = self.variant_on(path, t);
+                        let fields = match on {
                             Some((sid, vi)) => {
+                                self.tuple_pat_of_variant(path, sid, vi)?;
                                 self.variant_turbofish(path, sid)?;
                                 self.test_variant(p, sid, vi, SP, fail)?;
                                 self.prog.structs[sid as usize].variants[vi].fields.clone()
                             }
                             None => self.tuple_struct_fields(path, t, SP)?,
                         };
-                        for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP).map_err(|m| self.at(path.pos, m))? {
+                        for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP).map_err(|m| self.at(path.pos, e0023(m, on.is_some())))? {
                             let (_, fty, off) = fields[fi];
-                            self.pat_test(sub, Self::field_place(p, fty, off)?, fail)?;
+                            let fp = self.field_place(p, fty, off)?;
+                            self.pat_test(sub, fp, fail)?;
                         }
                         Ok(())
                     }
@@ -1127,7 +1444,8 @@ impl Cx<'_> {
                         let fields = self.tuple_pat_fields(p, elems.len(), SP)?;
                         for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP)? {
                             let (_, fty, off) = fields[fi];
-                            self.pat_test(sub, Self::field_place(p, fty, off)?, fail)?;
+                            let fp = self.field_place(p, fty, off)?;
+                            self.pat_test(sub, fp, fail)?;
                         }
                         Ok(())
                     }
@@ -1171,7 +1489,8 @@ impl Cx<'_> {
         }
         match t {
             Ty::Struct(x) if self.prog.base_of(x) == self.prog.base_of(sid) => Ok(self.prog.structs[x as usize].fields.clone()),
-            _ => err(span, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(t), self.prog.structs[sid as usize].name)),
+            // (at the pattern's path: a sub-pattern `Tau { t: x }` on its own line is where rustc points)
+            _ => Err(self.at(path.pos, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(t), self.prog.structs[sid as usize].name))),
         }
     }
 
@@ -1188,8 +1507,9 @@ impl Cx<'_> {
     pub(crate) fn pat_deref_once(&mut self, p: Place) -> (Place, bool) {
         match p {
             Place::Var(v, Ty::Ref(m, i)) => (Place::Mem(self.b.use_var(v), 0, *i), m),
-            // (a `&[T]` / `&str` in memory is the (pointer, length) pair itself: the slice place is that pair)
-            Place::Mem(a, o, Ty::Ref(m, i @ (Ty::Slice(_) | Ty::Str))) => (Place::Mem(a, o, *i), m),
+            // (a `&[T]` / `&str` / `&Foo<[T]>` in memory is the (pointer, length) pair itself: the place of the
+            // unsized value is that pair)
+            Place::Mem(a, o, Ty::Ref(m, i)) if i.is_unsized() => (Place::Mem(a, o, *i), m),
             Place::Mem(a, o, Ty::Ref(m, i)) => (Place::Mem(self.b.ins().load(PTR, mf(), a, o), 0, *i), m),
             p => (p, false),
         }
@@ -1220,29 +1540,41 @@ impl Cx<'_> {
             let Some(&(_, fty, off)) = fields.iter().find(|f| f.0 == *fid) else {
                 return err(SP, format!("no field `{fid}`"));
             };
-            out.push((fpat, Self::field_place(p, fty, off)?));
+            out.push((fpat, self.field_place(p, fty, off)?));
         }
-        // (a union's pattern names one field, with no `..`. Matching the field is reading it, which needs `unsafe`
-        // (E0133), unless its pattern is `_` (or `_ | _`))
+        // (a union's pattern names exactly one field, without `..`; matching the field reads it, which needs `unsafe`
+        // (E0133), unless its pattern is `_` (or `_ | _`). The pattern's shape is the type check's, before E0133)
         let union = matches!(p.ty(), Ty::Struct(sid) if self.prog.unions.contains(&self.prog.structs[self.prog.base_of(sid) as usize].name));
-        fn wild(p: &Pat) -> bool {
-            match p {
-                Pat::Wild => true,
-                Pat::Or(ps) => ps.iter().all(wild),
-                _ => false,
+        if union {
+            if out.len() != 1 {
+                return Err(self.at(path.pos, "union patterns should have exactly one field".into()));
             }
+            if *has_rest {
+                return Err(self.at(path.pos, "`..` cannot be used in union patterns".into()));
+            }
+            fn wild(p: &Pat) -> bool {
+                match p {
+                    Pat::Wild => true,
+                    Pat::Or(ps) => ps.iter().all(wild),
+                    _ => false,
+                }
+            }
+            if self.unsafe_ok == 0 && self.user_code && !wild(out[0].0) {
+                return Err(self.at(path.pos, "access to union field is unsafe and requires unsafe function or block (E0133)".into()));
+            }
+            return Ok(out);
         }
-        if union && self.unsafe_ok == 0 && self.user_code && out.iter().any(|(q, _)| !wild(q)) {
-            return err(SP, "access to union field is unsafe and requires unsafe block (E0133)");
-        }
-        if union && *has_rest {
-            return err(SP, "`..` cannot be used in union patterns");
-        } else if union && out.len() != 1 {
-            return err(SP, "union patterns should have exactly one field");
-        } else if !union && !*has_rest && out.len() != fields.len() {
+        if !*has_rest && out.len() != fields.len() {
             return err(SP, "pattern does not mention all fields (add `..`)");
         }
         Ok(out)
+    }
+
+    /// n names the unit struct t is (no fields, no variants)
+    pub(crate) fn unit_struct_pat(&self, n: &str, t: Ty) -> bool {
+        let Ty::Struct(sid) = t else { return false };
+        let sd = &self.prog.structs[self.prog.base_of(sid) as usize];
+        sd.name == n && sd.fields.is_empty() && sd.variants.is_empty() && !self.prog.is_tuple(sid)
     }
 
     /// 判定に通った後で、パターン中の名前を束縛する
@@ -1261,6 +1593,9 @@ impl Cx<'_> {
             Pat::Ident(..) if unit_variant_ident(self.prog, pat).is_some() => Ok(()),
             Pat::Ident(..) if const_lit_pat(self.prog, pat).is_some() => Ok(()),
             Pat::Ident(..) if self.const_pat_ok(pat, p.ty()) => Ok(()),
+            // (a unit struct's name, of the value's type: a pattern that binds and moves nothing (`let Unit = *w;`
+            // through a Deref, `let Unit = u;` before a use of u))
+            Pat::Ident(false, false, n, None) if self.unit_struct_pat(n, p.ty()) => Ok(()),
             // (an aggregate constant, tested by pat_test: not a new name, so a nested match still compares with it)
             Pat::Ident(_, _, n, None)
                 if self.user_code
@@ -1271,13 +1606,24 @@ impl Cx<'_> {
                 Ok(())
             }
             Pat::Ident(by_ref, mutable, name, subpat) => {
-                if let Some(sub) = subpat {
-                    self.pat_bind(sub, p, mode)?;
-                }
+                // (`x @ sub`: sub binds first, and what it binds is checked against x below (at_conflict))
+                let inner = match subpat {
+                    Some(sub) => {
+                        self.at_binds.push(vec![]);
+                        let r = self.pat_bind(sub, p, mode);
+                        let inner = self.at_binds.pop().unwrap_or_default();
+                        r?;
+                        Some(inner)
+                    }
+                    None => None,
+                };
                 let name = name.clone();
                 // (`mut x` where the default binding mode is by reference: by value again, before edition 2024
                 // (`for (n, mut m) in &tups` moves out of the shared reference, E0507; `let (_, mut m) = &(1u8, 2u8);`
                 // makes m a u8))
+                if *by_ref && *mutable && matches!(mode, BindMode::Ref(false)) {
+                    return Err(self.ref_mut_through_shared());
+                }
                 let mode = match mode {
                     _ if *by_ref => BindMode::Ref(*mutable),
                     BindMode::Ref(m) if *mutable && self.prog.edition < 2024 => {
@@ -1292,6 +1638,25 @@ impl Cx<'_> {
                     }
                     m => m,
                 };
+                if inner.is_some() || !self.at_binds.is_empty() {
+                    let kind = match mode {
+                        BindMode::Move if borrowck::is_copy(self.prog, p.ty(), 0) && !holds_mut_ref(self.prog, p.ty(), 0) => AtBind::Copy,
+                        BindMode::Move => AtBind::Move,
+                        BindMode::Ref(m) => AtBind::Ref(m),
+                    };
+                    if let Some(inner) = &inner {
+                        let whole = matches!(subpat.as_deref(), Some(Pat::Ident(..)));
+                        // (the moves are the borrow check's (E0382), which code after a `return;` is not given to:
+                        // rustc's check of the pattern holds there too)
+                        if let Some(m) = at_conflict(&name, kind, inner, whole).filter(|m| !(self.dead_stmt && m.ends_with("(E0382)"))) {
+                            return Err(self.at(self.at_pat_pos(), m));
+                        }
+                    }
+                    if let Some(top) = self.at_binds.last_mut() {
+                        top.extend(inner.unwrap_or_default());
+                        top.push((kind, name.clone()));
+                    }
+                }
                 match mode {
                     BindMode::Move => {
                         let (v, t) = self.read(p);
@@ -1463,6 +1828,9 @@ impl Cx<'_> {
                 }
                 // `rest @ ..`: 残りの部分スライス (`&[T]`)
                 if let Some(Pat::Ident(by_ref, mutable, rname, _)) = rest {
+                    if *by_ref && *mutable && matches!(mode, BindMode::Ref(false)) {
+                        return Err(self.ref_mut_through_shared());
+                    }
                     let (es, _) = self.prog.size_align(elem);
                     let start = self.b.ins().iadd_imm_s(base, pre.len() as i64 * es as i64);
                     let len_v = self.b.ins().iadd_imm_s(len, -((pre.len() + post.len()) as i64));
@@ -1485,6 +1853,20 @@ impl Cx<'_> {
                         _ => None,
                     };
                     self.bind(rname.clone(), Ty::Ref(m, intern(Ty::Slice(intern(elem)))), Some(fat));
+                    // (in an `x @ sub`, how it binds, as pat_bind notes the other bindings (at_conflict): `ref mut a @
+                    // [ref b @ ..]`)
+                    if let Some(top) = self.at_binds.last_mut() {
+                        // (`mut rest @ ..` where the default binding mode is by reference: by value again before
+                        // edition 2024, as an identifier's binding is)
+                        let kind = if *by_ref || (matches!(mode, BindMode::Ref(_)) && !(*mutable && self.prog.edition < 2024)) {
+                            AtBind::Ref(m)
+                        } else if borrowck::is_copy(self.prog, elem, 0) && !holds_mut_ref(self.prog, elem, 0) {
+                            AtBind::Copy
+                        } else {
+                            AtBind::Move
+                        };
+                        top.push((kind, rname.clone()));
+                    }
                     if let Some((path, srcs)) = held {
                         self.bk.bind_srcs = srcs;
                         self.bk.pat_path = path;
@@ -1504,17 +1886,19 @@ impl Cx<'_> {
                 self.rg_pat_lifetimes(path);
                 let (fields, vname, rvi) = match self.variant_on(path, p.ty()) {
                     Some((sid, vi)) => {
+                        self.tuple_pat_of_variant(path, sid, vi)?;
                         let v = &self.prog.structs[sid as usize].variants[vi];
                         (v.fields.clone(), Some(v.name.clone()), Some(vi))
                     }
                     None => (self.tuple_struct_fields(path, p.ty(), SP)?, None, None),
                 };
                 let deref = matches!(mode, BindMode::Ref(_));
-                for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP).map_err(|m| self.at(path.pos, m))? {
+                for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP).map_err(|m| self.at(path.pos, e0023(m, rvi.is_some())))? {
                     let (fname, fty, off) = fields[fi].clone();
                     let saved = self.bk_pat_field(deref, vname.as_deref(), &fname);
                     let rs = self.rg_pat_field(p.ty(), rvi, fi);
-                    let r = self.pat_bind(sub, Self::field_place(p, fty, off)?, mode);
+                    let fp = self.field_place(p, fty, off)?;
+                    let r = self.pat_bind(sub, fp, mode);
                     self.rg.pat = rs.0;
                     self.rg.pat_ref = rs.1;
                     self.bk.pat_path = saved;
@@ -1531,7 +1915,8 @@ impl Cx<'_> {
                     let (fname, fty, off) = fields[fi].clone();
                     let saved = self.bk_pat_field(deref, None, &fname);
                     let rs = self.rg_pat_field(p.ty(), None, fi);
-                    let r = self.pat_bind(sub, Self::field_place(p, fty, off)?, mode);
+                    let fp = self.field_place(p, fty, off)?;
+                    let r = self.pat_bind(sub, fp, mode);
                     self.rg.pat = rs.0;
                     self.rg.pat_ref = rs.1;
                     self.bk.pat_path = saved;
@@ -1738,7 +2123,19 @@ impl Cx<'_> {
     /// 受け手の struct の型引数で impl のメソッド (`Rc::<T>::deref`) を値の引数で呼ぶ
     pub(crate) fn call_fn_vals(&mut self, id: u32, args: &[(Value, Ty)], span: Sp) -> R<V> {
         let targs = match args.first().map(|a| self.strip_refs(a.1)) {
-            Some(Ty::Struct(sid)) if !self.prog.sigs[id as usize].generics.is_empty() => self.prog.structs[sid as usize].args.clone(),
+            Some(t @ Ty::Struct(sid)) if !self.prog.sigs[id as usize].generics.is_empty() => {
+                // (the impl's parameters from its self type matched against the receiver's: `impl<T, H> Deref for
+                // W<H, T>` lists them in another order than W's arguments)
+                let sig = &self.prog.sigs[id as usize];
+                let mut sol = vec![None; sig.generics.len()];
+                match sig.self_ty {
+                    Some(st) if self.prog.match_ty(st, t, &mut sol) => match sol.iter().copied().collect::<Option<Vec<Ty>>>() {
+                        Some(v) => v,
+                        None => self.prog.structs[sid as usize].args.clone(),
+                    },
+                    _ => self.prog.structs[sid as usize].args.clone(),
+                }
+            }
             _ => vec![],
         };
         let name = self.prog.names[id as usize].clone();
@@ -1931,12 +2328,23 @@ impl Cx<'_> {
             if fname.is_none() && matches!(self.peek(b), Some(Ty::Ptr(..))) {
                 return err(expr_start(e), format!("cannot move out of `{}`, which is behind a raw pointer (E0507)", raw_place_text(e)));
             }
+            // (out of what a reference that is no place points to (`*&x`, `*v.first().unwrap()`, `*id(&s)`): the
+            // reference is a temporary, E0507 as rustc says it. A place's is the borrow check's)
+            if fname.is_none() && !is_place_expr(b) {
+                if let Some(Ty::Ref(m, _)) = self.peek(b) {
+                    return err(expr_start(e), format!("cannot move out of a {} reference (E0507)", if m { "mutable" } else { "shared" }));
+                }
+            }
             // (through references too: `r.value` with r: `&Rc<S>`)
             if let Some(Ty::Struct(sid)) = self.peek(b).map(|t| self.strip_refs(t)) {
                 let through = fname.is_none_or(|f| self.prog.field(sid, f).is_none());
                 if through && self.user_deref_sid(b, sid).is_some() {
                     let n = self.prog.structs[self.prog.base_of(sid) as usize].name.clone();
-                    let msg = if matches!(n.as_str(), "Rc" | "Arc") { format!("cannot move out of an `{n}` (E0507)") } else { format!("cannot move out of dereference of `{n}` (E0507)") };
+                    let msg = if matches!(n.as_str(), "Rc" | "Arc") {
+                        format!("cannot move out of an `{n}` (E0507)")
+                    } else {
+                        format!("cannot move out of dereference of `{}` (E0507)", self.prog.tn(Ty::Struct(sid)))
+                    };
                     return err(expr_start(e), msg);
                 }
             }
@@ -2070,20 +2478,34 @@ impl Cx<'_> {
 
     /// a pattern moved a value out of `*rc` (an Rc / a Deref type of the program's): E0507, as `let x = *rc;`
     pub(crate) fn deref_move_check(&mut self, e: &Expr) -> R<()> {
-        if let Expr::Unary(op, x, _) = strip_paren(e) {
+        if !self.bk_on() || self.bk.level == 0 {
+            return Ok(());
+        }
+        // (`*x`, and a field reached through an overloaded deref (`if let Some(v) = wrap.field` with wrap: W: Deref),
+        // also deeper (`w.a.b`): what the pattern moves is behind the reference `deref` returns, E0507)
+        let mut cur = strip_paren(e);
+        loop {
+            let (x, fname) = match cur {
+                Expr::Field(b, f, _) => (strip_paren(b), Some(f)),
+                Expr::Unary(op, b, _) if op == "*" => (strip_paren(b), None),
+                _ => break,
+            };
             // (a pattern that moves out of what a raw pointer points to: `let (a, s) = *x;`)
-            if op == "*" && self.bk_on() && self.bk.level >= 1 && matches!(self.peek(x), Some(Ty::Ptr(..))) {
+            if fname.is_none() && matches!(self.peek(x), Some(Ty::Ptr(..))) {
                 return err(expr_start(e), format!("cannot move out of `{}`, which is behind a raw pointer (E0507)", raw_place_text(e)));
             }
-            if op == "*" && self.bk_on() && self.bk.level >= 1 {
-                if let Some(Ty::Struct(sid)) = self.peek(x).map(|t| self.strip_refs(t)) {
-                    if self.user_deref_sid(x, sid).is_some() {
-                        let n = self.prog.structs[self.prog.base_of(sid) as usize].name.clone();
-                        let what = if matches!(n.as_str(), "Rc" | "Arc") { format!("an `{n}`") } else { format!("dereference of `{}`", self.prog.tn(Ty::Struct(sid))) };
-                        return err(expr_start(e), format!("cannot move out of {what} (E0507)"));
-                    }
+            if let Some(Ty::Struct(sid)) = self.peek(x).map(|t| self.strip_refs(t)) {
+                let through = fname.is_none_or(|f| self.prog.field(sid, f).is_none());
+                if through && self.user_deref_sid(x, sid).is_some() {
+                    let n = self.prog.structs[self.prog.base_of(sid) as usize].name.clone();
+                    let what = if matches!(n.as_str(), "Rc" | "Arc") { format!("an `{n}`") } else { format!("dereference of `{}`", self.prog.tn(Ty::Struct(sid))) };
+                    return err(expr_start(e), format!("cannot move out of {what} (E0507)"));
                 }
             }
+            if fname.is_none() {
+                break;
+            }
+            cur = x;
         }
         Ok(())
     }
@@ -2396,6 +2818,19 @@ impl Cx<'_> {
                 self.b.ins().jump(out, &[]);
                 self.b.switch_to_block(out);
             }
+            // (a box of a struct with an unsized tail: (pointer, length or vtable), as `Box<[T]>` / `Box<dyn Tr>`)
+            Ty::Box(inner) if inner.is_dst_struct() => {
+                let ptr = self.b.ins().load(PTR, mf(), p, 0);
+                let live = self.b.create_block();
+                let out = self.b.create_block();
+                self.b.ins().brif(ptr, live, &[], out, &[]);
+                self.b.switch_to_block(live);
+                let meta = self.b.ins().load(types::I64, mf(), p, 8);
+                self.drop_dst_struct(ptr, meta, *inner)?;
+                self.free(ptr);
+                self.b.ins().jump(out, &[]);
+                self.b.switch_to_block(out);
+            }
             Ty::Box(inner) => {
                 let ptr = self.b.ins().load(PTR, mf(), p, 0);
                 let live = self.b.create_block();
@@ -2429,6 +2864,12 @@ impl Cx<'_> {
                 self.b.def_var(i, next);
                 self.b.ins().jump(head, &[]);
                 self.b.switch_to_block(done);
+            }
+            // (`drop_in_place::<Wrap<[T]>>(p)`: p is the address of the (data, metadata) pair)
+            Ty::Struct(_) if t.is_dst_struct() => {
+                let data = self.b.ins().load(PTR, mf(), p, 0);
+                let meta = self.b.ins().load(types::I64, mf(), p, 8);
+                self.drop_dst_struct(data, meta, t)?;
             }
             Ty::Struct(sid) => {
                 // 先に `impl Drop` の drop(&mut self)、それからフィールド
@@ -2747,7 +3188,43 @@ impl Cx<'_> {
 
 /// t is a `&mut`, or holds one in an array, a tuple, a struct's field or an enum's variant (`Option<&mut T>`, whose
 /// derived Copy is_copy takes to hold, as it takes every reference for Copy)
-fn holds_mut_ref(prog: &crate::program::Program, t: Ty, depth: u32) -> bool {
+/// rustc's check of `x @ sub` (its THIR's, before the borrow check), with kind how x binds and inner what sub binds:
+/// x moved and sub borrowing ("borrow of moved value"); `ref x` and sub moving ("cannot move out of value because it
+/// is borrowed"), or borrowing mutably where either is `ref mut`. Then the borrow check's E0382: x moved after sub moved
+/// a part of it (`a @ Some(b)` of an `Option<String>`), or all of it (`a @ b`, whole)
+pub(crate) fn at_conflict(name: &str, kind: AtBind, inner: &[(AtBind, String)], whole: bool) -> Option<String> {
+    let first = |f: &dyn Fn(AtBind) -> bool| inner.iter().find(|(k, _)| f(*k)).map(|(_, n)| n.as_str());
+    match kind {
+        AtBind::Copy => None,
+        AtBind::Move => {
+            if let Some(b) = first(&|k| matches!(k, AtBind::Ref(_))) {
+                return Some(format!("borrow of moved value: the value is moved into `{name}`, and `{b}` borrows it after the move"));
+            }
+            first(&|k| k == AtBind::Move).map(|b| {
+                if whole {
+                    format!("use of moved value: `{name}` (the value was moved into `{b}`) (E0382)")
+                } else {
+                    format!("use of partially moved value: `{name}` (a part of it was moved into `{b}`) (E0382)")
+                }
+            })
+        }
+        AtBind::Ref(outer_mut) => {
+            if let Some(b) = first(&|k| outer_mut && k == AtBind::Ref(true)) {
+                return Some(format!("cannot borrow value as mutable more than once at a time: `{name}` and `{b}`"));
+            }
+            if let Some(b) = first(&|k| matches!(k, AtBind::Ref(m) if m != outer_mut)) {
+                return Some(if outer_mut {
+                    format!("cannot borrow value as immutable because it is also borrowed as mutable: `{name}` and `{b}`")
+                } else {
+                    format!("cannot borrow value as mutable because it is also borrowed as immutable: `{name}` and `{b}`")
+                });
+            }
+            first(&|k| k == AtBind::Move).map(|b| format!("cannot move out of value because it is borrowed: `{name}` borrows it, and `{b}` moves out of it"))
+        }
+    }
+}
+
+pub(crate) fn holds_mut_ref(prog: &crate::program::Program, t: Ty, depth: u32) -> bool {
     if depth > 16 {
         return false;
     }
@@ -2761,4 +3238,13 @@ fn holds_mut_ref(prog: &crate::program::Program, t: Ty, depth: u32) -> bool {
         }
         _ => false,
     }
+}
+
+/// rustc's E0023 of tuple_fields' "this pattern has N fields, but the corresponding variant has M": of a tuple variant
+/// or a tuple struct, "field" for one (rustc 1.100)
+fn e0023(m: String, variant: bool) -> String {
+    let Some((n, r)) = m.strip_prefix("this pattern has ").and_then(|r| r.split_once(" fields, but the corresponding variant has ")) else { return m };
+    let (Ok(a), Ok(b)) = (n.parse::<usize>(), r.parse::<usize>()) else { return m };
+    let f = |k: usize| if k == 1 { "field" } else { "fields" };
+    format!("this pattern has {a} {}, but the corresponding tuple {} has {b} {} (E0023)", f(a), if variant { "variant" } else { "struct" }, f(b))
 }

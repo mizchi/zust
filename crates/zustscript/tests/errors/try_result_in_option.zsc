@@ -1,0 +1,3 @@
+// expect: `?` on a `Result` in this function, which returns `Option`: drop the error with `.ok()?`
+fn a() -> Result<i32, String> { Ok(1) }
+fn b() -> Option<i32> { let v = a()?; Some(v) }

@@ -389,6 +389,7 @@ impl Cx<'_> {
                             Stmt::Let(Pat::Ident(false, true, "for#tmp".into(), None), None, Some(base), None, at),
                             Stmt::Expr(Expr::For(label.clone(), fpat.clone(), Box::new(rebuilt), fbody.clone()), false),
                         ],
+                        spos: Default::default(),
                     },
                 );
                 let blk = self.keep_expr(blk);
@@ -528,16 +529,16 @@ impl Cx<'_> {
                         }
                         let mut stmts = vec![Stmt::Let((**fpat).clone(), None, Some(item), None, at)];
                         stmts.extend(fbody.stmts.iter().cloned());
-                        let iflet = Expr::If(Box::new(Expr::Let(Box::new(some), Box::new(scrut))), crate::parse::Block { stmts }, None);
+                        let iflet = Expr::If(Box::new(Expr::Let(Box::new(some), Box::new(scrut))), crate::parse::Block { stmts, spos: Default::default() }, None);
                         // (with no `break` / `continue` in the body, no loop: a value moved in is not moved in a loop)
                         let dbg = format!("{fbody:?}");
                         if label.is_none() && !dbg.contains("Break(") && !dbg.contains("Continue(") {
-                            let st = Expr::Block(None, false, crate::parse::Block { stmts: vec![Stmt::Expr(iflet, true)] });
+                            let st = Expr::Block(None, false, crate::parse::Block { stmts: vec![Stmt::Expr(iflet, true)], spos: Default::default() });
                             let st: &Expr = self.keep_expr(st);
                             return self.expr(st, None);
                         }
                         let range = Expr::Range(Some(Box::new(Expr::Lit("0usize".into(), Default::default()))), Some(Box::new(Expr::Lit("1usize".into(), Default::default()))), false);
-                        let lp = Expr::For(label.clone(), Box::new(Pat::Wild), Box::new(range), crate::parse::Block { stmts: vec![Stmt::Expr(iflet, false)] });
+                        let lp = Expr::For(label.clone(), Box::new(Pat::Wild), Box::new(range), crate::parse::Block { stmts: vec![Stmt::Expr(iflet, false)], spos: Default::default() });
                         let lp: &Expr = self.keep_expr(lp);
                         return self.for_inner(lp);
                     }
@@ -629,6 +630,15 @@ impl Cx<'_> {
                 }
                 _ => None,
             };
+            // (a struct of the program's with a `next` of its own, but no Iterator impl nor `into_iter`: `for x in bogus`
+            // is rustc's E0277 at the expression)
+            if let Some(Ty::Struct(s)) = bt {
+                let user = self.prog.struct_item.get(s as usize).is_some_and(|&i| i < self.prog.prelude_from);
+                if user && has_next && user_into.is_none() && !matches!(strip_paren(fexpr), Expr::MethodCall(..)) && !self.prog.implements(Ty::Struct(s), "Iterator") {
+                    let n = self.prog.tn(Ty::Struct(s)).replace('#', "");
+                    return Err(self.at(expr_start(fexpr), format!("`{n}` is not an iterator (E0277)")));
+                }
+            }
             let paren = |x: &Expr| Expr::Paren(Box::new(x.clone()));
             let via: Option<Expr> = if has_next {
                 None
@@ -673,6 +683,11 @@ impl Cx<'_> {
         };
         // `&a[lo..hi]` は部分スライス (参照ごと評価する)
         let sub = matches!(base_e, Expr::Index(_, ix, _) if matches!(&**ix, Expr::Range(..)));
+        // (a number, `bool` or `char` is no iterator: `for _ in *x` of `x: &mut i32`, E0277 at the expression)
+        if let Some(t) = self.peek(e).filter(|t| t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char)) {
+            let n = self.prog.tn(t).replace('#', "");
+            return Err(self.at(expr_start(e), format!("`{n}` is not an iterator (E0277)")));
+        }
         let (ptr, len, elem) = self.indexable(if sub { e } else { base_e })?;
         let mut mode = by_ref;
         let base_is_ref = by_ref.is_none() && matches!(self.peek(base_e), Some(Ty::Ref(..)));
@@ -902,7 +917,14 @@ impl Cx<'_> {
         let Expr::For(_, fpat, _, fbody) = f else { unreachable!() };
         let Expr::Range(start, end, closed) = rg else { unreachable!() };
         let Some(lo_e) = start else {
-            return err(SP, "for loops need a range with a start");
+            // (`..10` / `..=10` is no iterator, E0277)
+            let r = if *closed { "RangeToInclusive" } else { "RangeTo" };
+            let el = match end.as_deref() {
+                Some(e) if super::p2_call::is_int_lit(e) => "{integer}".to_string(),
+                Some(e) => self.peek(e).map_or("_".to_string(), |t| self.prog.tn(t).replace('#', "")),
+                None => "_".to_string(),
+            };
+            return Err(self.at(expr_start(rg), format!("`{r}<{el}>` is not an iterator (E0277)")));
         };
         // `for i in 0..`: 型の最大値までの閉区間 (事実上終わらない)
         if end.is_none() && rev {
@@ -1287,9 +1309,26 @@ impl Cx<'_> {
             return Ok((Some(v), vt));
         }
         let args = self.macro_args(p, g)?;
+        let kept: Vec<&Expr> = args.into_iter().map(|a| &*self.keep_expr(a)).collect();
+        // (elements that are distinct closures with no captures and one signature: their fn pointer, as for an array)
+        let is_clo = |t: Option<Ty>| matches!(t, Some(Ty::Struct(s)) if self.prog.closure_of_struct.contains_key(&self.prog.base_of(s)));
+        let mut lubbed = false;
+        // (also over the first element's `&String`, which inference may have given)
+        let string_ref = |t: Option<Ty>| matches!(t, Some(Ty::Ref(_, Ty::Struct(s))) if self.prog.struct_index.get("String") == Some(&self.prog.base_of(*s)));
+        if elem.is_none() || string_ref(elem) {
+            if let Some(t) = self.str_refs_lub(&kept) {
+                elem = Some(t);
+            }
+        }
+        if elem.is_none() || is_clo(elem) {
+            if let Some(f) = self.closures_lub(&kept) {
+                elem = Some(f);
+                lubbed = true;
+                self.lub_fnptr += 1;
+            }
+        }
         let mut vals = vec![];
-        for a in args {
-            let a: &Expr = self.keep_expr(a);
+        for a in kept {
             // (`vec![&f()]`: a macro's arguments are not extended, the temporary goes away with the statement)
             let d0 = self.bk.direct.len();
             if self.bk_on() && !self.bk.macro_let {
@@ -1297,15 +1336,29 @@ impl Cx<'_> {
             }
             let r = self.expr(a, elem);
             self.bk.direct.truncate(d0);
-            let (v, t) = r?;
+            let r = r.and_then(|(v, t)| if t == Ty::Never { Ok((v, t)) } else { match elem { Some(e) => self.same(SP, t, e).map(|_| (v, t)), None => Ok((v, t)) } });
+            let (v, t) = match r {
+                Ok(x) => x,
+                Err(er) => {
+                    if lubbed {
+                        self.lub_fnptr -= 1;
+                    }
+                    return Err(er);
+                }
+            };
             if t == Ty::Never {
+                if lubbed {
+                    self.lub_fnptr -= 1;
+                }
                 return Ok((None, Ty::Never));
             }
-            match elem {
-                Some(e) => self.same(SP, t, e)?,
-                None => elem = Some(t),
+            if elem.is_none() {
+                elem = Some(t);
             }
             vals.push(v);
+        }
+        if lubbed {
+            self.lub_fnptr -= 1;
         }
         let Some(e) = elem else {
             return err(span, "type annotations needed for an empty `vec![]`");
@@ -1374,6 +1427,7 @@ impl Cx<'_> {
                             Stmt::Expr(Expr::Macro(path_of("eprintln"), format!("(\"{{}}{{:#?}}\", {head:?}, __exr_dbg)"), crate::parse::Span::default()), true),
                             Stmt::Expr(path_expr("__exr_dbg"), false),
                         ],
+                        spos: Default::default(),
                     },
                 );
                 let ex: &Expr = self.keep_expr(ex);
@@ -1491,7 +1545,7 @@ impl Cx<'_> {
                     };
                     let mut stmts = lets;
                     stmts.push(Stmt::Expr(Expr::If(Box::new(Expr::Unary("!".into(), Box::new(Expr::Paren(Box::new(cmp))), crate::parse::Span::default())), fail, None), false));
-                    let e: &Expr = self.keep_expr(Expr::Block(None, false, PBlock { stmts }));
+                    let e: &Expr = self.keep_expr(Expr::Block(None, false, PBlock { stmts, spos: Default::default() }));
                     self.expr(e, Some(Ty::Unit))?;
                     return Ok((None, Ty::Unit));
                 }
@@ -1802,7 +1856,8 @@ impl Cx<'_> {
         let fail = self.b.create_block();
         self.test_variant(place, inst, ok_vi, SP, fail)?;
         let (_, oty, ooff) = self.prog.structs[inst as usize].variants[ok_vi].fields[0];
-        let (okv, _) = self.read(Self::field_place(place, oty, ooff)?);
+        let fp = self.field_place(place, oty, ooff)?;
+        let (okv, _) = self.read(fp);
         let cont = self.b.create_block();
         let param = clif_ty(oty).map(|ct| self.b.append_block_param(cont, ct));
         match okv {
@@ -1824,7 +1879,8 @@ impl Cx<'_> {
         if family == "Result" {
             let (_, ety, eoff) = self.prog.structs[inst as usize].variants[err_vi].fields[0];
             let (_, rety, reoff) = self.prog.structs[rinst as usize].variants[r_err].fields[0];
-            let (ev, _) = self.read(Self::field_place(place, ety, eoff)?);
+            let fp = self.field_place(place, ety, eoff)?;
+            let (ev, _) = self.read(fp);
             // エラーの型が違えば `From::from` で変換する (`impl From<ParseIntError> for AppError`)
             let ev = if ety != rety {
                 let conv = match rety {
@@ -2001,7 +2057,8 @@ impl Cx<'_> {
                 }
             }
             let inner = match expected {
-                Some(Ty::Box(t)) if !matches!(t, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str) => Some(*t),
+                // (not an unsized struct (`Box<Wrap<[u8]>>`): the value is built at its sized type and the box coerced)
+                Some(Ty::Box(t)) if !t.is_unsized() => Some(*t),
                 // (a closure boxed where a `Box<dyn Fn(..)>` is expected: the trait object is its signature, as for
                 // `&|x| ..` where a `&dyn Fn(..)` is (its parameters' types, the bound its body is checked with))
                 Some(Ty::Box(t @ Ty::Dyn(_))) if matches!(crate::acg::strip_paren(&cargs[0]), Expr::Closure(..)) => Some(*t),
@@ -2431,7 +2488,12 @@ impl Cx<'_> {
         if segs.len() == 2 {
             // (through an alias of a primitive too: `type Mask = u16;` and `Mask::BITS`)
             // (a type alias is not hidden by a value binding of the name: another namespace)
-            let alias = || Ty::from_suffix(&self.prog.prim_of_name(&segs[0]));
+            // (an alias of a primitive, or one of core::ffi's C types: `c_int::MAX` in libc 0.2's types.rs)
+            let alias = || {
+                let prim = self.prog.prim_of_name(&segs[0]);
+                // (the integer ones: `c_float::MAX` / `c_double::MAX` are not integer bounds)
+                Ty::from_suffix(&prim).or_else(|| crate::ast_types::ffi_alias(&prim).filter(|t| t.is_int() && !self.prog.struct_index.contains_key(prim.as_str())))
+            };
             if let Some(t) = Ty::from_suffix(&segs[0]).or(if segs[0] == "char" { Some(Ty::Char) } else { None }).or_else(alias) {
                 if let Some(v) = crate::program::prim_assoc_const(t, &segs[1]) {
                     let t = if segs[1] == "BITS" { Ty::U32 } else { t };

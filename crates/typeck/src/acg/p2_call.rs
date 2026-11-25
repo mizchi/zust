@@ -72,7 +72,7 @@ pub(crate) fn vec_of(es: &[Expr]) -> Expr {
         return m;
     }
     lets.push(Stmt::Expr(m, false));
-    Expr::Block(None, false, PBlock { stmts: lets })
+    Expr::Block(None, false, PBlock { stmts: lets, spos: Default::default() })
 }
 
 impl Cx<'_> {
@@ -89,7 +89,33 @@ impl Cx<'_> {
             || self.prog.structs[sid as usize].args.iter().any(|&a| matches!(a, Ty::Struct(x) if self.copies_items(x, depth + 1)))
     }
 
+    /// Whether the type of `r` (past its references) is one with a Drop impl
+    #[cold]
+    fn has_drop_impl(&mut self, r: &Expr) -> bool {
+        matches!(self.peek(r).map(|t| self.strip_refs(t)), Some(Ty::Struct(sid)) if self.prog.drop_impls.contains(&self.prog.base_of(sid)))
+    }
+
     pub(crate) fn method_call(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
+        // (invalid_atomic_ordering, deny by default: an atomic's load / store / failure ordering it cannot have)
+        if let Expr::MethodCall(r, m, _, args, sp) = e {
+            if self.user_code
+                && matches!(m.as_bytes().first(), Some(b'l' | b's' | b'c' | b'f'))
+                && matches!(m.as_str(), "load" | "store" | "compare_exchange" | "compare_exchange_weak" | "fetch_update")
+            {
+                if let Some(er) = self.atomic_ordering(r, m, args) {
+                    return Err(er);
+                }
+            }
+            // (E0658: a closure's, a fn pointer's or an `F: Fn..` parameter's `call` / `call_mut` / `call_once`, which
+            // need `fn_traits`)
+            if self.user_code && !self.prog.fn_traits && m.starts_with("call") && matches!(m.as_str(), "call" | "call_mut" | "call_once") && self.fn_like(r) {
+                return Err(self.at(sp.at, "use of unstable library feature `fn_traits` (E0658)".to_string()));
+            }
+            // (E0040: `x.drop()` of a value whose type has a Drop impl)
+            if self.user_code && args.is_empty() && m == "drop" && self.has_drop_impl(r) {
+                return Err(self.at(sp.at, "explicit use of destructor method (E0040)".to_string()));
+            }
+        }
         // (a call that named its trait: set while this call is resolved, and the outer call's back after)
         let forced = match e {
             Expr::MethodCall(_, m, ..) => self.explicit_traits.get(&(e as *const Expr as usize)).map(|t| (m.clone(), t.clone())),
@@ -168,6 +194,49 @@ impl Cx<'_> {
         self.caller_locs.truncate(n);
         self.explicit_trait = prev;
         r
+    }
+
+    /// The receiver of a `call` is a closure, a fn pointer or a fn item, or a type parameter one of whose bounds is an
+    /// `Fn` trait (behind references)
+    #[cold]
+    #[inline(never)]
+    fn fn_like(&self, r: &Expr) -> bool {
+        match self.peek(r).map(|t| self.strip_refs(t)) {
+            Some(Ty::Struct(sid)) => {
+                let sd = &self.prog.structs[sid as usize];
+                // (std's `Fn` traits by name, not one of the program's that starts so (`FnLike`))
+                let fn_trait = |b: &String| matches!(b.split(['<', '(']).next().map(str::trim), Some("Fn" | "FnMut" | "FnOnce"));
+                sd.name.contains("{closure") || sd.placeholder.as_ref().is_some_and(|bs| bs.iter().any(fn_trait))
+            }
+            Some(Ty::Fn(..)) => true,
+            _ => false,
+        }
+    }
+
+    /// invalid_atomic_ordering (rustc 1.100's messages, at the ordering): a std atomic's `load` with `Release` /
+    /// `AcqRel`, `store` with `Acquire` / `AcqRel`, `compare_exchange(_weak)` / `fetch_update` with a failure ordering
+    /// of `Release` / `AcqRel`, written as `Ordering::X` or `X`
+    #[cold]
+    #[inline(never)]
+    fn atomic_ordering(&self, r: &Expr, m: &str, args: &[Expr]) -> Option<String> {
+        let Ty::Struct(sid) = self.strip_refs(self.peek(r)?) else { return None };
+        if !self.prog.structs[self.prog.base_of(sid) as usize].name.starts_with("Atomic") {
+            return None;
+        }
+        let (k, bad, msg) = match m {
+            "load" => (0, ["Release", "AcqRel"], "atomic loads cannot have `Release` or `AcqRel` ordering".to_string()),
+            "store" => (1, ["Acquire", "AcqRel"], "atomic stores cannot have `Acquire` or `AcqRel` ordering".to_string()),
+            _ => (
+                if m == "fetch_update" { 1 } else { 3 },
+                ["Release", "AcqRel"],
+                format!("`{m}`'s failure ordering may not be `Release` or `AcqRel`, since a failed `{m}` does not result in a write"),
+            ),
+        };
+        let Expr::Path(None, p) = strip_paren(args.get(k)?) else { return None };
+        let n = p.segs.last()?.name.as_str();
+        // (std's `atomic::Ordering` is the prelude's `__AtOrd_`)
+        let ordering = p.segs.len() == 1 || matches!(p.segs[p.segs.len() - 2].name.as_str(), "Ordering" | "__AtOrd_");
+        (ordering && bad.contains(&n)).then(|| self.at(p.pos, msg))
     }
 
     /// An impl's method i is for t: its impl's self type (its parameters solved) is t (`impl A for W<u8>`'s is not
@@ -280,6 +349,12 @@ impl Cx<'_> {
     fn method_call_inner(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::MethodCall(recv, method, gargs, margs, msp) = e else { unreachable!() };
         let msp = *msp;
+        // (E0624: a private fn of the receiver's inherent impl, where the program has such)
+        if self.prog.field_priv.as_deref().is_some_and(|fp| !fp.methods.is_empty()) {
+            if let Some(Ty::Struct(sid)) = self.peek(recv).map(|t| self.strip_refs(t)) {
+                self.method_privacy(sid, method, msp.at)?;
+            }
+        }
         // (`0.0.cmp()` with `impl MyCmp for f32` only: an unsuffixed literal takes the one numeric type whose impl has
         // the method, when its default type (f64 / i32) has none)
         if let Expr::Lit(t, sp) = strip_paren(recv) {
@@ -620,7 +695,7 @@ impl Cx<'_> {
                             let hs = Expr::Ref(true, Box::new(Expr::Unary("*".into(), Box::new(path_expr("__hs")), crate::parse::Span::default())));
                             stmts.push(Stmt::Expr(mcall(f, "hash", vec![hs]), true));
                         }
-                        let e = Expr::Block(None, false, PBlock { stmts });
+                        let e = Expr::Block(None, false, PBlock { stmts, spos: Default::default() });
                         return self.expr(&e, expected);
                     }
                     if self.prog.structs[self.prog.base_of(sid) as usize].name == "Option" {
@@ -1179,6 +1254,20 @@ impl Cx<'_> {
                         let fat = self.addr_plus(a, o);
                         return self.dyn_method_call_on(fat, tr, e, Some(rt));
                     }
+                    // (a `dyn Tr` place (the tail of a struct, `x.inner.get()`): its place is its pair)
+                    Place::Mem(a, o, t @ Ty::Dyn(tr)) => {
+                        let fat = self.addr_plus(a, o);
+                        return self.dyn_method_call_on(fat, tr, e, Some(Ty::Ref(true, intern(t))));
+                    }
+                    // (a reference to a struct with an unsized tail: the place of its pair, as struct_base takes it)
+                    Place::Mem(a, o, Ty::Ref(_, i) | Ty::Box(i)) if i.is_dst_struct() => {
+                        through_ref |= matches!(p.ty(), Ty::Ref(..));
+                        Place::Mem(self.addr_plus(a, o), 0, *i)
+                    }
+                    Place::Var(v, Ty::Ref(_, i) | Ty::Box(i)) if i.is_dst_struct() => {
+                        through_ref |= matches!(p.ty(), Ty::Ref(..));
+                        Place::Mem(self.b.use_var(v), 0, *i)
+                    }
                     Place::Mem(a, o, Ty::Ref(_, i) | Ty::Box(i)) => {
                         through_ref |= matches!(p.ty(), Ty::Ref(..));
                         let ptr = self.b.ins().load(PTR, mf(), a, o);
@@ -1318,7 +1407,11 @@ impl Cx<'_> {
                 if let Some(bv) = bv {
                     match recv_temp {
                         Some(f) => self.clear_flag(f),
-                        None => self.mark_moved(recv),
+                        None => {
+                            self.mark_moved(recv);
+                            // (the Box moves into the call: a use of it after is E0382)
+                            self.bk_acc(recv, borrowck::Acc::Move);
+                        }
                     }
                     // (the receiver is the Box: of its type also where p0 is what a temporary Box points to,
                     // `Box::new(S).f()`; an `unsafe fn` is so here too, E0133 outside `unsafe`)
@@ -1349,6 +1442,11 @@ impl Cx<'_> {
             if self.prog.structs[self.prog.base_of(ps) as usize].name == "Pin" && p0t == Ty::Struct(ps) {
                 if let Place::Mem(a0, o0, _) = p0 {
                     let v0 = self.addr_plus(a0, o0);
+                    // (a `Pin<&mut Self>` moves into the call, as it is no `&mut` a call reborrows: a use of it after is
+                    // E0382 (moves/pin-mut-reborrow.rs))
+                    if recv_temp.is_none() && (!self.bk_ty(p0t).0 || super::p6_match_drop::holds_mut_ref(self.prog, p0t, 0)) {
+                        self.bk_acc(recv, borrowck::Acc::Move);
+                    }
                     return self.call_fn(id, Some((v0, p0t)), &margs.iter().collect::<Vec<_>>(), tf, expected, SP);
                 }
             }
@@ -1530,8 +1628,17 @@ impl Cx<'_> {
         // (also a `&self` one whose self type is invariant in a lifetime an argument is borrowed for, or outlives:
         // `c.push(&mut y)` of `fn push(&self, r: &'c mut i32)` in `impl<'c> C<'c>` with C holding a
         // `RefCell<Vec<&'c mut i32>>`: the argument's borrow lasts as long as c's 'c)
-        let stores = if self.bk_on() && !via_deref && matches!(recv_ty, Ty::Ref(false, _)) && self.bk_ty(st).1 { self.shared_recv_stores(id) } else { vec![] };
-        let into_recv = self.bk_on() && !via_deref && self.bk_ty(st).1 && (matches!(recv_ty, Ty::Ref(true, _)) || !stores.is_empty());
+        let shared_holder = self.bk_on() && !via_deref && matches!(recv_ty, Ty::Ref(false, _)) && self.bk_ty(st).1;
+        let mut stores = if shared_holder { self.shared_recv_stores(id) } else { vec![] };
+        // (and the prelude's cells that store their argument through `&self` (`c.set(Some(&x))`, `c.replace(v)`): what
+        // it borrows, the cell holds, as rustc's `Cell<T>` is invariant in T)
+        // (also one reached through a deref (`c.set(Some(&x))` with c: `Rc<Cell<..>>`): the local the receiver is
+        // rooted at holds it)
+        let cell_deref = self.bk_on() && via_deref && matches!(recv_ty, Ty::Ref(false, _)) && self.bk_ty(st).1 && self.cell_store(id, st);
+        if (shared_holder && stores.is_empty() && self.cell_store(id, st)) || cell_deref {
+            stores = vec![1];
+        }
+        let into_recv = self.bk_on() && (!via_deref || cell_deref) && self.bk_ty(st).1 && (matches!(recv_ty, Ty::Ref(true, _)) || !stores.is_empty());
         // (the arguments stored: their loans flow out of the call, as a result's that borrows them)
         let stores0 = std::mem::replace(&mut self.bk.store_args, stores);
         if into_recv {
@@ -2267,6 +2374,15 @@ impl Cx<'_> {
             let member = sig.self_ty.is_some() || sig.impl_of.is_some();
             let named: Vec<usize> = if member { (0..sig.generics.len()).filter(|&k| !hidden_param(&sig.generics[k].0)).collect() } else { vec![] };
             let ntf = tf.iter().filter(|a| !matches!(a, GArg::Lifetime(_))).count();
+            // (E0107: a free fn's turbofish names only its explicit parameters, not an `impl Trait` argument's hidden one:
+            // `foo::<str, String>` of `fn foo<T: ?Sized>(_f: impl AsRef<T>)`)
+            if !member && sig.trait_of.is_none() && sig.generics.iter().any(|g| hidden_param(&g.0)) {
+                let n = sig.generics.iter().filter(|g| !hidden_param(&g.0)).count();
+                if ntf > n {
+                    let w = |k: usize| if k == 1 { "argument" } else { "arguments" };
+                    return err(SP, format!("function takes {n} generic {} but {ntf} generic {} supplied (E0107)", w(n), if ntf == 1 { "argument was" } else { "arguments were" }));
+                }
+            }
             let own0 = if member { named.len().saturating_sub(ntf).max(first.min(named.len())) } else { first };
             let slot_of = |i: usize| if member { named.get(own0 + i).copied().unwrap_or(usize::MAX) } else { first + i };
             for (i, a) in tf.iter().enumerate() {
@@ -2309,6 +2425,36 @@ impl Cx<'_> {
         Ok(())
     }
 
+    /// A default method of a generic trait (`trait Getter<T> { fn do_get2(&self) -> (T, T) { .. } }`) on a type with
+    /// one impl of the trait (`impl Getter<isize> for isize`): the trait's parameters (after Self) are that impl's
+    /// arguments, when nothing else gave them. Once Self is known, before the arguments are lowered, so a literal
+    /// argument takes that type (`p.translate(3)` with `impl Movable<isize> for Point`)
+    pub(crate) fn trait_args_from_impl(&self, sig: &FnSig, sol: &mut [Option<Ty>]) {
+        let (None, Some(tr), Some(Some(st))) = (sig.self_ty, sig.trait_of.as_deref(), sol.first().copied()) else { return };
+        if !sol.iter().skip(1).any(|x| x.is_none()) {
+            return;
+        }
+        let Some(imps) = self.prog.impl_targs.get(tr) else { return };
+        let fits: Vec<Vec<Ty>> = imps
+            .iter()
+            .filter_map(|(ist, args, ng)| {
+                let mut isol = vec![None; *ng];
+                if !self.prog.match_ty(*ist, st, &mut isol) {
+                    return None;
+                }
+                let a: Vec<Ty> = args.iter().map(|&a| self.prog.partial_subst(a, &isol)).collect();
+                a.iter().all(|&t| !self.prog.has_param(t)).then_some(a)
+            })
+            .collect();
+        if let [a] = fits.as_slice() {
+            for (i, &t) in a.iter().enumerate() {
+                if let Some(x @ None) = sol.get_mut(1 + i) {
+                    *x = Some(t);
+                }
+            }
+        }
+    }
+
     pub(crate) fn resolve_call(&mut self, id: u32, arg_tys: &[Ty], mut sol: Vec<Option<Ty>>, ret_hint: Option<Ty>, span: Sp) -> R<(u32, FnSig)> {
         let sig = self.prog.sigs[id as usize].clone();
         if !sig.is_generic() {
@@ -2327,6 +2473,7 @@ impl Cx<'_> {
             }
         }
         self.solve_assoc_bounds(&sig, &mut sol);
+        self.trait_args_from_impl(&sig, &mut sol);
         // (a default method of a generic trait: `trait Getter<T> { fn do_get2(&self) -> (T, T) { .. } }` on a type
         // with `impl Getter<isize> for isize`: the trait's parameters (after Self) are that impl's arguments, when nothing else gave them)
         if let (None, Some(tr), Some(Some(st))) = (sig.self_ty, sig.trait_of.as_deref(), sol.first().copied()) {
@@ -2469,6 +2616,24 @@ impl Cx<'_> {
             if imp.is_none() && ambiguous.get() {
                 return err(span, format!("`{}` has no implementation for `{}` that is told apart from the trait's other blanket impls", self.prog.names[id as usize], self.prog.tn(args[0])));
             }
+            // (impls of the trait with other arguments for the same type (`impl Conv<u64> for u8` and `impl Conv<bool>
+            // for u8`): the one whose method has the trait's signature under the trait's arguments the call has (Self,
+            // then the trait's own: `T = bool`), as the solver selects the impl whose head matches the goal)
+                let imp = imp.map(|imp| {
+                let Some(group) = self.prog.overloads.get(self.prog.names[imp as usize].split('#').next().unwrap_or("")) else { return imp };
+                let want_ret = self.prog.subst(sig.ret, &args);
+                let want_params: Vec<Ty> = sig.params.iter().map(|&t| self.prog.subst(t, &args)).collect();
+                if self.prog.has_param(want_ret) || want_params.iter().any(|&t| self.prog.has_param(t)) {
+                    return imp;
+                }
+                let fit: Vec<u32> = group.iter().copied().filter(|&c| {
+                    let cs = &self.prog.sigs[c as usize];
+                    // (an impl for the call's Self itself: `impl Conv<u8> for W<u16>` is not one for `W<u8>`)
+                    !cs.is_generic() && cs.self_ty == args.first().copied() && cs.impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim()) == tr0 && cs.ret == want_ret && cs.params.len() == want_params.len()
+                        && cs.params.iter().zip(&want_params).skip(1).all(|(a, b)| a == b)
+                }).collect();
+                if fit.len() == 1 { fit[0] } else { imp }
+            });
             if let Some(imp) = imp {
                 let isig = &self.prog.sigs[imp as usize];
                 if !isig.is_generic() {
@@ -2525,7 +2690,7 @@ impl Cx<'_> {
     }
 
     /// 同じ名前の trait impl の関数 (`P::from` が `From<&str>` と `From<String>`) から、最初の引数の型で選ぶ
-    pub(crate) fn pick_overload(&self, id: u32, recv: Option<Ty>, args: &[&Expr]) -> u32 {
+    pub(crate) fn pick_overload(&self, id: u32, recv: Option<Ty>, args: &[&Expr], expected: Option<Ty>) -> u32 {
         if self.keep_overload.get() == Some(id) {
             self.keep_overload.set(None);
             return id;
@@ -2567,6 +2732,33 @@ impl Cx<'_> {
             Ty::Ref(_, Ty::Ref(m, i)) => Some(Ty::Ref(*m, i)),
             _ => None,
         };
+        // (impls of one trait with different arguments for one type (`impl Conv<u64> for u8`, `impl Conv<bool> for
+        // u8`): the receiver fits both, the trait's argument tells them apart, as the trait solver's matching of the
+        // impls' heads does. Here the argument is what the call's result must be: the one whose result is that type)
+        if let Some(want) = expected.filter(|&w| !self.prog.has_param(w)) {
+            // (the receiver by value or by reference: the impls' self type)
+            let mut bare = at;
+            while let Ty::Ref(_, i) = bare {
+                bare = *i;
+            }
+            // (an inherent method that fits comes first, whatever the result: `s.f()` with `impl S { fn f() }`)
+            let inherent = self.explicit_trait.is_none()
+                && cands.iter().any(|&c| self.prog.sigs[c as usize].impl_trait.is_none() && (fits(c, at) || self.prog.sigs[c as usize].self_ty == Some(bare)));
+            let mut fit: Vec<u32> = cands.iter().copied().filter(|&c| self.prog.sigs[c as usize].impl_trait.is_some() && (fits(c, at) || self.prog.sigs[c as usize].self_ty == Some(bare))).collect();
+            // (only impls of one trait are told apart this way: of the trait the call names (`A::f(&s)`), or the one
+            // trait all candidates are of; two traits' methods of one name are not chosen by their results)
+            if let Some((_, tr)) = &self.explicit_trait {
+                let tr = tr.rsplit("::").next().unwrap_or(tr);
+                fit.retain(|&c| base(c).map(|b| b.rsplit("::").next().unwrap_or(b)) == Some(tr));
+            }
+            let one_trait = fit.windows(2).all(|w| base(w[0]) == base(w[1]));
+            if fit.len() > 1 && one_trait && !inherent {
+                let by_ret: Vec<u32> = fit.iter().copied().filter(|&c| self.prog.sigs[c as usize].ret == want).collect();
+                if by_ret.len() == 1 {
+                    return by_ret[0];
+                }
+            }
+        }
         // (`a::M::m(&x)`: the impl of the trait the call named, also through the deref coercion; never an inherent
         // method of the same name)
         if let Some((m, tr)) = &self.explicit_trait {
@@ -2773,7 +2965,7 @@ impl Cx<'_> {
         // (戻り値を書く先: 引数の中の呼び出しには渡さない)
         let hint = self.dst_hint.take();
         let id0 = id;
-        let id = self.pick_overload(id, recv.map(|r| r.1), args);
+        let id = self.pick_overload(id, recv.map(|r| r.1), args, expected);
         // (E0133 was checked on the fn found before the overload was chosen: an `unsafe fn` chosen in its place, by
         // the traits in scope, needs the same check)
         // (also when the group mixes safe and unsafe methods (a vector's `m` of two traits): the check before the choice
@@ -2806,10 +2998,30 @@ impl Cx<'_> {
                 self.prog.match_ty(sig0.ret, Ty::Struct(es), &mut sol);
             }
         }
+        // (a parameter that is a fn pointer over the type parameters, `f: fn(T)`, and an argument of a fn type (a fn
+        // item that is not generic, a fn pointer): it decides them before the arguments are lowered in order, so an
+        // earlier literal (`spawn(100, f)` with `fn f(i: isize)`) takes their type, not i32)
+        for (a, &pt) in args.iter().zip(&sig0.params[skip.min(sig0.params.len())..]) {
+            if !matches!(pt, Ty::Fn(_)) || !self.prog.has_param(pt) {
+                continue;
+            }
+            let ft = match self.fn_item(a) {
+                Some(fid) if self.prog.sigs[fid as usize].generics.is_empty() => {
+                    let fs = &self.prog.sigs[fid as usize];
+                    Some(Ty::Fn(crate::types::intern_fn(crate::types::FnTy { params: fs.params.clone(), ret: fs.ret })))
+                }
+                Some(_) => None,
+                None => self.peek(a).filter(|t| matches!(t, Ty::Fn(_)) && !self.prog.has_param(*t)),
+            };
+            if let Some(ft) = ft {
+                self.prog.match_ty(pt, ft, &mut sol);
+            }
+        }
         let mut vals: Vec<(Value, Ty, Sp)> = vec![];
         if let Some((r, rt)) = recv {
             self.prog.match_ty(sig0.params[0], rt, &mut sol);
             vals.push((r, rt, span));
+            self.trait_args_from_impl(&sig0, &mut sol);
         }
         // `Iterator` を受ける引数に Vec / &Vec / スライス / 配列を渡したら (IntoIterator 相当) イテレータにする
         let conv: Vec<Option<Expr>> = args
@@ -3146,6 +3358,14 @@ impl Cx<'_> {
                     }
                 }
             }
+            if let (Ty::Ref(pm, wi @ Ty::Struct(_)), Ty::Ref(am, gi), Some(val)) = (pt, t, v) {
+                if am || !pm {
+                    if let Some((m, u)) = self.unsize_tail_sol(*wi, *gi, &mut sol) {
+                        v = Some(self.make_unsized(val, m, expr_start(a))?);
+                        t = Ty::Ref(pm, intern(u));
+                    }
+                }
+            }
             if let (Ty::Ref(pm, Ty::Slice(_)), Ty::Ref(am, Ty::Array(e, n)), Some(val)) = (pt, t, v) {
                 if am || !pm {
                     v = Some(self.make_fat(val, *n as i64));
@@ -3208,7 +3428,8 @@ impl Cx<'_> {
                 Some(v) => v,
                 None => self.b.ins().iconst(types::I8, 0),
             };
-            vals.push((v, t, expr_start(a)));
+            // (a block argument's type is its tail's: rustc points there, `f({ String::new() })`)
+            vals.push((v, t, value_pos(a)));
         }
         let arg_tys: Vec<Ty> = vals.iter().map(|v| v.1).collect();
         // 引数の型から改めて解く。引数に現れない型パラメータ (クロージャの戻り値など) は sol から
@@ -3227,6 +3448,45 @@ impl Cx<'_> {
             };
             if t.is_some_and(|t| !self.prog.has_param(t) && !self.needs_drop(t)) {
                 return Ok((None, Ty::Unit));
+            }
+        }
+        // (a turbofish names the pointee: it must be the argument's (`size_of_val::<u8>(s)` with s: &[u8] is E0308))
+        let tf_ok = |t: Ty, me: &Self| match turbofish {
+            Some(tf) => match tf.first() {
+                Some(GArg::Ty(pt)) => me.parse_ty(pt).is_ok_and(|w| w == t),
+                _ => true,
+            },
+            None => true,
+        };
+        // (`drop_in_place(p)` of a pointer to a struct with an unsized tail: no value of it can be read out, the drop
+        // glue drops it in place through the pair)
+        if self.prog.names[id as usize] == "__core_drop_in_place" && vals.len() == 1 {
+            // (`*mut` only: `drop_in_place(p)` of a `*const` is E0308)
+            if let Ty::Ptr(true, t) = vals[0].1 {
+                if t.is_dst_struct() && tf_ok(*t, self) {
+                    let Some(&g) = self.prog.index.get(crate::prelude::DROP_GLUE) else { return err(span, "internal: no drop glue") };
+                    let iid = {
+                        let mut ins = self.insts.lock().unwrap();
+                        ins.request(self.prog, g, vec![*t]).or_else(|e| err(span, e))?
+                    };
+                    self.requested.push(iid);
+                    let fs = self.insts.lock().unwrap().sig(self.prog, iid).clone();
+                    let f = self.fref(iid, &fs);
+                    self.b.ins().call(f, &[vals[0].0]);
+                    return Ok((None, Ty::Unit));
+                }
+            }
+        }
+        // (`size_of_val(x)` / `align_of_val(x)` of a pointer to an unsized type: from the pair's second word)
+        if matches!(self.prog.names[id as usize].as_str(), "__core_size_of_val" | "__core_align_of_val") && vals.len() == 1 {
+            // (a reference only: `size_of_val(p)` of a raw pointer is E0308)
+            if let Ty::Ref(_, t) = vals[0].1 {
+                if t.is_unsized() && tf_ok(*t, self) {
+                    let meta = self.b.ins().load(types::I64, mf(), vals[0].0, 8);
+                    let (size, align) = self.unsized_size_align(meta, *t);
+                    let v = if self.prog.names[id as usize] == "__core_size_of_val" { size } else { align };
+                    return Ok((Some(v), Ty::Usize));
+                }
             }
         }
         // (a callee that requires 'static (`fn f<T: 'static>`, `&'static T`): from here on, checked)
@@ -3251,7 +3511,11 @@ impl Cx<'_> {
             }
         }
         let sol_rg = if self.rg_on() { Some(sol0.clone()) } else { None };
-        let (target, sig) = self.resolve_call(id, &arg_tys, sol0, expected, span)?;
+        let explicit = turbofish.is_some_and(|t| t.iter().any(|a| matches!(a, GArg::Ty(_))));
+        let prev = crate::traits::EXPLICIT_ARGS.with(|e| e.replace(explicit));
+        let r = self.resolve_call(id, &arg_tys, sol0, expected, span);
+        crate::traits::EXPLICIT_ARGS.with(|e| e.set(prev));
+        let (target, sig) = r?;
         if let Some(sol) = sol_rg {
             self.rg_call(id, &sol, turbofish, args, &sig.params, sig.ret, rg_recv, skip == 1, if span.line == 0 { rg_sp } else { span });
         }
@@ -3531,6 +3795,13 @@ impl Cx<'_> {
                     || matches!(&l, Lit::Int(i) if matches!(i.suffix(), "f32" | "f64"))
                     || (matches!(&l, Lit::Int(i) if i.suffix().is_empty()) && expected.is_some_and(|t| t.is_float())) =>
             {
+                // (an integer literal is never a float: `let y: f64 = 2;` is rustc's E0308, in the program's own code)
+                if let (Lit::Int(i), Some(t), true) = (&l, expected, self.user_code) {
+                    if i.suffix().is_empty() {
+                        self.int_as_float = text.as_ptr() as usize;
+                        return err(SP, format!("mismatched types: expected `{}`, found integer", self.prog.tn(t)));
+                    }
+                }
                 let (digits, suffix) = match &l {
                     Lit::Float(f) => (f.base10_digits().to_string(), f.suffix().to_string()),
                     Lit::Int(i) => (i.base10_digits().to_string(), i.suffix().to_string()),
@@ -3586,6 +3857,17 @@ impl Cx<'_> {
                 let n = bytes.len() as u32;
                 let a = self.data_addr(bytes);
                 Ok((Some(a), Ty::Ref(false, intern(Ty::Array(intern(Ty::U8), n)))))
+            }
+            // (`c"hello"`: the prelude's `&'static CStr` of its bytes and their 0)
+            Lit::CStr(bs) => {
+                let mut text = String::from("b\"");
+                for &c in bs.iter().chain(std::iter::once(&0u8)) {
+                    text.push_str(&format!("\\x{c:02x}"));
+                }
+                text.push('"');
+                let call = Expr::Call(Box::new(path_expr("__exr_cstr_lit")), vec![Expr::Lit(text, crate::parse::Pos::default())]);
+                let e: &Expr = self.keep_expr(call);
+                self.expr(e, expected)
             }
             _ => err(SP, "unsupported literal"),
         }
@@ -3965,7 +4247,7 @@ pub fn static_not_sync(prog: &Program) -> Option<(usize, String)> {
 
 /// `__impl0`: the parameter the summary makes of an `impl Trait` argument (its index after the name), not a user's
 /// `__implT`
-fn hidden_param(n: &str) -> bool {
+pub(crate) fn hidden_param(n: &str) -> bool {
     n.starts_with("__impl") && n.len() > 6 && n.as_bytes()[6..].iter().all(|c| c.is_ascii_digit())
 }
 
@@ -4062,6 +4344,18 @@ impl Cx<'_> {
     /// A `&self` method whose self type is invariant in a lifetime another parameter's type names, or one that
     /// outlives such a lifetime (`'f: 'c`): what that argument borrows is held by the receiver (rustc: its region is
     /// the receiver's, which lives as long as the receiver is used)
+    /// id is `set` or `replace` of the prelude's Cell, RefCell or OnceCell, whose value of type st it stores its
+    /// argument in
+    fn cell_store(&self, id: u32, st: Ty) -> bool {
+        let Ty::Struct(sid) = st else { return false };
+        let b = self.prog.base_of(sid);
+        let prelude = self.prog.struct_item.get(b as usize).is_some_and(|&i| i >= self.prog.prelude_from);
+        let m = self.prog.names[id as usize].rsplit("::").next().unwrap_or("").split('#').next().unwrap_or("");
+        // (the prelude's own method, not a program's trait method of the name)
+        let own = self.prog.item_of.get(id as usize).copied().flatten().is_some_and(|i| i >= self.prog.prelude_from);
+        prelude && own && matches!(self.prog.structs[b as usize].name.as_str(), "Cell" | "RefCell" | "OnceCell") && matches!(m, "set" | "replace")
+    }
+
     pub(crate) fn shared_recv_stores(&mut self, id: u32) -> Vec<usize> {
         let prog = self.prog;
         let sig = &prog.sigs[id as usize];

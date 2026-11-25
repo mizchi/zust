@@ -167,7 +167,8 @@ fn errors_of_items_in_fn_bodies_at_their_lines() {
     let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
     let d = s.check(bad);
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2], "{d:?}");
-    assert!(d[0].msg.contains("cannot find type `T`"), "{d:?}");
+    // (rustc's E0401: the inner fn cannot name the outer one's parameter)
+    assert!(d[0].msg.contains("can't use generic parameters from outer item (E0401)"), "{d:?}");
     let dir = std::env::temp_dir().join(format!("zust-unhoist-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let e = Session2::new(Options2 { jobs: 1, ..Options2::default() }).build(bad, &dir.join("a")).unwrap_err();
@@ -893,6 +894,55 @@ fn review100_capture_visibility_dyn_gat() {
 }
 
 #[test]
+fn malformed_attribute_input() {
+    // (a built-in attribute in a shape rustc cannot read, as rustc 1.100 reports it; a `cfg` predicate is read from
+    // the source as written, as the configuring takes the attributes away)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let lit = |found: &str| format!("expected a literal (`1u8`, `1.0f32`, `\"string\"`, etc.) here, found {found}");
+    let cases: &[(&str, Option<String>)] = &[
+        // (deprecated: known keys with string values, each once)
+        ("#[deprecated(since = \"a\", note = \"a\", reason)]\nfn f() {}\nfn main() { }\n", Some("malformed `deprecated` attribute input".into())),
+        ("#[deprecated(reason = \"x\")]\nfn f() {}\nfn main() { }\n", Some("malformed `deprecated` attribute input".into())),
+        ("#[deprecated(\"since\")]\nfn f() {}\nfn main() { }\n", Some("malformed `deprecated` attribute input".into())),
+        ("#[deprecated(since = b\"1.29\", note = \"hi\")]\nfn f() {}\nfn main() { }\n", Some("malformed `deprecated` attribute input".into())),
+        ("#[deprecated(since = \"a\", since = \"b\", note = \"c\")]\nfn f() {}\nfn main() { }\n", Some("malformed `deprecated` attribute input".into())),
+        ("#[deprecated(note = test)]\nfn f() {}\nfn main() { }\n", Some(lit("expression"))),
+        ("#[deprecated(note = concat!(\"a\", \"b\"))]\nfn f() {}\nfn main() { }\n", Some(lit("macro call"))),
+        ("#[deprecated(since = r\"1.0\", note = \"a, b\")]\nfn f() {}\n#[deprecated()]\nfn g() {}\nfn main() { }\n", None),
+        // (repr, windows_subsystem, link)
+        ("#[repr(\"C\")]\nstruct A {}\nfn main() {}\n", Some("malformed `repr` attribute input".into())),
+        ("#[repr(C, align(8))]\nstruct A { x: u8 }\nfn main() { let _ = A { x: 1 }.x; }\n", None),
+        ("#![windows_subsystem = \"wrong\"]\nfn main() {}\n", Some("malformed `windows_subsystem` attribute input".into())),
+        ("#![windows_subsystem = \"console\"]\nfn main() {}\n", None),
+        ("#[link(kind = \"wonderful_unicorn\")] extern \"C\" {}\nfn main() {}\n", Some("malformed `link` attribute input".into())),
+        // (cfg predicates: a name, `name = \"value\"`, all / any of any number, not of one)
+        ("#[cfg(foo(bar))]\nfn check() {}\nfn main() {}\n", Some("malformed `cfg` attribute input".into())),
+        ("fn main() {}\n#[cfg(not())]\nfn f() {}\n", Some("malformed `cfg` attribute input".into())),
+        ("fn main() {}\n#[cfg(a, b)]\nfn f() {}\n", Some("malformed `cfg` attribute input".into())),
+        ("fn main() {}\n#[cfg(foo = 1)]\nfn f() {}\n", Some("malformed `cfg` attribute input".into())),
+        ("fn main() {}\n#[cfg(feature = -1)]\nfn f() {}\n", Some(lit("expression"))),
+        ("fn main() {}\n#[cfg(target-os = \"windows\")]\nfn f() {}\n", Some("expected one of `(`, `,`, `::`, or `=`, found `-`".into())),
+        ("#![cfg_attr(a())]\nfn main() {}\n", Some("malformed `cfg_attr` attribute input".into())),
+        ("#[cfg_attr(foo(bar), inline)]\nfn f() {}\nfn main() {}\n", Some("malformed `cfg_attr` attribute input".into())),
+        ("#[cfg(all())]\nfn f() {}\n#[cfg(not(any()))]\nfn g() {}\n#[cfg(all(unix,))]\nfn h() {}\n#[cfg(feature = \"a\")]\nfn i() {}\nfn main() {}\n", None),
+        // (cfg! of one predicate)
+        ("fn main() {\n    let _ = cfg!();\n}\n", Some("macro requires a cfg-pattern as an argument".into())),
+        ("fn main() {\n    if cfg!(not()) { }\n}\n", Some("malformed `cfg` macro input".into())),
+        ("fn main() {\n    let _ = cfg!(a, b);\n}\n", Some("expected 1 cfg-pattern".into())),
+        // (not one in a comment, a string or a macro's pattern)
+        ("// #[cfg(foo(bar))]\nfn main() { let _ = \"#[cfg(foo(bar))]\"; let _ = cfg!(unix); }\nmacro_rules! m { ($p:meta) => { #[cfg($p)] fn x() {} } }\n", None),
+    ];
+    for (src, want) in cases {
+        let got = first(src);
+        match want {
+            Some(m) => assert_eq!(got.as_ref().map(|d| d.1.as_str()), Some(m.as_str()), "{src}"),
+            None => assert_eq!(got, None, "{src}"),
+        }
+    }
+}
+
+#[test]
 fn gat_arity_at_uses() {
     // (E0107 at a use of a generic associated type without its arguments or with the wrong number of lifetimes,
     // as rustc 1.100 reports them; valid uses, bindings with arguments and other traits' names are left alone)
@@ -906,6 +956,48 @@ fn gat_arity_at_uses() {
     assert_eq!(first(src), Some((5, 24, "associated type takes 1 lifetime argument but 0 lifetime arguments were supplied (E0107)".to_string())), "qualified_lifetime");
     let src = "trait Lend {\n    type Item<'a> where Self: 'a;\n    fn next<'a>(&'a mut self) -> Option<Self::Item<'a>>;\n}\nstruct W(Vec<u8>);\nimpl Lend for W {\n    type Item<'a> = &'a u8;\n    fn next<'a>(&'a mut self) -> Option<Self::Item<'a>> { self.0.first() }\n}\nfn take<T: for<'a> Lend<Item<'a> = &'a u8>>(t: &mut T) -> u8 { *t.next().unwrap() }\nfn main() {\n    let v: Vec<u8> = vec![1];\n    let _: Box<dyn Iterator<Item = &u8>> = Box::new(v.iter());\n    let _ = take(&mut W(vec![3]));\n}\n";
     assert_eq!(first(src), None, "valid_uses_ok");
+}
+
+#[test]
+fn unsafe_attributes() {
+    // (`#[unsafe(..)]` around an attribute that is not an unsafe one, the keyword where a path goes, and an unsafe
+    // attribute without `unsafe` where that is an error, as rustc 1.100 reports them)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    let f = "pub extern \"C\" fn f() {}\nfn main() {}\n";
+    for a in ["repr(C)", "inline", "link_name = \"x\"", "doc = \"x\"", "diagnostic::on_unimplemented(message = \"m\")"] {
+        let name = a.split(['(', ' ']).next().unwrap();
+        assert_eq!(check(2021, &format!("#[unsafe({a})]\n{f}")), at(1, &format!("`{name}` is not an unsafe attribute")), "{a}");
+    }
+    for a in ["no_mangle", "export_name = \"x\"", "link_section = \".x\""] {
+        assert_eq!(check(2021, &format!("#[unsafe({a})]\n{f}")), None, "unsafe_{a}");
+        assert_eq!(check(2021, &format!("#[{a}]\n{f}")), None, "bare_2021_{a}");
+        assert_eq!(check(2024, &format!("#[{a}]\n{f}")), at(1, "unsafe attribute used without unsafe"), "bare_2024_{a}");
+    }
+    assert_eq!(check(2015, &format!("#![deny(rust_2024_compatibility)]\n#[no_mangle]\n{f}")), at(2, "unsafe attribute used without unsafe"), "denied_lint");
+    assert_eq!(check(2021, "#[unsafe(unsafe(no_mangle))]\nfn a() {}\nfn main() {}\n"), at(1, "expected identifier, found keyword `unsafe`"), "double");
+    assert_eq!(check(2021, "#[derive(unsafe(Debug))]\nstruct Foo;\nfn main() {}\n"), at(1, "expected identifier, found keyword `unsafe`"), "in_derive");
+    assert_eq!(check(2021, "#[derive(Debug, unsafety)]\nstruct Foo;\nfn main() {}\n").is_some_and(|d| d.1.contains("keyword")), false, "a_name_starting_with_unsafe");
+    assert_eq!(check(2024, "#[unsafe(does_not_exist)]\nfn aa() {}\nfn main() {}\n"), at(1, "cannot find attribute `does_not_exist` in this scope"), "unknown_first");
+}
+
+#[test]
+fn proc_macro_attributes_outside_a_proc_macro_crate() {
+    // (a proc macro's attribute in a crate that is not `proc-macro`, as rustc 1.100 reports it: on a fn, the crate
+    // type; on another item, the item's kind. A comment that names the crate type does not make the crate one)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    for a in ["proc_macro", "proc_macro_derive", "proc_macro_attribute"] {
+        let input = if a == "proc_macro_derive" { "(Foo)" } else { "" };
+        let src = format!("// `proc-macro`\n#[{a}{input}]\npub fn f(a: u8) -> u8 {{ a }}\nfn main() {{}}\n");
+        assert_eq!(first(&src), at(2, &format!("the `{a}` attribute is only usable with crates of the `proc-macro` crate type")), "{a}_fn");
+        let src = format!("#[{a}{input}]\npub struct S;\nfn main() {{}}\n");
+        assert_eq!(first(&src), at(1, &format!("the `{a}` attribute cannot be used on structs")), "{a}_struct");
+    }
 }
 
 #[test]
@@ -988,6 +1080,640 @@ fn review100_fourth_round() {
     // (E0191: an associated type's segment in a default is not a parameter)
     let src = "trait Id { type T; }\nimpl Id for u8 { type T = u8; }\ntrait Base<T, U = <u8 as Id>::T> { type A; type B; }\ntrait Mid: Base<u8, A = u8> {}\ntrait Root: Base<u8, <u8 as Id>::T, B = u8> + Mid {}\nfn f(_: &dyn Root) {}\nfn main() {}\n";
     assert_eq!(first(src), None, "associated_segment_in_a_default");
+}
+
+#[test]
+fn attributes_at_crate_level_and_misplaced() {
+    // (as rustc 1.100 reports them: an attribute macro an item takes, written at the crate; an attribute on an item
+    // of a kind it does not apply to, an error or, for those rustc only warns about, an error where the lint is denied)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    for a in ["derive(Debug)", "test", "test_case", "bench", "global_allocator"] {
+        let name = a.split('(').next().unwrap();
+        assert_eq!(first(&format!("#![{a}]\nfn main() {{}}\n")), at(1, &format!("`{name}` attribute cannot be used at crate level")), "{a}");
+    }
+    let cases: &[(&str, &str, Option<&str>)] = &[
+        ("inline", "const FOO: u8 = 0;", Some("the `inline` attribute cannot be used on constants")),
+        ("used", "fn foo() {}", Some("the `used` attribute cannot be used on functions")),
+        ("used", "static FOO: u32 = 0;", None),
+        ("target_feature(enable = \"sse2\")", "struct S;", Some("the `target_feature` attribute cannot be used on structs")),
+        ("debugger_visualizer(natvis_file = \"a.natvis\")", "fn foo() {}", Some("the `debugger_visualizer` attribute cannot be used on functions")),
+        ("repr(packed)", "enum E { A }", Some("the `repr(packed)` attribute cannot be used on enums")),
+        ("repr(C)", "fn foo() {}", Some("the `repr(C)` attribute cannot be used on functions")),
+        ("repr(C)", "enum E { A }", None),
+        ("no_mangle", "const C: u8 = 0;", Some("const items should never be `#[no_mangle]`")),
+        // (warnings only: not an error)
+        ("cold", "struct S;", None),
+        ("macro_use", "struct S;", None),
+        ("no_mangle", "struct S;", None),
+    ];
+    for (a, item, want) in cases {
+        assert_eq!(first(&format!("#[{a}]\n{item}\nfn main() {{}}\n")), want.and_then(|m| at(1, m)), "{a} {item}");
+    }
+    // (a comment between attributes does not hide the ones after it)
+    assert_eq!(first("#[inline]\n// a comment\n#[target_feature(enable = \"sse2\")]\nconst FOO: u8 = 0;\nfn main() {}\n"), at(1, "the `inline` attribute cannot be used on constants"), "comment_between");
+    assert_eq!(first("#[inline = \"\"]\nfn f() {}\nfn main() {}\n"), at(1, "valid forms for the attribute are `inline`, `inline(always)`, and `inline(never)`"), "inline_eq");
+    assert_eq!(first("#![deny(unused_attributes)]\n#[macro_export]\n#[macro_use]\n// a comment\n#[path = \"foo\"]\nmacro_rules! foo {\n    () => {};\n}\nfn main() {}\n"), at(3, "the `macro_use` attribute cannot be used on macro defs"), "macro_def");
+    assert_eq!(first("#[macro_use]\nmacro_rules! foo {\n    () => {};\n}\nfn main() {}\n"), None, "macro_def_not_denied");
+    // (a warned one is an error where `unused_attributes` is denied)
+    assert_eq!(first("#![deny(unused_attributes)]\n#[cold]\nstruct S;\nfn main() {}\n"), at(2, "the `cold` attribute cannot be used on structs"), "denied");
+}
+
+#[test]
+fn review106_attribute_scans() {
+    // (each expected line and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    // (cfg: a candidate in a block comment or a string is not an attribute; `cfg!` takes a trailing comma)
+    assert_eq!(check(2021, "/* #[cfg(not())] */\nfn main() {}\n"), None, "block_comment");
+    assert_eq!(check(2021, "fn main() { let _ = \"#[cfg(not())]\"; let _ = r#\"#[cfg(not())]\"#; }\n"), None, "strings");
+    assert_eq!(check(2021, "fn main() { let _ = cfg!(unix,); }\n"), None, "trailing_comma");
+    assert_eq!(check(2021, "/* a */ #[cfg(not())]\nfn g() {}\nfn main() {}\n"), at(1, "malformed `cfg` attribute input"), "after_a_comment");
+    // (a hashed raw string is a string literal)
+    assert_eq!(check(2021, "#[deprecated(note = r#\"reason\"#)]\npub fn f() {}\nfn main() {}\n"), None, "raw_note");
+    assert_eq!(check(2021, "#[cfg(feature = r#\"x\"#)]\nfn g() {}\nfn main() {}\n"), None, "raw_cfg_value");
+    // (a lint's level is the last inner attribute that names it, not any `deny`)
+    let f = "#[no_mangle]\npub fn f() {}\nfn main() { f(); }\n";
+    assert_eq!(check(2021, &format!("#![deny(dead_code)]\n#![warn(unsafe_attr_outside_unsafe)]\n{f}")), None, "other_lint_denied");
+    assert_eq!(check(2021, &format!("#![deny(unsafe_attr_outside_unsafe)]\n{f}")), at(2, "unsafe attribute used without unsafe"), "named_lint_denied");
+    // (a comment that names the crate type does not make the crate a proc-macro one)
+    assert_eq!(check(2021, "// crate_type = \"proc-macro\"\n#[proc_macro]\npub fn m(a: u8) -> u8 { a }\nfn main() {}\n"), at(2, "the `proc_macro` attribute is only usable with crates of the `proc-macro` crate type"), "comment_crate_type");
+}
+
+#[test]
+fn review106_second_round() {
+    // (each expected line and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    let crate_type = "the `proc_macro` attribute is only usable with crates of the `proc-macro` crate type";
+    // (a value is compared as text: a raw string is the same string)
+    let src = "#![windows_subsystem = r\"console\"]\n#[link(name = \"m\", kind = r\"static\")]\nextern \"C\" {}\nfn main() {}\n";
+    assert_eq!(check(2021, src), None, "raw_values");
+    assert_eq!(check(2021, "#![windows_subsystem = \"con\\x73ole\"]\nfn main() {}\n"), None, "escaped_value");
+    assert_eq!(check(2021, "#![windows_subsystem = r\"gui\"]\nfn main() {}\n"), at(1, "malformed `windows_subsystem` attribute input"), "raw_unknown_value");
+    // (an inner attribute may span lines; one in a block comment is no attribute)
+    let src = "#![crate_type =\n    \"proc-macro\"]\nextern crate proc_macro;\n#[proc_macro]\npub fn m(a: proc_macro::TokenStream) -> proc_macro::TokenStream { a }\n";
+    assert!(check(2021, src).is_none_or(|(_, m)| m != crate_type), "multiline_crate_type");
+    let src = "#[proc_macro]\npub fn m(a: u8) -> u8 { a }\nfn main() {}\n\n/*\n#![crate_type = \"proc-macro\"]\n*/\n";
+    assert_eq!(check(2021, src), at(1, crate_type), "block_comment_crate_type");
+    // (an escaped backslash ends no string: the entries after it are split)
+    assert_eq!(check(2021, "#[deprecated(note = \"\\\\\", since = \"1.0\",)]\npub fn f() {}\nfn main() {}\n"), None, "escaped_backslash");
+    // (comments in a cfg predicate are whitespace)
+    assert_eq!(check(2021, "#[cfg(all(/* note */))]\nfn f() {}\nfn main() {}\n"), None, "comment_in_predicate");
+    assert_eq!(check(2021, "#[cfg(not(/* a */ unix, windows))]\nfn f() {}\nfn main() {}\n"), at(1, "malformed `cfg` attribute input"), "comment_and_two_patterns");
+    // (a macro's pattern is tokens, checked only when expanded)
+    assert_eq!(check(2021, "macro_rules! eat { (cfg!(not())) => {}; }\nfn main() {}\n"), None, "macro_pattern");
+    assert_eq!(check(2021, "macro_rules! eat { () => {}; }\nfn main() { let _ = cfg!(not()); }\n"), at(2, "malformed `cfg` macro input"), "after_a_macro");
+    // (an item's `allow` among other lints lowers the level again)
+    let src = "#![deny(unsafe_attr_outside_unsafe)]\n\n#[allow(dead_code, unsafe_attr_outside_unsafe)]\n#[no_mangle]\npub fn f() {}\n\nfn main() { f(); }\n";
+    assert_eq!(check(2021, src), None, "allow_in_a_list");
+}
+
+#[test]
+fn private_paths() {
+    // (E0603: each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, format!("{m} (E0603)")));
+    let m = "mod a {\n    fn f() {}\n    mod b { pub fn g() {} }\n    struct U;\n    struct T(u8);\n    struct S { x: u8 }\n    const C: u8 = 1;\n    type Al = u8;\n    enum E { V }\n    pub(super) fn sup() {}\n    pub mod c { pub(super) fn cs() {} pub(in crate::a) fn ci() {} }\n}\nfn main() {\n";
+    let main = |line: &str| format!("{m}{line}\n}}\n");
+    for (line, col, msg) in [
+        ("    a::f();", 8, "function `f` is private"),
+        ("    a::b::g();", 8, "module `b` is private"),
+        ("    let _ = a::U;", 16, "unit struct `U` is private"),
+        ("    let _ = &a::U;", 17, "unit struct `U` is private"),
+        ("    let _: a::U;", 15, "struct `U` is private"),
+        ("    let _ = a::T(1);", 16, "tuple struct constructor `T` is private"),
+        ("    let _ = a::S { x: 1 };", 16, "struct `S` is private"),
+        ("    let _ = a::C;", 16, "constant `C` is private"),
+        ("    let _: a::Al = 1;", 15, "type alias `Al` is private"),
+        ("    let _ = a::E::V;", 16, "enum `E` is private"),
+        ("    a::c::cs();", 11, "function `cs` is private"),
+        ("    a::c::ci();", 11, "function `ci` is private"),
+        ("    struct Z { u: u8 } let _ = Z { u: { let _ = a::U; 1 } };", 52, "unit struct `U` is private"),
+    ] {
+        assert_eq!(check(2021, &main(line)), at(14, col, msg), "{line}");
+    }
+    assert_eq!(check(2021, &main("    a::sup();")), None, "pub_super_from_the_parent");
+    // (an import: what rustc calls a struct of any kind there; 2015 and later read `use a::f` from the crate root here)
+    for ed in [2015, 2021] {
+        assert_eq!(check(ed, "mod a { struct U; }\nuse a::U;\nfn main() {}\n"), at(2, 8, "struct `U` is private"), "use_{ed}");
+    }
+    // (a child module sees its parent's private items; a re-export, a glob, a macro's item and a module of a fn body are
+    // not followed)
+    let src = "mod a {\n    fn f() {}\n    pub mod b { pub fn g() { super::f(); crate::a::f(); } }\n    mod c { pub fn j() {} }\n    pub use self::c::j;\n    macro_rules! mk { () => { pub fn made() {} } }\n    mk!();\n    pub struct S;\n    impl S { pub fn new() -> S { S } }\n}\nuse a::*;\nfn main() {\n    a::j();\n    a::made();\n    let _ = a::S::new();\n    mod a2 { pub fn z() {} }\n    a2::z();\n}\n";
+    for ed in [2015, 2021] {
+        assert_eq!(check(ed, src), None, "visible_{ed}");
+    }
+    // (a syntax error first, as rustc)
+    let src = "mod foo { mod bar { struct B; } }\nstruct Foo {\n    a: foo:A,\n    b: foo::bar::B,\n}\nfn main() {}\n";
+    assert!(check(2021, src).is_some_and(|(l, _, m)| l == 3 && !m.contains("E0603")), "syntax_error_first");
+}
+
+#[test]
+fn review106_third_round() {
+    // (each expected line and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    // (a comment in an attribute's input is whitespace)
+    assert_eq!(check(2021, "#![windows_subsystem = /* reason */ \"console\"]\nfn main() {}\n"), None, "comment_in_inner_input");
+    assert_eq!(check(2021, "#[deprecated(note = /* why */ \"old\")]\npub fn f() {}\nfn main() {}\n"), None, "comment_in_item_input");
+    // (a Unicode escape's digits may have `_` between them)
+    assert_eq!(check(2021, "#![windows_subsystem = \"\\u{6_3}onsole\"]\nfn main() {}\n"), None, "unicode_escape_underscore");
+    // (`macro_rules !` with a space; one in a comment defines nothing)
+    // (zustc reads no `macro_rules !` with a space yet: only no cfg error is asked of it)
+    assert!(check(2021, "macro_rules ! eat { (cfg!(not())) => {}; }\nfn main() {}\n").is_none_or(|(_, m)| !m.contains("cfg")), "spaced_macro_rules");
+    assert_eq!(check(2021, "// macro_rules! x {\nfn main() { let _ = cfg!(not()); }\n"), at(2, "malformed `cfg` macro input"), "macro_rules_in_a_comment");
+    // (what a false `cfg` takes away is not read: an item, a statement or a block of one, an attribute after one)
+    for src in [
+        "#[cfg(any())]\nfn f() { let _ = cfg!(not()); }\nfn main() {}\n",
+        "#[cfg(any())]\n#[cfg(not())]\nfn f() {}\nfn main() {}\n",
+        "#[cfg(any())]\nmod m {\n    #[cfg(not())]\n    fn f() {}\n}\nfn main() {}\n",
+        "fn main() {\n    #[cfg(any())]\n    let _ = cfg!(not());\n    #[cfg(any())]\n    {\n        let _ = cfg!(not());\n    }\n}\n",
+    ] {
+        assert_eq!(check(2021, src), None, "{src}");
+    }
+    assert_eq!(check(2021, "#[cfg(not())]\n#[cfg(any())]\nfn f() {}\nfn main() {}\n"), at(1, "malformed `cfg` attribute input"), "malformed_first");
+    assert_eq!(check(2021, "#[cfg(all())]\n#[cfg(not())]\nfn f() {}\nfn main() {}\n"), at(2, "malformed `cfg` attribute input"), "after_a_true_cfg");
+    assert_eq!(check(2021, "fn main() { let _ = cfg!(not()); }\n"), at(1, "malformed `cfg` macro input"), "kept_macro");
+    // (a char escape the text ends in: no crash)
+    let _ = check(2021, "fn main() { let _ = cfg!(x '\\");
+    let _ = check(2021, "#[cfg(a = '\\");
+}
+
+#[test]
+fn attributes_on_variants_params_and_prototypes() {
+    // (each expected line and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let check = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    let params = "allow, cfg, cfg_attr, deny, expect, forbid, and warn are the only allowed built-in attributes in function parameters";
+    for (src, line, msg) in [
+        ("enum Foo {\n    #[inline]\n    Variant,\n}\nfn main() {}\n", 2, "the `inline` attribute cannot be used on enum variants"),
+        ("enum Foo {\n    #[repr(u8)]\n    Variant,\n}\nfn main() {}\n", 2, "the `repr(u8)` attribute cannot be used on enum variants"),
+        ("fn f(#[inline] p: u32) {}\nfn main() {}\n", 1, params),
+        ("fn f(#[allow(unused)] a: u8, #[doc = \"x\"] b: u8) {}\nfn main() {}\n", 1, params),
+        ("struct S;\nimpl S {\n    fn g(&self, #[inline] a: u8) {}\n}\nfn main() {}\n", 3, params),
+        ("#[link_ordinal(123)]\nstruct Foo {}\nfn main() {}\n", 1, "the `link_ordinal` attribute cannot be used on structs"),
+        ("#[repr(i128)]\nstruct Foo;\nfn main() {}\n", 1, "the `repr(i128)` attribute cannot be used on structs"),
+        ("#[repr(C, u8)]\nstruct S;\nfn main() {}\n", 1, "the `repr(u8)` attribute cannot be used on structs"),
+        ("#![deny(unused_attributes)]\ntrait Trait {\n    #[inline]\n    fn foo();\n}\nfn main() {}\n", 3, "the `inline` attribute cannot be used on required trait methods"),
+    ] {
+        assert_eq!(check(src), at(line, msg), "{src}");
+    }
+    // (accepted, or only warned of: a lint attribute or `cfg` on a parameter, `non_exhaustive` / `cold` on a variant,
+    // `inline` on a required trait method where `unused_attributes` only warns, an enum's integer repr)
+    for src in [
+        "fn f(#[allow(unused)] a: u8, #[cfg(all())] b: u8) {}\nfn main() {}\n",
+        "enum E {\n    #[cold]\n    A,\n    #[non_exhaustive]\n    B,\n}\nfn main() {}\n",
+        "trait T {\n    #[inline]\n    fn f();\n}\nfn main() {}\n",
+        "#[repr(u8)]\nenum E { A }\nfn main() {}\n",
+        "fn f<F: Fn(u8) -> u8>(#[allow(unused)] g: F) {}\nfn main() {}\n",
+    ] {
+        assert_eq!(check(src), None, "{src}");
+    }
+}
+
+#[test]
+fn unknown_attributes_anywhere() {
+    // (each expected line is rustc 1.100's "cannot find attribute" on the same source; None where rustc accepts it)
+    let check = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |l: usize, n: &str| Some((l, format!("cannot find attribute `{n}` in this scope")));
+    for (src, line) in [
+        ("#[foobar] macro_rules! m { () => {} }\nfn main() {}\n", 1),
+        ("#[foobar] mod m { pub fn f() {} }\nfn main() {}\n", 1),
+        ("enum E {\n    #[foobar] A,\n}\nfn main() {}\n", 2),
+        ("struct S {\n    #[foobar] x: u8,\n}\nfn main() {}\n", 2),
+        ("fn main() {\n    #[foobar] let x = 1;\n}\n", 2),
+        ("fn f(#[foobar] x: u8) {}\nfn main() {}\n", 1),
+        ("extern \"C\" {\n    #[foobar] fn g();\n}\nfn main() {}\n", 2),
+    ] {
+        assert_eq!(check(src), at(line, "foobar"), "{src}");
+    }
+    // (`diagnostic` is a namespace, not an attribute)
+    assert_eq!(check("#[diagnostic]\npub struct Bar;\nfn main() {}\n"), at(1, "diagnostic"), "bare_diagnostic");
+    // (accepted: a macro's input or body, a tool's path, a derive's helper, a comment, a namespaced one)
+    for src in [
+        "macro_rules! m { ($i:item) => { $i } }\nm!(#[foobar] fn f() {});\nfn main() {}\n",
+        "macro_rules! m { () => { #[foobar] fn f() {} } }\nfn main() {}\n",
+        "#[rustfmt::skip]\nfn main() {}\n",
+        "#[derive(Default)]\nenum E {\n    #[default]\n    A,\n}\nfn main() {}\n",
+        "// #[foobar]\nfn main() { let _ = \"#[foobar]\"; }\n",
+        "#[diagnostic::on_unimplemented(message = \"m\")]\ntrait T {}\nfn main() {}\n",
+    ] {
+        assert_eq!(check(src), None, "{src}");
+    }
+}
+
+#[test]
+fn unresolved_imports() {
+    // (each expected line, column and message is rustc 1.100's on the same source, in both editions unless one is
+    // given; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    for edition in [2015, 2021] {
+        // (a name the module does not define; on through a struct, a fn, a type alias's glob)
+        assert_eq!(check(edition, "mod m {}\nuse m::nothing as _;\nfn main() {}\n"), at(2, "unresolved import `m::nothing` (E0432)"), "missing");
+        assert_eq!(check(edition, "mod m { pub struct S; impl S { pub const C: u8 = 1; } }\nuse m::S::C;\nfn main() {}\n"), at(2, "unresolved import `m::S` (E0432)"), "through_struct");
+        assert_eq!(check(edition, "mod a { pub fn f() {} }\nfn main() { use a::f::g; }\n"), at(2, "unresolved import `a::f` (E0432)"), "through_fn");
+        assert_eq!(check(edition, "mod m { pub type A = u8; }\nuse m::A::*;\nfn main() {}\n"), at(2, "unresolved import `m::A` (E0432)"), "glob_of_alias");
+        assert_eq!(check(edition, "mod foo { pub fn f() {} }\nuse foo::f::{self};\nfn main() {}\n"), at(2, "unresolved import `foo::f` (E0432)"), "self_of_fn");
+        // (what else could define the name there: an `extern` block, a glob, a macro, an import; an enum's variant, a
+        // module of the same name as a fn)
+        for src in [
+            "mod m { extern \"C\" { pub fn abs(x: i32) -> i32; } }\nuse m::abs;\nfn main() {}\n",
+            "mod m { pub use std::fmt::*; }\nuse m::Debug;\nfn main() {}\n",
+            "mod m { macro_rules! mk { () => { pub fn g() {} } } mk!(); }\nuse m::g;\nfn main() {}\n",
+            "mod m { pub enum E { A } }\nuse m::E::A;\nfn main() { let _ = A; }\n",
+            "mod m { pub use std::fmt as f; }\nuse m::f::Debug;\nfn main() {}\n",
+            "mod m { pub mod n { pub fn f() {} } pub fn n() {} }\nuse m::n::f;\nfn main() { f() }\n",
+            "mod a { pub mod b {} }\nuse a::b::{self as c};\nfn main() {}\n",
+        ] {
+            assert_eq!(check(edition, src), None, "{edition} {src}");
+        }
+    }
+    // (an `extern crate` binds its name in the module: `use crate::m::alloc::..` is no unresolved import there)
+    assert_eq!(check(2021, "mod m { pub extern crate alloc; }\nuse crate::m::alloc::vec::Vec;\nfn main() { let _: Vec<u8> = Vec::new(); }\n"), None, "extern_crate_in_module");
+    // (E0433: `super` and `self` past the start of a path)
+    let src = "pub mod x {\n    pub use crate::x::super::{self as c1};\n    pub fn foo() {}\n}\nfn main() {}\n";
+    assert_eq!(check(2015, src), at(2, "`super` in paths can only be used in start position (E0433)"), "super_in_middle");
+    let src = "pub mod x {\n    pub fn foo() {}\n}\nfn main() {\n    crate::x::self::foo();\n}\n";
+    assert_eq!(check(2021, src), at(5, "`self` in paths can only be used in start position or last position (E0433)"), "self_in_middle");
+    // (2015: a path from the crate root, whose `main` is a fn)
+    assert_eq!(check(2015, "use main::bar;\nfn main() {}\n"), at(1, "unresolved import `main` (E0432)"), "from_root_2015");
+}
+
+#[test]
+fn field_privacy() {
+    // (E0451 / E0616: a field a module may not see, in a struct literal or pattern, a `..base`, an access; each
+    // expected line, column and message is rustc 1.100's on the same source, in both editions; None where rustc
+    // accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    for edition in [2015, 2021] {
+        let src = "mod a { pub struct Foo { x: isize } }\nfn main() {\n    let _ = a::Foo { x: 1 };\n}\n";
+        assert_eq!(check(edition, src), at(3, 22, "field `x` of struct `Foo` is private (E0451)"), "literal");
+        let src = "mod a { pub struct Foo { x: isize } pub fn make() -> Foo { Foo { x: 3 } } }\nuse a::Foo;\nfn main() {\n    match a::make() {\n        Foo { x: _ } => {}\n    }\n}\n";
+        assert_eq!(check(edition, src), at(5, 15, "field `x` of struct `Foo` is private (E0451)"), "pattern");
+        let src = "mod a { pub struct S { pub a: u8, b: u8 } pub fn mk() -> S { S { a: 1, b: 2 } } }\nfn main() {\n    let s = a::mk();\n    let _ = a::S { a: 3, ..s };\n}\n";
+        assert_eq!(check(edition, src), at(4, 28, "field `b` of struct `S` is private (E0451)"), "base");
+        let src = "mod m { pub struct S { pub v: bool, a: u8 } }\nfn main() {\n    let _ = m::S { v: true };\n}\n";
+        assert_eq!(check(edition, src), at(3, 13, "cannot construct `S` with struct literal syntax due to private fields"), "left_out");
+        let src = "mod a {\n    pub struct Foo { x: u32 }\n    impl Foo { pub fn new() -> Foo { Foo { x: 0 } } }\n}\nfn main() {\n    let f = a::Foo::new();\n    let _ = f.x;\n}\n";
+        assert_eq!(check(edition, src), at(7, 15, "field `x` of struct `Foo` is private (E0616)"), "access");
+        let src = "mod m { pub union U { pub a: u8, c: u8 } }\nfn main() {\n    let _ = m::U { c: 0 };\n}\n";
+        assert_eq!(check(edition, src), at(3, 20, "field `c` of union `U` is private (E0451)"), "union");
+        // (the type check's error first: rustc's privacy pass does not run after it)
+        let src = "mod foo { pub struct Foo { x: u32 } impl Foo { fn method(&self) {} } }\nfn main() {\n    let f = foo::Foo { x: 0 };\n    f.method;\n}\n";
+        assert_eq!(check(edition, src).map(|x| x.0), Some(4), "type_error_first");
+        // (in the module, `pub(super)` from the parent, a child module, `pub` and `pub(crate)`)
+        for src in [
+            "mod a { pub struct Foo { x: u8 } pub fn f() -> u8 { let s = Foo { x: 1 }; s.x } }\nfn main() { let _ = a::f(); }\n",
+            "mod a { pub mod b { pub struct S { pub(super) x: u8 } } pub fn f() -> u8 { let s = b::S { x: 1 }; s.x } }\nfn main() { let _ = a::f(); }\n",
+            "mod a { pub struct S { x: u8 } pub mod c { pub fn g(s: &super::S) -> u8 { s.x } } pub fn mk() -> S { S { x: 1 } } }\nfn main() { let _ = a::c::g(&a::mk()); }\n",
+            "mod a { pub struct S { pub x: u8, pub(crate) y: u8 } }\nfn main() { let s = a::S { x: 1, y: 2 }; let _ = s.x + s.y; }\n",
+        ] {
+            assert_eq!(check(edition, src), None, "{edition} {src}");
+        }
+    }
+}
+
+#[test]
+fn method_privacy() {
+    // (E0624: a fn or const of an inherent impl, not `pub`, used outside the module of the impl; each expected line,
+    // column and message is rustc 1.100's on the same source, in both editions; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    for edition in [2015, 2021] {
+        let src = "mod a { pub struct S; impl S { fn new() -> S { S } } }\nfn main() {\n    let _ = a::S::new();\n}\n";
+        assert_eq!(check(edition, src), at(3, 19, "associated function `new` is private (E0624)"), "path");
+        let src = "mod a { pub struct Foo; impl Foo { fn f(&self) {} } }\nfn main() {\n    let x = a::Foo;\n    x.f();\n}\n";
+        assert_eq!(check(edition, src), at(4, 7, "method `f` is private (E0624)"), "method");
+        let src = "mod a { pub struct Foo; impl Foo { const ID: i32 = 1; } }\nfn main() {\n    let _ = a::Foo::ID;\n}\n";
+        assert_eq!(check(edition, src), at(3, 21, "associated constant `ID` is private (E0624)"), "const");
+        // (the impl's module, not the type's)
+        let src = "mod a { pub struct S; }\nmod b { impl crate::a::S { fn g(&self) {} } }\nfn main() {\n    a::S.g();\n}\n";
+        assert_eq!(check(edition, src), at(4, 10, "method `g` is private (E0624)"), "impl_elsewhere");
+        // (in the impl's module, `pub(crate)`, a child module, a trait's fn of the name, an impl in a fn of the root)
+        for src in [
+            "mod a { pub struct S; impl S { fn new() -> S { S } pub fn make() -> S { S::new() } } }\nfn main() { let _ = a::S::make(); }\n",
+            "mod a { pub struct S; impl S { pub(crate) fn new() -> S { S } } }\nfn main() { let _ = a::S::new(); }\n",
+            "mod a { pub struct S; impl S { fn f(&self) {} } pub mod c { pub fn g() { super::S.f(); } } }\nfn main() { a::c::g(); }\n",
+            "mod a { pub struct S; impl S { fn f(&self) {} } pub trait T { fn f(&self); } impl T for S { fn f(&self) {} } }\nuse a::T;\nfn main() { a::S.f(); }\n",
+            "mod a { pub struct Foo; }\nfn f() { impl a::Foo { fn bar(&self) {} } }\nfn main() { a::Foo.bar(); f(); }\n",
+        ] {
+            assert_eq!(check(edition, src), None, "{edition} {src}");
+        }
+    }
+}
+
+#[test]
+fn import_privacy_and_reexports() {
+    // (E0603 through a private import; E0364 / E0365: a re-export wider than what it names. Each expected line,
+    // column and message is rustc 1.100's on the same source, in both editions; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    for edition in [2015, 2021] {
+        let src = "mod public { pub struct Hi; }\nmod testing { use super::public::Hi; }\nuse testing::Hi;\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(3, 14, "struct import `Hi` is private (E0603)"), "use");
+        let src = "mod a { pub struct S; }\nmod b { use crate::a::S; }\nfn main() {\n    let _ = b::S;\n}\n";
+        assert_eq!(check(edition, src), at(4, 16, "unit struct import `S` is private (E0603)"), "value");
+        let src = "fn f() {}\nmod m { pub use crate::f; }\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(2, 17, "`f` is only public within the crate, and cannot be re-exported outside (E0364)"), "crate_item");
+        let src = "mod a { fn foo() {} pub mod b { pub use super::foo; } }\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(1, 41, "`foo` is private, and cannot be re-exported (E0364)"), "private_item");
+        let src = "mod a { mod inner {} pub mod b { pub use super::inner; } }\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(1, 42, "`inner` is private, and cannot be re-exported (E0365)"), "module");
+        // (a `pub` item, a `pub(crate)` or `pub(super)` re-export as narrow as the item, a `pub use` re-exported, a
+        // private import used in its module)
+        for src in [
+            "pub fn f() {}\nmod m { pub use crate::f; }\nfn main() {}\n",
+            "fn f() {}\nmod m { pub(crate) use crate::f; }\nfn main() {}\n",
+            "mod a { fn foo() {} pub mod b { pub(super) use super::foo; } }\nfn main() {}\n",
+            "mod a { pub struct S; }\nmod b { pub use crate::a::S; }\nuse b::S;\nfn main() { let _ = S; }\n",
+            "mod a { pub struct S; }\nmod b { use crate::a::S; pub fn f() -> S { S } }\nfn main() { let _ = b::f(); }\n",
+        ] {
+            assert_eq!(check(edition, src), None, "{edition} {src}");
+        }
+    }
+}
+
+#[test]
+fn import_cycles() {
+    // (E0432: an import that names only itself through other imports, a glob of a module into itself; each expected
+    // line, column and message is rustc 1.100's on the same source, in both editions; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    for edition in [2015, 2021] {
+        assert_eq!(check(edition, "mod y {\n    pub use crate::y::x;\n}\nfn main() {}\n"), at(2, 13, "unresolved import `crate::y::x` (E0432)"), "self");
+        let src = "mod a { pub use crate::b::foo; }\nmod b { pub use crate::a::foo; }\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(1, 17, "unresolved import `crate::b::foo` (E0432)"), "two");
+        assert_eq!(check(edition, "use self::*;\nfn main() {}\n"), at(1, 5, "unresolved import `self::*` (E0432)"), "glob_self");
+        // (a cycle of globs, an import of an item, one through another crate's)
+        for src in [
+            "mod a { pub use crate::b::*; pub fn f() {} }\nmod b { pub use crate::a::*; }\nfn main() { b::f(); }\n",
+            "mod a { pub use crate::b::x; }\nmod b { pub fn x() {} }\nfn main() { a::x(); }\n",
+            "mod a { pub use std::fmt::Debug; }\nmod b { pub use crate::a::Debug; }\nfn main() {}\n",
+        ] {
+            assert_eq!(check(edition, src), None, "{edition} {src}");
+        }
+    }
+}
+
+#[test]
+fn tuple_constructors_and_leading_super() {
+    // (a tuple struct with a field a module may not see: its constructor is as private as that field; more leading
+    // `super`s than the module has parents. Each expected line, column and message is rustc 1.100's on the same source,
+    // in both editions; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    for edition in [2015, 2021] {
+        let src = "mod a { pub struct S(u8); }\nfn main() {\n    let _ = a::S(1);\n}\n";
+        assert_eq!(check(edition, src), at(3, 16, "tuple struct constructor `S` is private (E0603)"), "path");
+        let src = "mod a { pub struct S(pub u8, u8); }\nuse a::S;\nfn main() {\n    let _ = S(1, 2);\n}\n";
+        assert_eq!(check(edition, src), at(4, 13, "cannot initialize a tuple struct which contains private fields (E0423)"), "call");
+        let src = "mod a { pub struct S(u8); }\nuse a::S;\nfn f(s: S) { let S(_) = s; }\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(3, 18, "cannot match against a tuple struct which contains private fields (E0532)"), "pattern");
+        let src = "mod outer {\n    mod inner {\n        struct Example(super::super::super::Impl);\n    }\n}\nstruct Impl;\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(3, 38, "too many leading `super` keywords within `crate::outer::inner` (E0433)"), "super");
+        // (a `pub` field, the constructor in its module, the struct as a type, `super` within the crate)
+        for src in [
+            "mod a { pub struct S(pub u8); }\nuse a::S;\nfn main() {\n    let _ = S(1);\n}\n",
+            "mod a { pub struct S(u8); pub fn f() -> S { S(1) } }\nfn main() { let _ = a::f(); }\n",
+            "mod a { pub struct S(u8); pub fn f() -> S { S(1) } }\nfn g(_: a::S) {}\nfn main() { g(a::f()); }\n",
+            "mod a { pub fn f() {} mod b { fn g() { super::f(); } } }\nfn main() {}\n",
+        ] {
+            assert_eq!(check(edition, src), None, "{edition} {src}");
+        }
+    }
+}
+
+#[test]
+fn generic_parameters_from_outer_item() {
+    // (E0401: an item in a fn body that names a generic parameter or `Self` of an item around it; each expected line,
+    // column and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let check = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    let src = "fn foo<U>(v: Vec<U>) -> U {\n    fn bar(w: Vec<U>) -> u8 { 0 }\n    v.into_iter().next().unwrap()\n}\nfn main() {}\n";
+    assert_eq!(check(src), at(2, 19, "can't use generic parameters from outer item (E0401)"), "type");
+    let src = "fn foo<const X: u32>() {\n    fn bar() -> u32 {\n        X\n    }\n}\nfn main() {}\n";
+    assert_eq!(check(src), at(3, 9, "can't use generic parameters from outer item (E0401)"), "const");
+    let src = "struct S;\nimpl S {\n    fn f() {\n        fn g(_: Self) {}\n    }\n}\nfn main() {}\n";
+    assert_eq!(check(src), at(4, 17, "can't use `Self` from outer item (E0401)"), "self_type");
+    let src = "struct S0<T>(T);\nimpl<T> S0<T> {\n    fn foo() {\n        fn bar() -> S0<i32> {\n            Self(0)\n        }\n    }\n}\nfn main() {}\n";
+    assert_eq!(check(src), at(5, 13, "can't reference `Self` constructor from outer item (E0401)"), "self_ctor");
+    // (the item's own parameter of the name, a non-generic impl's constructor (a warning), lifetimes, an impl of a
+    // local struct)
+    for src in [
+        "fn foo<T>(x: T) {\n    fn bar<T>(y: T) {}\n}\nfn main() {}\n",
+        "struct S0(usize);\nimpl S0 {\n    fn foo() {\n        fn bar() -> S0 { Self(0) }\n    }\n}\nfn main() {}\n",
+        "fn f<'a>(x: &'a str) -> usize {\n    fn g<'b>(y: &'b str) -> usize { y.len() }\n    g(x)\n}\nfn main() {}\n",
+        "fn f<T>() {\n    struct L;\n    impl L { fn new() -> Self { L } }\n}\nfn main() {}\n",
+    ] {
+        assert_eq!(check(src), None, "{src}");
+    }
+}
+
+#[test]
+fn glob_ambiguity() {
+    // (E0659: a name two glob imports bring with different definitions, where a path names it; each expected line
+    // and column is rustc 1.100's on the same source, in both editions; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let two = "mod a { pub struct S; }\nmod b { pub struct S; }\nuse a::*;\nuse b::*;\n";
+    let fns = "mod a { pub fn f() {} }\nmod b { pub fn f() {} }\nuse a::*;\nuse b::*;\n";
+    let at = |l: usize, c: usize, n: &str| Some((l, c, format!("`{n}` is ambiguous (E0659)")));
+    for edition in [2015, 2021] {
+        // (a type, a call, an enum's variants, a path through a module's globs, an import)
+        assert_eq!(check(edition, &format!("{two}fn f(_: S) {{}}\nfn main() {{}}\n")), at(5, 9, "S"), "type");
+        assert_eq!(check(edition, &format!("{fns}fn main() {{\n    f();\n}}\n")), at(6, 5, "f"), "call");
+        assert_eq!(check(edition, "use self::A::*;\nuse self::B::*;\nenum A { V }\nenum B { V }\nfn main() { let _ = V; }\n"), at(5, 21, "V"), "variants");
+        let src = "mod a {\n    mod c { pub struct E; }\n    mod d { pub struct E; }\n    pub use self::c::*;\n    pub use self::d::*;\n}\nfn main() { let _ = a::E; }\n";
+        assert_eq!(check(edition, src), at(7, 24, "E"), "through_module");
+        let src = "mod a { pub struct S; }\nmod b { pub struct S; }\nmod m { pub use crate::a::*; pub use crate::b::*; }\nuse m::S;\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(4, 8, "S"), "import");
+        // (one definition both globs bring, an item or an import of the module that takes the name, a private item a
+        // glob does not bring, no use of the name, a generic parameter, a `mut` binding, a field and a method, ..)
+        for src in [
+            "mod a { pub struct S; }\nmod b { pub use crate::a::S; }\nuse a::*;\nuse b::*;\nfn main() { let _ = S; }\n".to_string(),
+            format!("{two}struct S;\nfn main() {{ let _ = S; }}\n"),
+            format!("{two}use a::S;\nfn main() {{ let _ = S; }}\n"),
+            "mod a { pub struct S; }\nmod b { struct S; }\nuse a::*;\nuse b::*;\nfn main() { let _ = S; }\n".to_string(),
+            format!("{two}fn main() {{}}\n"),
+            format!("{two}fn f<S>(_: S) {{}}\nfn main() {{}}\n"),
+            format!("{fns}fn main() {{ let mut f = 1; f += 1; let _ = f; }}\n"),
+            format!("{fns}struct P {{ f: u8 }}\nimpl P {{ fn f(&self) -> u8 {{ self.f }} }}\nfn main() {{ let p = P {{ f: 1 }}; let _ = p.f(); }}\n"),
+            // (an enum of a block: its variant's name as defined)
+            format!("{two}fn main() {{ enum E {{ S }} let _ = E::S; }}\n"),
+        ] {
+            assert_eq!(check(edition, &src), None, "{edition} {src}");
+        }
+    }
+}
+
+#[test]
+fn fn_qualifier_order() {
+    // (each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let check = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    for (q, col, msg) in [
+        ("unsafe async", 8, "expected one of `extern` or `fn`, found keyword `async`"),
+        ("async const", 7, "expected one of `extern`, `fn`, `safe`, or `unsafe`, found keyword `const`"),
+        ("extern \"C\" unsafe", 12, "expected `fn`, found keyword `unsafe`"),
+        ("async unsafe const", 14, "expected one of `extern` or `fn`, found keyword `const`"),
+        ("unsafe extern \"C\" async", 19, "expected `fn`, found keyword `async`"),
+        ("extern extern", 8, "expected `fn`, found keyword `extern`"),
+    ] {
+        assert_eq!(check(&format!("{q} fn f() {{}}\nfn main() {{}}\n")), Some((1, col, msg.to_string())), "{q}");
+    }
+    // (an item a false `cfg` takes away is parsed too; a fn pointer type's qualifiers are read the same way)
+    assert_eq!(check("#[cfg(false)]\nunsafe async fn f() {}\nfn main() {}\n").map(|x| (x.0, x.1)), Some((2, 8)), "configured_away");
+    assert_eq!(check("type F = extern \"C\" unsafe fn(u8);\nfn main() {}\n").map(|x| (x.0, x.1)), Some((1, 21)), "fn_pointer");
+    // (in order, or not before a `fn`, or in a comment or a macro: nothing)
+    let src = "const unsafe extern \"C\" fn f() {}\ntype G = *const unsafe fn(u8);\nfn main() { unsafe { let _ = async { 1 }; } }\nextern \"C\" { fn x(); }\nconst C: u8 = 1;\n// unsafe async fn bad() {}\nmacro_rules! m { () => { unsafe async fn z() {} } }\n";
+    assert_eq!(check(src), None, "in_order");
+}
+
+#[test]
+fn review106_fourth_round() {
+    // (each expected line and message is rustc 1.100's on the same source, or the error it reports there; None where
+    // rustc accepts it)
+    let check = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    // (accepted: comments between attributes and in a `macro_rules!` head, a `cfg!` that `stringify!` quotes, a raw
+    // C string's text, a `cfg_attr` that does not hold, a crate a false `#![cfg]` takes away, `$` in a comment or a
+    // literal, `#[unsafe(..)]` and `#![..]` with comments or spaces before the name)
+    for src in [
+        "#[cfg(any())] /* note */ #[cfg(not())] fn f() {}\nfn main() {}\n",
+        "#[cfg(any())] /// doc\n#[cfg(not())] fn f() {}\nfn main() {}\n",
+        "macro_rules! m /* {} */ { (cfg!(not())) => {}; }\nfn main() {}\n",
+        "const S: &str = stringify!(a (cfg!(not())));\nfn main() {}\n",
+        "#[cfg_attr(any(), cfg(not()))]\nfn f() {}\nfn main() {}\n",
+        "#[cfg_attr(all(), cfg_attr(any(), cfg(not())))]\nfn f() {}\nfn main() {}\n",
+        "fn main() { let _ = cfg!(feature = \"$\"); let _ = cfg!(unix /* $x */); }\n",
+        "#[unsafe(/* safety */ no_mangle)]\npub extern \"C\" fn f() {}\nfn main() {}\n",
+        "#![windows_subsystem = \"con\\u{7_3}ole\"]\nfn main() {}\n",
+    ] {
+        assert_eq!(check(src), None, "{src}");
+    }
+    // (a false `#![cfg]` takes the crate away, `main` too: rustc reports only that, E0601)
+    assert!(check("#![cfg(any())]\nfn g() {}\n#[cfg(not())] fn f() {}\nfn main() {}\n").is_none_or(|(_, m)| !m.contains("cfg")), "crate_cfg_false");
+    // (zustc's lexer reads no raw C string yet: only no cfg error is asked of it)
+    assert!(check("fn main() { let _ = cr#\"text\" #[cfg(not())] \"#; }\n").is_none_or(|(_, m)| !m.contains("cfg")), "raw_c_string");
+    // (`#![ crate_type = "proc-macro"]` is a proc-macro crate: zustc has no `proc_macro` crate, so only the crate-type
+    // error is asked of it)
+    let pm = "#![ crate_type = \"proc-macro\"]\nextern crate proc_macro;\nuse proc_macro::TokenStream;\n#[proc_macro]\npub fn m(t: TokenStream) -> TokenStream { t }\n";
+    assert!(check(pm).is_none_or(|(_, m)| !m.contains("crate type")), "spaced_crate_type");
+    // (rejected: `cfg!` with spaces or another delimiter, a `$` only in a comment, a value with more after its
+    // literal, a Unicode escape without its brace, a nested `cfg` of a `cfg_attr` that holds, an attribute after a
+    // true `#![cfg]`)
+    for (src, line, msg) in [
+        ("fn main() { let _ = cfg ! (not()); }\n", 1, "malformed `cfg` macro input"),
+        ("fn main() { let _ = cfg![not()]; }\n", 1, "malformed `cfg` macro input"),
+        ("fn main() { let _ = cfg!{not()}; }\n", 1, "malformed `cfg` macro input"),
+        ("fn main() { let _ = cfg!(not() /* $ */); }\n", 1, "malformed `cfg` macro input"),
+        ("fn main() { let _ = cfg!(feature = \"a\" + \"b\"); }\n", 1, "malformed `cfg` macro input"),
+        ("fn main() { let _ = cfg!(feature = \"\\u{61\"); }\n", 1, "malformed `cfg` macro input"),
+        ("fn main() { let _ = cfg!(feature = \"\\u{_61}\"); }\n", 1, "malformed `cfg` macro input"),
+        ("#![windows_subsystem = \"con\\u{_73}ole\"]\nfn main() {}\n", 1, "malformed `windows_subsystem` attribute input"),
+        ("#[cfg(feature = \"a\" + \"b\")]\nfn f() {}\nfn main() {}\n", 1, "malformed `cfg` attribute input"),
+        ("#[cfg_attr(all(), cfg(not()))]\nfn f() {}\nfn main() {}\n", 1, "malformed `cfg` attribute input"),
+        ("#[cfg_attr(all(), inline,\n    cfg(not()))]\nfn f() {}\nfn main() {}\n", 2, "malformed `cfg` attribute input"),
+        ("#[cfg_attr(all(), cfg_attr(all(), cfg(not())))]\nfn f() {}\nfn main() {}\n", 1, "malformed `cfg` attribute input"),
+        ("#![cfg(all())]\n#[cfg(not())] fn f() {}\nfn main() {}\n", 2, "malformed `cfg` attribute input"),
+    ] {
+        assert_eq!(check(src), at(line, msg), "{src}");
+    }
+}
+
+#[test]
+fn item_errors_at_their_part() {
+    // (an error of an item's definition at the part rustc points at: the union field that needs dropping, the derive
+    // a union cannot have or that is unknown, the variant whose implicit discriminant overflows, also in a fn body;
+    // each expected line is rustc 1.100's on the same source)
+    let line = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let src = "union U {\n    a: u8,\n    b: String,\n}\nfn main() {}\n";
+    assert_eq!(line(src).map(|d| d.0), Some(3), "union field");
+    let src = "#[derive(\n    Clone,\n    Copy,\n    PartialEq,\n)]\nunion U {\n    a: u8,\n}\nfn main() {}\n";
+    assert_eq!(line(src).map(|d| d.0), Some(4), "union derive");
+    let src = "#[derive(Clone,\n         Sync,\n         Copy)]\nenum Foo {}\nfn main() {}\n";
+    assert_eq!(line(src), Some((2, "cannot find derive macro `Sync` in this scope".to_string())), "unknown derive");
+    let src = "#[repr(u8)]\nenum A {\n    Ok = 254,\n    Ok2,\n    OhNo,\n}\nfn main() {}\n";
+    assert_eq!(line(src).map(|d| d.0), Some(5), "E0370");
+    let src = "fn f() {\n    #[repr(i8)]\n    enum A {\n        Ok = i8::MAX - 1,\n        Ok2,\n        OhNo,\n    }\n    let _ = A::Ok;\n}\nfn main() {}\n";
+    assert_eq!(line(src).map(|d| d.0), Some(6), "E0370 in a fn body");
+}
+
+#[test]
+fn errors_at_their_statement() {
+    // (an error whose expression has no position of its own, at the statement's line, and the checks that come with
+    // it; each expected line and message is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    assert_eq!(first("fn main() {\n    let x = 1;\n    [];\n}\n"), at(3, "type annotations needed for an empty array"), "empty array");
+    assert_eq!(first("fn main() {\n    let x = 1;\n    match () {}\n}\n"), at(3, "non-exhaustive patterns: type `()` is non-empty (E0004)"), "match without arms");
+    assert_eq!(first("fn f() -> u8 {\n    let x = 1;\n    return;\n}\nfn main() {}\n"), at(3, "`return;` in a function whose return type is not `()` (E0069)"), "E0069");
+    assert_eq!(first("fn main() {\n    for _ in ..10 {}\n}\n"), at(2, "`RangeTo<{integer}>` is not an iterator (E0277)"), "RangeTo");
+    assert_eq!(first("fn f(x: &mut i32) {\n    for _ in *x {}\n}\nfn main() {}\n"), at(2, "`i32` is not an iterator (E0277)"), "i32 iterated");
+    assert_eq!(first("fn main() {\n    const { 2 } - const { 1 };\n}\n"), at(2, "mismatched types: expected `()`, found `i32`"), "block-like statement");
+    assert_eq!(first("fn f() {\n    if let Some(v) = Some(1) {\n        const { v }\n    }\n}\nfn main() {}\n"), at(3, "attempt to use a non-constant value in a constant (E0435)"), "E0435");
+    assert_eq!(first("fn f() -> str {\n    loop {}\n}\nfn main() {}\n"), at(1, "the size for values of type `str` cannot be known at compilation time (E0277)"), "unsized return");
+    // (union patterns: one field, reading it is unsafe, `_` reads nothing)
+    let u = "union U { a: u8, b: u16 }\n";
+    assert_eq!(first(&format!("{u}fn f(U {{ a }}: U) -> u8 {{\n    a\n}}\nfn main() {{}}\n")), at(2, "access to union field is unsafe and requires unsafe function or block (E0133)"), "union parameter");
+    assert_eq!(first(&format!("{u}fn f(u: U) {{\n    let U {{ a, b }} = u;\n}}\nfn main() {{}}\n")), at(3, "union patterns should have exactly one field"), "two fields");
+    assert_eq!(first(&format!("{u}fn f(u: U) {{\n    let U {{ a: _ }} = u;\n    unsafe {{ let U {{ b }} = u; }}\n}}\nfn main() {{}}\n")), None, "wildcard and unsafe");
 }
 
 /// An impl is for a type only when the type meets the impl's bounds, its where clauses' too (issue #2): nested goals of
@@ -1094,6 +1820,1033 @@ fn goals_have_a_certainty() {
     ok("trait A {}\ntrait B {}\ntrait Tr<X> {}\nimpl<T: B> Tr<u8> for T {}\nimpl<T: A> Tr<u16> for T {}\nimpl<T: Tr<u8>> B for T {}\nimpl A for i32 {}\nfn need<T: Tr<u16>>(_: T) {}\nfn main() { need(1i32); }");
 }
 
+#[test]
+fn format_string_errors_at_their_char() {
+    // (an invalid format string at the char rustc points at, escapes, line continuations and raw strings counted;
+    // each expected line, column and message is rustc 1.100's on the same source)
+    let first = |body: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(&format!("fn main() {{\n    {body}\n}}\n")).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |c: usize, m: &str| Some((2, c, format!("invalid format string: {m}")));
+    assert_eq!(first(r#"let _ = format!("{ x}", x = 1);"#), at(24, "expected `}`, found `x`"), "space before the argument");
+    assert_eq!(first(r#"let _ = format!("{x", x = 1);"#), at(24, "expected `}` but string was terminated"), "unterminated");
+    assert_eq!(first(r#"let _ = format!("ab}");"#), at(24, "unmatched `}` found"), "unmatched");
+    assert_eq!(first(r#"let _ = format!("{\n x}", x = 1);"#), at(26, "expected `}`, found `x`"), "after an escape");
+    assert_eq!(first(r##"let _ = format!(r#"{ \n"#);"##), at(26, "expected `}`, found `\\`"), "raw");
+    assert_eq!(first(r#"let _ = format!("{ }", 1);"#), None, "white space only");
+    assert_eq!(first(r#"let _ = format!("{x }", x = 1);"#), None, "white space after");
+    // (a line continuation: the next line's char)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check("fn main() {\n    let _ = format!(\"  \\\n    { \\\n    b\");\n}\n");
+    assert_eq!(d.first().map(|d| (d.line, d.msg.clone())), Some((4, "invalid format string: expected `}`, found `b`".to_string())), "continuation");
+}
+
+#[test]
+fn fn_value_mismatch_at_its_origin() {
+    // (a fn body's value that is not of the return type, where rustc points: the tail `()`, a `loop`'s `break`, the
+    // `match` arm that does not diverge, an `unsafe` block; each expected line is rustc 1.100's on the same source)
+    let line = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| d.line)
+    };
+    assert_eq!(line("fn foo() -> usize {\n    ()\n}\nfn main() {}\n"), Some(2), "unit tail");
+    assert_eq!(line("fn f() -> i32 {\n    loop {\n        if false { break; }\n        return 42;\n    }\n}\nfn main() {}\n"), Some(3), "break");
+    assert_eq!(line("fn f(a: Option<u32>) -> u32 {\n    match a {\n        Some(v) => return v,\n        None => (),\n    }\n}\nfn main() {}\n"), Some(4), "arm");
+    assert_eq!(line("fn g() -> u8 { 0 }\nfn main() {\n    match () {\n        () => g()\n    }\n}\n"), Some(4), "arm of main");
+    assert_eq!(line("fn f() -> ! {\n    unsafe {\n        let _x = 1;\n    }\n}\nfn main() {}\n"), Some(2), "unsafe block");
+}
+
+#[test]
+fn parse_errors_where_rustc_points() {
+    // (a missing `;` before a token on a later line: right after the expression; a struct field's missing `:` in a
+    // fn body's struct: at its line, not past the file. Each expected line and column is rustc 1.100's)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col))
+    };
+    assert_eq!(first("fn f() -> f32 {\n    3\n    5.0\n}\nfn main() {}\n"), Some((2, 6)), "missing semicolon");
+    assert_eq!(first("fn main() {\n    struct Test {\n        Very\n        Bad\n        Stuff\n    }\n}\n").map(|d| d.0), Some(4), "struct in a fn body");
+}
+
+#[test]
+fn dyn_compatibility() {
+    // (E0038: a `dyn` of a trait that is not dyn compatible, at the `dyn`, naming the trait whose own definition
+    // makes it so; each expected line, column and message is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, t: &str| Some((l, c, format!("the trait `{t}` is not dyn compatible (E0038)")));
+    let use_a = "fn f(_: &dyn A) {}\nfn main() {}\n";
+    assert_eq!(first("trait Bar {\n    const X: usize;\n}\nfn f(_: &dyn Bar) {}\nfn main() {}\n"), e(4, 10, "Bar"), "associated const");
+    assert_eq!(first(&format!("trait A {{\n    fn new() -> u8;\n}}\n{use_a}")), e(4, 10, "A"), "no receiver");
+    assert_eq!(first(&format!("trait A {{\n    fn g<T>(&self, t: T);\n}}\n{use_a}")), e(4, 10, "A"), "generic method");
+    assert_eq!(first(&format!("trait A {{\n    fn eq(&self, o: &Self) -> bool;\n}}\n{use_a}")), e(4, 10, "A"), "Self parameter");
+    assert_eq!(first(&format!("trait A: Clone {{}}\n{use_a}")), e(2, 10, "A"), "Clone supertrait");
+    assert_eq!(first("trait Super {\n    type G<T>;\n}\ntrait Child: Super {}\nfn f(_: &dyn Child) {}\nfn main() {}\n"), e(5, 14, "Super"), "through a supertrait");
+    // (a method that requires `Self: Sized`, and a projection of `Self`, keep it dyn compatible)
+    assert_eq!(first("trait A {\n    fn new() -> Self where Self: Sized;\n    type T;\n    fn get(&self) -> Self::T;\n}\nfn f(_: &dyn A<T = u8>) {}\nfn main() {}\n"), None, "exempt");
+}
+
+#[test]
+fn method_signature_mismatch() {
+    // (E0053: an impl's method whose parameter, result or `unsafe` is not the trait's, at the part rustc points at;
+    // each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, m: &str| Some((l, c, format!("method `{m}` has an incompatible type for trait `Foo` (E0053)")));
+    let tr = |decl: &str, imp: &str| format!("trait Foo {{\n    {decl}\n}}\nstruct A;\nimpl Foo for A {{\n    #[inline]\n{imp}\n}}\nfn main() {{}}\n");
+    assert_eq!(first(&tr("fn foo(&self, x: u8) -> bool;", "    fn foo(\n        &self,\n        x: i16,\n    ) -> bool { x > 0 }")), e(9, 12, "foo"), "parameter");
+    assert_eq!(first(&tr("fn foo(&self) -> u8;", "    fn foo(&self)\n        -> i8 { 0 }")), e(8, 12, "foo"), "result");
+    assert_eq!(first(&tr("fn foo(&self) -> u8;", "    unsafe fn foo(&self) -> u8 { 0 }")), e(7, 5, "foo"), "unsafe");
+    assert_eq!(first(&tr("fn foo(&self) -> u8;", "    fn foo(self) -> u8 { 0 }")), e(7, 12, "foo"), "receiver");
+    assert_eq!(first(&tr("fn foo(&self) -> u8;", "    fn foo(self: Box<Self>) -> u8 { 0 }")), e(7, 18, "foo"), "receiver's type");
+    // (an `-> impl Trait` or `async fn` declaration: the impl may return a type of its own)
+    assert_eq!(first("use std::fmt::Display;\ntrait Foo {\n    fn bar(&self) -> impl Display;\n}\nimpl Foo for i32 {\n    fn bar(&self) -> i32 { *self }\n}\nfn main() {}\n"), None, "impl Trait");
+}
+
+#[test]
+fn unused_variables_where_the_lint_is_denied() {
+    // (unused_variables at the levels its attributes give: the crate's, the fn's, a statement's or an arm's; each
+    // expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2024, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, n: &str| Some((l, c, format!("unused variable: `{n}`")));
+    let deny = "#![deny(unused_variables)]\n";
+    // (an `allow` on a statement covers what is in it, a `let`'s `else` block too)
+    assert_eq!(
+        first(&format!("{deny}fn main() {{\n    #[allow(unused_variables)]\n    let Some(_) = Some(1) else {{\n        let x = 1;\n        return;\n    }};\n    let y = 2;\n}}\n")),
+        e(8, 9, "y"),
+        "allow on a statement"
+    );
+    assert_eq!(first("#[deny(unused)]\nfn main() {\n    let unused = ();\n}\nfn other() {\n    let fine = ();\n}\n"), e(3, 9, "unused"), "deny on the fn");
+    // (an arm's or a statement's own level is read where some item of the program, or the crate, names the lint's
+    // level: a `deny` on an arm alone, with none on an item, is not seen)
+    assert_eq!(
+        first("fn f() {\n    match 0 {\n        #[deny(unused_variables)]\n        y => (),\n    }\n}\n#[deny(unused_variables)]\nfn g() {\n    match 0 {\n        #[allow(unused_variables)]\n        z => (),\n    }\n}\nfn main() {}\n"),
+        e(4, 9, "y"),
+        "deny on an arm"
+    );
+    assert_eq!(first(&format!("{deny}fn main() {{\n    match () {{\n        () if let Some(b) = Some(()) => {{}}\n        _ => {{}}\n    }}\n}}\n")), e(4, 24, "b"), "guard");
+    assert_eq!(first(&format!("{deny}fn main() {{\n    let o = Some(1);\n    if let Some(b) = o {{}}\n}}\n")), e(4, 17, "b"), "if let");
+    // (a crate's `allow(unused)` does not undo its `forbid(unused_variables)`; a parameter's pattern)
+    assert_eq!(first("#![allow(unused)]\n#![forbid(unused_variables)]\nstruct Inner { i: i32 }\nfn foo(Inner { i }: Inner) {}\nfn main() {}\n"), e(4, 16, "i"), "forbid");
+    assert_eq!(first(&format!("{deny}fn main() {{\n    #[allow(unused_variables)]\n    let a = 1;\n    let b = {{\n        #[allow(unused_variables)]\n        let c = 3;\n        4\n    }};\n    println!(\"{{b}}\");\n}}\n")), None, "allowed");
+    // (a group's `forbid` lets a member be allowed)
+    assert_eq!(first("#![forbid(unused)]\n#[allow(unused_variables)]\nfn main() {\n    let a: ();\n}\n"), None, "forbid of a group");
+}
+
+#[test]
+fn copy_with_a_field_that_is_not() {
+    // (E0204: `Copy` for a type with a field that is not Copy, at the type's name for a derive and at the self type
+    // for an impl; each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize| Some((l, c, "the trait `Copy` cannot be implemented for this type (E0204)".to_string()));
+    assert_eq!(first("use std::ops::Range;\n#[derive(Copy, Clone)]\nstruct R(Range<usize>);\nfn main() {}\n"), e(3, 8), "derive");
+    assert_eq!(first("struct Foo {\n    foo: Vec<u32>,\n}\nimpl Clone for Foo { fn clone(&self) -> Self { loop {} } }\nimpl Copy for Foo {}\nfn main() {}\n"), e(5, 15), "impl");
+    assert_eq!(first("#[derive(Clone)]\nstruct Wrapper<T>(T);\nimpl<S> Copy for Wrapper<S> {}\nfn main() {}\n"), e(3, 18), "an impl's parameter without a bound");
+    assert_eq!(first("#[derive(Clone, Copy)]\nenum E { A(String), B }\nfn main() {}\n"), e(2, 6), "enum");
+    assert_eq!(first("#[derive(Clone, Copy)]\nstruct M<'a> {\n    r: &'a mut bool,\n}\nfn main() {}\n"), e(2, 8), "&mut");
+    // (a derive bounds the type's parameters; PhantomData is Copy for every type, ManuallyDrop when its type is; a
+    // union with a written `impl Copy` may derive Clone alone)
+    let ok = "#[derive(Clone, Copy)]\nstruct Ok1<T>(T, u8, &'static str, [u16; 3], (u8, char), fn(u8) -> u8, *const u8);\n#[derive(Clone)]\nstruct W<S>(S);\nimpl<S: Copy> Copy for W<S> {}\n#[derive(Clone, Copy)]\nenum E2 { A(u8), B { x: Option<u8> }, C }\n#[derive(Clone, Copy)]\nstruct P(std::marker::PhantomData<String>, std::mem::ManuallyDrop<u8>, std::ops::RangeTo<u8>, core::cmp::Ordering);\n#[derive(Clone)]\nunion U {\n    a: u8,\n}\nimpl Copy for U {}\nfn main() {}\n";
+    assert_eq!(first(ok), None, "Copy");
+}
+
+#[test]
+fn gated_cfg_names() {
+    // (E0658: a `cfg` predicate of a name behind a feature gate, at the name, unless the crate enables the feature;
+    // each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, n: &str| Some((l, c, format!("`cfg({n})` is experimental and subject to change (E0658)")));
+    assert_eq!(first("#[cfg(not(sanitize = \"thread\"))]\nfn main() {}\n"), e(1, 11, "sanitize"), "attribute");
+    assert_eq!(first("fn main() {\n    let _ = cfg!(overflow_checks);\n}\n"), e(2, 18, "overflow_checks"), "cfg!");
+    assert_eq!(
+        first("#[cfg_attr(target(os = \"linux\"), allow(unused))]\nfn main() {}\n"),
+        Some((1, 12, "compact `cfg(target(..))` is experimental and subject to change (E0658)".to_string())),
+        "compact target"
+    );
+    // (enabled, a value of a name that is not gated, and an attribute of what a cfg_attr puts on the item)
+    assert_eq!(first("#![feature(cfg_overflow_checks)]\nfn main() {\n    let _ = cfg!(overflow_checks);\n}\n"), None, "enabled");
+    assert_eq!(first("#[cfg(feature = \"version\")]\nfn f() {}\n#[cfg_attr(unix, doc = \"sanitize\")]\nfn main() {}\n"), None, "not gated");
+}
+
+#[test]
+fn integer_literal_where_a_float_is_expected() {
+    // (an unsuffixed integer literal is never a float: E0308 where a float is expected, E0277 for arithmetic with a
+    // float, at the operator; each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    assert_eq!(first("fn main() {\n    let y: f64 = 2;\n    println!(\"{y}\");\n}\n"), e(2, 18, "mismatched types: expected `f64`, found integer"), "let");
+    assert_eq!(first("fn g(x: f32) -> f32 { x }\nfn main() {\n    let z = g(3);\n    println!(\"{z}\");\n}\n"), e(3, 15, "mismatched types: expected `f32`, found integer"), "argument");
+    assert_eq!(first("fn f(x: f32) -> f32 {\n    x + 100\n}\nfn main() {}\n"), e(2, 7, "cannot add `{integer}` to `f32` (E0277)"), "x + 100");
+    assert_eq!(first("fn f(x: f64) -> f64 {\n    100 + x\n}\nfn main() {}\n"), e(2, 9, "cannot add `f64` to `{integer}` (E0277)"), "100 + x");
+    assert_eq!(first("fn g(mut x: f64) -> f64 {\n    x += 1;\n    x\n}\nfn main() {}\n"), e(2, 7, "cannot add-assign `{integer}` to `f64` (E0277)"), "x += 1");
+    // (a float literal, or one with a float suffix, is one)
+    assert_eq!(first("fn main() {\n    let a: f64 = 2.0 + 1e3 + 2f64;\n    let b: f32 = 3.;\n    println!(\"{a} {b}\");\n}\n"), None, "floats");
+}
+
+#[test]
+fn unsized_where_sized_is_needed() {
+    // (E0277: an unsized type written where a Sized one is needed: an argument of std's containers or of a type of the
+    // program's whose parameter does not say `?Sized`, an enum variant's field, a struct's field before the last; each
+    // expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, t: &str| Some((l, c, format!("the size for values of type `{t}` cannot be known at compilation time (E0277)")));
+    assert_eq!(first("fn iceman(c: Vec<[i32]>) {}\nfn main() {}\n"), e(1, 14, "[i32]"), "Vec");
+    assert_eq!(first("trait Foo {}\nimpl Foo for Option<[u8]> {}\nfn main() {}\n"), e(2, 14, "[u8]"), "impl");
+    assert_eq!(first("struct A<T>(T);\nstruct B(A<[u8]>);\nfn main() {}\n"), e(2, 10, "[u8]"), "a type of the program's");
+    assert_eq!(first("enum E {\n    V([Box<E>]),\n}\nfn main() {}\n"), e(2, 7, "[Box<E>]"), "variant");
+    assert_eq!(first("struct S<X: ?Sized> {\n    f1: X,\n    f2: isize,\n}\nfn main() {}\n"), e(2, 9, "X"), "field before the last");
+    // (a parameter that says `?Sized`, std's that allow it, the last field)
+    let ok = "struct W<T: ?Sized>(Box<T>);\nstruct P<T: ?Sized> {\n    a: u8,\n    b: T,\n}\nfn f(_: W<[u8]>, _: Box<str>, _: std::rc::Rc<dyn Fn()>, _: &P<str>) {}\nfn main() {}\n";
+    assert_eq!(first(ok), None, "Sized");
+}
+
+#[test]
+fn method_of_an_unbounded_type_parameter() {
+    // (E0599: a method of a type parameter with no bounds but markers, in a fn nothing instantiates; each expected line
+    // and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, m: &str| Some((l, c, format!("no method named `{m}` found for type parameter `T` in the current scope (E0599)")));
+    assert_eq!(first("fn foo<T>(t: T) {\n    t.clone();\n}\nfn main() {}\n"), e(2, 7, "clone"), "clone");
+    // (behind a reference: rustc names `&T`, zustc the parameter; the place is the same)
+    assert_eq!(first("fn foo<T: Send + 'static>(x: &T) {\n    x.method();\n}\nfn main() {}\n").map(|d| (d.0, d.1)), Some((2, 7)), "behind a reference");
+    // (a blanket impl's method, std's `into`, a where clause of the impl's)
+    assert_eq!(first("trait Ext { fn ext(&self) {} }\nimpl<T> Ext for T {}\nfn foo<T>(t: T) -> u8 {\n    t.ext();\n    let _x: T = t.into();\n    0\n}\nfn main() {}\n"), None, "blanket");
+    assert_eq!(
+        first("trait Trait { fn method(self) -> isize; }\nstruct W<T> { field: T }\nimpl<'a, T> Trait for &'a W<T> where &'a T: Trait {\n    fn method(self) -> isize {\n        let r: &'a T = &self.field;\n        r.method()\n    }\n}\nfn main() {}\n"),
+        None,
+        "where clause"
+    );
+}
+
+#[test]
+fn attribute_paths_that_resolve_to_nothing() {
+    // (E0433: an attribute written as a path whose first segment is no tool and no module, or a module's that has no
+    // such attribute; each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, m: &str| Some((l, c, format!("{m} (E0433)")));
+    assert_eq!(first("#[foo::bar]\nfn main() {}\n"), e(1, 3, "cannot find module or crate `foo` in this scope"), "unknown");
+    assert_eq!(first("mod existent {}\n\n#[existent::nonexistent]\nfn main() {}\n"), e(3, 13, "cannot find `nonexistent` in `existent`"), "a module's");
+    assert_eq!(first("mod rustfmt {}\n\n#[rustfmt::skip]\nfn main() {}\n"), e(3, 12, "cannot find `skip` in `rustfmt`"), "a module shadows a tool");
+    // (a tool's attribute)
+    assert_eq!(first("#[rustfmt::skip]\n#[allow(clippy::all)]\n#[diagnostic::on_unimplemented(message = \"x\")]\ntrait T {}\nfn main() {}\n"), None, "tools");
+}
+
+#[test]
+fn local_where_a_constant_goes() {
+    // (E0435: a local of a fn in a value a constant holds, or in an array's length; each expected line and column is
+    // rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize| Some((l, c, "attempt to use a non-constant value in a constant (E0435)".to_string()));
+    assert_eq!(first("fn main() {\n    let foo = 42u32;\n    const FOO: u32 = foo;\n}\n"), e(3, 22), "a const in a fn");
+    assert_eq!(first("fn f(x: isize) {\n    static CHILD: isize = x + 1;\n}\nfn main() {}\n"), e(2, 27), "a static, a parameter");
+    assert_eq!(first("struct P { v: u8 }\nimpl P {\n    fn get(&self) -> u8 {\n        static V: u8 = self.v;\n        V\n    }\n}\nfn main() {}\n"), e(4, 24), "self");
+    assert_eq!(first("fn main() {\n    let n: usize = 0;\n    struct Foo;\n    impl Foo {\n        const N: usize = n;\n    }\n}\n"), e(5, 26), "an associated const");
+    assert_eq!(first("fn main() {\n    let foo: isize = 100;\n    enum Stuff {\n        Bar = foo,\n    }\n}\n"), e(4, 15), "a discriminant");
+    assert_eq!(first("fn main() {\n    let n = 3;\n    let _a = [0u8; n];\n}\n"), e(3, 20), "a repeat's length");
+    assert_eq!(first("fn main() {\n    let n = 3;\n    let _a: [u8; n];\n}\n"), e(3, 18), "an array type's length");
+    assert_eq!(first("const fn test_me<T>(a: usize) -> usize {\n    const { a }\n}\nfn main() {}\n"), e(2, 13), "an inline const in a generic fn");
+    // (an item of the name, a `let` of the value's own, a `let` in a block already closed)
+    assert_eq!(first("const FOO: u32 = 1;\nfn main() {\n    let x = 2;\n    const BAR: u32 = FOO + 1;\n    static Z: u32 = { let x = 3; x };\n    let _ = (x, BAR, Z);\n}\n"), None, "items and the value's own let");
+    assert_eq!(first("fn main() {\n    {\n        let a = 1;\n        let _ = a;\n    }\n    const A: i32 = 2;\n    let _ = A;\n}\n"), None, "a closed block's let");
+}
+
+#[test]
+fn errors_in_a_fn_written_in_another() {
+    // (a fn written inside another one is checked hoisted out of it: the type errors that hold wherever it is are
+    // reported where it was written; each expected line (and column, where given) is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |src: &str| first(src).map(|d| (d.0, d.1));
+    assert_eq!(
+        first("fn main() {\n    fn g(n: usize) {\n        let _x = [0; n];\n    }\n    g(1);\n}\n"),
+        Some((3, 22, "attempt to use a non-constant value in a constant (E0435)".to_string())),
+        "E0435"
+    );
+    assert_eq!(at("unsafe fn f() {}\nfn main() {\n    fn g() {\n        f();\n    }\n    g();\n}\n"), Some((4, 9)), "E0133");
+    assert_eq!(first("fn main() {\n    fn g() -> Missing {\n        loop {}\n    }\n}\n").map(|d| (d.0, d.2)), Some((2, "cannot find type `Missing`".to_string())), "E0412");
+    // (E0023, rustc's wording: zustc points at the pattern's path, rustc at its fields)
+    assert_eq!(
+        first("enum E { A(u8, u8, u8), B }\nfn main() {\n    fn g(e: E) {\n        match e { E::A(a, b) => {}, _ => {} }\n    }\n}\n").map(|d| (d.0, d.2)),
+        Some((4, "this pattern has 2 fields, but the corresponding tuple variant has 3 fields (E0023)".to_string())),
+        "E0023 of a variant"
+    );
+    assert_eq!(
+        first("struct S(u8, u8);\nfn main() {\n    let S(x) = S(1, 2);\n}\n").map(|d| (d.0, d.2)),
+        Some((3, "this pattern has 1 field, but the corresponding tuple struct has 2 fields (E0023)".to_string())),
+        "E0023 of a struct"
+    );
+    // (a tuple pattern of a unit variant (E0532) or a struct variant (E0164), at its path)
+    assert_eq!(
+        first("enum C { A, B(u8) }\nfn g(c: C) { if let C::A(..) = c {} }\nfn main() {}\n"),
+        Some((2, 21, "expected tuple struct or tuple variant, found unit variant `C::A` (E0532)".to_string())),
+        "E0532"
+    );
+    assert_eq!(
+        first("enum C { D { x: u8 }, E }\nfn g(c: C) { match c { C::D(x) => {}, _ => {} } }\nfn main() {}\n"),
+        Some((2, 24, "expected tuple struct or tuple variant, found struct variant `C::D` (E0164)".to_string())),
+        "E0164"
+    );
+    assert_eq!(
+        first("use C::D;\nenum C { D { x: u8 }, A }\nfn g(c: C) { match c { D(x) => {}, _ => {} } }\nfn main() {}\n"),
+        Some((3, 24, "cannot find tuple struct or tuple variant `D` in this scope (E0532)".to_string())),
+        "a struct variant by its name alone"
+    );
+    // (`Self` of the impl around it, which rustc takes from an outer item with a warning)
+    assert_eq!(first("struct S0(usize);\nimpl S0 {\n    fn foo() {\n        fn bar() -> S0 {\n            Self(0)\n        }\n    }\n}\nfn main() {}\n"), None, "Self");
+}
+
+#[test]
+fn diff_markers_and_mismatched_delimiters() {
+    // (rustc 1.100's lexer and parser errors on the same source: a merge's diff marker at its line's first column; a
+    // closing delimiter that does not close the innermost open one at its line, where rustc labels it)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let marker = |l: usize| Some((l, 1, "encountered diff marker".to_string()));
+    assert_eq!(first("fn main() {\n<<<<<<< HEAD\n    let _a = 1;\n=======\n    let _b = 2;\n>>>>>>> branch\n}\n"), marker(2), "in a body");
+    assert_eq!(first("struct S {\n<<<<<<< HEAD\n    x: u8,\n=======\n    y: u8,\n>>>>>>> branch\n}\nfn main() {}\n"), marker(2), "in a struct");
+    assert_eq!(first("use std::{\n<<<<<<< HEAD\n    fmt,\n=======\n    io,\n>>>>>>> branch\n};\nfn main() {}\n"), marker(2), "in a use tree");
+    // (not in a string or a comment)
+    assert_eq!(first("fn main() {\n    let _s = \"\n<<<<<<< HEAD\n\";\n    /*\n<<<<<<< HEAD\n    */\n}\n"), None, "in a string");
+    let mismatch = |src: &str| first(src).map(|d| (d.0, d.2));
+    assert_eq!(mismatch("impl A {\n    fn b(self>\n}\n\nfn main() {}\n"), Some((3, "mismatched closing delimiter: `}`".to_string())), "brace for a paren");
+    assert_eq!(
+        mismatch("trait Foo {\n    fn bar() {\n        let x = foo();\n    )\n}\nfn main() {}\n"),
+        Some((4, "mismatched closing delimiter: `)`".to_string())),
+        "paren for a brace"
+    );
+    // (a closing delimiter none open matches is skipped; the one left over with none open is "unexpected", in place of
+    // the mismatch)
+    assert_eq!(
+        mismatch("fn main() {\n    if 1 < 2 {\n        let _a = vec!];\n    }\n}\n"),
+        Some((5, "unexpected closing delimiter: `}`".to_string())),
+        "unexpected"
+    );
+    // (an unclosed one at the end is the lexer's other error, before a diff marker)
+    assert_eq!(first("mod tests {\n<<<<<<< HEAD\n    fn a() {\n=======\n    fn b() {\n>>>>>>> x\n    }\n}\n").map(|d| d.2), Some("this file contains an unclosed delimiter".to_string()), "unclosed");
+}
+
+#[test]
+fn unnamed_imports_atomic_orderings_and_variant_bindings() {
+    // (E0431, invalid_atomic_ordering and bindings_with_variant_name (E0170); each expected line and column is
+    // rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let unnamed = |l: usize, c: usize| Some((l, c, "imports need to be explicitly named".to_string()));
+    assert_eq!(first("use {self};\nfn main() {}\n"), unnamed(1, 6), "use {{self}}");
+    assert_eq!(first("use self;\nfn main() {}\n"), unnamed(1, 5), "use self");
+    assert_eq!(first("use crate::{self};\nfn main() {}\n"), unnamed(1, 13), "crate");
+    // (a module's `self`, one with a name, `use ::{self}` (another error))
+    assert_eq!(first("use std::fmt::{self, Write};\nuse crate::{self as y};\nfn main() {}\n"), None, "named");
+    assert_eq!(
+        first("use std::sync::atomic::{AtomicUsize, Ordering};\nfn main() {\n    let x = AtomicUsize::new(0);\n    x.store(1, Ordering::Acquire);\n}\n"),
+        Some((4, 16, "atomic stores cannot have `Acquire` or `AcqRel` ordering".to_string())),
+        "store"
+    );
+    assert_eq!(
+        first("use std::sync::atomic::{AtomicI32, Ordering};\nfn main() {\n    let x = AtomicI32::new(0);\n    let _ = x.compare_exchange(0, 1, Ordering::SeqCst, Ordering::AcqRel);\n}\n"),
+        Some((4, 56, "`compare_exchange`'s failure ordering may not be `Release` or `AcqRel`, since a failed `compare_exchange` does not result in a write".to_string())),
+        "compare_exchange"
+    );
+    assert_eq!(
+        first("use std::sync::atomic::{AtomicBool, Ordering};\nfn main() {\n    let x = AtomicBool::new(true);\n    let _ = x.load(Ordering::Acquire);\n    x.store(false, Ordering::Release);\n}\n"),
+        None,
+        "orderings it can have"
+    );
+    assert_eq!(
+        first("enum E { A, B }\nfn f(e: E) -> u8 {\n    match e {\n        A => 1,\n    }\n}\nfn main() {}\n"),
+        Some((4, 9, "pattern binding `A` is named the same as one of the variants of the type `E` (E0170)".to_string())),
+        "a variant's name"
+    );
+    // (allowed by the crate, or the variants in scope by a `use`)
+    assert_eq!(first("#![allow(bindings_with_variant_name)]\nenum E { A, B }\nfn f(e: E) -> u8 {\n    match e {\n        A => 1,\n    }\n}\nfn main() {}\n"), None, "allowed");
+    assert_eq!(first("mod m {\n    pub enum E { A, B }\n}\nuse m::E::*;\nfn f(e: m::E) -> u8 {\n    match e {\n        A => 1,\n        B => 2,\n    }\n}\nfn main() {}\n"), None, "imported");
+}
+
+#[test]
+fn stricter_bounds_than_the_trait() {
+    // (E0276: an impl's method whose own type parameter has a bound the trait's method does not give; each expected
+    // line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize| Some((l, c, "impl has stricter requirements than trait (E0276)".to_string()));
+    assert_eq!(first("trait Foo {\n    fn foo<T>(x: T);\n}\nimpl Foo for bool {\n    fn foo<T>(x: T) where T: Copy {}\n}\nfn main() {}\n"), e(5, 30), "a where clause");
+    assert_eq!(
+        first("trait A {}\ntrait B: A {}\ntrait Foo {\n    fn f<T: A>(&self);\n    fn g<T: Eq>(&self);\n}\nimpl Foo for u8 {\n    fn f<T: A>(&self) {}\n    fn g<T: Ord>(&self) {}\n}\nfn main() {}\n"),
+        e(9, 13),
+        "Ord where the trait says Eq"
+    );
+    // (the trait's bounds' supertraits, and fewer bounds than the trait's)
+    assert_eq!(first("trait Foo {\n    fn f<T: Ord + Copy>(&self);\n}\nimpl Foo for u8 {\n    fn f<T: Eq + Clone + PartialOrd>(&self) {}\n}\nfn main() {}\n"), None, "supertraits");
+    assert_eq!(first("trait A {}\ntrait B: A {}\ntrait Foo {\n    fn f<T: B>(&self);\n}\nimpl Foo for u8 {\n    fn f<T: A>(&self) {}\n}\nfn main() {}\n"), None, "a supertrait of the program's");
+}
+
+#[test]
+fn duplicate_items_in_an_impl() {
+    // (E0201 in a trait's impl, E0592 in an inherent one: the second item of a name in one namespace, at its start;
+    // each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(
+        first("struct Foo;\nimpl Foo {\n    const bar: bool = true;\n    fn bar() {}\n}\nfn main() {}\n"),
+        Some((4, 5, "duplicate definitions with name `bar` (E0592)".to_string())),
+        "a const and a fn"
+    );
+    assert_eq!(
+        first("trait Bar { fn bar(&self) -> isize; }\nstruct Foo;\nimpl Bar for Foo {\n    fn bar(&self) -> isize { 1 }\n    fn bar(&self) -> isize { 2 }\n}\nfn main() {}\n"),
+        Some((5, 5, "duplicate definitions with name `bar`: (E0201)".to_string())),
+        "two fns of a trait's impl"
+    );
+    assert_eq!(
+        first("trait Foo { type Bar; }\nstruct Baz;\nimpl Foo for Baz {\n    type Bar = i16;\n    type Bar = u16;\n}\nfn main() {}\n"),
+        Some((5, 5, "duplicate definitions with name `Bar`: (E0201)".to_string())),
+        "two types"
+    );
+    // (a `const fn` is a fn; items of other names)
+    assert_eq!(first("struct S;\nimpl S {\n    const fn f() {}\n    const F: u8 = 0;\n}\nimpl S {\n    fn g() {}\n}\nfn main() {}\n"), None, "no duplicate");
+}
+
+#[test]
+fn trait_bounds_that_name_no_trait_in_scope() {
+    // (E0405 / E0404 at a fn's bound; each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, n: &str, code: &str| Some((l, c, format!("cannot find trait `{n}` in this scope ({code})")));
+    assert_eq!(first("fn f<T: Nope>(_x: T) {}\nfn main() {}\n"), e(1, 9, "Nope", "E0405"), "inline");
+    assert_eq!(first("fn f<T>(_x: T) where T: Nope {}\nfn main() {}\n"), e(1, 25, "Nope", "E0405"), "where clause");
+    assert_eq!(first("fn f(_x: impl Nope) {}\nfn main() {}\n"), e(1, 15, "Nope", "E0405"), "impl Trait");
+    // (std's traits outside its prelude, not imported: E0404 for the ones with a derive macro of the name)
+    assert_eq!(first("fn foobar<T: Debug>(_x: T) {}\nfn main() {}\n"), e(1, 14, "Debug", "E0404"), "Debug");
+    assert_eq!(first("fn g(_x: impl Display) {}\nfn main() {}\n"), e(1, 15, "Display", "E0405"), "Display");
+    // (imported, by a path, a derive)
+    assert_eq!(first("use std::fmt::Debug;\nfn f<T: Debug>(_x: T) {}\nfn main() {}\n"), None, "imported");
+    assert_eq!(first("use std::fmt;\nfn f<T: fmt::Debug + Clone>(_x: T) {}\n#[derive(Debug)]\nstruct S;\nfn main() {}\n"), None, "a path and a derive");
+}
+
+#[test]
+fn unstable_items_of_std() {
+    // (E0658 of a `use` of an unstable item of std's; each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, f: &str| Some((l, c, format!("use of unstable library feature `{f}` (E0658)")));
+    assert_eq!(first("use std::ops::FnPtr;\nfn main() {}\n"), e(1, 5, "fn_static"), "a path");
+    assert_eq!(first("use std::marker::{Copy, Reborrow};\nfn main() {}\n"), e(1, 25, "reborrow"), "a braced list");
+    assert_eq!(first("use core::io::ErrorKind;\nfn main() {}\n"), e(1, 11, "core_io"), "core::io");
+    assert_eq!(first("#[allow(unused_imports)] use core::unicode::UNICODE_VERSION;\nfn main() {}\n"), e(1, 30, "unicode_internals"), "after attributes");
+    assert_eq!(
+        first("use std::intrinsics;\nfn main() {}\n").map(|d| (d.0, d.1)),
+        Some((1, 5)),
+        "intrinsics"
+    );
+    // (a stable item of the module, the feature enabled)
+    assert_eq!(first("use std::intrinsics::transmute;\nfn main() {}\n"), None, "a stable item");
+    assert_eq!(first("#![feature(reborrow)]\nuse std::marker::Reborrow;\nfn main() {}\n"), None, "enabled");
+}
+
+#[test]
+fn calls_of_the_fn_traits_methods() {
+    // (E0658: `call` / `call_mut` / `call_once` of a closure or an `F: Fn..` parameter need `fn_traits`; each expected
+    // line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize| Some((l, c, "use of unstable library feature `fn_traits` (E0658)".to_string()));
+    assert_eq!(first("fn main() {\n    let f = || ();\n    f.call(());\n}\n"), e(3, 7), "a closure's method");
+    assert_eq!(first("fn main() {\n    let f = || ();\n    Fn::call(&f, ());\n}\n"), e(3, 5), "by its trait's path");
+    assert_eq!(first("fn foo<F: Fn()>(mut f: F) {\n    f.call_mut(());\n}\nfn main() {}\n"), e(2, 7), "a parameter's");
+    // (the feature enabled (zustc does not call a closure's `call` yet: another error, not this one); a method of the
+    // program's of the name)
+    assert_ne!(first("#![feature(fn_traits)]\nfn main() {\n    let f = || ();\n    f.call(());\n}\n").map(|d| d.2), e(4, 7).map(|d| d.2), "enabled");
+    assert_eq!(first("trait Call { fn call(&self, _x: ()) {} }\nimpl Call for u8 {}\nfn main() {\n    1u8.call(());\n}\n"), None, "the program's");
+    assert_eq!(first("trait FnLike { fn call(&self); }\nfn c<F: FnLike>(f: F) {\n    f.call();\n}\nfn main() {}\n"), None, "a trait of the program's named Fn..");
+}
+
+#[test]
+fn malformed_link_attributes() {
+    // (`link_name` takes `= "name"`, `link_ordinal` an integer: E0539, at the attribute's line as rustc 1.100)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    assert_eq!(first("#[link_name]\nextern \"C\" {\n    fn bar() -> u32;\n}\nfn main() {}\n"), Some((1, "malformed `link_name` attribute input".to_string())), "link_name");
+    assert_eq!(first("extern \"C\" {\n    #[link_ordinal(\"x\")]\n    fn foo();\n}\nfn main() {}\n"), Some((2, "malformed `link_ordinal` attribute input".to_string())), "link_ordinal");
+    assert_eq!(first("extern \"C\" {\n    #[link_name = \"foo\"]\n    fn bar();\n}\n#[export_name = \"x\"]\npub fn f() {}\nfn main() {}\n"), None, "well formed");
+}
+
+#[test]
+fn derive_on_an_item_of_another_kind() {
+    // (E0774: a derive is a struct's, an enum's or a union's; at the attribute's line as rustc 1.100)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize| Some((l, "`derive` may only be applied to `struct`s, `enum`s and `union`s (E0774)".to_string()));
+    assert_eq!(first("trait Foo {\n    #[derive(Clone)]\n    type Bar;\n}\nfn main() {}\n"), e(2), "a trait's item");
+    assert_eq!(first("#[derive(Debug)]\nfn f() {}\nfn main() {}\n"), e(1), "a fn");
+    assert_eq!(first("extern \"C\" {\n    #[derive(Copy)]\n    fn f();\n}\nfn main() {}\n"), e(2), "an extern block's item");
+    assert_eq!(first("#[derive(Clone, Copy)]\nunion U { f: i32 }\n#[derive(Debug)]\nenum E {}\nfn main() {}\n"), None, "a union and an enum");
+}
+
+#[test]
+fn item_declarations_rustc_rejects() {
+    // (E0646, E0128, E0109, E0116, E0091, E0130, E0118, E0229, E0040: errors of an item's own declaration or a call, at the lines rustc 1.100
+    // reports them)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, m: &str| Some((l, m.to_string()));
+    assert_eq!(first("fn main() where (): Copy {}\n"), e(1, "`main` function is not allowed to have a `where` clause (E0646)"), "main's where clause");
+    let fwd = "generic parameter defaults cannot reference parameters before they are declared (E0128)";
+    assert_eq!(first("struct Foo<T = U, U = ()> {\n    a: T,\n    b: U,\n}\nfn main() {}\n"), e(1, fwd), "a later parameter");
+    assert_eq!(first("pub struct Foo<Bar = Bar>(Bar);\nfn main() {}\n"), e(1, fwd), "the parameter itself");
+    assert_eq!(first("struct Foo<T, U = Vec<T>>(T, U);\nfn main() {}\n"), None, "an earlier parameter");
+    assert_eq!(first("type X = u32<i32>;\nfn main() {}\n"), e(1, "type arguments are not allowed on builtin type `u32` (E0109)"), "a builtin type");
+    assert_eq!(first("type X = u32<'static>;\nfn main() {}\n"), e(1, "lifetime arguments are not allowed on builtin type `u32` (E0109)"), "a builtin type's lifetime");
+    assert_eq!(first("fn is_copy<T: ::std::marker<i32>::Copy>() {}\nfn main() {}\n"), e(1, "type arguments are not allowed on module `marker` (E0109)"), "a module of std");
+    let foreign = "cannot define inherent `impl` for a type outside of the crate where the type is defined (E0116)";
+    assert_eq!(first("impl Vec<u8> {}\nfn main() {}\n"), e(1, foreign), "a type of std");
+    assert_eq!(first("use std::rc::Rc;\npub struct Foo;\npub type Function = Rc<Foo>;\nimpl Function {}\nfn main() {}\n"), e(4, foreign), "through an alias");
+    assert_eq!(first("struct Vec<T>(T);\nimpl<T> Vec<T> {\n    fn get(&self) -> &T {\n        &self.0\n    }\n}\nfn main() {}\n"), None, "the crate's own type of that name");
+    assert_eq!(first("type Foo<T> = u32;\nfn main() {}\n"), e(1, "type parameter `T` is never used (E0091)"), "an unused parameter");
+    assert_eq!(first("type Foo<\n    Unused\n> = u8;\nfn main() {}\n"), e(2, "type parameter `Unused` is never used (E0091)"), "at the parameter's line");
+    assert_eq!(first("fn main() {\n    type E<T> = u8;\n}\n"), e(2, "type parameter `T` is never used (E0091)"), "in a fn body");
+    assert_eq!(first("type Foo<'a, T: 'a, const N: usize> = [&'a T; 2];\nfn main() {}\n"), None, "lifetimes and consts may go unused");
+    let pat = "patterns aren't allowed in foreign function declarations (E0130)";
+    assert_eq!(first("extern \"C\" {\n    fn foo((a, b): (u32, u32));\n}\nfn main() {}\n"), e(2, pat), "a tuple pattern");
+    assert_eq!(first("extern \"C\" {\n    fn foo(mut a: u32);\n}\nfn main() {}\n"), e(2, pat), "a `mut` binding");
+    assert_eq!(first("extern \"C\" {\n    fn foo(a: usize, _: u8);\n}\nfn main() {}\n"), None, "names and `_`");
+    assert_eq!(first("impl<T> T {\n    fn get(&self) {}\n}\nfn main() {}\n"), e(1, "no nominal type found for inherent implementation (E0118)"), "a type parameter");
+    assert_eq!(first("type A<T> = B;\ntype B = _;\nfn main() {}\n").map(|d| d.0), Some(2), "an alias of an alias rustc rejects");
+    let cons = "associated item constraints are not allowed here (E0229)";
+    assert_eq!(first("trait A {}\nstruct Foo;\npub trait D {\n    fn f<T>(self)\n        where T<Bogus = Foo>: A;\n}\nfn main() {}\n"), e(5, cons), "on a type parameter");
+    assert_eq!(first("trait Foo {\n    type A;\n}\nstruct Bar;\nfn baz<I: Foo>(x: &<I as Foo<A = Bar>>::A) {}\nfn main() {}\n"), e(5, cons), "in a qualified path");
+    assert_eq!(first("fn f<I: Iterator<Item = u8>>(i: I) where I: Clone {}\nfn main() {}\n"), None, "in a bound");
+    let dtor = "explicit use of destructor method (E0040)";
+    let foo = "struct Foo;\nimpl Drop for Foo {\n    fn drop(&mut self) {}\n}\n";
+    assert_eq!(first(&format!("{foo}fn main() {{\n    let mut x = Foo;\n    x.drop();\n}}\n")), e(7, dtor), "a method call");
+    assert_eq!(first(&format!("{foo}fn main() {{\n    Drop::drop(&mut Foo);\n}}\n")), e(6, dtor), "a path call");
+    assert_eq!(first(&format!("{foo}fn main() {{\n    let x = Foo;\n    drop(x);\n}}\n")), None, "std's drop");
+}
+
+#[test]
+fn returns_ranges_and_receivers_rustc_rejects() {
+    // (E0572, E0586, E0185 / E0186, at the lines rustc 1.100 reports them)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, m: &str| Some((l, m.to_string()));
+    let ret = "return statement outside of function body (E0572)";
+    assert_eq!(first("const FOO: u32 = return 0;\nfn main() {}\n"), e(1, ret), "a const's value");
+    assert_eq!(first("const X: () = {\n    return;\n};\nfn main() {}\n"), e(2, ret), "a const's block");
+    assert_eq!(first("enum Bug {\n    V1 = return [0][0],\n}\nfn main() {}\n"), e(2, ret), "a discriminant");
+    assert_eq!(first("fn main() {\n    [(); return];\n}\n"), e(2, ret), "a repeat's length");
+    assert_eq!(first("const F: fn() -> u8 = || { return 1; };\nconst G: u8 = { fn g() -> u8 { return 2; } g() };\nfn main() {}\n"), None, "a closure's or a fn's body in a const");
+    let no_end = "inclusive range with no end (E0586)";
+    assert_eq!(first("fn main() {\n    let v = [1, 2, 3];\n    let x = &v[1..=];\n}\n"), e(3, no_end), "an index");
+    assert_eq!(first("fn main() {\n    for _ in 1..= {}\n}\n"), e(2, no_end), "a for loop's head");
+    assert_eq!(first("fn main() {\n    match 3u8 {\n        0..= => {}\n        _ => {}\n    }\n}\n"), e(3, no_end), "a pattern");
+    assert_eq!(first("fn main() {\n    let v = [1, 2, 3];\n    let _ = &v[..=1];\n    let _ = &v[1..];\n}\n"), None, "ranges with an end or exclusive");
+    let tr = "trait Foo {\n    fn foo();\n    fn bar(&self);\n}\nstruct Bar;\n";
+    assert_eq!(first(&format!("{tr}impl Foo for Bar {{\n    fn foo(&self) {{}}\n    fn bar(&self) {{}}\n}}\nfn main() {{}}\n")), e(7, "method `foo` has a `&self` declaration in the impl, but not in the trait (E0185)"), "a receiver in the impl only");
+    assert_eq!(first(&format!("{tr}impl Foo for Bar {{\n    fn foo() {{}}\n    fn bar() {{}}\n}}\nfn main() {{}}\n")), e(8, "method `bar` has a `&self` declaration in the trait, but not in the impl (E0186)"), "a receiver in the trait only");
+}
+
+#[test]
+fn link_names_and_members_rustc_rejects() {
+    // (E0454, E0459, E0648, E0437, E0438, at the lines rustc 1.100 reports them)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, m: &str| Some((l, m.to_string()));
+    assert_eq!(first("#[export_name = \"\\0foo\"]\npub fn bar() {}\nfn main() {}\n"), e(1, "`export_name` may not contain null characters (E0648)"), "an export name's NUL");
+    assert_eq!(first("#[export_name = \"\"]\npub fn bar() {}\nfn main() {}\n"), e(1, "`export_name` may not be empty"), "an empty export name");
+    assert_eq!(first("#[link(name = \"\")]\nextern \"C\" {}\nfn main() {}\n"), e(1, "link name must not be empty (E0454)"), "an empty link name");
+    assert_eq!(first("#[link(name = \"a\\0\")]\nextern \"C\" {}\nfn main() {}\n"), e(1, "link name may not contain null characters (E0648)"), "a link name's NUL");
+    assert_eq!(first("extern \"C\" {\n    #[link_name = \"\"]\n    fn f();\n}\nfn main() {}\n"), e(2, "link name must not be empty (E0454)"), "an empty link_name");
+    assert_eq!(first("#[link(kind = \"dylib\")]\nextern \"C\" {}\nfn main() {}\n"), e(1, "`#[link]` attribute requires a `name = \"string\"` argument (E0459)"), "a link with no name");
+    assert_eq!(first("#[link(name = \"  \")]\nextern \"C\" {}\n#[export_name = \"  \"]\npub fn bar() {}\nfn main() {}\n"), None, "names of spaces");
+    assert_eq!(first("trait Foo {}\nimpl Foo for i32 {\n    type Bar = bool;\n}\nfn main() {}\n"), e(3, "type `Bar` is not a member of trait `Foo` (E0437)"), "a type the trait does not declare");
+    assert_eq!(first("trait Bar {}\nimpl Bar for i32 {\n    const BAR: bool = true;\n}\nfn main() {}\n"), e(3, "const `BAR` is not a member of trait `Bar` (E0438)"), "a const the trait does not declare");
+    assert_eq!(first("trait Tr {\n    type A;\n    const C: u8;\n}\nimpl Tr for i32 {\n    type A = u8;\n    const C: u8 = 1;\n}\nimpl Iterator for Box<u8> {\n    type Item = u8;\n    fn next(&mut self) -> Option<u8> { None }\n}\nfn main() {}\n").map(|d| d.1.contains("not a member")), None, "declared members, a std trait");
+    assert_eq!(first("trait Sealed {\n    #[doc(hidden)]\n    type Buffer: Copy;\n}\nimpl Sealed for u8 {\n    type Buffer = u8;\n}\nfn main() {}\n"), None, "a member with an attribute");
+    assert_eq!(first("#[link(kind = \"wonderful_unicorn\")]\nextern \"C\" {}\nfn main() {}\n"), e(1, "malformed `link` attribute input"), "a kind rustc does not know, before the name");
+    // (E0197, E0084, E0777, E0184)
+    assert_eq!(first("struct Foo;\nunsafe impl Foo {}\nfn main() {}\n"), e(2, "inherent impls cannot be unsafe (E0197)"), "an unsafe inherent impl");
+    assert_eq!(first("unsafe trait U {}\nstruct Foo;\nunsafe impl U for Foo {}\nfn main() {}\n"), None, "an unsafe trait's impl");
+    assert_eq!(first("#[repr(i32)]\nenum Foo {}\nfn main() {}\n"), e(1, "unsupported representation for zero-variant enum (E0084)"), "a zero-variant enum's repr");
+    assert_eq!(first("#[repr(i32)]\nenum Foo { A }\nenum Bar {}\nfn main() {}\n"), None, "an enum with a variant, one with no repr");
+    assert_eq!(first("#[derive(\"Clone\")]\nstruct Foo;\nfn main() {}\n"), e(1, "expected path to a trait, found literal (E0777)"), "a literal in a derive");
+    assert_eq!(first("#[derive(Copy, Clone)]\nstruct Foo;\nimpl Drop for Foo {\n    fn drop(&mut self) {}\n}\nfn main() {}\n"), e(2, "the trait `Copy` cannot be implemented for this type; the type has a destructor (E0184)"), "Copy and Drop");
+}
+
+#[test]
+fn elided_lifetimes_and_foreign_bodies() {
+    // (E0726, and a fn with a body in an extern block, at the lines rustc 1.100 reports them)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, m: &str| Some((l, m.to_string()));
+    let lt = "implicit elided lifetime not allowed here (E0726)";
+    assert_eq!(first("trait MyTrait {}\nstruct Foo<'a> {\n    x: &'a u32,\n}\nimpl MyTrait for Foo {}\nfn main() {}\n"), e(5, lt), "the self type's lifetime");
+    assert_eq!(first("trait MyTrait<'a> {}\nimpl MyTrait for u32 {}\nfn main() {}\n"), e(2, lt), "the trait's lifetime");
+    assert_eq!(first("struct HasLifetime<'a>(&'a bool);\nasync fn error(lt: HasLifetime) {\n    if *lt.0 {}\n}\nfn main() {}\n"), e(2, lt), "an async fn's parameter");
+    assert_eq!(
+        first("trait MyTrait<'a> {}\nstruct Foo<'a>(&'a u8);\nimpl<'a> MyTrait<'a> for Foo<'a> {}\nimpl MyTrait<'_> for &Foo<'_> {}\nfn no_error(x: Foo) -> u8 { *x.0 }\nfn main() {}\n"),
+        None,
+        "lifetimes written, and a plain fn's elided one"
+    );
+    assert_eq!(first("extern \"C\" {\n    fn foo() -> i32 {\n        0\n    }\n}\nfn main() {}\n"), e(2, "incorrect function inside `extern` block"), "a foreign fn with a body");
+}
+
+#[test]
+fn type_parameter_counts_against_the_trait() {
+    // (E0049, at the impl's method as rustc 1.100)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, m: &str| Some((l, m.to_string()));
+    assert_eq!(
+        first("trait Foo {\n    fn foo<T: Default>(x: T) -> Self;\n}\nstruct Bar;\nimpl Foo for Bar {\n    fn foo(x: bool) -> Self { Bar }\n}\nfn main() {}\n"),
+        e(6, "associated function `foo` has 0 type parameters but its trait declaration has 1 type parameter (E0049)"),
+        "fewer"
+    );
+    assert_eq!(
+        first("trait Fuzz {\n    fn fuzz<A: Default, B>(&self, x: A, y: B);\n}\nstruct Baz;\nimpl Fuzz for Baz {\n    fn fuzz(&self, x: bool, y: bool) {}\n}\nfn main() {}\n"),
+        e(6, "method `fuzz` has 0 type parameters but its trait declaration has 2 type parameters (E0049)"),
+        "a method"
+    );
+    assert_eq!(first("trait Foo {\n    fn foo<T: Default>(x: T) -> T;\n}\nstruct Bar;\nimpl Foo for Bar {\n    fn foo<U: Default>(x: U) -> U { x }\n}\nfn main() {}\n"), None, "the same count");
+    assert_eq!(
+        first("trait Foo {\n    fn foo<T>();\n}\nstruct Bar;\nimpl Foo for Bar {\n    fn foo<const N: u8>() {}\n}\nfn main() {}\n").map(|d| d.1.contains("E0049")),
+        None,
+        "a const parameter for a type parameter: another error"
+    );
+}
+
+#[test]
+fn item_errors_at_the_part_rustc_points_at() {
+    // (E0072 at the type's name, E0746 at the return type, a fn's `static X: T;` at its line)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, m: &str| Some((l, m.to_string()));
+    assert_eq!(first("#[derive(Hash)]\npub enum Elem {\n    A(Elem),\n}\nfn main() {}\n"), e(2, "recursive type `Elem` has infinite size"), "past the derive");
+    assert_eq!(
+        first("pub trait R {}\nfn create(_: &()) ->\n    dyn R\n{\n    unimplemented!()\n}\nfn main() {}\n"),
+        e(3, "return type cannot be a trait object without pointer indirection (E0746)"),
+        "the return type's line"
+    );
+    assert_eq!(first("fn foo() {\n    static symbol: [u32];\n}\nfn main() {}\n").map(|d| d.0), Some(2), "a static without a body in a fn");
+}
+
+#[test]
+fn awaits_and_binders_where_rustc_points() {
+    // (E0728 at the `await`; a `for<..>` binder as rustc's parser reads it)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    assert_eq!(
+        first("fn main() {\n    async {\n        let _ = 1;\n    }.await\n}\n"),
+        Some((4, "`await` is only allowed inside `async` functions and blocks (E0728)".to_string())),
+        "the `await`'s line, not the next token's"
+    );
+    assert_eq!(first("type A = for<'a:> fn();\ntype B = for<'a, 'b> fn();\nfn main() {}\n"), None, "a binder's lifetimes, an empty bound");
+    assert_eq!(first("type A = for<,> fn();\nfn main() {}\n").map(|d| d.0), Some(1), "a comma alone");
+    // (rustc rejects a binder's bounds and type parameters after parsing: a later syntax error comes first)
+    assert_eq!(first("type A = for<'b, 'a: 'b> fn();\nfn main() {}\n"), Some((1, "bounds cannot be used in this context".to_string())), "a binder's bounds");
+    assert_eq!(first("type D = for<'a, T> fn();\nfn main() {}\n"), Some((1, "only lifetime parameters can be used in this context".to_string())), "a binder's type parameter");
+    assert_eq!(first("type A = for<'a: 'b> fn();\ntype B = for<,> fn();\nfn main() {}\n").map(|d| d.0), Some(2), "the later syntax error first");
+}
+
+#[test]
+fn macro_fragments_and_unit_patterns() {
+    // (a matcher's fragment specifier rustc does not know, E0533, at the lines rustc 1.100 reports them)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, m: &str| Some((l, m.to_string()));
+    assert_eq!(first("macro_rules! test {\n    ($wrong:id) => {};\n}\nfn main() {}\n"), e(2, "invalid fragment specifier `id`"), "an unknown fragment");
+    assert_eq!(
+        first("macro_rules! m {\n    ($($x:expr),* ; $t:ty, $p:pat_param, $l:lifetime) => { $x:id };\n}\nfn main() {}\n"),
+        None,
+        "known fragments, and the transcriber's text"
+    );
+    assert_eq!(first("fn main() {\n    macro_rules! m {\n        ($x:guard) => {};\n    }\n}\n"), e(3, "`guard` fragments in macro are unstable (E0658)"), "a gated fragment");
+    assert_eq!(first("pub mod break {\n}\nfn main() {}\n"), e(1, "expected identifier, found keyword `break`"), "a keyword for a module's name");
+    assert_eq!(first("mod breaks {\n    pub fn f() {}\n}\nfn main() { breaks::f(); }\n"), None, "a name a keyword starts");
+    assert_eq!(first("#![some_nonexistent_attribute]\nfn main() {}\n"), e(1, "cannot find attribute `some_nonexistent_attribute` in this scope"), "an unknown inner attribute");
+    assert_eq!(first("#![allow(dead_code)]\n#![recursion_limit = \"256\"]\n#![no_implicit_prelude]\nfn main() {}\n").map(|d| d.1.contains("cannot find attribute")), None, "known inner attributes");
+    assert_eq!(
+        first("enum E {\n    T(i32),\n    S { s: i32 },\n}\nfn f(e: E) -> u8 {\n    match e {\n        E::T => 0,\n        _ => 1,\n    }\n}\nfn main() {}\n"),
+        e(7, "expected unit struct, unit variant or constant, found tuple variant `E::T` (E0533)"),
+        "a tuple variant as a path pattern"
+    );
+}
+
+#[test]
+fn names_defined_twice_in_one_item_or_by_macro_export() {
+    // (E0428 of two variants, two foreign items, two `#[macro_export]` macros, as rustc 1.100)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, n: &str| Some((l, format!("the name `{n}` is defined multiple times (E0428)")));
+    assert_eq!(first("enum E {\n    A,\n    B,\n    A,\n}\nfn main() {}\n"), e(4, "A"), "two variants");
+    assert_eq!(first("fn main() {\n    enum E {\n        A,\n        A(u8),\n    }\n}\n"), e(4, "A"), "in a fn's enum");
+    assert_eq!(first("extern \"C\" {\n    fn foo();\n    pub\n    fn foo();\n}\nfn main() {}\n"), e(3, "foo"), "two foreign fns, at the `pub`");
+    assert_eq!(first("#[macro_export]\nmacro_rules! foo { () => {} }\n#[macro_export]\nmacro_rules! foo { () => {} }\nfn main() {}\n"), e(4, "foo"), "two exported macros");
+    assert_eq!(first("macro_rules! foo { () => {} }\nmacro_rules! foo { () => {} }\nfn main() { foo!(); }\n"), None, "a macro shadowing one, neither exported");
+}
+
+#[test]
+fn keyword_labels_and_limit_values() {
+    // (rustc 1.100's `eat_label` and limit attributes, at their place)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let kw = |l: usize, c: usize| Some((l, c, "labels cannot use keyword names".to_string()));
+    assert_eq!(first("fn main() {\n    'static: loop {}\n}\n"), kw(2, 5), "a label definition");
+    assert_eq!(first("fn main() {\n    'a: loop {\n        break '_;\n    }\n}\n"), kw(3, 15), "at the `break`");
+    assert_eq!(first("fn main() {\n    'a: loop {\n        continue 'while;\n    }\n}\n"), kw(3, 18), "at the `continue`");
+    assert_eq!(first("fn main() {\n    'r#break: loop {\n        break 'r#break;\n    }\n    'a: while false { continue 'a; }\n}\n"), None, "a raw name, and an ordinary one");
+    let lim = |l: usize| Some((l, 1, "`limit` must be a non-negative integer".to_string()));
+    assert_eq!(first("#![recursion_limit = \"-1\"]\nfn main() {}\n"), lim(1), "a negative limit");
+    assert_eq!(first("// a limit\n#![type_length_limit = \"\"]\nfn main() {}\n"), lim(2), "an empty one");
+    assert_eq!(first("#![recursion_limit = \"99999999999999999999999\"]\nfn main() {}\n"), lim(1), "one too large");
+    assert_eq!(first("#![recursion_limit = \"256\"]\nfn main() {}\n"), None, "a limit");
+}
+
+#[test]
+fn generic_parameter_defaults_where_rustc_rejects_them() {
+    // (rustc 1.100: a const parameter's default on a fn or an impl; a default before a parameter without one)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let here = |l: usize, c: usize| Some((l, c, "defaults for generic parameters are not allowed here".to_string()));
+    let trail = |l: usize, c: usize| Some((l, c, "generic parameters with a default must be trailing".to_string()));
+    assert_eq!(first("fn foo<const N: usize = 5>() {}\nfn main() {}\n"), here(1, 8), "a fn's, at the `const`");
+    assert_eq!(first("struct Foo<const N: usize>;\nimpl<const N: usize = 1> Foo<N> {}\nfn main() {}\n"), here(2, 6), "an impl's");
+    assert_eq!(first("struct S;\nimpl S {\n    fn f<const N: u8 = 1>() {}\n}\nfn main() {}\n"), here(3, 10), "a method's");
+    assert_eq!(first("struct A<T = u32, const N: usize> {\n    arg: T,\n}\nfn main() {}\n"), trail(1, 10), "a type parameter's");
+    assert_eq!(first("struct Foo<const N: u8 = 3, T>(T);\nfn main() {}\n"), trail(1, 18), "a const parameter's, at its name");
+    assert_eq!(first("trait Tr<T = u8, U> { fn f(&self, u: U) -> T; }\nfn main() {}\n"), trail(1, 10), "a trait's");
+    assert_eq!(first("struct P<'a, T = u8, const N: usize = 2>(&'a T);\nenum E<T, U = T> { A(T, U) }\nfn main() {}\n"), None, "trailing defaults");
+}
+
+/// The trait solver's `No` of a goal with no type parameter in it (`Vec<u8>: Foo` with `impl<T: Bar> Foo for Vec<T>`
+/// and no `u8: Bar`) is reported from a generic fn nothing calls: it holds whatever the fn's parameters are
+#[test]
+fn trait_solver_no_in_uncalled_generic_fn() {
+    let src = "trait Foo {}\ntrait Bar {}\nimpl<T: Bar> Foo for Vec<T> {}\nfn needs_foo<T: Foo>(_: T) {}\nfn hello<T>(_: T) {\n    needs_foo(Vec::<u8>::new());\n}\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0].line, 6, "{d:?}");
+    assert!(d[0].msg.contains("Vec<u8>: Foo") && d[0].msg.contains("not satisfied"), "{d:?}");
+    // (with `impl Bar for u8` the goal holds)
+    let ok = src.replace("trait Bar {}\n", "trait Bar {}\nimpl Bar for u8 {}\n");
+    assert!(s.check(&ok).is_empty());
+}
+
+/// An auto trait of a type parameter holds only by its bounds (also through a supertrait of the program's), and a
+/// struct is Send when its fields are, also when it contains itself (coinductive)
+#[test]
+fn trait_solver_auto_traits_of_type_parameters() {
+    let src = "fn is_send<T: Send>(_: T) {}\ntrait Shared: Send {}\nstruct List<T> { v: T, next: Option<Box<List<T>>> }\nfn by_sync<S: Sync>(s: S) {\n    is_send(s);\n}\nfn by_super<S: Shared>(s: S) {\n    is_send(s);\n}\nfn by_list<S: Send>(s: List<S>) {\n    is_send(s);\n}\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0].line, 5, "{d:?}");
+    assert!(d[0].msg.contains("cannot be sent between threads safely"), "{d:?}");
+}
+
+/// `-> impl Tr` of a scalar or `()` for std's traits the solver believes `implements` about: zustc accepts exactly
+/// what rustc accepts (the expected column is rustc 1.100.0's answer for each)
+#[test]
+fn trait_solver_opaque_std_traits_like_rustc() {
+    let cases: &[(&str, &str, bool)] = &[
+        ("1u8", "Copy", true),
+        ("1u8", "Clone", true),
+        ("1u8", "std::fmt::Debug", true),
+        ("1u8", "std::fmt::Display", true),
+        ("1u8", "Default", true),
+        ("1u8", "PartialEq", true),
+        ("1u8", "Eq", true),
+        ("1u8", "PartialOrd", true),
+        ("1u8", "Ord", true),
+        ("1u8", "std::hash::Hash", true),
+        ("1u8", "Send", true),
+        ("1u8", "Sync", true),
+        ("1i32", "Copy", true),
+        ("1i32", "Clone", true),
+        ("1i32", "std::fmt::Debug", true),
+        ("1i32", "std::fmt::Display", true),
+        ("1i32", "Default", true),
+        ("1i32", "PartialEq", true),
+        ("1i32", "Eq", true),
+        ("1i32", "PartialOrd", true),
+        ("1i32", "Ord", true),
+        ("1i32", "std::hash::Hash", true),
+        ("1i32", "Send", true),
+        ("1i32", "Sync", true),
+        ("1u64", "Copy", true),
+        ("1u64", "Clone", true),
+        ("1u64", "std::fmt::Debug", true),
+        ("1u64", "std::fmt::Display", true),
+        ("1u64", "Default", true),
+        ("1u64", "PartialEq", true),
+        ("1u64", "Eq", true),
+        ("1u64", "PartialOrd", true),
+        ("1u64", "Ord", true),
+        ("1u64", "std::hash::Hash", true),
+        ("1u64", "Send", true),
+        ("1u64", "Sync", true),
+        ("1.0f64", "Copy", true),
+        ("1.0f64", "Clone", true),
+        ("1.0f64", "std::fmt::Debug", true),
+        ("1.0f64", "std::fmt::Display", true),
+        ("1.0f64", "Default", true),
+        ("1.0f64", "PartialEq", true),
+        ("1.0f64", "Eq", false),
+        ("1.0f64", "PartialOrd", true),
+        ("1.0f64", "Ord", false),
+        ("1.0f64", "std::hash::Hash", false),
+        ("1.0f64", "Send", true),
+        ("1.0f64", "Sync", true),
+        ("true", "Copy", true),
+        ("true", "Clone", true),
+        ("true", "std::fmt::Debug", true),
+        ("true", "std::fmt::Display", true),
+        ("true", "Default", true),
+        ("true", "PartialEq", true),
+        ("true", "Eq", true),
+        ("true", "PartialOrd", true),
+        ("true", "Ord", true),
+        ("true", "std::hash::Hash", true),
+        ("true", "Send", true),
+        ("true", "Sync", true),
+        ("'a'", "Copy", true),
+        ("'a'", "Clone", true),
+        ("'a'", "std::fmt::Debug", true),
+        ("'a'", "std::fmt::Display", true),
+        ("'a'", "Default", true),
+        ("'a'", "PartialEq", true),
+        ("'a'", "Eq", true),
+        ("'a'", "PartialOrd", true),
+        ("'a'", "Ord", true),
+        ("'a'", "std::hash::Hash", true),
+        ("'a'", "Send", true),
+        ("'a'", "Sync", true),
+        ("()", "Copy", true),
+        ("()", "Clone", true),
+        ("()", "std::fmt::Debug", true),
+        ("()", "std::fmt::Display", false),
+        ("()", "Default", true),
+        ("()", "PartialEq", true),
+        ("()", "Eq", true),
+        ("()", "PartialOrd", true),
+        ("()", "Ord", true),
+        ("()", "std::hash::Hash", true),
+        ("()", "Send", true),
+        ("()", "Sync", true),
+        ("1usize", "Copy", true),
+        ("1usize", "Clone", true),
+        ("1usize", "std::fmt::Debug", true),
+        ("1usize", "std::fmt::Display", true),
+        ("1usize", "Default", true),
+        ("1usize", "PartialEq", true),
+        ("1usize", "Eq", true),
+        ("1usize", "PartialOrd", true),
+        ("1usize", "Ord", true),
+        ("1usize", "std::hash::Hash", true),
+        ("1usize", "Send", true),
+        ("1usize", "Sync", true),
+        ("1i128", "Copy", true),
+        ("1i128", "Clone", true),
+        ("1i128", "std::fmt::Debug", true),
+        ("1i128", "std::fmt::Display", true),
+        ("1i128", "Default", true),
+        ("1i128", "PartialEq", true),
+        ("1i128", "Eq", true),
+        ("1i128", "PartialOrd", true),
+        ("1i128", "Ord", true),
+        ("1i128", "std::hash::Hash", true),
+        ("1i128", "Send", true),
+        ("1i128", "Sync", true),
+        ("1.0f32", "Copy", true),
+        ("1.0f32", "Clone", true),
+        ("1.0f32", "std::fmt::Debug", true),
+        ("1.0f32", "std::fmt::Display", true),
+        ("1.0f32", "Default", true),
+        ("1.0f32", "PartialEq", true),
+        ("1.0f32", "Eq", false),
+        ("1.0f32", "PartialOrd", true),
+        ("1.0f32", "Ord", false),
+        ("1.0f32", "std::hash::Hash", false),
+        ("1.0f32", "Send", true),
+        ("1.0f32", "Sync", true),
+    ];
+    let mut bad = vec![];
+    for &(v, tr, ok) in cases {
+        let src = format!("fn f() -> impl {tr} {{ {v} }}\nfn main() {{ let _ = f(); }}\n");
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        let d = s.check(&src);
+        // (a no is the bound's own error, naming the trait: not another error of the program)
+        let names_bound = |m: &str| m.contains(tr.rsplit("::").next().unwrap_or(tr)) && (m.contains("not satisfied") || m.contains("E0277"));
+        if d.is_empty() != ok || (!ok && !d.iter().any(|x| names_bound(&x.msg))) {
+            bad.push(format!("{v}: {tr}: rustc {ok}, zustc {d:?}"));
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+/// A type parameter is Copy only by its bounds (a method's own where clause among them): a call needing it from a
+/// method without one is E0277, reported from the generic method nothing calls
+#[test]
+fn trait_solver_placeholder_lacks_copy() {
+    let src = "fn require_copy<T: Copy>(_x: T) {}\nstruct Bar<T> {\n    x: T,\n}\nimpl<T> Bar<T> {\n    fn needs_copy(self) where T: Copy {\n        require_copy(self.x);\n    }\n    fn fails_copy(self) {\n        require_copy(self.x);\n    }\n}\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0].line, 10, "{d:?}");
+    assert!(d[0].msg.contains("`T: Copy` is not satisfied"), "{d:?}");
+}
+
+/// `b.clone()` of a Box whose integer literal is not settled yet keeps it open for what the clone must be
+/// (`Box<isize>`), and a clone coerced to a trait object does not make the receiver one
+#[test]
+fn clone_of_box_keeps_its_literal_open() {
+    let src = "#[derive(Clone)]\nstruct B1;\ntrait A {}\nimpl A for B1 {}\nstruct Holder { a: Box<isize> }\nfn main() {\n    let k = Box::new(22);\n    let h = Holder { a: k.clone() };\n    let v: Box<_> = Box::new(B1);\n    let _c: Box<dyn A> = v.clone();\n    let _ = (h.a, k, v);\n}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert!(d.is_empty(), "{d:?}");
+}
+
+/// A struct with an unsized tail (`Foo<[u8]>`): `&Foo<[u8; 3]>` coerces to it (through a let, a generic call, a
+/// box), the literal's elements take the slice's element type, and a pattern on the pointee checks
+#[test]
+fn dst_struct_tail_coercions_check() {
+    let src = "struct Foo<T: ?Sized> { a: i32, inner: T }\nfn g<T: Copy>(x: &Foo<[T]>) -> T { x.inner[0] }\nfn main() {\n    let f: &Foo<[u8]> = &Foo { a: 32, inner: [1, 2, 3] };\n    let Foo { a, inner } = f;\n    let _ = (a, inner.len(), g(f));\n    let _: u8 = g(&Foo { a: 0, inner: [1u8, 2] });\n    let b: Box<Foo<[u8; 2]>> = Box::new(Foo { a: 1, inner: [4, 5] });\n    let b: Box<Foo<[u8]>> = b;\n    let _ = b.inner.len();\n}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert!(d.is_empty(), "{d:?}");
+}
+
+/// A method's own `where Self: Pair<u8, u16> + Parent` (nested commas) gives `Self: Parent`; an uninferred const
+/// argument takes the value a bound meets, so the impl's where clause on it is checked with that value
+#[test]
+fn review_where_self_nested_and_const_refined() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let src = "trait Parent { type X; }\ntrait Pair<A, B> {}\ntrait Child {\n    fn get(&self) -> <Self as Parent>::X where Self: Pair<u8, u16> + Parent;\n}\nfn main() {}\n";
+    assert!(s.check(src).is_empty(), "{:?}", s.check(src));
+    let src = "struct Const<const N: usize>;\ntrait Bar<const N: usize> {}\nimpl Bar<3> for () {}\ntrait Foo<const N: usize> {}\nimpl<const N: usize> Foo<N> for Const<N> where (): Bar<N> {}\nfn f(_: impl Foo<3>) {}\nfn main() { f(Const); }\n";
+    assert!(s.check(src).is_empty(), "{:?}", s.check(src));
+}
+
+/// Third review of #128, each checked against rustc: a trait's own `where Self: Parent` is a supertrait for
+/// `<Self as Parent>::A`; `&T` (T: Sized) and `&Tail<[u8]>` do not overlap; a std trait written as a path
+/// (`core::fmt::Debug`) is that trait; an impl's `-> impl Tr` whose arms all name one type is checked; an unsized
+/// field read by value is E0277
+#[test]
+fn review_three_cases() {
+    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    for src in [
+        "trait Parent { type A; }\ntrait Child where Self: Parent { fn get(&self) -> <Self as Parent>::A; }\nfn main() {}\n",
+        "struct Tail<T: ?Sized>(T);\ntrait Flag {}\nimpl<T> Flag for &T {}\nimpl Flag for &Tail<[u8]> {}\nfn main() {}\n",
+        "trait Local {}\nstruct S;\nimpl Local for S where u8: core::fmt::Debug {}\nfn need<X: Local>(_: X) {}\nfn main() { need(S); }\n",
+        "trait Parent {}\ntrait Child: Parent {}\nstruct W<T>(T);\nimpl<T: Copy> Parent for W<T> {}\nimpl<T> Child for W<T> where W<T>: Parent {}\nfn main() {}\n",
+        "fn main() { let a = vec![1.0]; let b = vec![1.0f32]; assert_eq!(a, b); }\n",
+    ] {
+        let d = check(src);
+        assert!(d.is_empty(), "{src}\n{d:?}");
+    }
+    // (a predicate on another subject gives nothing about the self type: `T: Parent` is not `W<T>: Parent`)
+    let d = check("trait Parent {}\ntrait Child: Parent {}\nstruct W<T>(T);\nimpl<T: Copy> Parent for W<T> {}\nimpl<T> Child for W<T> where T: Parent {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].msg.contains("Parent"), "{d:?}");
+    let d = check("trait Local {}\nstruct S;\nfn f(b: bool) -> impl Local { if b { S } else { S } }\nfn main() { let _ = f(true); }\n");
+    assert!(d.len() == 1 && d[0].msg.contains("S: Local"), "{d:?}");
+    let d = check("struct S<T: ?Sized> { a: u8, tail: T }\nfn main() { let r: &S<[u8]> = &S { a: 1, tail: [1, 2] }; let _m = r.tail; let _ = r.a; }\n");
+    assert!(d.len() == 1 && d[0].msg.contains("cannot be known at compilation time"), "{d:?}");
+}
+
+/// Fourth review of #128, each checked against rustc: `size_of_val` of a raw pointer and `drop_in_place` of a
+/// `*const` are E0308; a tail `if` whose arms are `S` and a call returning `S` is checked as one `S`; a qualified
+/// projection whose const argument zustc cannot evaluate takes the one impl that fits, and is not the first impl by
+/// self type when several do
+#[test]
+fn review_four_cases() {
+    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let d = check("fn main() { let a = [1u8, 2, 3]; let p: *const [u8] = &a; let _ = std::mem::size_of_val(p); }\n");
+    assert!(d.len() == 1 && d[0].msg.contains("mismatched types"), "{d:?}");
+    let d = check("struct Tail<T: ?Sized>(u8, T);\nfn main() { let b: Box<Tail<[u8]>> = Box::new(Tail(1, [1, 2])); let p: *const Tail<[u8]> = &*b; unsafe { std::ptr::drop_in_place(p); } }\n");
+    assert!(d.len() == 1 && d[0].msg.contains("mismatched types"), "{d:?}");
+    let d = check("trait Local {}\nstruct S;\nfn make_s() -> S { S }\nfn f(b: bool) -> impl Local { if b { S } else { make_s() } }\nfn main() { let _ = f(true); }\n");
+    assert!(d.len() == 1 && d[0].msg.contains("S: Local"), "{d:?}");
+    let one = "trait Pick<const N: usize> { type Out; }\nstruct S;\nimpl Pick<2> for S { type Out = u8; }\nfn main() { let _x: <S as Pick<{ match true { true => 2, false => 3 } }>>::Out = 0u8; }\n";
+    let d = check(one);
+    assert!(d.is_empty(), "{d:?}");
+    let two = "trait Pick<const N: usize> { type Out; }\nstruct S;\nimpl Pick<3> for S { type Out = u64; }\nimpl Pick<2> for S { type Out = u8; }\nfn main() { let _x: <S as Pick<{ match true { true => 2, false => 3 } }>>::Out = 0; }\n";
+    let d = check(two);
+    assert!(d.len() == 1 && d[0].msg.contains("cannot be evaluated"), "{d:?}");
+    // (an impl whose trait argument is not resolved (`{ <u8 as K>::N }`, 2) may be the one: not the other impl)
+    let unres = "trait K { const N: usize; }\nimpl K for u8 { const N: usize = 2; }\ntrait Pick<const N: usize> { type Out; }\nstruct S;\nimpl Pick<3> for S { type Out = u64; }\nimpl Pick<{ <u8 as K>::N }> for S { type Out = u8; }\nfn main() { let _x: <S as Pick<{ match true { true => 2, false => 3 } }>>::Out = 0; }\n";
+    let d = check(unres);
+    assert!(d.len() == 1 && d[0].msg.contains("cannot be evaluated"), "{d:?}");
+}
+
 /// Projections as normalizes-to goals (issue #2 step 3), each checked against rustc 1.97:
 /// - a bound's bindings (`T: Tr<A = u32>`): `<t as Tr>::A`, by Tr's impls, must be the bound type (E0271);
 /// - where clauses on a projection (`where T::A: Bar`, `where <T as Tr>::A: Bar`) or another type (`where W<T>:
@@ -1175,4 +2928,197 @@ fn projections_are_goals() {
     // (an impl's associated type against its trait's bounds for it)
     bad("trait Bar {}\ntrait Tr { type A: Bar; }\nimpl Tr for u8 { type A = u16; }\nfn main() {}", "`u16: Bar`");
     ok("trait Bar {}\nimpl Bar for u16 {}\ntrait Tr { type A: Bar; }\nimpl Tr for u8 { type A = u16; }\nfn main() {}");
+}
+
+#[test]
+fn async_main_and_test_attributes_where_rustc_rejects_them() {
+    // (rustc 1.100: E0752 at the fn; the test macro's error at the `#[test]` on what is no free fn, `--test` or not)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(first("async fn main() {}\n"), Some((1, 1, "`main` function is not allowed to be `async` (E0752)".to_string())), "async main");
+    assert_eq!(first("#![crate_type = \"lib\"]\npub async fn main() {}\n"), None, "a library's async fn named main");
+    let t = |l: usize, c: usize| Some((l, c, "the `test` attribute may only be used on a free function".to_string()));
+    assert_eq!(first("struct S;\nimpl S {\n    #[test]\n    fn new() {}\n}\nfn main() {}\n"), t(3, 5), "a method");
+    assert_eq!(first("#[test]\nstruct A;\nfn main() {}\n"), t(1, 1), "a struct");
+    assert_eq!(first("#[derive(Clone)]\n#[test]\nconst X: u8 = 1;\nfn main() {}\n"), t(2, 1), "a const, after another attribute");
+    assert_eq!(first("fn main() {\n    #[test]\n    struct A5(u32, u8);\n}\n").map(|d| (d.0, d.2)), t(2, 5).map(|d| (d.0, d.2)), "an item in a fn body, at its line");
+    assert_eq!(first("#[test]\nfn t() {}\n#[test]\npub(crate) unsafe extern \"C\" fn u() {}\nmacro_rules! m { () => {} }\nfn main() {}\n"), None, "free fns");
+}
+
+#[test]
+fn macro_definitions_rustc_rejects_and_rules_with_doc_comments() {
+    // (rustc 1.100 reads each `macro_rules!` definition, used or not: no rule, a matcher outside delimiters, a rule cut
+    // short; a rule's doc comment is a warning, and the rule after it is read)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, m: &str| Some((l, m.to_string()));
+    assert_eq!(first("fn main() {}\n\nmacro_rules! test {}\n"), e(3, "macros must contain at least one rule"), "no rule");
+    assert_eq!(first("macro_rules! foo()\nfn main() {}\n"), e(1, "macros that expand to items must be delimited with braces or followed by a semicolon"), "parentheses, no `;`");
+    assert_eq!(first("macro_rules! b {\n    0 => {}\n}\nfn main() {}\n"), e(2, "invalid macro matcher; matchers must be contained in balanced delimiters"), "a bare matcher");
+    assert_eq!(first("macro_rules! a { {} => }\nfn main() {}\n"), e(1, "macro definition ended unexpectedly"), "no body");
+    assert_eq!(first("macro_rules! e {\n    {}\n}\nfn main() {}\n"), e(2, "expected `=>`, found end of macro arguments"), "no `=>`");
+    assert_eq!(first("macro_rules! m {\n    /// the empty one\n    () => { 1 };\n    /// a value\n    ($x:expr) => { $x };\n}\nfn main() { let _ = m!() + m!(2); }\n"), None, "doc comments on rules");
+}
+
+#[test]
+fn items_of_one_name_in_two_blocks_of_a_fn() {
+    // (each block's item is its own: moved out of the fn, they are named apart)
+    let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+    let src = "fn main() {\n    {\n        struct Bar { x: u8 }\n        let _ = Bar { x: 1 };\n    }\n    {\n        struct Bar { y: u16 }\n        let b = Bar { y: 2 };\n        let _ = b.y;\n    }\n    if true {\n        enum E { A }\n        let _ = E::A;\n    } else {\n        enum E { B }\n        let _ = E::B;\n    }\n}\n";
+    assert_eq!(s.check(src).first().map(|d| (d.line, d.msg.clone())), None);
+    // (an `unsafe fn` in a body is moved out too: it was left there, "nested items are not supported")
+    let src = "fn main() {\n    unsafe fn g(x: u8) -> u8 {\n        x + 1\n    }\n    let _ = unsafe { g(1) };\n}\n";
+    assert_eq!(s.check(src).first().map(|d| (d.line, d.msg.clone())), None, "an unsafe fn in a body");
+    // (and one with other qualifiers: `async fn`, `const fn`, `extern "C" fn`)
+    let src = "fn main() {\n    async fn a() {}\n    const fn c(x: u8) -> u8 {\n        x + 1\n    }\n    extern \"C\" fn e(x: u8) -> u8 {\n        x\n    }\n    const K: u8 = c(1);\n    let _ = (a(), K, e(2));\n}\n";
+    assert_eq!(s.check(src).first().map(|d| (d.line, d.msg.clone())), None, "fns with qualifiers in a body");
+}
+
+#[test]
+fn literals_and_comments_a_file_ends_in() {
+    // (rustc 1.100's lexer errors at the literal's or the comment's start, before the delimiters it leaves open)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    assert_eq!(first("fn main() {\n    let s = \"abc;\n}\n"), e(2, 13, "unterminated double quote string (E0765)"), "a string");
+    assert_eq!(first("fn main() {\n    let s = r##\"abc\"#;\n}\n"), e(2, 13, "unterminated raw string (E0748)"), "a raw string");
+    assert_eq!(first("fn main() {\n    let s = b\"abc;\n}\n"), e(2, 13, "unterminated double quote byte string (E0766)"), "a byte string");
+    assert_eq!(first("fn main() {\n    /* a /* b */\n}\n"), e(2, 5, "unterminated block comment (E0758)"), "a block comment");
+    assert_eq!(first("fn main() {\n    let c = '\"'; let l: &'static str = \"}\"; let r = r#\"\"\"#;\n").map(|d| d.2), Some("this file contains an unclosed delimiter".to_string()), "closed literals: the delimiter's error");
+}
+
+#[test]
+fn a_struct_field_without_its_comma() {
+    // (rustc 1.100: right after the field, where the comma goes)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(first("pub struct S {\n    pub foo: u32\n    pub bar: u32\n}\nfn main() {}\n"), Some((2, 17, "expected `,`, or `}`, found keyword `pub`".to_string())));
+    assert_eq!(first("struct F {\n    owo: bool\n    #[allow(unused)]\n    uwu: bool,\n}\nfn main() {}\n"), Some((2, 14, "expected `,`, or `}`, found `#`".to_string())));
+    assert_eq!(first("struct G { a: u8 b: u8 }\nfn main() {}\n"), Some((1, 17, "expected `,`, or `}`, found `b`".to_string())));
+    assert_eq!(first("struct H { a: u8, b: Vec<u8> }\nfn main() {}\n"), None);
+}
+
+#[test]
+fn const_and_static_items_without_a_type() {
+    // (rustc 1.100: right after the name, or after its colon)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, kw: &str| Some((l, c, format!("missing type for `{kw}` item")));
+    assert_eq!(first("const A = 1;\nfn main() {}\n"), e(1, 8, "const"), "no colon");
+    assert_eq!(first("const _A: = 123;\nfn main() {}\n"), e(1, 10, "const"), "a colon");
+    assert_eq!(first("static B = 2;\nfn main() {}\n"), e(1, 9, "static"), "a static");
+    assert_eq!(first("fn main() {\n    const FOO = \"hello\";\n    let _ = FOO;\n}\n").map(|d| (d.0, d.2)), e(2, 0, "const").map(|d| (d.0, d.2)), "in a fn body, at its line");
+    assert_eq!(first("const A: u8 = 1;\nstatic B: u8 = 2;\nfn main() {}\n"), None, "with types");
+}
+
+#[test]
+fn attributes_with_no_item_after_them_in_an_impl() {
+    // (rustc 1.100: "expected item after attributes", at the first)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(first("struct Foo;\nimpl Foo {\n    fn foo() {}\n    #[inline]\n    #[allow(dead_code)]\n}\nfn main() {}\n"), Some((4, 5, "expected item after attributes".to_string())));
+    assert_eq!(first("struct Foo;\nimpl Foo {\n    #[inline]\n    fn foo() {}\n}\nfn main() { Foo::foo(); }\n"), None);
+}
+
+#[test]
+fn abis_no_one_has_and_raw_pointers_without_their_keyword() {
+    // (rustc 1.100: E0703 at the ABI's string; a raw pointer type's `const` or `mut`, at the `*`)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(first("pub extern \"fictional\" fn lol() {}\nfn main() {}\n"), Some((1, 12, "invalid ABI: found `fictional` (E0703)".to_string())));
+    assert_eq!(first("extern \"\\x43\" fn foo() {}\nextern \"C-unwind\" { fn bar(); }\nfn main() {}\n"), None, "an escaped C, C-unwind");
+    let p = |l: usize, c: usize| Some((l, c, "expected `mut` or `const` keyword in raw pointer type".to_string()));
+    assert_eq!(first("fn foo(_: *()) {}\nfn main() {}\n"), p(1, 11), "a bare pointer");
+    assert_eq!(first("fn main() {\n    let x = 5u8;\n    let p: *const u8 = &x;\n    let _d: **const u8 = &p;\n}\n"), p(4, 13), "a pointer to a pointer");
+}
+
+#[test]
+fn extern_statics_in_a_static_value() {
+    // (rustc 1.100's E0080 for the value, at its line; a fn reads one in `unsafe`)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    assert_eq!(first("extern \"C\" {\n    pub static symbol: u32;\n}\nstatic CRASH: u32 = symbol;\nfn main() {}\n"), Some((4, "cannot access extern static `symbol` (E0080)".to_string())));
+    assert_eq!(first("extern \"C\" {\n    static symbol: u32;\n}\nstatic OK: u32 = 1;\nfn main() {\n    let _ = unsafe { symbol };\n}\n"), None);
+    // (its address is no read; a read through it is, `*&X`)
+    assert_eq!(first("extern \"C\" {\n    static Q: [u8; 0];\n}\nstatic R: &'static [u8; 0] = unsafe { &Q };\nfn main() {}\n"), None, "its address");
+    assert_eq!(first("extern \"C\" {\n    static Q: u32;\n}\npub static B: u32 = *&Q;\nfn main() {}\n").map(|d| d.0), Some(4), "a read through its address");
+}
+
+#[test]
+fn macro_parameters_no_matcher_binds() {
+    // (rustc 1.100, where the rule is used: at the `$name` in its body; an inner `macro_rules!`'s own `$x` is fine)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    assert_eq!(first("macro_rules! m {\n    (begin $ard:ident end) => {\n        [$arg]\n    };\n}\nfn main() {\n    let x = 1;\n    let _ = m![begin x end];\n}\n"), Some((3, "cannot find macro parameter `$arg` in this scope".to_string())), "a typo");
+    assert_eq!(first("macro_rules! m {\n    (begin $($ard:ident),* end) => {\n        [$($arg),*]\n    };\n}\nfn main() {\n    let x = 1;\n    let _ = m![begin x end];\n}\n"), Some((3, "attempted to repeat an expression containing no syntax variables matched as repeating at this depth".to_string())), "a repetition");
+    assert_eq!(first("macro_rules! outer {\n    ($n:ident) => {\n        macro_rules! $n {\n            ($x:expr) => { $x + 1 };\n        }\n    };\n}\nouter!(inner);\nfn main() {\n    let _ = inner!(2);\n}\n"), None, "an inner macro's own parameter");
+}
+
+#[test]
+fn a_for_loop_over_a_struct_with_its_own_next() {
+    // (rustc 1.100: E0277 at the expression; an Iterator impl's `next` is fine)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let s = "struct M { x: isize }\nimpl M {\n    fn next(&mut self) -> Option<isize> { Some(self.x) }\n}\nfn main() {\n    let bogus = M { x: 1 };\n    for x in bogus {\n        let _ = x;\n    }\n}\n";
+    assert_eq!(first(s), Some((7, 14, "`M` is not an iterator (E0277)".to_string())));
+    let ok = "struct C(u8);\nimpl Iterator for C {\n    type Item = u8;\n    fn next(&mut self) -> Option<u8> { None }\n}\nfn main() {\n    for x in C(3) { let _ = x; }\n}\n";
+    assert_eq!(first(ok), None);
+}
+
+#[test]
+fn renamed_groups_and_derives_by_std_paths() {
+    // (rustc 1.100: a group or a glob has no name to rename; a derive of a name std's root does not have. `extern "C"
+    // mod foo;` is srcmap's, missing_mod_tests)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let m = "mod foo {\n    pub fn bar() {}\n}\nfn main() {}\n";
+    assert_eq!(first(&format!("use foo::{{bar}} as baz;\n{m}")), Some((1, 16, "expected `;`, found keyword `as`".to_string())));
+    assert_eq!(first(&format!("use foo::* as baz;\n{m}")), Some((1, 12, "expected `;`, found keyword `as`".to_string())));
+    assert_eq!(first(&format!("use foo::{{bar as baz}};\n{m}")).map(|e| e.2).filter(|e| e.contains("found keyword")), None);
+    let e = first("#[derive(\n    core::RustcDecodable,\n)]\nstruct S;\nfn main() {}\n");
+    assert_eq!(e.map(|e| (e.0, e.2)), Some((2, "cannot find `RustcDecodable` in `core`".to_string())));
+    assert_eq!(first("#[derive(core::clone::Clone, ::std::marker::Copy)]\nstruct S;\nfn main() {}\n"), None);
+}
+
+#[test]
+fn macro_matchers_rustc_rejects_what_follows_a_fragment_in_and_names_bound_twice() {
+    // (rustc 1.100's check_matcher: `expr` is followed by `=>` `,` `;` only, `ty` / `path` by a few more, `pat` by
+    // `|` before edition 2021 only; a name bound twice in one matcher)
+    let first = |src: &str, edition: u16| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, m: &str| Some((l, m.to_string()));
+    assert_eq!(first("macro_rules! m {\n    ($e:expr +) => ()\n}\nfn main() {}\n", 2021), e(2, "`$e:expr` is followed by `+`, which is not allowed for `expr` fragments"));
+    assert_eq!(first("macro_rules! m {\n    ( $a:expr $($b:tt)* ) => { };\n}\nfn main() {}\n", 2021), e(2, "`$a:expr` is followed by `$b:tt`, which is not allowed for `expr` fragments"));
+    assert_eq!(first("macro_rules! m {\n    ($($ty:ty)-+) => ();\n}\nfn main() {}\n", 2021), e(2, "`$ty:ty` is followed by `-`, which is not allowed for `ty` fragments"));
+    let or = "macro_rules! m { ($x:pat | $y:pat) => {} }\nfn main() {}\n";
+    assert_eq!(first(or, 2021), e(1, "`$x:pat` is followed by `|`, which is not allowed for `pat` fragments"));
+    assert_eq!(first(or, 2018), None);
+    let ok = "macro_rules! m {\n    ($e:expr => $t:ty, $p:path { $b:block }) => {};\n    ($($e:expr),* ; $($t:ty)|*) => {};\n    ($($x:pat_param)|+ if $c:expr) => {};\n}\nfn main() {}\n";
+    assert_eq!(first(ok, 2021), None);
+    assert_eq!(first("macro_rules! m {\n    ($a:ident, $($a:ident),*) => {};\n}\nfn main() {}\n", 2021), e(2, "duplicate matcher binding"));
+    assert_eq!(first("macro_rules! m {\n    ($a:ident) => {};\n    ($a:path) => {};\n}\nfn main() {}\n", 2021), None);
 }
