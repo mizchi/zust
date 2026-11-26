@@ -205,7 +205,7 @@ Any other editor works too, as long as its client can start an arbitrary command
 | publishDiagnostics | yes (diagnostics from zustc's check; code zustc cannot handle may get false diagnostics) |
 | semanticTokens / inlayHint / codeAction / formatting | no |
 
-Documents are synced in full: didChange receives the whole text.
+Documents are synced incrementally: didChange receives the ranges an edit changed (or the whole text, if the client sends it).
 
 ### Configuration (environment variables)
 

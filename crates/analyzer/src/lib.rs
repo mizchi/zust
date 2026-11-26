@@ -1,4 +1,4 @@
-//! A minimal LSP server (stdio). Supported: initialize / didOpen / didChange (full sync) / didClose /
+//! A minimal LSP server (stdio). Supported: initialize / didOpen / didChange (incremental sync) / didClose /
 //! shutdown / exit / textDocument/documentSymbol / workspace/symbol / textDocument/definition / textDocument/references /
 //! textDocument/hover / textDocument/completion.
 //! Runs [`Session::check`] on every open / change and returns publishDiagnostics.
@@ -123,7 +123,7 @@ impl Server {
                     }));
                 }
                 vec![reply(json!({
-                    "capabilities": { "textDocumentSync": 1, "documentSymbolProvider": true, "workspaceSymbolProvider": true, "definitionProvider": true, "referencesProvider": true,
+                    "capabilities": { "textDocumentSync": 2, "documentSymbolProvider": true, "workspaceSymbolProvider": true, "definitionProvider": true, "referencesProvider": true,
                         "hoverProvider": true, "completionProvider": { "triggerCharacters": [".", ":"] },
                         "renameProvider": { "prepareProvider": true }, "signatureHelpProvider": { "triggerCharacters": ["(", ","] }, "documentHighlightProvider": true },
                     "serverInfo": { "name": "zustc", "version": env!("CARGO_PKG_VERSION") }
@@ -187,15 +187,30 @@ impl Server {
             }
             "textDocument/didChange" => {
                 let uri = p["textDocument"]["uri"].as_str().unwrap_or("").to_string();
-                // Full sync (textDocumentSync = 1), so the last change is the full text
-                let Some(text) = p["contentChanges"]
-                    .as_array()
-                    .and_then(|a| a.last())
-                    .and_then(|c| c["text"].as_str())
-                else {
+                let Some(changes) = p["contentChanges"].as_array().filter(|a| !a.is_empty()) else {
                     return vec![];
                 };
-                vec![self.diagnose(uri, text, p["textDocument"]["version"].clone())]
+                // Incremental sync (textDocumentSync = 2): each change replaces its range (UTF-16 columns) of the text
+                // the one before it left, in order; one without a range is the full text. (An edit sends what it
+                // changed, not the whole file: the message of a large file is no longer read whole per keystroke)
+                let mut text: Option<String> = None;
+                for c in changes {
+                    let Some(t) = c["text"].as_str() else { continue };
+                    let r = &c["range"];
+                    if r.is_null() {
+                        text = Some(t.to_string());
+                        continue;
+                    }
+                    let cur = text.get_or_insert_with(|| self.docs.get(&uri).map(|d| d.text.clone()).unwrap_or_default());
+                    let at = |q: &Value| {
+                        let (line, ch) = (q["line"].as_u64().unwrap_or(0) as u32, q["character"].as_u64().unwrap_or(0) as u32);
+                        offset(cur, line, ch).unwrap_or(cur.len())
+                    };
+                    let (a, b) = (at(&r["start"]), at(&r["end"]));
+                    cur.replace_range(a..b.max(a), t);
+                }
+                let Some(text) = text else { return vec![] };
+                vec![self.diagnose(uri, &text, p["textDocument"]["version"].clone())]
             }
             "textDocument/didClose" => {
                 let uri = p["textDocument"]["uri"].as_str().unwrap_or("").to_string();
