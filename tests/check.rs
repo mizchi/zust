@@ -3920,6 +3920,23 @@ fn a_transmute_of_fn_pointers_that_pass_differently_and_a_constant_array_s_len()
 }
 
 #[test]
+fn a_method_of_a_trait_implemented_for_unit() {
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    // (a trait of the root's implemented for `()`: `().b()`, `B::b(())`, through a `&()`)
+    let src = "trait B {\n    fn b(self) -> u8;\n    fn r(&self) -> u8 {\n        4\n    }\n}\nimpl B for () {\n    fn b(self) -> u8 {\n        7\n    }\n}\nfn f(x: &()) -> u8 {\n    x.r() + x.b()\n}\nfn main() {\n    let _ = ().b() + B::b(()) + f(&());\n}\n";
+    assert_eq!(first(src), None);
+    // (more type arguments than the method has: E0107 at the method)
+    let src = "pub trait Ice {\n    fn f(&self, _: ());\n}\nimpl Ice for () {\n    fn f(&self, _: ()) {}\n}\nfn main() {\n    ().f::<()>(());\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.2.contains("method takes 0 generic arguments but 1 generic argument was supplied"))), Some((8, true)));
+    // (an opaque result where a `let` writes a type: E0308)
+    let src = "use std::fmt::Display;\ntrait Foo {\n    fn bar(&self) -> impl Display;\n}\nimpl Foo for () {\n    fn bar(&self) -> impl Display {\n        \"Hello\"\n    }\n}\nfn main() {\n    let _x: &str = ().bar();\n    println!(\"{}\", ().bar());\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.2.contains("found opaque type"))), Some((11, true)));
+}
+
+#[test]
 fn a_mut_accessor_through_a_shared_slice_and_a_macro_call_after_a_string_with_slashes() {
     let first = |src: &str| {
         let mut s = Session::new(Options { jobs: 1, ..Options::default() });

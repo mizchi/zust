@@ -2146,6 +2146,55 @@ impl Cx<'_> {
     }
 
     /// プリミティブ型への trait 実装のメソッド (`impl Tr for u32` の `x.m()`)
+    #[cold]
+    #[inline(never)]
+    fn unit_trait_method(&mut self, recv: &Expr, by_ref: bool, method: &str, (gargs, margs): (&[GArg], &[Expr]), msp: crate::parse::Span, expected: Option<Ty>, written: bool) -> R<Option<V>> {
+        // (only an impl for `()` itself, or a default of a trait implemented for it: a blanket impl's method is left to
+        // the method call, which checks the impl's bounds)
+        let Some(pm) = self.prog.prim_method(Ty::Unit, method).filter(|&pm| self.prog.blanket.get(method) != Some(&pm)) else { return Ok(None) };
+        let id = self.prog.prim_self_method(Ty::Unit, method).unwrap_or(pm);
+        let sig = &self.prog.sigs[id as usize];
+        let tr = match sig.impl_trait.as_deref() {
+            Some(it) => it.split('<').next().unwrap_or(it).trim().to_string(),
+            // (a trait's default method: the trait is its name's path)
+            None => match self.prog.names[id as usize].rsplit_once("::") {
+                Some((tr, _)) if self.prog.traits.contains_key(tr) => tr.to_string(),
+                _ => return Ok(None),
+            },
+        };
+        // (a `&()` receiver: as it is to a `&self`, `*recv` to a `self`)
+        // (a trait declared at the root, which no type of the program's shares a name with: one in a module or a body is
+        // in scope only where it is declared or imported, which is not tracked here)
+        if !self.prog.unit_traits.iter().any(|t| *t == tr) || self.prog.struct_index.contains_key(&tr) {
+            return Ok(None);
+        }
+        // (E0107: more type arguments than the method and its impl have)
+        if gargs.len() > sig.generics.len() {
+            let n = sig.generics.len();
+            let (a, was) = if gargs.len() == 1 { ("argument", "was") } else { ("arguments", "were") };
+            return err(msp.start, format!("method takes {n} generic argument{} but {} generic {a} {was} supplied (E0107)", if n == 1 { "" } else { "s" }, gargs.len()));
+        }
+        // (an opaque result, `-> impl Display`, where a `let` writes a type: E0308, as the opaque type is no other)
+        if let Some(w) = expected.filter(|_| written && sig.ret_from & crate::types::OPAQUE_FROM != 0) {
+            return err(expr_start(recv), format!("mismatched types: expected `{}`, found opaque type (E0308)", self.prog.tn(w)));
+        }
+        let a0 = match (sig.params.first(), by_ref) {
+            (Some(Ty::Ref(..)), true) => recv.clone(),
+            (Some(Ty::Ref(m, _)), false) => Expr::Ref(*m, Box::new(recv.clone())),
+            (_, true) => Expr::Unary("*".into(), Box::new(recv.clone()), Default::default()),
+            _ => recv.clone(),
+        };
+        let Ok(Expr::Path(q, mut qp)) = crate::parse::parse_expr_at(&format!("<() as {tr}>::{method}"), msp.start) else { return Ok(None) };
+        // (the method's own type arguments, `().m::<u8>()`, go with the call)
+        if let Some(last) = qp.segs.last_mut() {
+            last.args = gargs.to_vec();
+        }
+        let mut args = vec![a0];
+        args.extend(margs.iter().cloned());
+        let c = self.keep_expr(Expr::Call(Box::new(Expr::Path(q, qp)), args));
+        self.expr(c, expected).map(Some)
+    }
+
     pub(crate) fn prim_trait_method(&mut self, e: &Expr, expected: Option<Ty>) -> R<Option<V>> {
         let Expr::MethodCall(recv, method, gargs, margs, msp) = e else { unreachable!() };
         let recv: &Expr = recv;
@@ -2161,6 +2210,14 @@ impl Cx<'_> {
             let with: Vec<Ty> = ints.into_iter().filter(|&i| self.prog.prim_self_method(i, method).is_some()).collect();
             if let [only] = with[..] {
                 t = only;
+            }
+        }
+        // (`().m()` with `impl Tr for ()` (its `#tuple0::m`, or the trait's default): `<() as Tr>::m(recv)`, the receiver
+        // borrowed as the method's self takes it)
+        if matches!(t, Ty::Unit | Ty::Ref(_, Ty::Unit)) && !self.prog.unit_traits.is_empty() {
+            let written = self.ann_init == e as *const Expr as usize;
+            if let Some(r) = self.unit_trait_method(recv, matches!(t, Ty::Ref(..)), method, (gargs, margs), *msp, expected, written)? {
+                return Ok(Some(r));
             }
         }
         // `impl Tr for &[T]` のメソッド (`__slice::__ref_m`、self は &[T]): 受け手の型が &[T] のとき

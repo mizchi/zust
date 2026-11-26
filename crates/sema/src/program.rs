@@ -526,6 +526,9 @@ pub struct Program {
     /// zust_syntax::lexer::trait_scopes of the program's own source: where two scopes define traits of one name, the
     /// traits in scope on each line (pick_overload chooses the impl of the one in scope at the call)
     pub trait_scopes: Vec<(u32, u32, Vec<String>)>,
+    /// When the program implements a trait for `()`: the traits declared at the top level of its root
+    /// (lexer::root_traits), whose methods a `()` receiver's method call takes; else empty
+    pub unit_traits: Vec<String>,
     /// The source line (1-based) of each item, for trait_scopes: the diagnostic line base of a function is not it (a
     /// dependency's is tagged, and it is the line before). Empty when trait_scopes is
     pub item_lines: Vec<u32>,
@@ -1411,6 +1414,7 @@ impl Program {
             const_fn_tys: Default::default(),
             overloads: Default::default(),
             trait_scopes: vec![],
+            unit_traits: vec![],
             item_lines: vec![],
             by_last: FxMap::default(),
             ref_groups: vec![],

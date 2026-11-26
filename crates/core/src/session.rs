@@ -2011,6 +2011,13 @@ impl Session {
                 prog.item_lines = items.iter().map(|it| it.line as u32).collect();
             }
         }
+        // (an impl of the program's for `()`: which traits a method call on `()` may use)
+        let for_unit = |it: &&lexer::SrcItem| {
+            it.kind == lexer::ItemKind::ImplHeader && src.get(it.start..it.end).is_some_and(|h| h.trim_end().trim_end_matches('{').trim_end().ends_with("for ()"))
+        };
+        if items[..user].iter().any(|it| for_unit(&it)) {
+            prog.unit_traits = lexer::root_traits(src0);
+        }
         prog.overflow_checks = !self.opts.opt;
         prog.deny_unreachable = deny_unreachable;
         // (the program has modules: read from its source as written, before flattening blanks their headers)

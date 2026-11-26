@@ -2567,6 +2567,31 @@ pub fn trait_scopes(src: &str) -> Vec<(u32, u32, Vec<String>)> {
     trait_scopes_with(src, src.contains("mod"))
 }
 
+/// The traits declared at the top level of the crate root (outside every module, fn body, block and impl), which a
+/// method call anywhere at the root can use. A trait in a module or in a body is in scope only where it is declared or
+/// imported, which zustc does not track for a method call on `()` (Program::unit_traits)
+#[cold]
+#[inline(never)]
+pub fn root_traits(src: &str) -> Vec<String> {
+    let s = src.as_bytes();
+    let toks = tokenize(s);
+    let mut out = vec![];
+    let mut depth = 0i32;
+    for k in 0..toks.len() {
+        let t = &s[toks[k].1..toks[k].2];
+        if toks[k].0 == 1 && t.len() == 1 {
+            match t[0] {
+                b'{' => depth += 1,
+                b'}' => depth -= 1,
+                _ => {}
+            }
+        } else if depth == 0 && toks[k].0 == 0 && t == b"trait" && k + 1 < toks.len() && toks[k + 1].0 == 0 {
+            out.push(String::from_utf8_lossy(&s[toks[k + 1].1..toks[k + 1].2]).into_owned());
+        }
+    }
+    out
+}
+
 /// trait_scopes, with whether src contains `mod` already known (one search of the text for both uses)
 pub fn trait_scopes_with(src: &str, has_mod: bool) -> Vec<(u32, u32, Vec<String>)> {
     if !has_mod || !src.contains("trait") {
