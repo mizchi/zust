@@ -1028,6 +1028,25 @@ mod tests {
         assert!(out.contains("pub fn d__other() -> u8 { 2u8 }"), "{out}");
     }
 
+    /// A tuple variant's fields are types, not a call's arguments, though its name is lowercase (#254 review):
+    /// `enum E { lower(u8) }` beside `fn u8`, while `.map(u8)` passes the fn
+    #[test]
+    fn a_tuple_variant_of_a_primitive_is_no_call() {
+        let src = "mod d {\n    pub fn u8(x: u8) -> u8 { x }\n    pub enum E { lower(u8), Upper(u8, char) }\n    pub fn f(v: Vec<u8>) -> Vec<u8> { v.into_iter().map(u8).collect() }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["d".to_string()]).unwrap();
+        assert!(out.contains("pub enum d__E { lower(u8), Upper(u8, char) }"), "{out}");
+        assert!(out.contains(".map(d__u8)"), "{out}");
+    }
+
+    /// A block's import is looked up in the place's namespaces (#254 review): `use crate::a::E::{self};` in a body
+    /// brings the type E, so `E::V` is a's enum and the call `E()` the fn a glob brings
+    #[test]
+    fn a_block_self_import_is_no_value() {
+        let src = "mod d {\n    pub mod a {\n        pub enum E { V }\n        pub fn E() -> u8 { 1 }\n    }\n    pub mod b {\n        pub fn E() -> u8 { 2 }\n    }\n    pub mod user {\n        use crate::b::*;\n        pub fn run() -> u8 {\n            use crate::a::E::{self};\n            let _v = E::V;\n            E()\n        }\n    }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["d".to_string()]).unwrap();
+        assert!(out.contains("let _v = d__a__E::V;\n            d__b__E()\n"), "{out}");
+    }
+
     /// A dependency under another name (`dig:common=cc`, a renamed one, mizchi/zust#249): every module of dig sees
     /// `common` as cc (a path, `::common::..`, a `use` of an item and of a module's item, a re-export a dependent's path
     /// goes through), after its own names (a module of the library's name); the root of the source too (`:c=cc`)
@@ -3828,8 +3847,10 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             k += 1;
         }
     }
+    let mut variant_tok: Vec<bool> = vec![false; toks.len()];
     for &v in &variant_toks {
         skip[v] = true;
+        variant_tok[v] = true;
     }
     // (nor an attribute's tokens or a macro's name: `#[derive(Eq)]` / `write!(..)` beside a module's `type Eq` /
     // `fn write`. The modules of a macro's path are a path's, `m::say!(..)`'s m)
@@ -4270,8 +4291,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                         d -= 1;
                     } else if is_sym(q, b'(') {
                         if d == 0 {
-                            // (not a fn pointer's type, `fn(u8)`, nor a tuple struct's fields, `struct u8x2(u8, u8);`)
-                            let fields = q >= 2 && (is_id(q - 2, b"struct") || is_id(q - 2, b"union"));
+                            // (not a fn pointer's type, `fn(u8)`, nor a tuple struct's or variant's fields,
+                            //  `struct u8x2(u8, u8);` / `enum E { lower(u8) }`)
+                            let fields = q >= 2 && (is_id(q - 2, b"struct") || is_id(q - 2, b"union")) || variant_tok[q - 1];
                             return q >= 1 && toks[q - 1].0 == 0 && s[toks[q - 1].1].is_ascii_lowercase() && !is_id(q - 1, b"fn") && !fields;
                         }
                         d -= 1;
@@ -4294,17 +4316,25 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             let prim = (j > k || !call) && is_primitive_name(n) && !(j == k && k >= 1 && want != NS_TYPE && (call_arg() || value_place()));
             // (a block's own import first: `fn f() { use b::g; g() }` beside a module-level `g`; for a primitive's name,
             //  one in the type namespace, `use crate::Byte as u8;`, as it shadows the primitive)
+            // (the first segment of a path that goes on is a type or module: `E::V(..)`)
+            let w = if j > k { NS_TYPE } else { want };
+            // (in the place's namespaces: a block's `use crate::a::E::{self};` is the type, not the call `E()`. A type's
+            //  place that finds none takes any, as `lookup` does, but not for a primitive's name)
             let in_block = || {
                 if is_def {
                     return None;
                 }
-                let ns = if prim { NS_TYPE } else { NS_ANY };
-                block_imports.iter().filter(|b| b.0 < k && k < b.1 && b.2 == n && b.4 == sc && b.5 & ns != 0).max_by_key(|b| b.0).map(|b| b.3.clone())
+                let find = |ns: u8| block_imports.iter().filter(|b| b.0 < k && k < b.1 && b.2 == n && b.4 == sc && b.5 & ns != 0).max_by_key(|b| b.0).map(|b| b.3.clone());
+                if prim {
+                    find(NS_TYPE)
+                } else if w == NS_TYPE {
+                    find(NS_TYPE).or_else(|| find(NS_ANY))
+                } else {
+                    find(w)
+                }
             };
             // (the scope's own item, its import, or what its globs pass on, globs of globs too, all of them compared
             //  (two distinct is ambiguous): libc's unix sees `time_t` of linux_like/linux/gnu/b64; a definition is its own)
-            // (the first segment of a path that goes on is a type or module: `E::V(..)`)
-            let w = if j > k { NS_TYPE } else { want };
             let nn = in_block().or_else(|| if is_def { renamed_in(sc, n) } else if prim { names.lookup_type(sc, n) } else { names.lookup(sc, n, w) });
             // (not a macro's name: `use core::panic as p;` then `p!()` stays as it is written)
             let std_path = |nn: &[u8]| [&b"std::"[..], b"core::", b"alloc::"].iter().any(|p| nn.starts_with(p));

@@ -89,7 +89,16 @@ mod hir {
     }
 }
 
+#[allow(non_snake_case)]
 mod a {
+    #[derive(Debug)]
+    pub enum E {
+        V,
+    }
+    #[allow(dead_code)]
+    pub fn E() -> u8 {
+        1
+    }
     pub mod m {
         pub fn inner() -> u8 {
             3
@@ -101,9 +110,13 @@ mod a {
     }
 }
 
+#[allow(non_snake_case)]
 mod b {
     pub fn m() -> u8 {
         2
+    }
+    pub fn E() -> u8 {
+        4
     }
 }
 
@@ -115,6 +128,13 @@ mod user {
 
     pub fn run() -> (u8, u8) {
         (m() * 10 + m::inner(), al::ByteClasses([5, 6, 7, 8]).get(1).0)
+    }
+
+    // (a block's `self` import is the type: `E::V` is a's enum, the call `E()` the glob's fn)
+    pub fn in_block() -> (u8, String) {
+        use crate::a::E::{self};
+        let v = E::V;
+        (E(), format!("{:?}", v))
     }
 }
 
@@ -134,5 +154,5 @@ fn main() {
     println!("{:?} {:?} {:?}", bigint::neg(bigint::Sign::Plus), mul(sign_of(-2), sign_of(5)), mul(sign_of(0), sign_of(1)));
     let c = util::alphabet::ByteClasses([1, 2, 3, 4]);
     println!("{:?} {:?} {:?} {:?}", dense::first(&c), other::Unit, other::Sign::Zero, other::CaseFoldError);
-    println!("{:?} {:?} {:?}", hir::fold(1), hir::fold(2).is_err(), user::run());
+    println!("{:?} {:?} {:?} {:?}", hir::fold(1), hir::fold(2).is_err(), user::run(), user::in_block());
 }

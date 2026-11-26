@@ -33,6 +33,11 @@ mod rng {
     #[derive(Debug)]
     #[allow(dead_code)]
     pub struct Byte(pub u8);
+    #[derive(Debug)]
+    #[allow(non_camel_case_types, dead_code)]
+    pub enum Small {
+        lower(u8),
+    }
     pub fn shadowed() -> String {
         use crate::rng::Byte as u8;
         let b: u8 = u8(1);
@@ -69,5 +74,5 @@ fn main() {
     let w = Wrap(u8(9), char('w'));
     let p = u8x2(u8(3), 4);
     println!("{} {} {} {} {} {}", w.0, w.1, u8::MAX, <u32>::BITS, 1.5f32 * 2.0, p.0 + p.1);
-    println!("{:?} {}", rng::values(), rng::shadowed());
+    println!("{:?} {} {:?}", rng::values(), rng::shadowed(), rng::Small::lower(u8(4)));
 }
