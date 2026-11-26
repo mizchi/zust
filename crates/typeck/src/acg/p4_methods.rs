@@ -339,11 +339,11 @@ impl Cx<'_> {
                 self.b.switch_to_block(done);
                 Ok(Some((Some(out), ot)))
             }
-            "get" | "get_mut" | "first" | "last" => {
+            "get" | "get_mut" | "first" | "last" | "first_mut" | "last_mut" => {
                 let (base, len, elem) = self.indexable(&*mc_recv)?;
                 let i = match name.as_str() {
-                    "first" => self.b.ins().iconst(types::I64, 0),
-                    "last" => self.b.ins().iadd_imm_s(len, -1),
+                    "first" | "first_mut" => self.b.ins().iconst(types::I64, 0),
+                    "last" | "last_mut" => self.b.ins().iadd_imm_s(len, -1),
                     _ => {
                         let Some(a) = args.first() else {
                             return err(SP, "get needs an index");
@@ -353,7 +353,7 @@ impl Cx<'_> {
                         v.unwrap()
                     }
                 };
-                let rty = Ty::Ref(name == "get_mut", intern(elem));
+                let rty = Ty::Ref(name.ends_with("_mut"), intern(elem));
                 let ot = opt(self, rty)?;
                 let Ty::Struct(oi) = ot else { unreachable!() };
                 let out = self.temp(ot);

@@ -1640,6 +1640,10 @@ impl Inf<'_> {
         if matches!(name, "line" | "column") {
             return self.known(Ty::U32);
         }
+        // (`concat!("a", "b").to_string()`: a string literal's type, for the method's receiver)
+        if matches!(name, "concat" | "stringify") {
+            return self.known(Ty::Ref(false, intern(Ty::Str)));
+        }
         if name == "format" && self.prog.struct_index.contains_key("String") {
             self.fmt_width_vars(g);
             let ss = self.prog.struct_index["String"];
@@ -2750,12 +2754,12 @@ impl Inf<'_> {
                 let rr = self.with(Shape::Ref(n == "get_mut", sl));
                 self.option_of(rr)
             }
-            "get" | "get_mut" | "first" | "last" => {
+            "get" | "get_mut" | "first" | "last" | "first_mut" | "last_mut" => {
                 for a in avs {
                     let k = self.known(Ty::Usize);
                     self.unify(a, k);
                 }
-                let rr = self.with(Shape::Ref(n == "get_mut", el));
+                let rr = self.with(Shape::Ref(n.ends_with("_mut"), el));
                 self.option_of(rr)
             }
             "swap" | "truncate" | "rotate_left" | "rotate_right" => {

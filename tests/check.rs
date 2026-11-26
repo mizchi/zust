@@ -3611,3 +3611,16 @@ fn line_and_column_are_u32s_and_a_float_s_constants_its_type() {
     let src = "fn main() {\n    let c = || (column!(), line!());\n    let a = if true { c() } else { (0, 0) };\n    assert_eq!(a, (1, 2));\n    let x = 42.0;\n    let _b = x == f32::NAN;\n    let d = 1;\n    let _e = d == f64::MANTISSA_DIGITS;\n}\n";
     assert!(errs(src).is_empty(), "{:?}", errs(src));
 }
+
+#[test]
+fn a_string_macro_s_methods_and_a_slice_s_first_mut_and_last_mut() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (`concat!(..)` / `stringify!(..)` as a method's receiver is a `&str`)
+    assert!(errs("fn main() {\n    let a = concat!(\"qux\", \"quux\",).to_string();\n    let b = stringify!(x).len();\n    let _ = (a, b);\n}\n").is_empty());
+    // (`first_mut` / `last_mut` of an array, a Vec and a slice)
+    let src = "fn main() {\n    let mut arr = [1u8, 2, 3];\n    *arr.last_mut().unwrap() = 30;\n    *arr.first_mut().unwrap() += 10;\n    let mut v = vec![1, 2];\n    let s: &mut [i32] = &mut v;\n    *s.first_mut().unwrap() = 5;\n    if let Some(x) = v.last_mut() {\n        *x = 20;\n    }\n}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+}
