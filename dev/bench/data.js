@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795727672813,
+  "lastUpdate": 1795727675543,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -118678,6 +118678,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/5b67f5e678785b3d3a9038e57662255963d7cde5"
         },
         "date": 1795712375386,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 69.444,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.939,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 73.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 92.471,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ff4ec00ba6a362a40c69d88a45c4360069e80d49",
+          "message": "lexer: a derive's name is a macro, not a glob-imported type (#251) (#272)\n\nFlattening modules renamed every identifier token that named a renamed item, including the tokens inside attributes and macro names. typenum's #[derive(Eq, ..)] beside its glob-imported `type Eq` became `typenum__operator_aliases__Eq`. That blocked typenum, generic-array, block-buffer and crypto-common.\n\nlexer::macro_ns_toks marks the tokens that name no item: everything inside an attribute, and the name right before `!` of a macro call. Neither renaming pass (module collisions, fn-body hoisting) touches them. A macro path's module segments are still renamed with their module.\n\nThe module renaming looks a macro path's last segment up in a macro-only namespace, which holds the std macros imported under another name. So `m::say!` reaches std's println even beside m's own `fn say`.\n\nTests:\n- probes derive_names_beside_glob_items and macro_path_modules, with expected output from rustc 1.97\n- check.rs derive_names_are_macros_not_glob_items\n- lexer unit tests\n\nFixes #251\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T06:09:14+09:00",
+          "tree_id": "70332231e26cb14b7442e1fcae5c569750af2c62",
+          "url": "https://github.com/mizchi/zust/commit/ff4ec00ba6a362a40c69d88a45c4360069e80d49"
+        },
+        "date": 1795727675028,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
