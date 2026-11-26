@@ -312,8 +312,9 @@ Mutants the tests miss are written to `mutants.out/missed.txt`; add tests to kil
   and installs valgrind from cached packages while it builds. The size budget depends on the linker, so CI installs wild 0.11.0 and measures with
   `ZUSTC_BENCH_LINKER=wild` (`bench/budget.txt` also holds wild sizes).
 - `.github/workflows/kpi.yml` runs on every push to a pull request. It measures the head and the merge base with
-  `bench/kpi_track.py --dry-run --only <sections>` (a zust-analyzer session included), in two parts on runners side
-  by side, the base's beside the head's: gen5000, and traits, crates and patterns followed by the LSP session. An instruction count is the same on any
+  `bench/kpi_track.py --dry-run --only <sections>` (a zust-analyzer session included), in three parts on runners side
+  by side, the base's beside the head's: gen5000; traits, crates and patterns; the LSP session. Only the job that
+  comments may write to the pull request. An instruction count is the same on any
   runner of the image. The base's numbers are cached, so a base measured before is not measured again.
   `bench/kpi_pr.py` then keeps one comment on the pull request up to date: the change of each KPI against
   the base, and one row per push with the change against the push before. A KPI that grows by more than 1% is marked and gives a warning; the job does not fail.

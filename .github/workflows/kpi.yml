@@ -10,7 +10,7 @@ name: KPI
 # only. Every push to main measures main and keeps it there, for the pull requests whose merge base it is (a cache
 # saved on main is read by every pull request; one saved by a pull request only by that one).
 #
-# The sections are measured in two parts on runners side by side, the base's beside the head's (`plan` lists the parts,
+# The sections are measured in three parts on runners side by side, the base's beside the head's (`plan` lists the parts,
 # a `measure` job measures one, `report` puts them together): an instruction count is the same on any runner of the image, so a part's numbers do not depend on where
 # it ran. A base whose bench/kpi_track.py has no --only is measured whole on one runner.
 on:
@@ -24,9 +24,9 @@ concurrency:
   group: kpi-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# (read only, but for the job that comments: the measuring jobs run the pull request's code and tools)
 permissions:
   contents: read
-  pull-requests: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -88,9 +88,10 @@ jobs:
           path: ~/kpi/base.txt
           key: ${{ steps.keys.outputs.base }}
           lookup-only: true
-      # (each part on a runner of its own, about as long as the other (locally: gen5000 84 s; traits, crates and
-      # patterns side by side 56 s, then the LSP session alone, as its count moves with how often the client polls,
-      # 42 s). A runner builds the workspace for its part, so more parts would add more builds than they save)
+      # (each part on a runner of its own: gen5000; traits, crates and patterns side by side; the LSP session alone,
+      # as its count moves with how often the client polls. With two parts, the second (the three, then the LSP
+      # session) took 1:54 on a runner where gen5000 took 0:44. A part's runner builds the workspace (1:40), so the
+      # wall time is the build and the longest part)
       - name: List the parts to measure
         id: parts
         env:
@@ -100,11 +101,11 @@ jobs:
         run: |
           parts=""
           add() { parts="$parts${parts:+,}{\"side\":\"$1\",\"sha\":\"$2\",\"part\":\"$3\"}"; }
-          for p in gen5000 traits,crates,patterns,lsp; do add head "$HEAD_SHA" "$p"; done
+          for p in gen5000 traits,crates,patterns lsp; do add head "$HEAD_SHA" "$p"; done
           if [ "$MEASURE_BASE" = true ]; then
             # (grep without -q reads all of it: git show is not cut off, which pipefail would take for a failure)
             if git show "$BASE_SHA:bench/kpi_track.py" | grep -- '"--only"' >/dev/null; then
-              for p in gen5000 traits,crates,patterns,lsp; do add base "$BASE_SHA" "$p"; done
+              for p in gen5000 traits,crates,patterns lsp; do add base "$BASE_SHA" "$p"; done
             else
               add base "$BASE_SHA" all
             fi
@@ -143,6 +144,8 @@ jobs:
         with:
           version: v2.3.1
           cache-executables: true
+          # (its cache statistics in the job summary only: one comment a measuring job would be one too many)
+          pr-comment: false
       - uses: Swatinem/rust-cache@v2
         with:
           cache-targets: "false"
@@ -181,6 +184,8 @@ jobs:
           else
             python3 bench/kpi_track.py "$PART" --dry-run --jobs 4 --only "$PART" | tee "$OUT"
           fi
+          # (what measured it, which report compares across the parts: no KPI's name, so kpi_pr.py skips the line)
+          echo "measured-with: $(valgrind --version)" | tee -a "$OUT"
       - uses: actions/upload-artifact@v4
         with:
           name: kpi-${{ matrix.side }}-${{ strategy.job-index }}
@@ -191,6 +196,9 @@ jobs:
     needs: [plan, measure]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
     defaults:
       run:
         shell: bash
@@ -210,6 +218,15 @@ jobs:
           cat "$RUNNER_TEMP"/parts/head-*.txt > ~/kpi/head.txt
           if ls "$RUNNER_TEMP"/parts/base-*.txt >/dev/null 2>&1; then
             cat "$RUNNER_TEMP"/parts/base-*.txt > ~/kpi/base.txt
+          fi
+          # (every KPI once, and one valgrind for all the parts: a base kept in the cache is compared with later heads)
+          for f in ~/kpi/head.txt ~/kpi/base.txt; do
+            [ -f "$f" ] || continue
+            python3 -c "import sys; sys.path.insert(0, 'bench'); import kpi_pr; got = kpi_pr.parse(sys.argv[1]); miss = [k for k in kpi_pr.KPIS if k not in got]; sys.exit(f'{sys.argv[1]}: no {miss}' if miss else 0)" "$f"
+          done
+          if [ "$(cat "$RUNNER_TEMP"/parts/*.txt | grep '^measured-with:' | sort -u | wc -l)" -gt 1 ]; then
+            echo "::error::the parts were measured with different valgrind versions:"; grep -h '^measured-with:' "$RUNNER_TEMP"/parts/*.txt | sort | uniq -c
+            exit 1
           fi
       - name: Restore the base's KPIs
         if: github.event_name == 'pull_request' && needs.plan.outputs.base_hit == 'true'
