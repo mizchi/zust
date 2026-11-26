@@ -7997,6 +7997,19 @@ fn dyn_first(d: &str) -> String {
     }
 }
 
+impl Program {
+    /// The traits the program implements for the trait object `dyn tr` (its text) by an impl of its own (`impl
+    /// MyTrait for dyn Tr {}`, generic or not): the candidates for a default method called through the object
+    pub fn dyn_impl_traits(&self, tr: &str) -> Vec<&String> {
+        if self.dyn_impls_exact.is_empty() && self.dyn_impls.is_empty() {
+            return vec![];
+        }
+        let first = dyn_first(tr);
+        let name = first.split(|c: char| c == '(' || c == '<').next().unwrap_or(&first).trim().to_string();
+        self.dyn_impls_exact.iter().filter(|(_, o)| *o == first).chain(self.dyn_impls.iter().filter(|(_, o)| *o == name)).map(|(t, _)| t).collect()
+    }
+}
+
 /// A bound that asks nothing of the type: `?Sized`, a lifetime (`'a`)
 fn relaxed_bound(b: &str) -> bool {
     b.starts_with('?') || b.starts_with('\'')

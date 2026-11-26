@@ -3537,11 +3537,11 @@ impl Cx<'_> {
             let named = self.explicit_traits.get(&(mc as *const Expr as usize)).cloned();
             let mut dflts: Vec<(String, u32)> = self
                 .prog
-                .traits
-                .iter()
-                .filter(|(t2, _)| named.as_ref().is_none_or(|n| *t2 == n) && self.prog.implements(obj, t2))
-                .filter_map(|(t2, ids)| {
-                    ids.iter()
+                .dyn_impl_traits(tr_full)
+                .into_iter()
+                .filter(|t2| named.as_ref().is_none_or(|n| *t2 == n) && self.prog.implements(obj, t2))
+                .filter_map(|t2| {
+                    self.prog.traits.get(t2)?.iter()
                         .copied()
                         .find(|&d| {
                             let s = &self.prog.sigs[d as usize];

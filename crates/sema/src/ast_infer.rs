@@ -2476,8 +2476,8 @@ impl Inf<'_> {
                 .or_else(|| self.prog.prim_method(Ty::Dyn(tr), n).filter(|&d| self.prog.sigs[d as usize].has_self))
                 // (or a default method of a trait the object implements, `impl MyTrait for dyn Tr {}`)
                 .or_else(|| {
-                    self.prog.traits.iter().filter(|(t2, _)| self.prog.implements(Ty::Dyn(tr), t2)).find_map(|(_, ids)| {
-                        ids.iter().copied().find(|&d| {
+                    self.prog.dyn_impl_traits(tr).into_iter().filter(|t2| self.prog.implements(Ty::Dyn(tr), t2)).find_map(|t2| {
+                        self.prog.traits.get(t2)?.iter().copied().find(|&d| {
                             let s = &self.prog.sigs[d as usize];
                             s.has_body && s.has_self && self.prog.names[d as usize].rsplit("::").next() == Some(n)
                         })
