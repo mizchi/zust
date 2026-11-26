@@ -270,12 +270,26 @@ pub struct PrepMemo {
     out: FxMap<(u64, u64, u32), ChunkOut>,
     /// Whether the last call reused chunks (the incremental path) rather than preprocessing the whole
     inc: bool,
+    /// Keep the chunks from the first call on (keep_from_first)
+    keep_first: bool,
 }
 
 impl PrepMemo {
     /// Whether the last call of `prep` with this memo reused the chunks it kept (the incremental path)
     pub fn was_incremental(&self) -> bool {
         self.inc
+    }
+
+    /// Keeps the chunks from the first call on, for a session whose document will be edited (zust-analyzer): its
+    /// first edit can then reuse them. Otherwise the first call only preprocesses the whole, and a build that
+    /// preprocesses once does not pay for keeping them (+20–40% of prep)
+    pub fn keep_from_first(&mut self) {
+        self.keep_first = true;
+    }
+
+    /// Forgets the chunks (not the number of calls, nor keep_from_first)
+    fn forget(&mut self) {
+        *self = PrepMemo { calls: self.calls, keep_first: self.keep_first, ..PrepMemo::default() };
     }
 }
 
@@ -1247,22 +1261,18 @@ pub fn prep(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, cfg: O
     memo.inc = false;
     let start = file_start(src);
     let src: &str = start.as_deref().unwrap_or(src);
-    if std::env::var_os("ZUSTC_NO_PREP_INC").is_some() || (memo.calls == 1 && std::env::var_os("ZUSTC_PREP_VERIFY").is_none()) {
+    if std::env::var_os("ZUSTC_NO_PREP_INC").is_some() || (memo.calls == 1 && !memo.keep_first && std::env::var_os("ZUSTC_PREP_VERIFY").is_none()) {
         return prep_full(src, crates, fix, cfg).map(marked);
     }
     let r = prep_inc(src, crates, cfg, memo);
     let (text, fx) = match r {
         Ok(Some(x)) => x,
         Ok(None) => {
-            let c = memo.calls;
-            *memo = PrepMemo::default();
-            memo.calls = c;
+            memo.forget();
             return prep_full(src, crates, fix, cfg).map(marked);
         }
         Err(e) => {
-            let c = memo.calls;
-            *memo = PrepMemo::default();
-            memo.calls = c;
+            memo.forget();
             return Err(e);
         }
     };
@@ -1291,9 +1301,7 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
         key = fnv(mix(key, 2), format!("{c:?}").as_bytes());
     }
     if memo.key != key {
-        let c = memo.calls;
-        *memo = PrepMemo::default();
-        memo.calls = c;
+        memo.forget();
         memo.key = key;
     }
     let log = std::env::var_os("ZUSTC_PREP_LOG").is_some();

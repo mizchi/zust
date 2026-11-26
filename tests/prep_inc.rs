@@ -132,7 +132,10 @@ fn prep_inc_attr_with_bracket_string() {
 /// first reused the chunks it kept (the first call preprocesses the whole and keeps nothing; the second keeps the
 /// chunks; the third can reuse them)
 fn through_memo(srcs: &[String]) -> Vec<bool> {
-    let mut memo = PrepMemo::default();
+    through(PrepMemo::default(), srcs)
+}
+
+fn through(mut memo: PrepMemo, srcs: &[String]) -> Vec<bool> {
     let mut reused = vec![];
     for (i, src) in srcs.iter().enumerate() {
         let (mut f1, mut f2) = (vec![], vec![]);
@@ -199,4 +202,17 @@ fn main() { let _ = a() + b(); }
     assert!(base != edited && edited != again);
     let srcs = vec![base.to_string(), edited, again];
     assert_eq!(through_memo(&srcs), vec![false, true]);
+}
+
+/// keep_from_first (zust-analyzer's documents): the first call keeps the chunks, so the second reuses them
+#[test]
+fn prep_inc_keeps_from_the_first_call() {
+    let base = "fn a() -> u8 {\n    1\n}\nfn b() -> u8 {\n    2\n}\nfn main() {\n    let _ = a() + b();\n}\n";
+    let edited = base.replace("    2\n", "    let _q = 1;\n    2\n");
+    let srcs = vec![base.to_string(), edited.clone()];
+    let mut memo = PrepMemo::default();
+    memo.keep_from_first();
+    assert_eq!(through(memo, &srcs), vec![true]);
+    // (without it, as a build: the first call keeps nothing)
+    assert_eq!(through_memo(&srcs), vec![false]);
 }
