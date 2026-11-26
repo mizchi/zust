@@ -1,7 +1,9 @@
 """Bundles zustc's own crates/syntax/src/types.rs (the type representation and intern) / crates/syntax/src/parse.rs / crates/syntax/src/ast_types.rs (type syntax → TySyn)
 into a single-file program.
 usage: python3 tests/selfhost/build_ast_types.py > out/selfhost/ast_types_main.rs
-For each file given as an argument, main prints the items' types as TySyn, and also the properties of the interned types (size, whether integer)."""
+For each file given as an argument, main prints the items' types as TySyn, and also the properties of the interned types (size, whether integer).
+(ast_types.rs calls ast_summary::const_int and parse.rs calls regions::mentions_lt, so ast_summary and what it uses
+(regions / wf / ast_closure / lexer / key / fxhash) come along)"""
 
 types = open("crates/syntax/src/types.rs").read()
 parse = open("crates/syntax/src/parse.rs").read()
@@ -15,6 +17,11 @@ mod parse {
 
 mod ast_types {
 """ + at + """}
+
+""" + "".join(f"mod {name} {{\n" + open(path).read() + "}\n\n" for name, path in [
+    ("ast_summary", "crates/syntax/src/ast_summary.rs"), ("regions", "crates/syntax/src/regions.rs"), ("wf", "crates/syntax/src/wf.rs"),
+    ("ast_closure", "crates/syntax/src/ast_closure.rs"), ("lexer", "crates/syntax/src/lexer.rs"), ("key", "crates/base/src/key.rs"),
+    ("fxhash", "crates/base/src/fxhash.rs")]) + """
 
 use parse::{Fields, Item, ItemKind, parse_file};
 use types::{Ty, TySyn, intern};
