@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795674799575,
+  "lastUpdate": 1795674802483,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -84748,6 +84748,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 131.887,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1d110890b480a55941bbca0f93ab4efbb7f997d4",
+          "message": "prelude: std::fmt::Write's impls come with the trait, not only with `write_str` (#148) (#231)\n\n`fn render<W: fmt::Write>(w: &mut W)` called with a `&mut String` failed with\n\"the trait bound `String: __FWr` is not satisfied (for `W`)\". The bound check\nwas right: the prelude had left `impl __FWr for String` out. Its member is\nchosen by its name, `write_str`, and a program that names the trait only in\na bound, or calls `write!(w, ..)` on a generic `W`, never names it. Writing\n`s.write_str(..)` anywhere in the program made the same code build.\n\nEvery impl of the trait has `write_str` and the trait's defaults call it, so\nthe selection now takes `write_str` with `__FWr`. It is checked in the\nselection loop, as the 128-bit helpers are, so a trait that comes in through\nanother prelude item brings it too.\n\ntests/probe/fmt_write_bound.rs (expected output from rustc): `write!` and\n`writeln!` into a generic `W: Write` / `W: fmt::Write`, and the bound alone.\nIt names no `write_str` (an impl of the program's own named it and hid the\nbug); on main it fails with the issue's error.\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T15:17:42+09:00",
+          "tree_id": "c19d024787d39670aa84aefa33ab2909fde5b54b",
+          "url": "https://github.com/mizchi/zust/commit/1d110890b480a55941bbca0f93ab4efbb7f997d4"
+        },
+        "date": 1795674801913,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.228,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.967,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 2.064,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 7.617,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.33,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.309,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 2.831,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 360.275,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 131.371,
             "unit": "MiB"
           }
         ]
