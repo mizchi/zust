@@ -1,0 +1,12 @@
+false
+true 1
+42
+42
+poisoned: false
+true
+thread 0 ran it
+true
+true
+true
+Once { .. }
+Once { .. }

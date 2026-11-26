@@ -8365,6 +8365,7 @@ compile-fail	trimmed-paths/core-unicode.rs
 run-pass	trivial-bounds/trivial-bounds-object.rs
 compile-fail	try-block/try-block-in-edition2015.rs
 run-pass	try-block/try-is-identifier-edition2015.rs
+compile-fail	try-trait/bad-interconversion.rs
 compile-fail	try-trait/bad-question-mark-on-trait-object.rs
 compile-fail	try-trait/deep-try-chain-issue-153583.rs
 compile-fail	try-trait/incompatible-types-with-question-mark-51632.rs
