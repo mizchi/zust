@@ -4188,7 +4188,10 @@ impl Cx<'_> {
         // (the result: its elided regions are of `&self`, else of the one region among the parameters)
         // (a receiver `&self` / `&mut self`: of the impl's own type; another receiver type leaves the result's
         // elided regions unknown)
-        let self_ref = sig0.has_self && matches!((sig0.params.first(), sig0.impl_of), (Some(Ty::Ref(_, Ty::Struct(s))), Some(i)) if prog.base_of(*s) == prog.base_of(i));
+        // (or of `impl dyn Tr`'s own object: `fn get(&self) -> &u8` borrows from the receiver, not only its object)
+        let self_ref = sig0.has_self
+            && (matches!((sig0.params.first(), sig0.impl_of), (Some(Ty::Ref(_, Ty::Struct(s))), Some(i)) if prog.base_of(*s) == prog.base_of(i))
+                || matches!(sig0.params.first(), Some(Ty::Ref(_, Ty::Dyn(_)))) && prog.names[id as usize].starts_with("__dyn_"));
         let self_r = if self_ref { ptrees.first().and_then(|t| t.as_ref()).and_then(|t| t.first().copied()).filter(|v| !substituted.contains(v)) } else { None };
         let other_self = sig0.has_self && !self_ref;
         inputs.dedup();

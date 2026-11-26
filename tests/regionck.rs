@@ -5782,3 +5782,29 @@ fn main() {
     // (two traits whose defaults of the name the object has: ambiguous, E0034)
     errors_at("trait ObjectTrait {}\ntrait A { fn f(&self) {} }\ntrait B { fn f(&self) {} }\nimpl A for dyn ObjectTrait + '_ {}\nimpl B for dyn ObjectTrait + '_ {}\nfn g(val: &dyn ObjectTrait) {\n    val.f()\n}\nfn main() {}\n", &[(7, "multiple applicable items in scope")], "dy8");
 }
+
+#[test]
+fn part38_review_methods_of_impls_for_trait_objects() {
+    // (#237's review, each checked with rustc 1.97. Accepted: an object whose trait takes a lifetime (`trait Obj<'a>:
+    // 'a`, the default its own bound), an impl for `dyn Obj<u8> + '_` (the object's arguments in the lookup), and
+    // `Ext::pick(x)` beside the object's own `pick`, which picks Ext's)
+    errors_at(r#"trait Obj<'a>: 'a {}
+impl<'a> dyn Obj<'a> { fn get(&self) -> u8 { 1 } }
+fn f<'a>(x: &'a dyn Obj<'a>) -> u8 { x.get() }
+trait O2<T> {}
+trait Ext { fn e(&self) -> u8 { 1 } }
+impl Ext for dyn O2<u8> + '_ {}
+fn g<'a>(x: &'a dyn O2<u8>) -> u8 { x.e() }
+trait O3 { fn pick(&self) -> u8 { 1 } }
+trait E3 { fn pick(&self) -> u8 { 2 } }
+impl E3 for dyn O3 {}
+fn h(x: &(dyn O3 + 'static)) -> u8 { E3::pick(x) }
+fn main() {}
+"#, &[], "rv1");
+    // (rejected: a `&self` result borrowed from the receiver, not only its object (3:50); an unsafe method outside
+    // `unsafe` (E0133); a `&mut self` method through `&` (E0596); a local Box's borrow returned (E0515))
+    errors_at("trait Tr {}\nimpl dyn Tr { fn get(&self) -> &u8 { panic!() } }\nfn leak(x: &(dyn Tr + 'static)) -> &'static u8 { x.get() }\nfn main() {}\n", &[(3, "lifetime may not live long enough")], "rv2");
+    errors_at("trait Obj {}\nimpl dyn Obj { unsafe fn dangerous(&self) -> u8 { 1 } }\nfn f(x: &(dyn Obj + 'static)) -> u8 { x.dangerous() }\nfn main() {}\n", &[(3, "E0133")], "rv3");
+    errors_at("trait Obj {}\nimpl dyn Obj { fn change(&mut self) {} }\nfn f(x: &(dyn Obj + 'static)) { x.change() }\nfn main() {}\n", &[(3, "E0596")], "rv4");
+    errors_at("trait Tr {}\nimpl dyn Tr { fn get<'a>(&'a self) -> &'a u8 { panic!() } }\nstruct S;\nimpl Tr for S {}\nfn g() -> &'static u8 { let b: Box<dyn Tr> = Box::new(S); b.get() }\nfn main() {}\n", &[(5, "E0515")], "rv5");
+}

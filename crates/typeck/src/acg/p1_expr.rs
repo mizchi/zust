@@ -3494,6 +3494,40 @@ impl Cx<'_> {
         self.dyn_call(fat, 0, &ps, r, args, span)
     }
 
+    /// A call through a trait object to a method of an impl for the object (`impl dyn Tr`, `impl X for dyn Tr`, or a
+    /// default of a trait the object implements): id with the pair as its `&self` / `&mut self` (m), whose type st
+    /// is the receiver's object. As a call through the vtable checks it: an unsafe method outside `unsafe` (E0133), a
+    /// `&mut self` method through a shared reference (E0596), the receiver's borrow for the borrow check, its tree for
+    /// the region check. late: the callee requires 'static, so the region check starts here; need_static: the impl
+    /// is for `dyn Tr + 'static`, which the receiver's object must outlive
+    #[allow(clippy::too_many_arguments)]
+    fn dyn_impl_call(&mut self, id: u32, m: bool, st: Ty, mc: &Expr, recv_ty: Option<Ty>, fat: Value, late: bool, need_static: bool) -> R<V> {
+        let Expr::MethodCall(recv, _, tf, margs, _) = mc else { return err(SP, "internal: expected a method call") };
+        self.check_unsafe_call(id, super::borrowck::pos(mc))?;
+        if let (Some(rt), true, true) = (recv_ty, self.user_code, m) {
+            if matches!(rt, Ty::Ref(false, _) | Ty::Ptr(false, _)) {
+                return err(SP, "cannot borrow data in a `&` reference as mutable (E0596)".to_string());
+            }
+        }
+        if late && !self.rg.on && self.rg.eligible && self.inline_depth == 0 {
+            self.rg_late_on();
+        }
+        self.rg_dyn_recv(mc, need_static);
+        // (the receiver is borrowed by `&self` / `&mut self`, and a result that borrows from self holds the loan,
+        // as a vtable call's does: `b.get()` of a local `Box<dyn Tr>` returned is E0515)
+        if self.bk_on() {
+            let flows = self.bk_ret_from(id, 0);
+            let ev = self.bk_recv_ev(recv, Ty::Ref(m, intern(Ty::Unit)), flows);
+            self.bk_push(ev);
+        }
+        let args: Vec<&Expr> = margs.iter().collect();
+        let tf = (!tf.is_empty()).then_some(tf.as_slice());
+        let r = self.call_fn(id, Some((fat, st)), &args, tf, None, SP);
+        // (the result's tree, for the expression: `b.get()` returned)
+        self.rg_took_call(mc);
+        r
+    }
+
     /// `x.m(..)` (x: `&dyn Trait`)
     /// `recv.m(..)` through the vtable of `dyn tr`. `recv_ty` is the receiver's type as evaluated, when the caller has
     /// it: a `&mut self` method through a shared `&dyn` / `*const dyn` is E0596
@@ -3502,13 +3536,16 @@ impl Cx<'_> {
     }
 
     pub(crate) fn dyn_method_call_on(&mut self, fat: Value, tr: &str, mc: &Expr, recv_ty: Option<Ty>) -> R<V> {
-        let Expr::MethodCall(_, name, tf, margs, _) = mc else { return err(SP, "internal: expected a method call") };
+        let Expr::MethodCall(_, name, _, margs, _) = mc else { return err(SP, "internal: expected a method call") };
         let tr_full = tr;
         let (trn, targs) = self.dyn_trait_args(tr);
         let binds = if tr.contains('=') { self.dyn_bindings(tr) } else { vec![] };
         let tr = trn.as_str();
         let decls = self.prog.dyn_methods(tr);
-        let Some(idx) = decls.iter().position(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(name.as_str())) else {
+        // (the trait `Tr::m(x)` names: not a method of the object's own trait of the same name)
+        let named = self.explicit_traits.get(&(mc as *const Expr as usize)).cloned();
+        let of_named = |d: u32| named.as_ref().is_none_or(|n| self.prog.names[d as usize].rsplit_once("::").is_some_and(|(t, _)| t == n));
+        let Some(idx) = decls.iter().position(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(name.as_str()) && of_named(d)) else {
             // (not in the vtable: an inherent method of `impl dyn Tr { .. }`, or one of another trait's impl for the
             // object, `impl X for dyn Tr`: `__dyn_Tr::m`, called with the pair as its `&self`)
             let base = tr.rsplit("::").next().unwrap_or(tr);
@@ -3518,15 +3555,8 @@ impl Cx<'_> {
                     // (the receiver as the object it is, so the impl's parameters are solved from its arguments:
                     // `dyn ObjectTrait<u8>` for `impl<T> MyTrait<T> for dyn ObjectTrait<T>`)
                     let st = Ty::Ref(m, intern(Ty::Dyn(crate::types::intern_str(tr_full))));
-                    let args: Vec<&Expr> = margs.iter().collect();
-                    // (the receiver's tree for the region check, as rg_dyn_call takes it: the reference and the
-                    // object's lifetime; a Box's content or an object place borrowed for the call)
-                    if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && s.regions.as_deref().is_some_and(Self::callee_needs_static) {
-                        self.rg_late_on();
-                    }
-                    self.rg_dyn_recv(mc, false);
-                    let tf = (!tf.is_empty()).then_some(tf.as_slice());
-                    return self.call_fn(id, Some((fat, st)), &args, tf, None, SP);
+                    let late = s.regions.as_deref().is_some_and(Self::callee_needs_static);
+                    return self.dyn_impl_call(id, m, st, mc, recv_ty, fat, late, false);
                 }
             }
             // (a default method of a trait the object implements, `impl MyTrait for dyn Tr {}`: with Self the object.
@@ -3534,7 +3564,6 @@ impl Cx<'_> {
             let obj = Ty::Dyn(crate::types::intern_str(tr_full));
             // (the trait `Tr::m(x)` names, else every trait the object implements with a default of the name: more
             // than one is ambiguous (E0034), as rustc's method lookup finds)
-            let named = self.explicit_traits.get(&(mc as *const Expr as usize)).cloned();
             let mut dflts: Vec<(String, u32)> = self
                 .prog
                 .dyn_impl_traits(tr_full)
@@ -3555,14 +3584,8 @@ impl Cx<'_> {
             }
             if let Some((t2, d)) = dflts.pop() {
                 let Some(&Ty::Ref(m, _)) = self.prog.sigs[d as usize].params.first() else { return err(SP, "internal: a default method's receiver") };
-                let need_static = !self.prog.dyn_impls_lt.contains(&(t2, base.to_string()));
-                if need_static && !self.rg.on && self.rg.eligible && self.inline_depth == 0 {
-                    self.rg_late_on();
-                }
-                self.rg_dyn_recv(mc, need_static);
-                let args: Vec<&Expr> = margs.iter().collect();
-                let tf = (!tf.is_empty()).then_some(tf.as_slice());
-                return self.call_fn(d, Some((fat, Ty::Ref(m, intern(obj)))), &args, tf, None, SP);
+                let need_static = !self.prog.dyn_impl_writes_lt(&t2, tr_full);
+                return self.dyn_impl_call(d, m, Ty::Ref(m, intern(obj)), mc, recv_ty, fat, need_static, need_static);
             }
             return err(SP, format!("no method named `{name}` found for `dyn {tr}`"));
         };

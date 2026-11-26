@@ -8030,6 +8030,16 @@ fn dyn_first(d: &str) -> String {
 }
 
 impl Program {
+    /// Whether the program's impl of trait t for the object `dyn tr` (its text) writes the object's lifetime (`impl X
+    /// for dyn Obj<u8> + '_`): by the object as written for an impl with no parameters, by its trait's name for a
+    /// generic one. Else it is for `dyn Obj + 'static`
+    pub fn dyn_impl_writes_lt(&self, t: &str, tr: &str) -> bool {
+        let first = dyn_first(tr);
+        let name = first.split(|c: char| c == '(' || c == '<').next().unwrap_or(&first).trim().to_string();
+        let key = |o: String| (t.to_string(), o);
+        (self.dyn_impls_exact.contains(&key(first.clone())) && self.dyn_impls_lt.contains(&key(first))) || (self.dyn_impls.contains(&key(name.clone())) && self.dyn_impls_lt.contains(&key(name)))
+    }
+
     /// The traits the program implements for the trait object `dyn tr` (its text) by an impl of its own (`impl
     /// MyTrait for dyn Tr {}`, generic or not): the candidates for a default method called through the object
     pub fn dyn_impl_traits(&self, tr: &str) -> Vec<&String> {

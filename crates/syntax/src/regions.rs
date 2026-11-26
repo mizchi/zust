@@ -915,7 +915,13 @@ pub fn adt_regions(g: &Generics, tys: &[&PTy]) -> Option<Box<RAdtSyn>> {
 /// referent)
 fn bare_dyn(t: &PTy, behind: bool) -> bool {
     match t {
-        PTy::Dyn(bs) => !behind && !bs.iter().any(|b| matches!(b, Bound::Lifetime(_))),
+        // (not one whose trait takes lifetimes (`dyn Obj<'a>`): the trait's own bound, `trait Obj<'a>: 'a`, may be
+        // its default, which the header does not see)
+        PTy::Dyn(bs) => {
+            !behind
+                && !bs.iter().any(|b| matches!(b, Bound::Lifetime(_)))
+                && !bs.iter().any(|b| matches!(b, Bound::Trait(_, p) if p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Lifetime(_))))))
+        }
         PTy::Ref(_, _, i) => bare_dyn(i, true),
         PTy::Path(None, p) => p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Ty(t) if bare_dyn(t, false)))),
         _ => false,
@@ -925,9 +931,11 @@ fn bare_dyn(t: &PTy, behind: bool) -> bool {
 /// t with `+ 'static` on each trait object bare_dyn finds
 fn static_dyn(t: &mut PTy, behind: bool) {
     match t {
-        PTy::Dyn(bs) => {
-            if !behind && !bs.iter().any(|b| matches!(b, Bound::Lifetime(_))) {
-                bs.push(Bound::Lifetime("'static".to_string()));
+        PTy::Dyn(_) => {
+            if bare_dyn(t, behind) {
+                if let PTy::Dyn(bs) = t {
+                    bs.push(Bound::Lifetime("'static".to_string()));
+                }
             }
         }
         PTy::Ref(_, _, i) => static_dyn(i, true),
