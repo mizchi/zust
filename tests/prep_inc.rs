@@ -127,3 +127,76 @@ fn prep_inc_attr_with_bracket_string() {
         }
     }
 }
+
+/// Each source in turn through one memo: the incremental result is the full one's, and whether each call after the
+/// first reused the chunks it kept (the first call preprocesses the whole and keeps nothing; the second keeps the
+/// chunks; the third can reuse them)
+fn through_memo(srcs: &[String]) -> Vec<bool> {
+    let mut memo = PrepMemo::default();
+    let mut reused = vec![];
+    for (i, src) in srcs.iter().enumerate() {
+        let (mut f1, mut f2) = (vec![], vec![]);
+        let full = prep_full(src, &[], &mut f1, None).map(marked);
+        let inc = prep(src, &[], &mut f2, None, &mut memo);
+        match (full, inc) {
+            (Ok(a), Ok(b)) => assert!(a == b && f1 == f2, "source {i} differs:\n{src}"),
+            (Err(_), Err(_)) => {}
+            (a, b) => panic!("source {i}: ok / err differ: full {:?} inc {:?}", a.err(), b.err()),
+        }
+        if i > 0 {
+            reused.push(memo.was_incremental());
+        }
+    }
+    reused
+}
+
+/// What only looks like an item after a brace on its line (in a comment, a string, a one-line impl) does not stop the
+/// incremental path, and an item that is one (in a fn body on its `{`'s line) is moved as the full preparation moves it
+/// (#188: on zustc's own sources, every edit used to preprocess the whole)
+#[test]
+fn prep_inc_same_line_items() {
+    let base = "\
+// (a comment: `extern \"C\" { fn f(); }`)
+struct T(u8);
+impl T { fn get(&self) -> u8 { self.0 } }
+fn label() -> &'static str { \"{ type X = u8; }\" }
+fn helper() -> u8 {
+    let t = T(1);
+    t.get()
+}
+fn outer() -> u8 { fn inner() -> u8 { 7 } inner() + helper() }
+fn main() { let _ = (outer(), label()); }
+";
+    let in_helper = base.replace("    t.get()\n", "    let _q = 2;\n    t.get()\n");
+    let in_outer = in_helper.replace("inner() + helper()", "inner() + helper() + 1");
+    let in_label = in_outer.replace("type X = u8;", "type X = u16;");
+    let srcs: Vec<String> = [base, &in_helper, &in_outer, &in_label].iter().map(|s| s.to_string()).collect();
+    for w in srcs.windows(2) {
+        assert_ne!(w[0], w[1]);
+    }
+    assert_eq!(through_memo(&srcs), vec![false, true, true]);
+}
+
+/// A body whose `fn` type comes before a block (`let f: fn() -> u8 = || { 1 };`) and that holds an item: the item
+/// stays in its skeleton (it once went with the closure's block, and with it the name another body's item collides
+/// with: that one was not renamed after an edit elsewhere)
+#[test]
+fn prep_inc_fn_type_before_a_block() {
+    let base = "\
+fn a() -> usize {
+    let f: fn() -> u8 = || { 1 };
+    const K: usize = 1;
+    K + f() as usize
+}
+fn b() -> usize {
+    const K: usize = 2;
+    K
+}
+fn main() { let _ = a() + b(); }
+";
+    let edited = base.replace("    K\n}", "    let _q = 1;\n    K\n}");
+    let again = edited.replace("let _q = 1;", "let _q = 2;");
+    assert!(base != edited && edited != again);
+    let srcs = vec![base.to_string(), edited, again];
+    assert_eq!(through_memo(&srcs), vec![false, true]);
+}

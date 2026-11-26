@@ -1457,9 +1457,9 @@ fn hoist_kws(c: u8) -> &'static [&'static str] {
     }
 }
 
-/// An item keyword right after a brace or a `;` on a line (`f({ fn inner() {} })`): whether hoist_nested_items moves
-/// such an item depends on the rest of the source (its quick check looks for indented items only), so the incremental
-/// preprocessing, which hoists a chunk alone, cannot reuse chunks of a source that has one
+/// An item keyword right after a brace or a `;` on a line (`f({ fn inner() {} })`), which hoist_parts_at's quick
+/// check looks for besides indented ones. A text check: it also answers yes for a comment, a string or a one-line impl
+/// (`impl T for u8 { fn f() {} }`), which only costs the tokenizing that check would skip
 pub fn has_inline_item(src: &str) -> bool {
     // (the keywords hoist_parts_at looks for)
     src.match_indices(['{', ';', '}']).any(|(i, _)| {
@@ -1667,7 +1667,14 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     // (a proc macro's output is one line, marked (PM_MARK): the items in its bodies, `{#[link(..)] extern "C" {..}`,
     // are not at a line's start. Looked for only once this process expanded one)
     // (nor an anonymous const a `macro_rules!` expansion wrote on one line, `const _: () = { impl Tr for u8 {..} };`)
-    if !indented && !(PM_EXPANDED.load(std::sync::atomic::Ordering::Relaxed) && src.contains(PM_MARK)) && !src.contains("const _") {
+    // (nor an item after a `{` / `;` / `}` on its line, `fn main() { fn g() {} g() }`: looked for here too, so that
+    // whether it is moved does not depend on the rest of the source having an indented item (prep's incremental path
+    // preprocesses a source of the changed chunks and the others' skeletons))
+    if !indented
+        && !(PM_EXPANDED.load(std::sync::atomic::Ordering::Relaxed) && src.contains(PM_MARK))
+        && !src.contains("const _")
+        && !has_inline_item(src)
+    {
         return None;
     }
     let s = src.as_bytes();

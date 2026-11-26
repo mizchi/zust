@@ -268,6 +268,15 @@ pub struct PrepMemo {
     chunks: Option<(String, Vec<(usize, u64, Levels)>, bool)>,
     /// (chunk hash, hash of what encloses it (mod / impl / trait), index among identical ones) → result
     out: FxMap<(u64, u64, u32), ChunkOut>,
+    /// Whether the last call reused chunks (the incremental path) rather than preprocessing the whole
+    inc: bool,
+}
+
+impl PrepMemo {
+    /// Whether the last call of `prep` with this memo reused the chunks it kept (the incremental path)
+    pub fn was_incremental(&self) -> bool {
+        self.inc
+    }
 }
 
 /// Chunk start position (byte), and the hash of what encloses it (the sequence of mod names / impl / trait)
@@ -501,13 +510,17 @@ fn macro_names(t: &str) -> Vec<String> {
 }
 
 /// Skeleton: within fn bodies, removes the tokens that are not items / calls of user macros (and thread_local!) / brackets / `;`.
-/// The number of newlines stays the same (newlines inside removed tokens and whitespace are kept)
-fn skeleton(t: &str, names: &[String]) -> String {
+/// The number of newlines stays the same (newlines inside removed tokens and whitespace are kept). With the hash of what
+/// it keeps as written
+fn skeleton(t: &str, names: &[String]) -> (String, u64) {
     let s = t.as_bytes();
     let toks = lexer::tokenize(s);
     let n = toks.len();
     let is_sym = |k: usize, c: u8| toks[k].0 == 1 && s[toks[k].1] == c;
     let mut blank = vec![false; n];
+    // (what each token is, for the hash: 0 outside the bodies, 1 in a body (kept only if a bracket or `;`), 2 in an item
+    // or macro call a body keeps)
+    let mut kind = vec![0u8; n];
     let mut depth = 0i32;
     let mut pending_fn = false;
     let mut bodies: Vec<i32> = vec![];
@@ -565,7 +578,7 @@ fn skeleton(t: &str, names: &[String]) -> String {
         }
         n - 1
     };
-    // ((opening token, closing token, whether something is kept) per body)
+    // ((opening token, closing token, whether something is kept) per body, and the bodies open (indices of spans))
     let mut spans: Vec<(usize, usize, bool)> = vec![];
     let mut open_at: Vec<usize> = vec![];
     // Initializer expressions of const / static (from `=` to `;`): removed except for calls of user macros
@@ -581,23 +594,77 @@ fn skeleton(t: &str, names: &[String]) -> String {
         if (in_body || in_init) && toks[k].0 == 0 {
             let w = &s[toks[k].1..toks[k].2];
             let stmt_start = k == 0 || is_sym(k - 1, b'{') || is_sym(k - 1, b'}') || is_sym(k - 1, b';') || is_sym(k - 1, b']');
+            // (what hoist_parts_at takes for an item's start, `pub fn` / `unsafe fn` / `async fn` / `extern "C" {..}` too:
+            // a skeleton keeps more than it moves, never less (an `unsafe {..}` block is kept whole, which is only text))
             let item_kw = in_body
                 && matches!(
                     w,
-                    b"fn" | b"struct" | b"enum" | b"const" | b"use" | b"static" | b"impl" | b"trait" | b"type" | b"mod" | b"union" | b"macro_rules"
+                    b"fn" | b"struct"
+                        | b"enum"
+                        | b"const"
+                        | b"use"
+                        | b"static"
+                        | b"impl"
+                        | b"trait"
+                        | b"type"
+                        | b"mod"
+                        | b"union"
+                        | b"macro_rules"
+                        | b"pub"
+                        | b"unsafe"
+                        | b"async"
+                        | b"extern"
+                        | b"safe"
                 );
+            // (and a `mod m { .. }` anywhere in a body, as flatten_modules finds them: where it is not a statement's
+            // start too)
+            let inline_mod = in_body && w == b"mod" && k + 2 < n && toks[k + 1].0 == 0 && is_sym(k + 2, b'{');
             let mac = k + 2 < n
                 && is_sym(k + 1, b'!')
                 && (is_sym(k + 2, b'(') || is_sym(k + 2, b'[') || is_sym(k + 2, b'{'))
                 && (w == b"thread_local" || names.iter().any(|x| x.as_bytes() == w));
-            if (stmt_start && item_kw) || mac {
-                // (Kept. The braces inside balance, so the depth does not change)
-                if let Some(sp) = spans.last_mut() {
-                    if in_body {
-                        sp.2 = true;
+            if (stmt_start && item_kw) || inline_mod || mac {
+                // (with the attributes before it, `#[cfg(..)] fn f() {}`: what they say decides what is moved)
+                let mut a = k;
+                while a >= 2 && is_sym(a - 1, b']') {
+                    let mut d = 0i32;
+                    let mut j = a - 1;
+                    loop {
+                        if is_sym(j, b']') {
+                            d += 1;
+                        } else if is_sym(j, b'[') {
+                            d -= 1;
+                            if d == 0 {
+                                break;
+                            }
+                        }
+                        if j == 0 {
+                            break;
+                        }
+                        j -= 1;
+                    }
+                    if d != 0 || j == 0 || !is_sym(j - 1, b'#') {
+                        break;
+                    }
+                    a = j - 1;
+                }
+                for m in a..k {
+                    blank[m] = false;
+                    kind[m] = 2;
+                }
+                // (Kept. The braces inside balance, so the depth does not change. Every body it is in keeps something:
+                // not only the last one opened, which may have closed already (a `fn` type before a block,
+                // `let f: fn() = || { .. };`), and not only the innermost, which an outer one would blank)
+                if in_body {
+                    for &o in &open_at {
+                        spans[o].2 = true;
                     }
                 }
-                k = end_of(k, mac && !(stmt_start && item_kw)) + 1;
+                let e = end_of(k, mac && !(stmt_start && item_kw) && !inline_mod);
+                for m in k..=e.min(n - 1) {
+                    kind[m] = 2;
+                }
+                k = e + 1;
                 continue;
             }
         }
@@ -607,6 +674,7 @@ fn skeleton(t: &str, names: &[String]) -> String {
             continue;
         }
         if in_body {
+            kind[k] = 1;
             let keep = toks[k].0 == 1 && matches!(s[toks[k].1], b'{' | b'}' | b'(' | b')' | b'[' | b']' | b';');
             if !keep {
                 blank[k] = true;
@@ -664,7 +732,7 @@ fn skeleton(t: &str, names: &[String]) -> String {
                 b'{' => {
                     if pending_fn {
                         bodies.push(depth);
-                        open_at.push(k);
+                        open_at.push(spans.len());
                         spans.push((k, n, false));
                         pending_fn = false;
                     }
@@ -675,9 +743,7 @@ fn skeleton(t: &str, names: &[String]) -> String {
                     if bodies.last() == Some(&depth) {
                         bodies.pop();
                         if let Some(o) = open_at.pop() {
-                            if let Some(sp) = spans.iter_mut().rev().find(|sp| sp.0 == o) {
-                                sp.1 = k;
-                            }
+                            spans[o].1 = k;
                         }
                     }
                 }
@@ -711,6 +777,34 @@ fn skeleton(t: &str, names: &[String]) -> String {
             }
         }
     };
+    // (and its hash, of what it keeps as written, without the whitespace between what a body keeps of its own (its
+    // brackets and `;`): what a body's blanking leaves (spaces, and the newlines that keep the lines) is not in it,
+    // so a line added to a body changes no hash. The lines are each chunk's own: no other chunk's output moves with
+    // them. The items and macro calls a body keeps, and what is outside the bodies, are hashed with their whitespace:
+    // a `macro_rules!`'s is in what its uses expand to)
+    // (of a body's own brackets, only those around something it keeps: a statement or a block with nothing kept in
+    // it, added or removed, changes no hash either. What a body keeps moves no other chunk's output but by its names
+    // and the blocks it is in, which those brackets are)
+    let mut holds = vec![false; n];
+    let mut open: Vec<usize> = vec![];
+    for k in 0..n {
+        if kind[k] == 2 {
+            for &o in &open {
+                holds[o] = true;
+            }
+        } else if !blank[k] && toks[k].0 == 1 {
+            match s[toks[k].1] {
+                b'{' | b'(' | b'[' => open.push(k),
+                b'}' | b')' | b']' => {
+                    if let Some(o) = open.pop() {
+                        holds[k] = holds[o];
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut h = FNV0;
     for k in 0..n {
         let (a, b) = (toks[k].1, toks[k].2);
         if a < last {
@@ -720,6 +814,10 @@ fn skeleton(t: &str, names: &[String]) -> String {
             squeeze(&mut out, &s[last..a]);
         } else {
             out.extend_from_slice(&s[last..a]);
+            let prev = if k > 0 { kind[k - 1] } else { 0 };
+            if !((prev == 1 || kind[k] == 1) && prev != 2 && kind[k] != 2) {
+                h = fnv(h, &s[last..a]);
+            }
         }
         if blank[k] {
             squeeze(&mut out, &s[a..b]);
@@ -728,6 +826,9 @@ fn skeleton(t: &str, names: &[String]) -> String {
             }
         } else {
             out.extend_from_slice(&s[a..b]);
+            if kind[k] != 1 || holds[k] {
+                h = fnv(mix(h, 1), &s[a..b]);
+            }
         }
         last = b;
     }
@@ -735,8 +836,9 @@ fn skeleton(t: &str, names: &[String]) -> String {
         squeeze(&mut out, &s[last..]);
     } else {
         out.extend_from_slice(&s[last..]);
+        h = fnv(h, &s[last..]);
     }
-    String::from_utf8(out).unwrap_or_else(|_| t.to_string())
+    (String::from_utf8(out).unwrap_or_else(|_| t.to_string()), h)
 }
 
 /// Splits the result of preprocessing per chunk (lines: each chunk's start line (0-based), the last is the total line count).
@@ -1142,6 +1244,7 @@ pub fn moved_lines(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet
 /// Preprocessing (incremental). Column shifts are added to fix
 pub fn prep(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, cfg: Option<&crate::cfg::CfgSet>, memo: &mut PrepMemo) -> R<String> {
     memo.calls += 1;
+    memo.inc = false;
     let start = file_start(src);
     let src: &str = start.as_deref().unwrap_or(src);
     if std::env::var_os("ZUSTC_NO_PREP_INC").is_some() || (memo.calls == 1 && std::env::var_os("ZUSTC_PREP_VERIFY").is_none()) {
@@ -1195,7 +1298,7 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
     }
     let log = std::env::var_os("ZUSTC_PREP_LOG").is_some();
     let (starts, balanced) = chunk_starts(src, &mut memo.chunks);
-    if !balanced || lexer::has_inline_item(src) {
+    if !balanced {
         return Ok(None);
     }
     if log {
@@ -1252,9 +1355,7 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
             None => match new_skel.get(&k) {
                 Some(e) => (e.0.clone(), e.1),
                 None => {
-                    let sk = skeleton(text_of(j), &names);
-                    let h = fnv(FNV0, sk.as_bytes());
-                    (sk, h)
+                    skeleton(text_of(j), &names)
                 }
             },
         };
@@ -1275,6 +1376,7 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
     }
     let mut outs: Vec<Option<ChunkOut>> = (0..nchunk).map(|_| None).collect();
     if memo.fp == fp && !memo.out.is_empty() {
+        memo.inc = true;
         let mut missing = vec![false; nchunk];
         let mut any = false;
         for j in 0..nchunk {
