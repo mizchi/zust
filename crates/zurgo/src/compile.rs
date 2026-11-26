@@ -13,7 +13,7 @@ use crate::platform::Target;
 use crate::resolve::{self, Graph, Mode, Node, Opts};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use zustc::session::{CrateSpec, Options, Session};
+use zustc::session::{CrateCheck, CrateSpec, Options, Session};
 
 type R<T> = Result<T, String>;
 
@@ -85,6 +85,12 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
 /// plan, and each test crate: its index in the crates, its label (`pkg (lib)`, `pkg (bin x)`, `pkg (test x)`), and
 /// whether it has the harness (`harness = false`: no)
 pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, String, bool, String)>)> {
+    plan_keeping(g, o, None)
+}
+
+/// plan_labeled; with `errs` (a check), a crate the proc-macro stubs' check cannot read, or that uses a stub's
+/// macro, is not an error of the plan but the crate's own: (crate, error) in errs
+fn plan_keeping(g: &Graph, o: &BuildOpts, mut errs: Option<&mut Vec<(String, String)>>) -> R<(Vec<CrateSpec>, Vec<(usize, String, bool, String)>)> {
     let host = Target::host();
     let target = match &o.target {
         Some(t) => Target::by_triple(t).ok_or_else(|| format!("unknown target `{t}` (x86_64-unknown-linux-gnu, wasm32-unknown-unknown)"))?,
@@ -185,9 +191,18 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, 
     // (build scripts, dependencies first)
     let mut bs = Runner::new(g, &r, &target, &host, out_dir(g, o), o.release, o.bs_compiler, o.jobs, o.verbose);
     let mut bs_out: BTreeMap<Node, build_script::Output> = BTreeMap::new();
+    // (a check: a build script that fails is the error of its package's crates (below))
+    let mut bs_err: BTreeMap<Node, String> = BTreeMap::new();
     for &n in &order {
-        if let Some(x) = bs.run(n)? {
-            bs_out.insert(n, x);
+        match bs.run(n) {
+            Ok(Some(x)) => {
+                bs_out.insert(n, x);
+            }
+            Ok(None) => {}
+            Err(e) if errs.is_some() => {
+                bs_err.insert(n, e);
+            }
+            Err(e) => return Err(e),
         }
     }
     let mut crates: Vec<CrateSpec> = vec![];
@@ -213,14 +228,41 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, 
                     g.pkgs[p].display()
                 ));
             }
-            let src = std::fs::read_to_string(&lib.path).map_err(|e| format!("{}: {e}", lib.path.display()))?;
+            // (a check: one whose root cannot be read, or that does not build, is its crate's error; it is not a stub
+            //  then, whose uses would be errors of their own)
+            let mut failed = false;
+            let src = match std::fs::read_to_string(&lib.path) {
+                Ok(t) => t,
+                Err(e) => {
+                    let e = format!("{}: {e}", lib.path.display());
+                    match errs.as_mut() {
+                        Some(v) => {
+                            v.push((lib.name.clone(), e));
+                            failed = true;
+                            String::new()
+                        }
+                        None => return Err(e),
+                    }
+                }
+            };
             // (its root with its features: `#[cfg_attr(feature = "x", proc_macro_attribute)]`)
             let cfg = zustc::cfg::CfgSet { features: r.nodes[&pn].features.iter().cloned().collect(), debug_assertions: !o.release, ..Default::default() };
             let m = proc_macro_stub::macros_of(&zustc::cfg::strip(&src, &cfg).unwrap_or(src));
             let stub = stub_dir.join(format!("{}.rs", lib.name));
             // (its macros run when rustc builds it and the toolchain's proc-macro server is there: zustc asks the
             //  server. Otherwise its uses are errors, below)
-            let dylib = if run_pm { Some(bs.proc_macro_dylib(pn)?) } else { None };
+            let dylib = match (run_pm && !failed).then(|| bs.proc_macro_dylib(pn)) {
+                Some(Ok(d)) => Some(d),
+                Some(Err(e)) => match errs.as_mut() {
+                    Some(v) => {
+                        v.push((lib.name.clone(), e));
+                        failed = true;
+                        None
+                    }
+                    None => return Err(e),
+                },
+                None => None,
+            };
             let text = match &dylib {
                 Some(_) => format!("// (zurgo: `{}` is a proc-macro crate: rustc builds it, the toolchain's proc-macro server runs its macros)\n", pk.name),
                 None => proc_macro_stub::stub_text(&pk.name, &m),
@@ -248,7 +290,7 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, 
                 proc_macro: dylib.clone(),
                 test: false,
             });
-            if dylib.is_none() {
+            if dylib.is_none() && !failed {
                 pm_macros.push((p, m));
             }
         }
@@ -461,13 +503,36 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, 
                 cfgs.push(("test".to_string(), None));
             }
             let cfg = zustc::cfg::CfgSet { features: c.features.clone(), debug_assertions: !o.release, wasm, cfgs, env: c.env.clone(), ..Default::default() };
-            let (text, _) = zustc::srcmap::load_crate(&c.root, &c.display, &cfg)?;
+            let text = match zustc::srcmap::load_crate(&c.root, &c.display, &cfg) {
+                Ok((t, _)) => t,
+                Err(e) => match errs.as_mut() {
+                    Some(v) => {
+                        v.push((c.name.clone(), e));
+                        continue;
+                    }
+                    None => return Err(e),
+                },
+            };
             let u = proc_macro_stub::uses_in(&text);
             for (p, m) in pm_macros.iter().filter(|(p, _)| pm_deps.contains(p)) {
                 if let Some(h) = u.hit(m) {
                     let pk = &g.pkgs[*p].m;
-                    return Err(format!("`{}` uses {h} of the proc-macro crate `{} v{}`: proc macros cannot run yet (mizchi/zust#29)", c.name, pk.name, pk.version));
+                    let why = format!("uses {h} of the proc-macro crate `{} v{}`: proc macros cannot run yet (mizchi/zust#29)", pk.name, pk.version);
+                    match errs.as_mut() {
+                        Some(v) => {
+                            v.push((c.name.clone(), why));
+                            break;
+                        }
+                        None => return Err(format!("`{}` {why}", c.name)),
+                    }
                 }
+            }
+        }
+    }
+    if let Some(v) = errs.as_mut() {
+        for (c, n) in crates[n_stubs..].iter().zip(&node_of) {
+            if let Some(e) = bs_err.get(n) {
+                v.push((c.name.clone(), e.clone()));
             }
         }
     }
@@ -570,6 +635,35 @@ fn ws_text_in(crates: &[CrateSpec], redact: bool) -> String {
     s
 }
 
+/// zustc's options for a build (or a check) with `o`: the target's backend and module writer
+fn session_opts(o: &BuildOpts) -> R<Options> {
+    let mut opts = Options { opt: o.release, time: o.time, no_cache: o.no_cache, ..Options::default() };
+    if let Some(j) = o.jobs {
+        opts.jobs = j;
+    }
+    match o.target.as_deref() {
+        None | Some("x86_64-unknown-linux-gnu") => opts.backend = Some(zustc::clif_backend::compile),
+        Some("wasm32-unknown-unknown") => {
+            opts.backend = Some(zustc::wasm_backend::compile);
+            opts.module_writer = Some(zustc::wasm_backend::write_module);
+        }
+        Some(t) => return Err(format!("unknown target `{t}`")),
+    }
+    Ok(opts)
+}
+
+/// `zurgo check`: the crates a build would compile (build scripts and proc macros run as for a build), each one
+/// checked (Session::check_workspace) and none compiled to an object. Each crate's errors (`file:line:col:
+/// message`), in dependency order. A crate's errors do not stop the check of the crates after it
+pub fn check(g: &Graph, o: &BuildOpts) -> R<Vec<CrateCheck>> {
+    let out = out_dir(g, o);
+    std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let _lock = build_script::lock_file(&out.join(".zurgo-lock"))?;
+    let mut errs = vec![];
+    let (crates, _) = plan_keeping(g, o, Some(&mut errs))?;
+    Session::new(session_opts(o)?).check_workspace(&crates, &out, errs)
+}
+
 pub fn build(g: &Graph, o: &BuildOpts) -> R<Built> {
     let out = out_dir(g, o);
     std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
@@ -584,18 +678,7 @@ pub fn build(g: &Graph, o: &BuildOpts) -> R<Built> {
         eprint!("{}", ws_text_in(&crates, true));
         eprintln!("(written to {}, with the environment's values)", p.display());
     }
-    let mut opts = Options { opt: o.release, time: o.time, no_cache: o.no_cache, ..Options::default() };
-    if let Some(j) = o.jobs {
-        opts.jobs = j;
-    }
-    match o.target.as_deref() {
-        None | Some("x86_64-unknown-linux-gnu") => opts.backend = Some(zustc::clif_backend::compile),
-        Some("wasm32-unknown-unknown") => {
-            opts.backend = Some(zustc::wasm_backend::compile);
-            opts.module_writer = Some(zustc::wasm_backend::write_module);
-        }
-        Some(t) => return Err(format!("unknown target `{t}`")),
-    }
+    let opts = session_opts(o)?;
     let wasm = opts.module_writer.is_some();
     Session::new(opts).build_workspace(&crates, &out)?;
     // (wasm32: a bin is the module `<name>.wasm`)

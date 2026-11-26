@@ -1886,12 +1886,22 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         need.insert("__exr_panic_fmt");
     }
     let mut dur_ops = false;
+    let mut fmt_write = false;
     loop {
         let mut changed = false;
         if !wide_ops && (need.contains("i128") || need.contains("u128")) {
             wide_ops = true;
             changed = true;
             wide(&mut need);
+        }
+        // (std::fmt::Write, `__FWr`: its impls (`impl __FWr for String`) are chosen by their member's name, and a
+        // program that names the trait only in a bound, or calls `write!(w, ..)` on a generic `W`, never names
+        // `write_str`. Every impl has it and the trait's defaults call it, so it comes with the trait (#148). In the
+        // loop, as the trait can come in through another prelude item too)
+        if !fmt_write && need.contains("__FWr") {
+            fmt_write = true;
+            changed = true;
+            need.insert("write_str");
         }
         // (the prelude's Duration impls + - * / and += -=; Duration is also chosen as the argument of `thread::sleep`,
         // so this is checked inside the loop)

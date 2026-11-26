@@ -526,8 +526,16 @@ pub struct Program {
     /// The source line (1-based) of each item, for trait_scopes: the diagnostic line base of a function is not it (a
     /// dependency's is tagged, and it is the line before). Empty when trait_scopes is
     pub item_lines: Vec<u32>,
-    /// The last segment of a name → fn IDs (`len` → `A::len`, `B::len`). For over-approximating references
-    pub by_last: FxMap<String, Vec<u32>>,
+    /// The last segment of a name → its group of fns (ref_groups: `len` → `A::len`, `B::len`). For over-approximating
+    /// references
+    pub by_last: FxMap<String, u32>,
+    /// The groups of fns of one last segment (by_last), in the order the names were first met: the nodes of the
+    /// reference graph between fns. A fn refers to a name, not to each fn of that name: `x.area()` to `area`, not to
+    /// its 2400 definitions in a program that defines it 2400 times, so the graph, and the cache keys over it, grow
+    /// with the calls plus the definitions, not with their product (#188). The same over-approximation: a change to
+    /// any `area` still reaches every caller of `area`. A fn is in its name's group, and in a second one for a
+    /// `__core_` name (`swap` too). Each group's fns ascend; an edit that adds a name keeps the others' order
+    pub ref_groups: Vec<Vec<u32>>,
     /// Trait name → the fns declared in that trait
     pub traits: FxMap<String, Vec<u32>>,
     /// impls whose self type is a reference to a concrete type (`impl Tr for &i32` / `for &S`): (that type, trait)
@@ -1401,6 +1409,7 @@ impl Program {
             trait_scopes: vec![],
             item_lines: vec![],
             by_last: FxMap::default(),
+            ref_groups: vec![],
             traits: FxMap::default(),
             impls: HashSet::default(),
             panic_handler: None,
@@ -2117,12 +2126,10 @@ impl Program {
                 let last = name.rsplit("::").next().unwrap().split('#').next().unwrap().to_string();
                 // (`io::stdin()` / `mem::swap(..)` are the prelude's `__core_*`: make them findable by the name's tail)
                 if let Some(short) = last.strip_prefix("__core_") {
-                    p.by_last.entry(short.to_string()).or_default().push(p.names.len() as u32);
+                    let short = short.to_string();
+                    p.add_to_group(short);
                 }
-                p.by_last
-                    .entry(last)
-                    .or_default()
-                    .push(p.names.len() as u32);
+                p.add_to_group(last);
                 if blanket {
                     let m = name.rsplit("::").next().unwrap().to_string();
                     p.blanket.entry(m).or_insert(p.names.len() as u32);
@@ -7025,12 +7032,23 @@ impl Program {
         }
     }
 
-    /// The identifiers in the item that match fn names (sorted), and those that match struct names.
-    /// It is an over-approximation that ignores shadowing by local variables,
-    /// but it errs on the safe side for both cache keys and reachability.
-    /// References to (fns, structs / enums, consts / statics). Scans the identifiers only once
-    pub fn refs(&self, src: &str, it: &SrcItem) -> (Vec<u32>, Vec<u32>, Vec<u32>) {
-        self.refs_in(src, it, None)
+    /// The next fn (names.len()) into the group of the last segment `last` (by_last, ref_groups)
+    fn add_to_group(&mut self, last: String) {
+        let id = self.names.len() as u32;
+        let groups = &mut self.ref_groups;
+        let g = *self.by_last.entry(last).or_insert_with(|| {
+            groups.push(vec![]);
+            groups.len() as u32 - 1
+        });
+        let v = &mut self.ref_groups[g as usize];
+        if v.last() != Some(&id) {
+            v.push(id);
+        }
+    }
+
+    /// The fns whose last name segment is `last` (`len` → `A::len`, `B::len`), ascending
+    pub fn fns_named(&self, last: &str) -> Option<&[u32]> {
+        self.by_last.get(last).map(|&g| self.ref_groups[g as usize].as_slice())
     }
 
     /// The set of names refs looks up (names in any table). Most identifiers (variables, keywords) need one lookup
@@ -7046,6 +7064,9 @@ impl Program {
         s
     }
 
+    /// The names in the item that name fns (their groups, ref_groups: sorted), and the structs / enums and the consts
+    /// / statics it names. An over-approximation that ignores shadowing by local variables, which errs on the safe
+    /// side for both cache keys and reachability. Scans the identifiers only once.
     /// names: ref_names (when given, identifiers not in it are skipped)
     pub fn refs_in(&self, src: &str, it: &SrcItem, names: Option<&FxSet<&str>>) -> (Vec<u32>, Vec<u32>, Vec<u32>) {
         let mut fns = vec![];
@@ -7061,8 +7082,8 @@ impl Program {
             // `for` calls next on an iterator without writing the name
             let s = if s == "for" { "next" } else { s };
             let mut hit = false;
-            if let Some(ids) = self.by_last.get(s) {
-                fns.extend_from_slice(ids);
+            if let Some(&g) = self.by_last.get(s) {
+                fns.push(g);
                 hit = true;
             }
             if let Some(&i) = self.struct_index.get(s) {
@@ -7096,10 +7117,13 @@ impl Program {
         (fns, sts, cs)
     }
 
-    /// The fn IDs reachable from main.
+    /// The fn IDs reachable from main (refs: each fn's groups (ref_groups)).
     /// Unreachable fns are not parsed, type-checked or compiled (relax/blaze's demand-driven approach, done AOT).
     pub fn reachable(&self, refs: &[Vec<u32>]) -> Vec<bool> {
+        let groups = &self.ref_groups;
         let mut seen = vec![false; self.names.len()];
+        // (a group's fns are pushed once: each name is followed once, however many fns name it)
+        let mut gseen = vec![false; groups.len()];
         // Roots: main, exported fns, the panic handler (a panic can happen anywhere)
         let mut stack: Vec<u32> = self.index.get("main").copied().into_iter().collect();
         stack.extend(self.index.get(TEST_ENTRY).copied());
@@ -7162,7 +7186,11 @@ impl Program {
             if std::mem::replace(&mut seen[i as usize], true) {
                 continue;
             }
-            stack.extend(refs[i as usize].iter().copied());
+            for &g in &refs[i as usize] {
+                if !std::mem::replace(&mut gseen[g as usize], true) {
+                    stack.extend(groups[g as usize].iter().copied());
+                }
+            }
         }
         seen
     }

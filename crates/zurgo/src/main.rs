@@ -10,6 +10,8 @@ const USAGE: &str = "usage: zurgo <command> [options]
 commands:
   build     build the package (or every member of a virtual workspace) with zustc
   run       build, then run a binary (arguments after `--` go to it)
+  check     check every crate a build compiles, and report each one's errors (all the fns' bodies' errors of a
+            crate, not only the first); writes no objects
   test      build the test crates (unit tests of the lib and bins, tests/*.rs) and run every test in a process
             of its own, all at once: `zurgo test [filter] [-- libtest args]`
   metadata  the package graph as JSON, as `cargo metadata --format-version 1` writes it
@@ -117,6 +119,25 @@ fn main() {
             let t0 = std::time::Instant::now();
             compile::build(&g, &o).unwrap_or_else(|e| die(&e));
             eprintln!("    Finished `{}` profile in {:.2}s (zustc)", if o.release { "release" } else { "dev" }, t0.elapsed().as_secs_f64());
+        }
+        "check" | "c" => {
+            let t0 = std::time::Instant::now();
+            let checks = compile::check(&g, &o).unwrap_or_else(|e| die(&e));
+            let n: usize = checks.iter().map(|c| c.errors.len()).sum();
+            for c in &checks {
+                for d in &c.errors {
+                    eprintln!("error: crate `{}`: {d}", c.name);
+                }
+                if let Some(dep) = &c.blocked_by {
+                    eprintln!("warning: crate `{}` not checked: its dependency `{dep}` could not be read or expanded", c.name);
+                }
+            }
+            if n > 0 {
+                let bad = checks.iter().filter(|c| !c.errors.is_empty()).count();
+                eprintln!("error: {n} error{} in {bad} crate{}", if n == 1 { "" } else { "s" }, if bad == 1 { "" } else { "s" });
+                std::process::exit(1);
+            }
+            eprintln!("    Finished checking {} crate{} in {:.2}s (zustc)", checks.len(), if checks.len() == 1 { "" } else { "s" }, t0.elapsed().as_secs_f64());
         }
         "run" | "r" => {
             // (without `--bin`: the `default-run` of the selected package, as cargo chooses)

@@ -320,6 +320,179 @@ fn metadata_matches_cargo() {
     assert!(bad.is_empty(), "\n{}", bad.join("\n"));
 }
 
+/// The files under d whose names end with ext
+fn files_with(d: &Path, ext: &str) -> Vec<PathBuf> {
+    let mut out = vec![];
+    for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(files_with(&p, ext));
+        } else if p.to_string_lossy().ends_with(ext) {
+            out.push(p);
+        }
+    }
+    out
+}
+
+#[test]
+fn check_reports_every_error() {
+    let sc = Scratch::new("check");
+    let d = sc.0.clone();
+    sc.write(&[
+        (
+            "app/Cargo.toml",
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[workspace]\n[dependencies]\nutil = { path = \"../util\" }\nother = { path = \"../other\" }\n",
+        ),
+        ("other/Cargo.toml", "[package]\nname = \"other\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        ("other/src/lib.rs", "pub fn three() -> u32 {\n    3\n}\n"),
+        ("app/src/main.rs", "fn main() {\n    println!(\"{}\", util::one() + util::two());\n    let s: String = 5;\n}\n"),
+        ("util/Cargo.toml", "[package]\nname = \"util\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        ("util/src/lib.rs", "pub fn one() -> u32 {\n    1\n}\npub fn bad_a() -> u32 {\n    \"a\"\n}\npub fn two() -> u32 {\n    2\n}\npub fn bad_b(x: u8) -> bool {\n    x + 1\n}\n"),
+    ]);
+    let m = d.join("app/Cargo.toml");
+    let t = d.join("t");
+    let (ok, _, err) = cargo(&["generate-lockfile", "--offline"], &m, &t);
+    assert!(ok, "{err}");
+    // (every fn's errors, of every crate: an error of the lib does not stop the bin's check, which uses its source)
+    let (ok, _, err) = zurgo(&["check"], &m, &t);
+    assert!(!ok, "{err}");
+    let lib = d.join("util/src/lib.rs").display().to_string();
+    for want in [
+        format!("error: crate `util`: {lib}:5:5: mismatched types: expected `u32`, found `&str`"),
+        format!("error: crate `util`: {lib}:11:5: mismatched types: expected `bool`, found `u8`"),
+        "error: crate `app`: src/main.rs:3:21: mismatched types: expected `String`, found `i32`".to_string(),
+        "error: 3 errors in 2 crates".to_string(),
+    ] {
+        assert!(err.contains(&want), "missing `{want}`:\n{err}");
+    }
+    // (a build stops at the first)
+    let (ok, _, err) = zurgo(&["build"], &m, &t);
+    assert!(!ok && err.matches("mismatched types").count() == 1, "{err}");
+    // (fixed: the check passes, and writes no object; the build after it builds and runs)
+    sc.write(&[
+        ("util/src/lib.rs", "pub fn one() -> u32 {\n    1\n}\npub fn two() -> u32 {\n    2\n}\n"),
+        ("app/src/main.rs", "fn main() {\n    println!(\"{}\", util::one() + util::two());\n}\n"),
+    ]);
+    let _ = std::fs::remove_dir_all(&t);
+    let (ok, _, err) = zurgo(&["check"], &m, &t);
+    assert!(ok && err.contains("Finished checking 3 crates"), "{err}");
+    assert!(files_with(&t, ".o").is_empty(), "a check wrote objects: {:?}", files_with(&t, ".o"));
+    let (ok, out, err) = zurgo(&["run"], &m, &t);
+    assert!(ok && out == "3\n", "{out}{err}");
+    // (a check right after the build, nothing edited: the crates are checked again, not taken as fresh from their
+    // objects, which stay as they are)
+    let stamps = |t: &Path| -> Vec<(PathBuf, std::time::SystemTime)> {
+        let mut v: Vec<_> = files_with(t, ".o").into_iter().map(|p| (p.clone(), std::fs::metadata(&p).unwrap().modified().unwrap())).collect();
+        v.sort();
+        v
+    };
+    let before = stamps(&t);
+    assert!(!before.is_empty());
+    let (ok, _, err) = zurgo(&["check", "--time"], &m, &t);
+    assert!(ok && err.contains("Finished checking 3 crates") && !err.contains(" fresh"), "{err}");
+    assert_eq!(stamps(&t), before, "a check wrote objects");
+    // (and an error after the build is found)
+    sc.write(&[("util/src/lib.rs", "pub fn one() -> u32 {\n    1\n}\npub fn two() -> u32 {\n    2\n}\nfn unused() -> u8 {\n    'c'\n}\n")]);
+    let (ok, _, err) = zurgo(&["check"], &m, &t);
+    assert!(!ok && err.contains(&format!("{lib}:8:5: mismatched types")) && err.contains("1 error in 1 crate"), "{err}");
+    // (a crate that cannot be expanded: its error, and the crates that use it are not checked; the others are)
+    sc.write(&[
+        ("util/src/lib.rs", "macro_rules! m {\n    () => {};\n}\nm!(x);\npub fn one() -> u32 {\n    1\n}\npub fn two() -> u32 {\n    2\n}\n"),
+        ("other/src/lib.rs", "pub fn three() -> u32 {\n    true\n}\n"),
+    ]);
+    let (ok, _, err) = zurgo(&["check"], &m, &t);
+    let other = d.join("other/src/lib.rs").display().to_string();
+    for want in [
+        format!("error: crate `util`: {lib}:4:1: no rules of `m!` matched this call"),
+        format!("error: crate `other`: {other}:2:5: mismatched types: expected `u32`, found `bool`"),
+        "warning: crate `app` not checked: its dependency `util` could not be read or expanded".to_string(),
+        "error: 2 errors in 2 crates".to_string(),
+    ] {
+        assert!(!ok && err.contains(&want), "missing `{want}`:\n{err}");
+    }
+}
+
+#[test]
+fn check_goes_on_past_a_crate_the_plan_cannot_take() {
+    // (without the proc-macro server: a crate that uses a stub's attribute, or whose module tree the stubs' check
+    // cannot read, is that crate's error, as one that cannot be expanded is; the crates that use it are not checked,
+    // the others are)
+    let sc = Scratch::new("check-plan");
+    let d = sc.0.clone();
+    sc.write(&[
+        (
+            "app/Cargo.toml",
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[workspace]\n[dependencies]\nutil = { path = \"../util\" }\nother = { path = \"../other\" }\n",
+        ),
+        ("app/src/main.rs", "fn main() {\n    println!(\"{}\", util::one() + other::three());\n}\n"),
+        ("util/Cargo.toml", "[package]\nname = \"util\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[dependencies]\npm = { path = \"../pm\" }\n"),
+        ("util/src/lib.rs", "#[pm::traced]\npub fn one() -> u32 {\n    1\n}\n"),
+        ("other/Cargo.toml", "[package]\nname = \"other\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        ("other/src/lib.rs", "pub fn three() -> u32 {\n    true\n}\n"),
+        ("pm/Cargo.toml", "[package]\nname = \"pm\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[lib]\nproc-macro = true\n"),
+        ("pm/src/lib.rs", "extern crate proc_macro;\nuse proc_macro::TokenStream;\n#[proc_macro_attribute]\npub fn traced(_a: TokenStream, i: TokenStream) -> TokenStream {\n    i\n}\n"),
+    ]);
+    let m = d.join("app/Cargo.toml");
+    let t = d.join("t");
+    let (ok, _, err) = cargo(&["generate-lockfile", "--offline"], &m, &t);
+    assert!(ok, "{err}");
+    let other = d.join("other/src/lib.rs").display().to_string();
+    let rest = [
+        format!("error: crate `other`: {other}:2:5: mismatched types: expected `u32`, found `bool`"),
+        "warning: crate `app` not checked: its dependency `util` could not be read or expanded".to_string(),
+        "error: 2 errors in 2 crates".to_string(),
+    ];
+    // (a build stops at the plan, as before)
+    let (ok, _, err) = zurgo_no_pm(&["build"], &m, &t);
+    assert!(!ok && err.contains("`util` uses the attribute `#[traced]` of the proc-macro crate `pm v0.1.0`") && !err.contains("mismatched"), "{err}");
+    let (ok, _, err) = zurgo_no_pm(&["check"], &m, &t);
+    assert!(!ok && err.contains("error: crate `util`: uses the attribute `#[traced]` of the proc-macro crate `pm v0.1.0`"), "{err}");
+    for want in &rest {
+        assert!(err.contains(want.as_str()), "missing `{want}`:\n{err}");
+    }
+    // (a module file that is not there)
+    sc.write(&[("util/src/lib.rs", "mod missing;\npub fn one() -> u32 {\n    1\n}\n")]);
+    let (ok, _, err) = zurgo_no_pm(&["check"], &m, &t);
+    assert!(!ok && err.contains("error: crate `util`: ") && err.contains("missing"), "{err}");
+    for want in &rest {
+        assert!(err.contains(want.as_str()), "missing `{want}`:\n{err}");
+    }
+    // (a build script that fails)
+    sc.write(&[("util/src/lib.rs", "pub fn one() -> u32 {\n    1\n}\n"), ("util/build.rs", "fn main() {\n    panic!(\"no\");\n}\n")]);
+    let (ok, _, err) = zurgo_no_pm(&["build"], &m, &t);
+    assert!(!ok && !err.contains("mismatched"), "{err}");
+    let (ok, _, err) = zurgo_no_pm(&["check"], &m, &t);
+    assert!(!ok && err.contains("error: crate `util`: "), "{err}");
+    for want in &rest {
+        assert!(err.contains(want.as_str()), "missing `{want}`:\n{err}");
+    }
+    std::fs::remove_file(d.join("util/build.rs")).unwrap();
+    // (with the proc-macro server: a proc-macro crate that does not build; the crates that reach it are not checked)
+    sc.write(&[
+        ("util/src/lib.rs", "#[pm::traced]\npub fn one() -> u32 {\n    1\n}\n"),
+        ("pm/src/lib.rs", "extern crate proc_macro;\nuse proc_macro::TokenStream;\n#[proc_macro_attribute]\npub fn traced(_a: TokenStream, i: TokenStream) -> TokenStream {\n    let x: u8 = \"no\";\n    i\n}\n"),
+    ]);
+    let (ok, _, err) = zurgo(&["check"], &m, &t);
+    let pm_rest = [
+        "error: crate `pm`: ".to_string(),
+        rest[0].clone(),
+        "warning: crate `util` not checked: its dependency `pm` could not be read or expanded".to_string(),
+        "warning: crate `app` not checked".to_string(),
+        "error: 2 errors in 2 crates".to_string(),
+    ];
+    for want in &pm_rest {
+        assert!(!ok && err.contains(want.as_str()), "missing `{want}`:\n{err}");
+    }
+    // (a proc-macro crate whose root cannot be read (not UTF-8), with or without the server)
+    std::fs::write(d.join("pm/src/lib.rs"), [0xffu8, 0xfe, 0x0a]).unwrap();
+    for zurgo in [self::zurgo, zurgo_no_pm] {
+        let (ok, _, err) = zurgo(&["check"], &m, &t);
+        for want in &pm_rest {
+            assert!(!ok && err.contains(want.as_str()), "missing `{want}`:\n{err}");
+        }
+    }
+}
+
 #[test]
 fn errors() {
     let sc = Scratch::new("errors");
