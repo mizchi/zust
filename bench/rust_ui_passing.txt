@@ -4190,6 +4190,7 @@ compile-fail	lifetimes/recover-infer-ret-ty-issue-135845.rs
 run-pass	lifetimes/ref-pattern-lifetime-annotation-13665.rs
 compile-fail	lifetimes/return-reference-local-variable-13497.rs
 run-pass	lifetimes/rvalue-cleanup-shortcircuit.rs
+run-pass	lifetimes/rvalue-lifetime-drop-timing.rs
 compile-fail	lifetimes/shadow.rs
 check-pass	lifetimes/static-bound-fulfillment-with-pointer-7268.rs
 compile-fail	lifetimes/static-impl-obligation.rs

@@ -526,6 +526,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         pat_moved: vec![],
         pat_vars: vec![],
         rel_parts: None,
+        index_owns: false,
         part_vars: vec![],
         known_var: vec![],
         owned: vec![],
@@ -1277,6 +1278,8 @@ pub struct Cx<'p> {
     /// The parts (offset in the place released, type) that the pattern of the next release moved out of, and the
     /// variants (offset, enum, variant) it matched on the way
     pub rel_parts: Option<PatParts>,
+    /// The next indexable owns a new value it indexes (an index expression's place, `[A(1)][0]`)
+    pub index_owns: bool,
     /// The variants (offset in the local, enum, variant) of the split under way (split_moved)
     pub part_vars: Vec<(i32, u32, usize)>,
     /// Locals (their drop flags) that a match left known to be one variant (enum, variant): every arm that went on
@@ -2455,6 +2458,8 @@ impl Cx<'_> {
                         diverged = true;
                         continue;
                     };
+                    // (the temporary that holds the value, when it is no place: what a `ref` binding refers to)
+                    let value_flag = self.last_scrut;
                     // (`let (y, _): (&'a u32, u32) = ..;`: the pattern binds from a value of the annotation's type)
                     if let Some(a) = ann_ty {
                         if let Some((t, tr)) = self.rg_let_ann(a, init, Some(place.ty())) {
@@ -2542,8 +2547,12 @@ impl Cx<'_> {
                     }
                     // (as for a plain let: what the bindings may borrow (a `ref` binding, a reference in the value)
                     // lives to the end of the block, the rest is dropped here: `let (n, _) = (c.borrow().len(), 0);`)
-                    if extends_temps(init) || self.bk_ty(place.ty()).1 || format!("{pat:?}").contains("Ident(true") {
+                    if extends_temps(init) || self.bk_ty(place.ty()).1 {
                         self.extend_temps(t0);
+                    } else if format!("{pat:?}").contains("Ident(true") {
+                        // (a `ref` binding keeps the value it refers to, not the statement's other temporaries:
+                        // `let ref x = f(&t());` drops t()'s at the `;`)
+                        self.extend_value_temp(t0, value_flag);
                     } else {
                         self.drop_temps(t0);
                     }
@@ -2637,7 +2646,12 @@ impl Cx<'_> {
                         self.rg_let_wild(a, init);
                     }
                     self.rg.let_sp = let_sp0;
-                    self.drop_temps(t0);
+                    // (`let _ = &t();` extends t()'s temporary to the block's end, as a named let does)
+                    if extends_temps(init) {
+                        self.extend_temps(t0);
+                    } else {
+                        self.drop_temps(t0);
+                    }
                 }
                 Stmt::Let(pat, ann_ty, init, _, let_at) => {
                     let name = pat_name(pat)?;

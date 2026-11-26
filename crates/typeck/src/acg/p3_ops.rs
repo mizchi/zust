@@ -1852,6 +1852,7 @@ impl Cx<'_> {
 
     /// (start address, length, element type) of an indexed target (array / slice / a reference to one)
     pub(crate) fn indexable(&mut self, e: &Expr) -> R<(Value, Value, Ty)> {
+        let own = std::mem::take(&mut self.index_owns);
         // (`g[i]` (g: MutexGuard<Vec<T>> and so on): `(*g)[i]`)
         if let Some(d) = self.user_deref(e) {
             let d = self.keep_expr(d);
@@ -1895,9 +1896,25 @@ impl Cx<'_> {
         let mut p = if is_place_expr(e) && !is_const {
             self.place(e)?
         } else {
+            // (a new value an index expression indexes (`[A(1)][0]`, `f()[0]`, `Box::new([..])[0]`, `vec![..][1]`) is a
+            // temporary of the statement: dropped with them. Not for the other callers (a `for` loop owns its array, or
+            // moves its elements out))
+            let fresh = own
+                && matches!(strip_paren(e), Expr::Array(_) | Expr::Repeat(..) | Expr::Call(..) | Expr::MethodCall(..) | Expr::Macro(..) | Expr::Struct(..) | Expr::Tuple(_));
             match self.expr(e, None)? {
-                (Some(a), t) if t.is_agg() => Place::Mem(a, 0, t),
-                (Some(v), Ty::Ref(_, i) | Ty::Box(i)) => Place::Mem(v, 0, *i),
+                (Some(a), t) if t.is_agg() => {
+                    if fresh {
+                        self.own_temp(a, t);
+                    }
+                    Place::Mem(a, 0, t)
+                }
+                (Some(v), t @ Ty::Box(i)) => {
+                    if fresh {
+                        self.own_temp(v, t);
+                    }
+                    Place::Mem(v, 0, *i)
+                }
+                (Some(v), Ty::Ref(_, i)) => Place::Mem(v, 0, *i),
                 (_, t) => {
                     return err(SP, format!("cannot index into a value of type `{}`", self.prog.tn(t)));
                 }

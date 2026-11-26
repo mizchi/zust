@@ -3064,6 +3064,21 @@ impl Cx<'_> {
         self.temps.extend(keep);
     }
 
+    /// The temporaries of a statement from t: the one whose flag is `value` (the value a `ref` binding refers to) lives
+    /// to the block's end, the others are dropped now
+    pub(crate) fn extend_value_temp(&mut self, t: usize, value: Option<StackSlot>) {
+        let ts: Vec<Owned> = self.temps.drain(t.min(self.temps.len())..).collect();
+        let depth = self.scopes.len() - 1;
+        let (keep, rest): (Vec<Owned>, Vec<Owned>) = ts.into_iter().partition(|o| value == Some(o.flag));
+        for o in rest.into_iter().rev() {
+            self.emit_owned_drop(o);
+        }
+        for mut o in keep {
+            o.depth = depth;
+            self.owned.push(o);
+        }
+    }
+
     /// let の初期化式の一時値は、ブロックの終わりまで延ばす (rustc の一時値の寿命延長の近似)
     pub(crate) fn extend_temps(&mut self, t: usize) {
         let depth = self.scopes.len() - 1;

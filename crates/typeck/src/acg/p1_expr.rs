@@ -663,6 +663,7 @@ impl Cx<'_> {
             }
             Expr::Index(b, index, isp) if !matches!(&**index, Expr::Range(..)) => {
                 let isp = *isp;
+                self.index_owns = true;
                 let (base, len, elem) = self.indexable(b)?;
                 // (a place written through `IndexMut` (`v[v.len() - 1] = 1` of a Vec): the `&mut v` is taken before
                 // the index is evaluated, with no two-phase borrow)
