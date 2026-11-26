@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795727996377,
+  "lastUpdate": 1795727999170,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -143377,6 +143377,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 5439,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3711c3bfbfd6136678c02b197008f28be07f3acf",
+          "message": "Region check part 40: OnceCell, constructors' WF, called generic fns, elided receiver lifetimes (#278)\n\nRegion check part 40: OnceCell, constructors' WF, called generic fns, elided receiver lifetimes",
+          "timestamp": "2026-11-27T06:11:33+09:00",
+          "tree_id": "4e7516f94cd431e2e57cfdc209bf0cb435a35242",
+          "url": "https://github.com/mizchi/zust/commit/3711c3bfbfd6136678c02b197008f28be07f3acf"
+        },
+        "date": 1795727998479,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.82,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1918,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.88,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1557,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 73.67,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5441,
             "unit": "tests"
           }
         ]
