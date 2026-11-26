@@ -307,14 +307,33 @@ pub fn vector_names(t: Ty) -> &'static [&'static str] {
     }
 }
 
-/// An integer type in constant evaluation: its width and sign (usize / isize are 64 bits)
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+/// An integer type in constant evaluation: its width and sign (usize / isize are 64 bits; ptr tells them from u64 /
+/// i64 only in their names, `usize::MAX`: they are one type otherwise)
+#[derive(Clone, Copy, Debug)]
 pub struct It {
     pub bits: u32,
     pub signed: bool,
+    pub ptr: bool,
+}
+
+impl PartialEq for It {
+    fn eq(&self, o: &It) -> bool {
+        (self.bits, self.signed) == (o.bits, o.signed)
+    }
+}
+
+impl Eq for It {}
+
+impl std::hash::Hash for It {
+    fn hash<H: std::hash::Hasher>(&self, h: &mut H) {
+        (self.bits, self.signed).hash(h);
+    }
 }
 
 impl It {
+    pub const U8: It = It { bits: 8, signed: false, ptr: false };
+    pub const U32: It = It { bits: 32, signed: false, ptr: false };
+    pub const I32: It = It { bits: 32, signed: true, ptr: false };
     pub fn of_name(n: &str) -> Option<It> {
         let (bits, signed) = match n {
             "u8" => (8, false),
@@ -329,36 +348,56 @@ impl It {
             "i128" => (128, true),
             _ => return None,
         };
-        Some(It { bits, signed })
+        Some(It { bits, signed, ptr: n == "usize" || n == "isize" })
     }
     pub fn of_ty(t: Ty) -> Option<It> {
         match t {
             Ty::U8 => It::of_name("u8"),
             Ty::U16 => It::of_name("u16"),
             Ty::U32 => It::of_name("u32"),
-            Ty::U64 | Ty::Usize => It::of_name("u64"),
+            Ty::U64 => It::of_name("u64"),
+            Ty::Usize => It::of_name("usize"),
             Ty::U128 => It::of_name("u128"),
             Ty::I8 => It::of_name("i8"),
             Ty::I16 => It::of_name("i16"),
             Ty::I32 => It::of_name("i32"),
-            Ty::I64 | Ty::Isize => It::of_name("i64"),
+            Ty::I64 => It::of_name("i64"),
+            Ty::Isize => It::of_name("isize"),
             Ty::I128 => It::of_name("i128"),
             _ => None,
         }
     }
-    /// The type's name, as a literal's suffix (usize / isize as u64 / i64: the same width)
+    /// The type's name, as a literal's suffix
     pub fn name(self) -> &'static str {
         match (self.bits, self.signed) {
             (8, false) => "u8",
             (16, false) => "u16",
             (32, false) => "u32",
+            (64, false) if self.ptr => "usize",
             (64, false) => "u64",
             (128, false) => "u128",
             (8, true) => "i8",
             (16, true) => "i16",
             (32, true) => "i32",
+            (64, true) if self.ptr => "isize",
             (64, true) => "i64",
             _ => "i128",
+        }
+    }
+    /// v as rustc shows a value of this type in E0080: `200_u8`, `-1_i32`, the type's MIN and MAX by name
+    /// (`i8::MIN`, `u8::MAX`; an unsigned 0 is `0_u8`)
+    fn show(self, v: i128) -> String {
+        let n = self.name();
+        let min = self.wrap(1i128 << (self.bits - 1));
+        if self.signed && v == min {
+            format!("{n}::MIN")
+        } else if v == if self.signed { !min } else { self.wrap(-1) } {
+            format!("{n}::MAX")
+        } else if self.signed {
+            format!("{v}_{n}")
+        } else {
+            // (a u128 past i128::MAX is held as its bit pattern)
+            format!("{}_{n}", v as u128)
         }
     }
     /// v's low bits as this type (two's complement; a u128 as its bit pattern)
@@ -378,6 +417,48 @@ impl It {
     pub fn check(self, v: Option<i128>) -> R<i128> {
         v.filter(|&v| self.fits(v)).ok_or_else(|| "overflow in constant".to_string())
     }
+    /// rustc's E0080 for `l op r` of this type that overflows or divides by zero (`attempt to compute `u8::MAX +
+    /// 1_u8`, which would overflow`; op "neg" is `-l`), at the operation's place in the text it was parsed from: its
+    /// start and its operator's, `1:14:1:22: ..` (see unplaced; 1-based columns); r is of type rt (a shift's own, i32
+    /// when unsuffixed)
+    #[cold]
+    #[inline(never)]
+    fn arith_err(self, op: &str, l: i128, r: i128, rt: Option<It>, sp: crate::parse::Span) -> String {
+        let m = match op {
+            "neg" => format!("attempt to negate `{}`, which would overflow", self.show(l)),
+            "/" if r == 0 => format!("attempt to divide `{}` by zero", self.show(l)),
+            "%" if r == 0 => format!("attempt to calculate the remainder of `{}` with a divisor of zero", self.show(l)),
+            "<<" | ">>" => format!("attempt to shift {} by `{}`, which would overflow", if op == "<<" { "left" } else { "right" }, rt.unwrap_or(It::I32).show(r)),
+            _ => format!("attempt to compute `{} {op} {}`, which would overflow", self.show(l), self.show(r)),
+        };
+        let (p, a) = (sp.start, sp.at);
+        if p.line == 0 { format!("{m} (E0080)") } else { format!("{}:{}:{}:{}: {m} (E0080)", p.line, p.col + 1, a.line, a.col + 1) }
+    }
+}
+
+/// An error of constant evaluation that is rustc's at the constant (E0080): an overflow or a division by zero
+pub fn const_eval_err(e: &str) -> bool {
+    e.contains("overflow in constant") || e.ends_with("(E0080)")
+}
+
+/// An E0080 without the place of its operation (`1:14:1:22: attempt to ..`, It::arith_err), which is in the text the
+/// expression was parsed from: for one parsed from other text than the caller's (another constant's initializer, a
+/// const fn's body), and for the callers that place the error themselves
+#[cold]
+fn unplaced(e: String) -> String {
+    match e.split_once(": ") {
+        Some((p, m)) if e.ends_with("(E0080)") && p.split(':').count() == 4 && p.split(':').all(|x| !x.is_empty() && x.bytes().all(|c| c.is_ascii_digit())) => m.to_string(),
+        _ => e,
+    }
+}
+
+/// An E0080 that has no place, at p (start and operator both)
+#[cold]
+fn placed_at(e: String, p: crate::parse::Pos) -> String {
+    if !e.ends_with("(E0080)") || p.line == 0 {
+        return e;
+    }
+    format!("{}:{}:{}:{}: {e}", p.line, p.col + 1, p.line, p.col + 1)
 }
 
 pub fn prim_assoc_const(t: Ty, name: &str) -> Option<i128> {
@@ -4295,11 +4376,17 @@ impl Program {
 
     /// Evaluates an integer constant expression of our own syntax tree (the value only: eval_t gives the type too)
     pub fn eval_const(&self, e: &crate::parse::Expr, depth: u32) -> R<i128> {
-        Ok(self.eval_t(e, depth, None)?.0)
+        Ok(self.eval_t(e, depth, None).map_err(unplaced)?.0)
     }
 
     /// e's value as type t (an integer type: unsuffixed literals in e are t's, the value is wrapped to t)
     pub fn eval_const_as(&self, e: &crate::parse::Expr, t: Ty) -> R<i128> {
+        self.eval_const_placed(e, t).map_err(unplaced)
+    }
+
+    /// eval_const_as of e parsed at its place in the source: an E0080 of an operation in e has its place, the start
+    /// of the operation and of its operator (`1:15:1:23: attempt to compute ..`); one in a constant e reads has none
+    pub fn eval_const_placed(&self, e: &crate::parse::Expr, t: Ty) -> R<i128> {
         let it = It::of_ty(t);
         let (v, _) = self.eval_t(e, 0, it)?;
         Ok(it.map_or(v, |it| it.wrap(v)))
@@ -4317,7 +4404,8 @@ impl Program {
         // (evaluated as the declared type: an unsuffixed literal is one (`const M: u8 = !0;` is 255), and
         // `const A: u8 = 255 + 1;` overflows)
         let decl = It::of_ty(self.consts[ci as usize].ty);
-        let (v, t) = self.eval_t(&e, depth + 1, decl)?;
+        // (its places are in its initializer's text, not the source's)
+        let (v, t) = self.eval_t(&e, depth + 1, decl).map_err(unplaced)?;
         Ok(match decl {
             Some(it) => (it.wrap(v), Some(it)),
             None => (v, t),
@@ -4340,7 +4428,7 @@ impl Program {
                     .find(|x| t.ends_with(*x) && !t.starts_with('\'') && !t.starts_with('"') && !t.starts_with('b'))
                     .and_then(|x| It::of_name(x))
                     // (a byte literal is a u8: `b'\x01'`)
-                    .or_else(|| t.starts_with("b'").then(|| It { bits: 8, signed: false }));
+                    .or_else(|| t.starts_with("b'").then(|| It::U8));
                 // (unsuffixed: the type the context wants, `const M: u8 = 255`)
                 Ok(match it.or(want) {
                     Some(it) => (it.wrap(v), Some(it)),
@@ -4472,7 +4560,9 @@ impl Program {
                 let b = crate::parse::parse_expr(&body)?;
                 let Expr::Block(_, _, b) = b else { return Err("unsupported const fn".into()) };
                 let rt = int_of(&rt);
-                let (v, t) = self.eval_block_env(&b, &mut env, depth + 1, rt.or(want))?;
+                // (its places are in the body's text, not the source's: an E0080 there is at the call, as rustc's
+                // `evaluation of `X` failed inside this call`)
+                let (v, t) = self.eval_block_env(&b, &mut env, depth + 1, rt.or(want)).map_err(|e| placed_at(unplaced(e), p.pos))?;
                 match rt.or(t).or(want) {
                     Some(it) => Ok((it.wrap(v), Some(it))),
                     None => un(v),
@@ -4496,7 +4586,8 @@ impl Program {
                     Some(Ty::Array(e, _)) => It::of_ty(*e),
                     _ => self.early_part_ty(b, None),
                 };
-                self.eval_t(&part, depth + 1, want.or(et))
+                // (the part's places are in that constant's text)
+                self.eval_t(&part, depth + 1, want.or(et)).map_err(unplaced)
             }
             Expr::Field(b, f, _) => {
                 let part = self.const_part(b, depth, &|x| match x {
@@ -4513,7 +4604,7 @@ impl Program {
                     }
                     _ => self.early_part_ty(b, f.parse::<usize>().ok()),
                 };
-                self.eval_t(&part, depth + 1, want.or(ft))
+                self.eval_t(&part, depth + 1, want.or(ft)).map_err(unplaced)
             }
             // (`-` of a literal is the negative literal: `-128i8` is i8::MIN, and so is `-(128i8)`; `-i8::MIN` overflows)
             Expr::Unary(op, x, _) if op == "-" && matches!(strip_parens(x), Expr::Lit(..)) => {
@@ -4532,11 +4623,15 @@ impl Program {
                 let (v, _) = self.eval_t(x, depth, None)?;
                 un((v == 0) as i128)
             }
-            Expr::Unary(op, x, _) => {
+            Expr::Unary(op, x, sp) => {
                 let (v, t) = self.eval_t(x, depth, want)?;
                 match (op.as_str(), t) {
-                    // (`-` of a typed value: checked; of an unsigned one, an error as rustc's)
-                    ("-", Some(it)) => Ok((it.check(v.checked_neg().filter(|_| it.signed || v == 0))?, t)),
+                    // (`-` of a typed value: checked (`-i8::MIN` is E0080); of an unsigned one, an error as rustc's)
+                    ("-", Some(it)) if it.signed => match v.checked_neg().filter(|&n| it.fits(n)) {
+                        Some(n) => Ok((n, t)),
+                        None => Err(it.arith_err("neg", v, 0, None, *sp)),
+                    },
+                    ("-", Some(it)) => Ok((it.check(v.checked_neg().filter(|_| v == 0))?, t)),
                     ("-", None) => un(v.wrapping_neg()),
                     // (`!` of a typed value: its bits only)
                     ("!", Some(it)) => Ok((it.wrap(!v), t)),
@@ -4545,7 +4640,7 @@ impl Program {
                     _ => Err("not an integer constant".into()),
                 }
             }
-            Expr::Binary(op, l, r, _) => {
+            Expr::Binary(op, l, r, sp) => {
                 let op = op.as_str();
                 let shift = op == "<<" || op == ">>";
                 let cmp = matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||");
@@ -4606,7 +4701,10 @@ impl Program {
                             "||" => return b(x != 0 || y != 0),
                             _ => return Err("unsupported operator in constant".into()),
                         };
-                        Ok((v.ok_or("overflow in constant")? as i128, t))
+                        match v {
+                            Some(v) => Ok((v as i128, t)),
+                            None => Err(it.arith_err(op, lv, rv, rt, *sp)),
+                        }
                     }
                     Some(it) => {
                         let v = match op {
@@ -4638,7 +4736,10 @@ impl Program {
                         if op != "<<" && op != ">>" && !(it.fits(lv) && it.fits(rv)) {
                             return Err("overflow in constant".into());
                         }
-                        Ok((it.check(v)?, t))
+                        match v.filter(|&v| it.fits(v)) {
+                            Some(v) => Ok((v, t)),
+                            None => Err(it.arith_err(op, lv, rv, rt, *sp)),
+                        }
                     }
                     None => match op {
                         "+" => un(lv.wrapping_add(rv)),
@@ -4714,7 +4815,7 @@ impl Program {
                 let bits = t.map_or(128, |it| it.bits);
                 let unsigned = t.is_some_and(|it| !it.signed);
                 let u = if bits < 128 { (v as u128) & ((1u128 << bits) - 1) } else { v as u128 };
-                let u32t = Some(It { bits: 32, signed: false });
+                let u32t = Some(It::U32);
                 // (an argument is its parameter's type: `pow`'s exponent a u32, `min` / `max`'s the receiver's)
                 let aw = if m == "pow" { u32t } else { t };
                 let a: Vec<i128> = args.iter().map(|x| Ok(self.eval_t(x, depth, aw)?.0)).collect::<R<Vec<i128>>>()?;
@@ -4811,7 +4912,7 @@ impl Program {
         match e {
             Expr::Lit(t, _) => {
                 if t.starts_with("b'") {
-                    return Some(It { bits: 8, signed: false });
+                    return Some(It::U8);
                 }
                 if t.starts_with('\'') || t.starts_with('"') || t.starts_with('b') {
                     return None;
@@ -4842,12 +4943,12 @@ impl Program {
                 It::of_ty(self.consts[ci as usize].ty)
             }
             Expr::Path(None, p) if p.segs.len() == 2 => match (Ty::prim(&p.segs[0].name).or_else(|| Ty::prim(&self.prim_of_name(&p.segs[0].name))), p.segs[1].name.as_str()) {
-                (Some(_), "BITS") => Some(It { bits: 32, signed: false }),
+                (Some(_), "BITS") => Some(It::U32),
                 (Some(t), _) => It::of_ty(t),
                 _ => None,
             },
             Expr::MethodCall(recv, m, ..) => match m.as_str() {
-                "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros" | "ilog2" | "ilog10" => Some(It { bits: 32, signed: false }),
+                "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros" | "ilog2" | "ilog10" => Some(It::U32),
                 "pow" | "min" | "max" | "abs" => self.static_ty(recv),
                 _ => None,
             },
@@ -4862,7 +4963,7 @@ impl Program {
     /// `u8::MAX` and the like, with their type (`BITS` is a u32)
     fn prim_const_t(&self, t: Ty, name: &str) -> R<(i128, Option<It>)> {
         let v = prim_assoc_const(t, name).ok_or("unsupported constant")?;
-        Ok((v, if name == "BITS" { Some(It { bits: 32, signed: false }) } else { It::of_ty(t) }))
+        Ok((v, if name == "BITS" { Some(It::U32) } else { It::of_ty(t) }))
     }
 
     /// The (built-in) generic definition of an n-element tuple
