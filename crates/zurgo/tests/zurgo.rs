@@ -874,3 +874,95 @@ fn test_wasm32_like_cargo_test() {
     assert_eq!(o.status.code(), Some(101), "{err}");
     assert_eq!(zurgo_outcomes(&err), want, "\n{err}");
 }
+
+/// Renamed dependencies (mizchi/zust#249), as cargo builds them: `common = { package = "crypto-common" }` is the library
+/// under that name in its dependent alone (in each module: a fn, a type, a trait, `use common::..`, `::common::..`,
+/// `pub use common;`), whose features turn on through the name (`common/fancy`); an optional one, `dep:` of a feature
+/// of the library's own name, beside a module of that name (spin's `lock_api_crate`); a bin's, from a module of its own;
+/// a proc-macro crate's (`macros::traced`); a dev-dependency's, in the lib's unit tests
+#[test]
+fn renamed_dependencies_run_like_cargo() {
+    let sc = Scratch::new("renamed");
+    let pkg = |name: &str, more: &str| format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n{more}");
+    sc.write(&[
+        ("Cargo.toml", "[workspace]\nmembers = [\"app\", \"dig\"]\nresolver = \"2\"\n"),
+        ("crypto-common/Cargo.toml", &pkg("crypto-common", "[features]\nfancy = []\n")),
+        (
+            "crypto-common/src/lib.rs",
+            "pub struct Block(pub u32);\npub fn make(x: u32) -> Block {\n    Block(x * 2)\n}\npub mod inner {\n    pub fn hello() -> &'static str {\n        \"hello\"\n    }\n}\npub trait Tr {\n    fn get(&self) -> u32;\n}\nimpl Tr for Block {\n    fn get(&self) -> u32 {\n        self.0 + 1\n    }\n}\n#[cfg(feature = \"fancy\")]\npub fn fancy() -> &'static str {\n    \"fancy\"\n}\n",
+        ),
+        ("lock_api/Cargo.toml", &pkg("lock_api", "")),
+        (
+            "lock_api/src/lib.rs",
+            "pub unsafe trait RawMutex {\n    const INIT: Self;\n    fn lock(&self) -> u32;\n}\npub struct Mutex<R: RawMutex, T> {\n    pub raw: R,\n    pub data: T,\n}\nimpl<R: RawMutex, T: Copy> Mutex<R, T> {\n    pub fn get(&self) -> (u32, T) {\n        (self.raw.lock(), self.data)\n    }\n}\n",
+        ),
+        (
+            "spinlike/Cargo.toml",
+            &pkg("spinlike", "[dependencies]\nlock_api_crate = { path = \"../lock_api\", package = \"lock_api\", optional = true }\n[features]\ndefault = [\"lock_api\"]\nlock_api = [\"dep:lock_api_crate\"]\n"),
+        ),
+        (
+            "spinlike/src/lib.rs",
+            "#[cfg(feature = \"lock_api\")]\npub mod lock_api {\n    pub type Mutex<T> = lock_api_crate::Mutex<crate::Raw, T>;\n    pub fn new<T>(data: T) -> Mutex<T> {\n        lock_api_crate::Mutex { raw: <crate::Raw as lock_api_crate::RawMutex>::INIT, data }\n    }\n}\npub struct Raw(pub u32);\n#[cfg(feature = \"lock_api\")]\nunsafe impl lock_api_crate::RawMutex for Raw {\n    const INIT: Self = Raw(100);\n    fn lock(&self) -> u32 {\n        self.0 + 1\n    }\n}\n",
+        ),
+        ("toolbox/Cargo.toml", &pkg("toolbox", "")),
+        ("toolbox/src/lib.rs", "pub fn twice(x: u32) -> u32 {\n    x * 2\n}\n"),
+        ("pm/Cargo.toml", &pkg("pm", "[lib]\nproc-macro = true\n")),
+        (
+            "pm/src/lib.rs",
+            "extern crate proc_macro;\nuse proc_macro::TokenStream;\n#[proc_macro_attribute]\npub fn traced(_a: TokenStream, i: TokenStream) -> TokenStream {\n    i\n}\n#[proc_macro]\npub fn answer(_i: TokenStream) -> TokenStream {\n    \"42u32\".parse().unwrap()\n}\n",
+        ),
+        (
+            "dig/Cargo.toml",
+            &pkg(
+                "dig",
+                "[dependencies]\ncommon = { path = \"../crypto-common\", package = \"crypto-common\" }\nspin = { path = \"../spinlike\", package = \"spinlike\" }\n[dev-dependencies]\ntools = { path = \"../toolbox\", package = \"toolbox\" }\n[features]\ndefault = [\"fancy\"]\nfancy = [\"common/fancy\"]\n",
+            ),
+        ),
+        (
+            "dig/src/lib.rs",
+            "pub use common;\npub use common::Block;\nmod sub;\npub fn all() -> String {\n    let m = spin::lock_api::new(7u8);\n    format!(\"{} {} {:?} {}\", sub::f(), common::make(1).0, m.get(), common::fancy())\n}\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn through_a_renamed_dev_dependency() {\n        assert_eq!(tools::twice(common::make(2).0), 8);\n    }\n}\n",
+        ),
+        (
+            "dig/src/sub.rs",
+            "use common::inner::hello;\nuse common::Tr;\npub fn f() -> String {\n    let b: ::common::Block = common::make(3);\n    format!(\"{} {}\", hello(), b.get())\n}\n",
+        ),
+        (
+            "app/Cargo.toml",
+            &pkg("app", "[dependencies]\nd = { path = \"../dig\", package = \"dig\" }\ncc = { path = \"../crypto-common\", package = \"crypto-common\" }\nmacros = { path = \"../pm\", package = \"pm\" }\n"),
+        ),
+        (
+            "app/src/main.rs",
+            "mod show {\n    use cc::Tr;\n    #[macros::traced]\n    pub fn line() -> String {\n        let b: d::Block = cc::Block(9);\n        format!(\"{} {} {} {} {}\", d::all(), cc::make(5).0, d::common::inner::hello(), b.get(), macros::answer!())\n    }\n}\nfn main() {\n    println!(\"{}\", show::line());\n}\n",
+        ),
+    ]);
+    let root = sc.0.join("Cargo.toml");
+    let app = sc.0.join("app/Cargo.toml");
+    let t = sc.0.join("target");
+    let (ok, _, err) = cargo(&["generate-lockfile", "--offline"], &root, &t);
+    assert!(ok, "{err}");
+    let (ok, want, err) = cargo(&["run", "-q", "--offline"], &app, &t);
+    assert!(ok, "cargo run: {err}");
+    assert_eq!(want, "hello 7 2 (101, 7) fancy 10 hello 10 42\n");
+    let (ok, got, err) = zurgo(&["run"], &app, &t);
+    assert!(ok, "zurgo run: {err}");
+    assert_eq!(got, want);
+    // (the workspace zustc is given names them so: `extern=ALIAS=NAME`, in place of the dependency)
+    let (ok, _, err) = zurgo(&["build", "-v"], &app, &t);
+    assert!(ok, "{err}");
+    let words = |c: &str| -> Vec<String> {
+        let l = err.lines().find(|l| l.starts_with(c)).unwrap_or_else(|| panic!("no `{c}` in\n{err}"));
+        let mut w: Vec<String> = l.split(' ').skip(3).filter(|w| !w.is_empty() && (!w.contains('=') || w.starts_with("extern="))).map(str::to_string).collect();
+        w.sort();
+        w
+    };
+    assert_eq!(words("lib spinlike "), ["extern=lock_api_crate=lock_api"]);
+    assert_eq!(words("lib dig "), ["extern=common=crypto_common", "extern=spin=spinlike"]);
+    assert_eq!(words("bin app "), ["extern=cc=crypto_common", "extern=d=dig", "extern=macros=pm"]);
+    // (the lib's unit tests, with the dev-dependency under its name)
+    let dig = sc.0.join("dig/Cargo.toml");
+    let (ok, out, err) = cargo(&["test", "--offline", "--lib"], &dig, &t);
+    assert!(ok, "cargo test: {err}");
+    let (ok, _, err) = zurgo(&["test", "--lib"], &dig, &t);
+    assert!(ok, "zurgo test: {err}");
+    assert_eq!(zurgo_outcomes(&err), cargo_outcomes(&out), "{err}");
+}

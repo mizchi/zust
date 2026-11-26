@@ -880,6 +880,11 @@ pub struct CrateSpec {
     pub lib: bool,
     /// The names of the directly depended-on crates
     pub deps: Vec<String>,
+    /// The dependencies this crate names otherwise: (the name it uses, the crate's name; the crate is in deps too). A
+    /// Cargo dependency renamed, `common = { package = "crypto-common" }`, as rustc's `--extern common=..`: every module
+    /// of this crate sees `common` as crypto_common, after its own names (as `extern crate crypto_common as common;` at
+    /// its root would), and crypto_common keeps its own name everywhere else (`extern=common=crypto_common`)
+    pub aliases: Vec<(String, String)>,
     /// The enabled features (`features=a,b`)
     pub features: Vec<String>,
     /// (a bin: the name of the executable, when it is not `name`. A Cargo package's lib and bin share the package's
@@ -935,7 +940,8 @@ fn ws_unescape(s: &str) -> String {
 
 /// Reads a workspace description file. One crate per line: `lib <name> <root file> [deps...]` / `bin <name> <root file> [deps...]`
 /// (in place of a dependency, `features=a,b` enables features; a bin's `exe=NAME` is the name of the executable; `cfg=name` / `cfg=name=value`
-/// is a cfg, `env=KEY=VALUE` is a value for `env!`: `%`, `#` and whitespace in the value are `%XX` (ws_escape); `pm=PATH` is a proc-macro crate's dylib)
+/// is a cfg, `env=KEY=VALUE` is a value for `env!`: `%`, `#` and whitespace in the value are `%XX` (ws_escape); `pm=PATH` is a proc-macro crate's dylib;
+/// `extern=ALIAS=NAME` is the dependency NAME under the name ALIAS, a renamed dependency (CrateSpec::aliases))
 /// (everything from `#` on is a comment; paths are relative to the description file's directory)
 pub fn read_workspace(path: &std::path::Path) -> R<Vec<CrateSpec>> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -953,12 +959,26 @@ pub fn read_workspace(path: &std::path::Path) -> R<Vec<CrateSpec>> {
         if w.len() < 3 || (w[0] != "lib" && w[0] != "bin") {
             return Err(format!("{}:{}: expected `lib|bin <name> <root> [deps...]`", path.display(), i + 1));
         }
+        let mut aliases: Vec<(String, String)> = vec![];
+        for s in w[3..].iter().filter_map(|s| s.strip_prefix("extern=")) {
+            match s.split_once('=') {
+                Some((a, n)) => aliases.push((a.to_string(), n.to_string())),
+                None => return Err(format!("{}:{}: expected `extern=ALIAS=NAME`, found `extern={s}`", path.display(), i + 1)),
+            }
+        }
+        let mut deps: Vec<String> = w[3..].iter().filter(|s| !s.contains('=')).map(|s| s.to_string()).collect();
+        for (_, n) in &aliases {
+            if !deps.contains(n) {
+                deps.push(n.clone());
+            }
+        }
         out.push(CrateSpec {
             name: w[1].to_string(),
             root: dir.join(w[2]),
             display: w[2].to_string(),
             lib: w[0] == "lib",
-            deps: w[3..].iter().filter(|s| !s.contains('=')).map(|s| s.to_string()).collect(),
+            deps,
+            aliases,
             features: w[3..]
                 .iter()
                 .filter_map(|s| s.strip_prefix("features="))
@@ -1010,6 +1030,13 @@ fn topo(crates: &[CrateSpec]) -> R<Vec<usize>> {
                 return Err(format!("crate `{}`: dependency `{d}` is not a lib", crates[i].name));
             }
             visit(j, crates, state, order)?;
+        }
+        // (an alias names a dependency, and is a name: the flattening of the modules reads `crate:alias=name`)
+        let ident = |s: &str| s.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && s != "_";
+        for (a, n) in &crates[i].aliases {
+            if !ident(a) || !crates[i].deps.contains(n) {
+                return Err(format!("crate `{}`: `extern={a}={n}` does not name a dependency under another name", crates[i].name));
+            }
         }
         state[i] = 2;
         order.push(i);
@@ -1110,6 +1137,8 @@ fn add_crate_cfg(h: &mut KeyHasher, c: &CrateSpec) {
     h.add(&c.features);
     h.add(&c.cfgs);
     h.add(&c.env);
+    // (and the names it gives its dependencies: its paths, and its dependents' through its items, mean other crates)
+    h.add(&c.aliases);
     // (a proc macro's dylib: also when it is rebuilt in place)
     if let Some(p) = &c.proc_macro {
         h.add(p.as_os_str());
@@ -1219,11 +1248,19 @@ impl Session {
             }
             ranges[k].2 = vis;
         }
+        // (the dependencies this crate and the dependency crates name otherwise, for the flattening of the modules: a
+        // path through an interface's items names them so too. `crate:alias=name`, `:alias=name` for a bin's own)
+        let mut externs: Vec<String> = vec![];
+        for &k in deps.iter().chain(std::iter::once(&i)) {
+            let owner = if crates[k].lib { crates[k].name.as_str() } else { "" };
+            externs.extend(crates[k].aliases.iter().map(|(a, n)| format!("{owner}:{a}={n}")));
+        }
         self.ctx = CrateCtx {
             lib: if c.lib { Some(c.name.clone()) } else { None },
             own_lines: n_lines(&own) + 1,
             map: map.clone(),
             deps: deps.iter().map(|&j| crates[j].name.clone()).collect(),
+            externs,
             features: Some(c.features.clone()),
             cfgs: c.cfgs.clone(),
             env: c.env.clone(),
@@ -1613,10 +1650,24 @@ impl Session {
                 // (which of their macros the libraries re-export, and under what names: `re::answer!()`. From their
                 // expanded text, prepared before this crate's: a `pub use` a macro of theirs gives counts too)
                 if !pms.is_empty() {
+                    // (a library's path through a dependency under another name starts from the dependency: `pub use
+                    // derive::Describe;` with `derive = { package = "pm" }` is pm's)
+                    let through = |k: usize, root: &str| -> String { crates[k].aliases.iter().find(|x| x.0 == root).map_or(root, |x| x.1.as_str()).to_string() };
                     for j in all_deps(i) {
                         if crates[j].proc_macro.is_none() {
                             let uses = pub_uses[j].get_or_insert_with(|| crate::pm::pub_uses(&own_v[j].as_ref().or(loaded[j].as_ref()).unwrap().0));
-                            crate::pm::note_reexports(&mut pms, &crates[j].name, uses);
+                            if crates[j].aliases.is_empty() {
+                                crate::pm::note_reexports(&mut pms, &crates[j].name, uses);
+                            } else {
+                                let uses: Vec<(String, String, String)> = uses.iter().map(|(r, n, a)| (through(j, r), n.clone(), a.clone())).collect();
+                                crate::pm::note_reexports(&mut pms, &crates[j].name, &uses);
+                            }
+                        }
+                    }
+                    // (a proc-macro dependency under another name: its macros through that name, `derive::Describe`)
+                    for (a, n) in &crates[i].aliases {
+                        if let Some(l) = pms.iter_mut().find(|l| l.name == *n) {
+                            l.via.push((a.clone(), "*".to_string(), "*".to_string()));
                         }
                     }
                 }

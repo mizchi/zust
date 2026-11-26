@@ -949,6 +949,26 @@ mod tests {
         assert!(out.contains("let b = &mylib__seedable__pcg32(state);"), "{out}");
     }
 
+    /// A dependency under another name (`dig:common=cc`, a renamed one, mizchi/zust#249): every module of dig sees
+    /// `common` as cc (a path, `::common::..`, a `use` of an item and of a module's item, a re-export a dependent's path
+    /// goes through), after its own names (a module of the library's name); the root of the source too (`:c=cc`)
+    #[test]
+    fn renamed_dependency_is_the_crate_in_each_module() {
+        let src = "pub mod cc {\n    pub fn make() -> u32 { 1 }\n    pub mod inner {\n        pub fn hi() {}\n    }\n}\npub mod dig {\n    pub use common;\n    pub mod cc {\n        pub fn make() -> u32 { 2 }\n    }\n    mod sub {\n        use common::inner::hi;\n        pub fn f() -> u32 {\n            hi();\n            common::make() + ::common::make() + crate::cc::make()\n        }\n    }\n}\nmod m {\n    pub fn g() -> u32 {\n        c::make() + dig::common::make()\n    }\n}\nfn main() {}\n";
+        let crates: Vec<String> = ["cc", "dig", "dig:common=cc", ":c=cc"].iter().map(|s| s.to_string()).collect();
+        let out = rename_module_collisions_in(src, &crates).unwrap();
+        assert!(out.contains("            cc__inner__hi();\n            cc__make() + cc__make() + dig__cc__make()"), "{out}");
+        assert!(out.contains("        cc__make() + cc__make()\n"), "{out}");
+        // (without the entry, `common` is no module)
+        let out = rename_module_collisions_in(src, &crates[..2]).unwrap();
+        assert!(out.contains("common::make()"), "{out}");
+        // (a bin's name for a crate over another crate of that name, which the bin does not depend on itself)
+        let src = "pub mod cc {\n    pub fn make() -> u32 { 1 }\n}\npub mod other {\n    pub fn make() -> u32 { 2 }\n}\nfn main() {\n    let _ = other::make();\n}\n";
+        let crates: Vec<String> = ["cc", "other", ":other=cc"].iter().map(|s| s.to_string()).collect();
+        let out = rename_module_collisions_in(src, &crates).unwrap();
+        assert!(out.contains("let _ = cc__make();"), "{out}");
+    }
+
     fn ren(src: &str) -> String {
         rename_module_collisions_in(src, &["d".to_string()]).unwrap_or_else(|| src.to_string())
     }
@@ -2885,6 +2905,8 @@ pub fn rename_module_collisions(src: &str) -> Option<String> {
 
 /// crates: クレートとして読み込んだモジュール (`pub mod geom { .. }`) の名前。その中のアイテムはぶつからなくても
 /// 必ず `geom__Name` にし (どのクレートと一緒にコンパイルしても同じシンボルになるように)、中の `crate::` はそのモジュールを指す
+/// (an entry `owner:alias=crate` is a dependency the crate `owner` names `alias`, a renamed one; `:alias=crate` for
+/// the root of the source: session::build's CrateSpec::aliases)
 pub fn rename_module_collisions_in(src: &str, crates: &[String]) -> Option<String> {
     rename_module_collisions_fix(src, crates, &mut vec![])
 }
@@ -3142,6 +3164,31 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     if renamed.is_empty() && !src.contains(" as ") {
         return None;
     }
+    // (a dependency under another name, `common = { package = "crypto-common" }` (rustc's `--extern common=..`): the
+    //  entry `digest:common=crypto_common` of crates, `:common=crypto_common` for the root of the source (a bin's).
+    //  As in rustc's extern prelude, every module of that crate sees the name, after its own names; the crate keeps its
+    //  own name everywhere. (the crate's root: its module, or usize::MAX, the name) → the crate's module)
+    let crate_root = |m: usize| -> usize { if in_crate(m) { mod_of_path.get(&vec![mods[m].0[0].clone()]).copied().unwrap_or(usize::MAX) } else { usize::MAX } };
+    let mut ext_alias: LMap<(usize, Vec<u8>), usize> = LMap::default();
+    for e in crates {
+        let Some((owner, rest)) = e.split_once(':') else { continue };
+        let Some((alias, target)) = rest.split_once('=') else { continue };
+        let root = if owner.is_empty() { Some(usize::MAX) } else { mod_of_path.get(&vec![owner.as_bytes().to_vec()]).copied() };
+        if let (Some(root), Some(&t)) = (root, mod_of_path.get(&vec![target.as_bytes().to_vec()])) {
+            ext_alias.insert((root, alias.as_bytes().to_vec()), t);
+        }
+    }
+    // (the module path a path from the extern prelude of the crate of scope `from` names: `common::block` →
+    //  `crypto_common::block`)
+    let ext_path = |from: usize, segs: &[Vec<u8>]| -> Option<Vec<Vec<u8>>> {
+        if ext_alias.is_empty() {
+            return None;
+        }
+        let t = *ext_alias.get(&(crate_root(from), segs.first()?.clone()))?;
+        let mut p = mods[t].0.clone();
+        p.extend(segs[1..].iter().cloned());
+        Some(p)
+    };
     // モジュールのパス (`crate::a::b` / `a::b` / `self` / `super`) → mods の番号
     let resolve_mod = |from: usize, segs: &[Vec<u8>]| -> Option<usize> {
         let mut base: Vec<Vec<u8>> = if from == usize::MAX { vec![] } else { mods[from].0.clone() };
@@ -3161,7 +3208,16 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             // (相対パスで見つからなければ crate からとみなす)
             let mut rel = base.clone();
             rel.extend(rest.iter().cloned());
-            if let Some(i) = mod_of_path.get(&rel).copied() {
+            let hit = mod_of_path.get(&rel).copied();
+            // (a name of the crate's extern prelude, unless the scope has a module or item of that name itself: another
+            // crate's module of the name, which the root of the source holds, is none of the crate's)
+            let own = |m: usize| !(crate_root(from) == usize::MAX && in_crate(m));
+            if !ext_alias.is_empty() && rest.len() == segs.len() && !hit.is_some_and(own) && !def_set.contains(&(from, segs[0].clone())) {
+                if let Some(p) = ext_path(from, segs) {
+                    return mod_of_path.get(&p).copied();
+                }
+            }
+            if let Some(i) = hit {
                 return Some(i);
             }
             if !croot.is_empty() {
@@ -3256,6 +3312,10 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     // or a module brings in)
     let resolve_mod_at = |from: usize, segs: &[Vec<u8>], at: usize, lead: bool| -> Option<usize> {
         if lead {
+            // (`::common::block`: the extern prelude's name first)
+            if let Some(p) = ext_path(from, segs) {
+                return mod_of_path.get(&p).copied();
+            }
             return resolve_mod(usize::MAX, segs);
         }
         let alias = segs.first().and_then(|f| {

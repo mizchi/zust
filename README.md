@@ -111,7 +111,9 @@ zustc build workspace.txt -o target
   - `features=a,b`: its features;
   - `cfg=name` / `cfg=name=value`: other cfgs (what a build script's `rustc-cfg` gives);
   - `env=KEY=VALUE`: the values `env!` / `option_env!` see (`CARGO_PKG_*`, `OUT_DIR`);
-  - `exe=NAME`: a bin's executable name.
+  - `exe=NAME`: a bin's executable name;
+  - `extern=ALIAS=NAME`: the dependency NAME under the name ALIAS in this crate (a renamed dependency, rustc's
+    `--extern ALIAS=..`). Every module of the crate sees it; NAME keeps its own name everywhere else.
 
   In a value, `%`, `#` and white space are written `%XX`. A name `env!` does not find there is looked up in zustc's
   own environment, as rustc does.
@@ -140,7 +142,9 @@ zurgo run
 - Build scripts run as under cargo (compiled by zustc, or by rustc when zustc cannot), and their cfgs, `rustc-env` and
   `OUT_DIR` reach the crates. A proc-macro dependency is built by rustc and run by the toolchain's proc-macro server
   (`rust-analyzer-proc-macro-srv`): its attributes, derives and function-like macros expand (mizchi/zust#29).
-- Not yet: two versions of one crate, renamed dependencies, git dependencies, its own resolver (mizchi/zust#28).
+- A renamed dependency (`common = { package = "crypto-common" }`) is the library under that name in its dependent
+  only, as rustc's `--extern common=..`.
+- Not yet: two versions of one crate, git dependencies, its own resolver (mizchi/zust#28).
 
 ### Options
 

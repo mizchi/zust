@@ -120,6 +120,7 @@ fn exe_moved_between_crates_relinks() {
         display: format!("{name}.rs"),
         lib: false,
         deps: vec![],
+        aliases: vec![],
         features: vec![],
         exe: Some("one".to_string()),
         cfgs: vec![],
@@ -256,6 +257,7 @@ fn unused_parens_in_a_library_and_not_in_dependencies() {
         display: format!("{name}.rs"),
         lib,
         deps: deps.iter().map(|d| d.to_string()).collect(),
+        aliases: vec![],
         features: vec![],
         exe: (!lib).then(|| name.to_string()),
         cfgs: vec![],
@@ -269,5 +271,80 @@ fn unused_parens_in_a_library_and_not_in_dependencies() {
     assert!(e.contains("lib.rs:3:13: unnecessary parentheses around assigned value"), "{e}");
     s.build_workspace(&[spec("dep", true, &[]), spec("main", false, &["dep"])], &out).unwrap();
     assert_eq!(run(&out.join("main"), &dir, 0).0, "2\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Renamed dependencies (`extern=ALIAS=NAME`; a Cargo `common = { package = "crypto-common" }`, rustc's `--extern
+/// common=..`): the dependent names the library otherwise in each of its modules (a fn, a type, a trait, `use
+/// alias::..` of a module's item and of an item, `::alias::..`, in a module of another file), re-exports it (`pub use
+/// common;`) and names it in `extern crate` (`extern crate lock_api_crate as la;`); a module of the library's own name
+/// beside the renamed library (spin's `lock_api` with `lock_api_crate`); a bin's names, from a module of its own. The
+/// output is rustc's
+#[test]
+fn renamed_dependencies_match_rustc() {
+    let dir = std::env::temp_dir().join(format!("zustc_ws_renamed_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let put = |p: &str, t: &str| {
+        let f = dir.join(p);
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(f, t).unwrap();
+    };
+    put(
+        "cc/lib.rs",
+        "pub mod hazmat;\npub struct Block(pub u32);\npub fn make(x: u32) -> Block {\n    Block(x * 2)\n}\npub mod inner {\n    pub fn hello() -> &'static str {\n        \"hello\"\n    }\n}\npub trait Tr {\n    fn get(&self) -> u32;\n}\nimpl Tr for Block {\n    fn get(&self) -> u32 {\n        self.0 + 1\n    }\n}\n",
+    );
+    put("cc/hazmat.rs", "pub struct State<T>(pub T);\npub fn state<T>(t: T) -> State<T> {\n    State(t)\n}\n");
+    put(
+        "lock_api/lib.rs",
+        "pub unsafe trait RawMutex {\n    const INIT: Self;\n    fn lock(&self) -> u32;\n}\npub struct Mutex<R: RawMutex, T> {\n    pub raw: R,\n    pub data: T,\n}\nimpl<R: RawMutex, T: Copy> Mutex<R, T> {\n    pub fn get(&self) -> (u32, T) {\n        (self.raw.lock(), self.data)\n    }\n}\n",
+    );
+    put(
+        "dig/lib.rs",
+        "extern crate lock_api_crate as la;\npub use common;\npub use common::Block;\nmod sub;\n// (a module of the library's name: `lock_api` is this one, `lock_api_crate` the library)\npub mod lock_api {\n    pub type Mutex<T> = lock_api_crate::Mutex<crate::Raw, T>;\n    pub fn new<T>(data: T) -> Mutex<T> {\n        lock_api_crate::Mutex { raw: <crate::Raw as lock_api_crate::RawMutex>::INIT, data }\n    }\n}\npub struct Raw(pub u32);\nunsafe impl la::RawMutex for Raw {\n    const INIT: Self = Raw(100);\n    fn lock(&self) -> u32 {\n        self.0 + 1\n    }\n}\npub fn all() -> String {\n    let m = lock_api::new(7u8);\n    format!(\"{} {} {:?}\", sub::f(), common::make(1).0, m.get())\n}\n",
+    );
+    put(
+        "dig/sub.rs",
+        "use common::hazmat::State;\nuse common::inner::hello;\nuse common::Tr;\npub fn f() -> String {\n    let s: State<&str> = common::hazmat::state(\"st\");\n    let b: ::common::Block = common::make(3);\n    format!(\"{} {} {}\", hello(), b.get(), s.0)\n}\n",
+    );
+    put(
+        "app/main.rs",
+        "mod show {\n    use cc::Tr;\n    pub fn line() -> String {\n        let b: d::Block = cc::Block(9);\n        format!(\"{} {} {} {}\", d::all(), cc::make(5).0, d::common::inner::hello(), b.get())\n    }\n}\nfn main() {\n    println!(\"{}\", show::line());\n}\n",
+    );
+    put(
+        "ws.txt",
+        "lib crypto_common cc/lib.rs\nlib lock_api lock_api/lib.rs\nlib dig dig/lib.rs extern=common=crypto_common extern=lock_api_crate=lock_api\nbin app app/main.rs extern=d=dig extern=cc=crypto_common\n",
+    );
+    let crates = zustc::session::read_workspace(&dir.join("ws.txt")).unwrap();
+    assert_eq!(crates[2].deps, ["crypto_common", "lock_api"]);
+    let alias = |a: &str, n: &str| (a.to_string(), n.to_string());
+    assert_eq!(crates[2].aliases, [alias("common", "crypto_common"), alias("lock_api_crate", "lock_api")]);
+    let out = dir.join("target");
+    let mut s = zustc::session::Session::new(zustc::session::Options { jobs: 1, ..Default::default() });
+    s.build_workspace(&crates, &out).unwrap();
+    // (rustc, with the same names: `--extern common=libcrypto_common.rlib`)
+    let rs = dir.join("target_rustc");
+    std::fs::create_dir_all(&rs).unwrap();
+    let rlib = |n: &str| rs.join(format!("lib{n}.rlib"));
+    for c in &crates {
+        let mut cmd = Command::new("rustc");
+        cmd.args(["--edition", "2021", "-Awarnings", "--crate-name", &c.name]).arg(&c.root).arg("-L").arg(&rs);
+        if c.lib {
+            cmd.args(["--crate-type", "rlib"]).arg("-o").arg(rlib(&c.name));
+        } else {
+            cmd.arg("-o").arg(rs.join(&c.name));
+        }
+        for (a, n) in &c.aliases {
+            cmd.arg("--extern").arg(format!("{a}={}", rlib(n).display()));
+        }
+        let o = cmd.output().unwrap();
+        assert!(o.status.success(), "rustc {}: {}", c.name, String::from_utf8_lossy(&o.stderr));
+    }
+    let a = run(&out.join("app"), &dir, 0);
+    assert_eq!(a, run(&rs.join("app"), &dir, 0));
+    assert_eq!(a.0, "hello 7 st 2 (101, 7) 10 hello 10\n");
+    // (`extern=` with no crate)
+    put("bad.txt", "lib crypto_common cc/lib.rs\nlib dig dig/lib.rs extern=common\n");
+    let e = zustc::session::read_workspace(&dir.join("bad.txt")).err().unwrap_or_default();
+    assert!(e.contains("expected `extern=ALIAS=NAME`"), "{e}");
     let _ = std::fs::remove_dir_all(&dir);
 }
