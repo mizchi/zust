@@ -590,6 +590,122 @@ unsafe fn __exr_realloc_ok(p: *mut u8, size: usize) -> *mut u8 {
     q
 }
 
+/// `core::alloc::Layout`: the size and alignment of a block of memory
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Layout {
+    __lay_size: usize,
+    __lay_align: usize,
+}
+
+/// `core::alloc::LayoutError` (`LayoutErr`, its old name): a size and alignment no Layout has
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LayoutError;
+pub type LayoutErr = LayoutError;
+
+impl Layout {
+    pub const fn from_size_align(size: usize, align: usize) -> Result<Layout, LayoutError> {
+        // (a power of two, and the size rounded up to it no more than isize::MAX)
+        if align == 0 || (align & (align - 1)) != 0 || size > (isize::MAX as usize) - (align - 1) {
+            return Err(LayoutError);
+        }
+        Ok(Layout { __lay_size: size, __lay_align: align })
+    }
+    pub const unsafe fn from_size_align_unchecked(size: usize, align: usize) -> Layout {
+        Layout { __lay_size: size, __lay_align: align }
+    }
+    pub const fn size(&self) -> usize {
+        self.__lay_size
+    }
+    pub const fn align(&self) -> usize {
+        self.__lay_align
+    }
+    pub const fn new<T>() -> Layout {
+        Layout { __lay_size: core::mem::size_of::<T>(), __lay_align: core::mem::align_of::<T>() }
+    }
+    pub fn for_value<T>(t: &T) -> Layout {
+        Layout { __lay_size: core::mem::size_of_val(t), __lay_align: core::mem::align_of_val(t) }
+    }
+    pub fn array<T>(n: usize) -> Result<Layout, LayoutError> {
+        match core::mem::size_of::<T>().checked_mul(n) {
+            Some(total) => Layout::from_size_align(total, core::mem::align_of::<T>()),
+            None => Err(LayoutError),
+        }
+    }
+    pub fn align_to(&self, align: usize) -> Result<Layout, LayoutError> {
+        Layout::from_size_align(self.__lay_size, if align > self.__lay_align { align } else { self.__lay_align })
+    }
+    pub fn padding_needed_for(&self, align: usize) -> usize {
+        let len = self.__lay_size;
+        (len.wrapping_add(align).wrapping_sub(1) & !align.wrapping_sub(1)).wrapping_sub(len)
+    }
+    pub fn pad_to_align(&self) -> Layout {
+        let pad = self.padding_needed_for(self.__lay_align);
+        Layout { __lay_size: self.__lay_size + pad, __lay_align: self.__lay_align }
+    }
+    pub fn extend(&self, next: Layout) -> Result<(Layout, usize), LayoutError> {
+        let new_align = if next.__lay_align > self.__lay_align { next.__lay_align } else { self.__lay_align };
+        let pad = self.padding_needed_for(next.__lay_align);
+        let offset = match self.__lay_size.checked_add(pad) {
+            Some(o) => o,
+            None => return Err(LayoutError),
+        };
+        let new_size = match offset.checked_add(next.__lay_size) {
+            Some(n) => n,
+            None => return Err(LayoutError),
+        };
+        match Layout::from_size_align(new_size, new_align) {
+            Ok(l) => Ok((l, offset)),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+unsafe extern "C" {
+    #[link_name = "aligned_alloc"]
+    fn __exr_aligned_alloc(align: usize, size: usize) -> *mut u8;
+}
+
+// `std::alloc::alloc` / `dealloc` / `realloc` / `alloc_zeroed` / `handle_alloc_error` over libc's allocator (malloc
+// aligns to 16; more takes aligned_alloc, whose size is a multiple of the alignment)
+pub unsafe fn __core_alloc(layout: Layout) -> *mut u8 {
+    if layout.__lay_align <= 16 {
+        unsafe { __exr_malloc(layout.__lay_size) }
+    } else {
+        let a = layout.__lay_align;
+        unsafe { __exr_aligned_alloc(a, (layout.__lay_size + a - 1) & !(a - 1)) }
+    }
+}
+pub unsafe fn __core_alloc_zeroed(layout: Layout) -> *mut u8 {
+    let p = unsafe { __core_alloc(layout) };
+    if !p.is_null() {
+        unsafe { __exr_memset(p, 0, layout.__lay_size) };
+    }
+    p
+}
+pub unsafe fn __core_dealloc(ptr: *mut u8, _layout: Layout) {
+    unsafe { __exr_free(ptr) }
+}
+pub unsafe fn __core_realloc(ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+    if layout.__lay_align <= 16 {
+        return unsafe { __exr_realloc(ptr, new_size) };
+    }
+    // (realloc keeps only malloc's alignment: a new block, the contents copied)
+    let q = unsafe { __core_alloc(Layout { __lay_size: new_size, __lay_align: layout.__lay_align }) };
+    if !q.is_null() {
+        let n = if new_size < layout.__lay_size { new_size } else { layout.__lay_size };
+        unsafe {
+            __exr_memcpy(q, ptr as *const u8, n);
+            __exr_free(ptr);
+        }
+    }
+    q
+}
+pub fn __core_handle_alloc_error(_layout: Layout) -> ! {
+    __exr_err_str::<()>("memory allocation failed\n");
+    unsafe { __exr_abort() };
+    loop {}
+}
+
 unsafe extern "C" {
     #[link_name = "memset"]
     fn __exr_memset(d: *mut u8, c: i32, n: usize) -> *mut u8;
@@ -10966,6 +11082,14 @@ impl Error for FromUtf8Error {
 }
 impl Error for ParseIntError {
     fn __err_mark(&self) {}
+}
+impl Error for LayoutError {
+    fn __err_mark(&self) {}
+}
+impl Display for LayoutError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.pad("invalid parameters to Layout::from_size_align")
+    }
 }
 impl Error for ParseFloatError {
     fn __err_mark(&self) {}
