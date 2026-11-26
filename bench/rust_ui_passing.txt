@@ -1196,6 +1196,7 @@ compile-fail	borrowck/two-phase-sneaky.rs
 compile-fail	borrowck/two-phase-surprise-no-conflict.rs
 compile-fail	borrowck/unboxed-closures-move-upvar-from-non-once-ref-closure.rs
 compile-fail	borrowck/unconstrained-closure-lifetime-generic.rs
+compile-fail	borrowck/unconstrained-closure-lifetime-trait-object.rs
 compile-fail	borrowck/uninitalized-in-match-arm-issue-126133.rs
 compile-fail	borrowck/unmatched-arg-and-hir-arg-issue-126385.rs
 compile-fail	borrowck/use-moved-value-in-match-guard-drop.rs
@@ -2365,6 +2366,7 @@ run-pass	drop/drop-with-trait-bound-calls-method-on-self.rs
 run-pass	drop/drop-with-type-ascription-1.rs
 run-pass	drop/drop-with-type-ascription-2.rs
 compile-fail	drop/drop_elaboration_with_errors2.rs
+run-pass	drop/dropck_legal_cycles.rs
 run-pass	drop/dropflag-reinit-in-loop.rs
 run-pass	drop/dst-coerce-unsized-drop.rs
 run-pass	drop/enum-drop-impl-15063.rs
@@ -8245,6 +8247,7 @@ compile-fail	traits/normalize/copy-impl-cannot-normalize.rs
 run-pass	traits/normalize/normalize-associated-type-in-where-clause.rs
 compile-fail	traits/not-suggest-non-existing-fully-qualified-path.rs
 compile-fail	traits/object-does-not-impl-trait.rs
+run-pass	traits/object-one-type-two-traits.rs
 compile-fail	traits/object/auto-dedup-in-impl.rs
 run-pass	traits/object/auto-dedup.rs
 check-pass	traits/object/bounds-cycle-1.rs
