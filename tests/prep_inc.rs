@@ -350,5 +350,8 @@ fn main() { let _ = a() + b(); }
     let edited = base.replace("    q\n}", "    let _z = 1;\n    q\n}");
     let again = edited.replace("let _z = 1;", "let _z = 2;");
     assert!(base != edited && edited != again);
+    // (and with a space after the `$`, which the macro parser reads the same)
+    let spaced = |t: &str| t.replace("$dispatch!()", "$ dispatch!()");
+    assert_eq!(through_memo(&[spaced(base), spaced(&edited), spaced(&again)]), vec![false, true]);
     assert_eq!(through_memo(&[base.to_string(), edited, again]), vec![false, true]);
 }

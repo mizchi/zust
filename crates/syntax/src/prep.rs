@@ -533,7 +533,8 @@ fn items_and_calls(s: &[u8], toks: &[(u8, usize, usize)], a: usize, b: usize) ->
         let w = &s[toks[m].1..toks[m].2];
         items |= ITEM_WORDS.contains(&w);
         if m + 1 < toks.len() && toks[m + 1].0 == 1 && s[toks[m + 1].1] == b'!' {
-            if m > 0 && toks[m - 1].0 == 1 && s[toks[m - 1].1] == b'$' && toks[m - 1].2 == toks[m].1 {
+            // (`$ m!()` too: the macro parser reads `$` and the name as two tokens, with space between them or not)
+            if m > 0 && toks[m - 1].0 == 1 && s[toks[m - 1].1] == b'$' {
                 items = true;
                 continue;
             }
