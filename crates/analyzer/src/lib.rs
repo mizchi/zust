@@ -217,7 +217,12 @@ impl Server {
         let doc = self
             .docs
             .entry(uri.clone())
-            .or_insert_with(|| Doc { s: Session::new(Options { jobs: 1, ..Default::default() }), text: String::new(), diags: vec![], syms: None, idx: None });
+            .or_insert_with(|| {
+                let mut s = Session::new(Options { jobs: 1, ..Default::default() });
+                // (its first edit preprocesses only what it changed)
+                s.keep_for_edits();
+                Doc { s, text: String::new(), diags: vec![], syms: None, idx: None }
+            });
         // If the text is the same (just saved, etc.), return the previous diagnostics as they are. The comparison is a memcmp, so cheaper than a hash
         if !doc.text.is_empty() && doc.text == text {
             return publish(&uri, version, doc.diags.clone());
