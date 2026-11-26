@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795676377990,
+  "lastUpdate": 1795676380629,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -137772,6 +137772,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/1d110890b480a55941bbca0f93ab4efbb7f997d4"
         },
         "date": 1795674807340,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.69,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1915,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.88,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1557,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 72.95,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5388,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5a9aceff6b0d4ad67d38a3b63af09f8980576e8b",
+          "message": "typeck: a trait method called through its std path, as its two-segment form (#153) (#233)\n\n* typeck: a trait method called through its std path, as its two-segment form (#153)\n\n`std::fmt::Write::write_str(&mut s, \"x\")` failed with \"cannot find value\n(unsupported path)\", and so did every `std::<module>::<Trait>::<method>(..)`\ncall: `std::clone::Clone::clone(&x)`, `std::iter::Iterator::count(it)`,\n`std::io::Write::write_all(..)`, `std::cmp::Ord::cmp(..)`,\n`std::ops::Add::add(..)` (`core::` ones gave \"cannot find value `clone`\").\nThe two-segment forms (`Clone::clone(&x)`, `fmt::Write::write_str` with\n`use std::fmt;`) worked.\n\nThe rules for a path call of a trait's method (the rewrite to a method\ncall, `Ord::cmp`, the operators, the primitive receivers) read a\ntwo-segment `Trait::m`, after strip_mods_p takes the modules off. That\nleaves std paths alone on purpose, so that `std::mem::swap` is not a\nprogram's own `swap`, and so a std-qualified trait path kept all its\nsegments and no rule took it.\n\n`Program::std_trait_path_skip` recognizes `std` / `core` / `alloc`, then\nlowercase modules, then a trait the program knows (the prelude's or its\nown) or one of std's the lowering takes without a declaration\n(STD_PATH_TRAITS, the names of its two-segment rule), then the method. The\ncall is then read as its last two segments, where the type inference\nstarts a call (`call`) and where the lowering does (`call_inner`), and in\n`prim_method_call`, which `peek` asks. A path that is not std's stops at its\nfirst segment, so other calls pay one comparison.\n\ntests/probe/std_trait_path_call.rs (expected output from rustc) covers each\nof those, `core::` and `::std::`, a closure argument and a turbofish, and\n`std::mem::swap` beside a fn of the program named `swap`. On main it fails\nat its first call.\n\nLeft: `<u16 as std::convert::From<u8>>::from(..)`, a qualified-self path,\nis another code path, and `<u8 as Clone>::clone(&5)` fails without `std::`\ntoo (the literal's type).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\n* typeck: keep the rewritten std path alive; a program's trait of the name keeps its std path unread\n\nFrom CodeRabbit's review of #233.\n\n- The type inference records the addresses of the expressions it types\n  and reads them after the walk; they must be in the body or in `keep`. The\n  two-segment callee `call` built for a std trait path was a local, so a\n  call that typed its callee through the fallback left a dangling address.\n  It now goes into `keep` first, as expr_kept does.\n- `std::string::ToString::to_string(&42u8)` beside a program's own `trait\n  ToString` printed \"local\" (rustc: 42): read as `ToString::to_string`, the\n  path named the program's trait. std_trait_path_skip now leaves a trait\n  name the program declares alone (`user_traits`); that call is \"cannot\n  find value (unsupported path)\" again, as before #233, rather than the\n  other trait's method. A program trait the prelude renamed for a collision\n  (`__u_Name`) does not block it.\n\ntests/check.rs: `std_trait_path_beside_a_program_trait_of_its_name`.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T15:53:06+09:00",
+          "tree_id": "028f4ee09a1fcb6484550f79c6e739dfb17bc961",
+          "url": "https://github.com/mizchi/zust/commit/5a9aceff6b0d4ad67d38a3b63af09f8980576e8b"
+        },
+        "date": 1795676380079,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
