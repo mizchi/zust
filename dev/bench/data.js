@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795696122040,
+  "lastUpdate": 1795709934684,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -60737,6 +60737,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 79.696,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "70739b91f845a9f1f1b62ed361dbcc9f357f664e",
+          "message": "cratebench/survey: the top crates.io crates by category, CRATES_SUPPORT.md and a dashboard (#247)\n\nSurveys the top 300 crates of crates.io by recent downloads, plus extra.tsv's 16 (tokio with `full`, serde and clap with `derive`, embassy and other embedded crates), each as the only dependency of a probe library in a temporary directory (sources from crates.io, versions from one shared Cargo.lock; nothing vendored). zurgo check gives each package of the graph its errors; zurgo build runs when there are none; --tests compares a crate's own tests under cargo test and zurgo test.\n\nCRATES_SUPPORT.md (generated): statuses with their share of the downloads, a table per category (15), what to fix first, errors by kind, graphs zurgo cannot plan, names zustc cannot find, every crate by category. site/crates/ shows the same with the history. crate-survey.yml runs the survey on main in a read-only job and commits its files from a separate publish job; pages.yml publishes /crates/.\n\nFirst survey (5498281): 38 of 273 probed crates build (13.5% of their downloads); 391 errors in 168 packages.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T01:13:53+09:00",
+          "tree_id": "29968aad16f7ac680effd93b949c9266719b0608",
+          "url": "https://github.com/mizchi/zust/commit/70739b91f845a9f1f1b62ed361dbcc9f357f664e"
+        },
+        "date": 1795709933982,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 128.885,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.833,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 21.432,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 51.65,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.449,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 133.306,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 800.818,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 571.721,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.83,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 76.553,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 237.157,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.309,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 632.162,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3941.307,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 63.352,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 95.401,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 38.072,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 67.282,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 77.404,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 178.876,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 62.613,
             "unit": "ms"
           }
         ]
