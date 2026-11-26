@@ -10,7 +10,10 @@
 // `a < b`). An associated function registered before inherent methods of the name in impls for two instances (`impl Mk2
 // for V<bool> { fn f() }`, `V<u8>`'s `unsafe fn f(&self)`, `V<u16>`'s `fn f(&self)`): `a.f()` on a `V<u16>` is its own,
 // safe one. A closure that calls a trait's default `&mut self` method on what it captures mutates it (`unused_mut` does
-// not fire on `cnt`).
+// not fire on `cnt`). Inherent methods of one name with different receivers in impls for two instances: what the
+// receiver's instance has decides (`Tg<u16>`'s `edit(&mut self)` reached through a DerefMut beside `Wr`'s associated
+// `edit()` goes through `deref_mut`; `Wc<u16>`'s `m(&self)` in a closure that is not `mut`). An inherent method beside
+// a trait's `unsafe fn` and another trait's associated function of the name (`Sa(0).f()` is the inherent, safe one).
 
 #![deny(unused_mut)]
 
@@ -147,6 +150,63 @@ impl Bump for Cnt {
     fn inc(&mut self) { self.0.push(1) }
 }
 
+// (inherent methods with different receivers for two instances, the second reached through a DerefMut beside an
+// associated function of the name)
+struct Tg<T>(T, u32);
+impl Tg<u8> {
+    fn edit(&self) -> u32 { self.1 }
+}
+impl Tg<u16> {
+    fn edit(&mut self) -> u32 {
+        self.1 += 10;
+        self.1
+    }
+}
+struct Wr(Tg<u16>, u32);
+impl Deref for Wr {
+    type Target = Tg<u16>;
+    fn deref(&self) -> &Tg<u16> { &self.0 }
+}
+impl DerefMut for Wr {
+    fn deref_mut(&mut self) -> &mut Tg<u16> {
+        self.1 += 1;
+        &mut self.0
+    }
+}
+impl Wr {
+    fn edit() -> i32 { 9 }
+}
+
+// (the same in a closure: `Wc<u16>`'s `m` takes `&self`)
+struct Wc<T>(T, u32);
+impl Wc<u8> {
+    fn m(&mut self) -> u32 {
+        self.1 += 1;
+        self.1
+    }
+}
+impl Wc<u16> {
+    fn m(&self) -> u32 { self.1 }
+}
+
+// (an inherent method beside a trait's `unsafe fn` and another trait's associated function of the name)
+struct Sa(u8);
+trait AssocF {
+    fn f() -> u8;
+}
+impl AssocF for Sa {
+    fn f() -> u8 { 1 }
+}
+trait OtherF {
+    unsafe fn f(&self) -> u8;
+}
+impl OtherF for Sa {
+    unsafe fn f(&self) -> u8 { 2 }
+}
+impl Sa {
+    fn f(&self) -> u8 { self.0 + 30 }
+}
+
 fn total(v: &Vec<u8>) -> u32 {
     let mut t = 0;
     let mut i = 0;
@@ -214,4 +274,16 @@ fn main() {
     bump();
     bump();
     println!("{:?}", cnt);
+
+    let mut wr = Wr(Tg(1u16, 0), 0);
+    wr.edit();
+    wr.edit();
+    println!("{} {} {} {}", wr.0 .1, wr.1, Wr::edit(), Tg(1u8, 5).edit());
+    let wc = Wc(1u16, 7);
+    let f = || wc.m();
+    let mut wc8 = Wc(1u8, 0);
+    let mut g = || wc8.m();
+    g();
+    println!("{} {}", f(), g());
+    println!("{} {} {}", Sa(0).f(), <Sa as AssocF>::f(), unsafe { OtherF::f(&Sa(0)) });
 }

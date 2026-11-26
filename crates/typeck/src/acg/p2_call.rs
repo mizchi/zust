@@ -1938,7 +1938,7 @@ impl Cx<'_> {
     pub(crate) fn takes_mut_self(&self, t: Ty, m: &str) -> bool {
         let t = self.strip_refs(t);
         if let Ty::Struct(ts) = t {
-            if let Some(id) = self.prog.self_method(ts, m).or_else(|| self.prog.self_default_method(ts, m)) {
+            if let Some(id) = self.prog.self_method_of(ts, m).or_else(|| self.prog.self_default_method(ts, m)) {
                 return matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(true, _)));
             }
         }
