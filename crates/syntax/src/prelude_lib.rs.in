@@ -10112,6 +10112,82 @@ impl Debug for SystemTime {
     }
 }
 
+unsafe extern "C" {
+    #[link_name = "clock_gettime"]
+    fn __exr_clock_gettime(clock: i32, ts: *mut i64) -> i32;
+}
+
+// `std::time::Instant`: CLOCK_MONOTONIC's time
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Instant {
+    __in_d: Duration,
+}
+
+impl Instant {
+    pub fn now() -> Instant {
+        let mut ts = [0i64; 2];
+        unsafe {
+            __exr_clock_gettime(1, ts.as_mut_ptr());
+        }
+        Instant { __in_d: Duration::new(ts[0] as u64, ts[1] as u32) }
+    }
+    pub fn duration_since(&self, earlier: Instant) -> Duration {
+        self.__in_d.checked_sub(earlier.__in_d).unwrap_or(Duration::ZERO)
+    }
+    pub fn checked_duration_since(&self, earlier: Instant) -> Option<Duration> {
+        self.__in_d.checked_sub(earlier.__in_d)
+    }
+    pub fn saturating_duration_since(&self, earlier: Instant) -> Duration {
+        self.duration_since(earlier)
+    }
+    pub fn elapsed(&self) -> Duration {
+        Instant::now().duration_since(*self)
+    }
+    pub fn checked_add(&self, d: Duration) -> Option<Instant> {
+        match self.__in_d.checked_add(d) {
+            Some(t) => Some(Instant { __in_d: t }),
+            None => None,
+        }
+    }
+    pub fn checked_sub(&self, d: Duration) -> Option<Instant> {
+        match self.__in_d.checked_sub(d) {
+            Some(t) => Some(Instant { __in_d: t }),
+            None => None,
+        }
+    }
+}
+
+impl Add<Duration> for Instant {
+    type Output = Instant;
+    fn add(self, d: Duration) -> Instant {
+        Instant { __in_d: self.__in_d + d }
+    }
+}
+impl AddAssign<Duration> for Instant {
+    fn add_assign(&mut self, d: Duration) {
+        self.__in_d = self.__in_d + d;
+    }
+}
+impl Sub<Duration> for Instant {
+    type Output = Instant;
+    fn sub(self, d: Duration) -> Instant {
+        Instant { __in_d: self.__in_d - d }
+    }
+}
+impl Sub<Instant> for Instant {
+    type Output = Duration;
+    fn sub(self, earlier: Instant) -> Duration {
+        self.duration_since(earlier)
+    }
+}
+
+impl Debug for Instant {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let s = format!("Instant {{ tv_sec: {}, tv_nsec: {} }}", self.__in_d.as_secs(), self.__in_d.subsec_nanos());
+        f.pad(&s)
+    }
+}
+
 // `std::time::Duration` (seconds and nanoseconds, as std)
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Duration {
