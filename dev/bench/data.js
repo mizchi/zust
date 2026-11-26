@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795696116467,
+  "lastUpdate": 1795696119268,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -117143,6 +117143,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/24729236037da90d17e5119dbdd8f70ed837e29f"
         },
         "date": 1795695324594,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 69.444,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.939,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 73.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 91.971,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "022713c58a345dd0bef7cd9734befab41a8f1471",
+          "message": "Region check part 38: methods of impls for trait objects, and the 'static they require (#237)\n\nRegion check part 38: methods of impls for trait objects, and the 'static they require",
+          "timestamp": "2026-11-26T21:22:29+09:00",
+          "tree_id": "06997b35a29872a281882ec5d580d55077014c35",
+          "url": "https://github.com/mizchi/zust/commit/022713c58a345dd0bef7cd9734befab41a8f1471"
+        },
+        "date": 1795696118747,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
