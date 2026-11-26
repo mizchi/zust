@@ -621,6 +621,20 @@ const SHADOWABLE: &[&str] = &[
     "Once", "OnceState", "Layout", "LayoutError", "Condvar", "ControlFlow", "Repeat",
 ];
 
+/// A name as it was before the compiler renamed it: `__u_Iter`, a program's type named as a prelude type
+/// (rename_user_collisions), is `Iter`; `__p_ThreadId`, the prelude's renamed against a program's (rename_shadowed),
+/// is `ThreadId`. Each renaming goes word by word, so a variant of such a name is renamed too. Any other name is
+/// itself: a variant the program names `__p_Ready`
+pub fn unrenamed(name: &str) -> &str {
+    if let Some(n) = name.strip_prefix("__u_").filter(|n| prelude_type_names().contains(*n)) {
+        return n;
+    }
+    if let Some(n) = name.strip_prefix("__p_").filter(|n| SHADOWABLE.contains(n)) {
+        return n;
+    }
+    name
+}
+
 /// The name a struct / enum / trait / union item defines (from its first identifiers: `pub struct Name`)
 fn type_def_name<'a>(src: &'a str, it: &SrcItem) -> Option<&'a str> {
     if !matches!(it.kind, ItemKind::Normal | ItemKind::TraitHeader) {

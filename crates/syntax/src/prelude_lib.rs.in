@@ -10921,8 +10921,8 @@ pub fn __exr_ptr_eq<T>(a: &T, b: &T) -> bool {
 }
 
 // `std::sync::Mutex` (green threads: `lock` waits while another thread holds it; the guard's drop lets it go.
-// When it cannot be had (the thread itself holds it, or every other thread waits), `lock` goes on, as it did when
-// there was one thread)
+// When it cannot be had (the thread itself holds it, or every other thread waits), std's waits forever: a panic, as
+// `join`'s, not a second guard)
 pub struct Mutex<T> {
     val: T,
     locked: bool,
@@ -10939,7 +10939,9 @@ impl<T> Mutex<T> {
     }
     pub fn lock(&self) -> Result<MutexGuard<T>, ()> {
         let m = &self.locked as *const bool as *mut bool;
-        __exr_green_wait(|| unsafe { !*m });
+        if !__exr_green_wait(|| unsafe { !*m }) {
+            panic!("deadlock: every thread is waiting");
+        }
         unsafe {
             *m = true;
         }
@@ -11003,10 +11005,10 @@ impl Condvar {
             *m = false;
         }
         __exr_green_progress();
-        if !__exr_green_wait(|| unsafe { *n != seen }) {
+        // (the notify, then the Mutex again: either one that cannot come is std's wait forever)
+        if !__exr_green_wait(|| unsafe { *n != seen }) || !__exr_green_wait(|| unsafe { !*m }) {
             panic!("deadlock: every thread is waiting");
         }
-        __exr_green_wait(|| unsafe { !*m });
         unsafe {
             *m = true;
         }

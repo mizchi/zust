@@ -521,6 +521,9 @@ pub struct Program {
     pub struct_index: FxMap<String, u32>,
     /// Variant name → (enum, index): finds variants from `use E::*;` by short name (not when several share it)
     pub variant_names: FxMap<String, Option<(u32, usize)>>,
+    /// The prelude enums' variants a variant of the program's own enum took the short name from, (name, (enum,
+    /// index)): the session gives the name back to the prelude's where the program imports that and not its own
+    pub variant_shadowed: Vec<(String, (u32, usize))>,
     /// The fns whose `impl Trait` return type their body determines
     pub opaque: Vec<u32>,
     /// The items from here on are the prelude's (no overflow checks)
@@ -1524,6 +1527,7 @@ impl Program {
             structs: AdtTable::new(),
             struct_index: FxMap::default(),
             variant_names: FxMap::default(),
+            variant_shadowed: vec![],
             opaque: vec![],
             prelude_from: u32::MAX,
             fn_preds: FxMap::default(),
@@ -1991,8 +1995,9 @@ impl Program {
         // not settled yet, so they are redone once everything is settled
         p.relayout_instances();
         // (a variant of the program's own enum wins over a prelude enum's of the same name: `use ControlFlow::*;` of its
-        // own `enum ControlFlow { Break, .. }`, beside the prelude's that the name brings in. When two of one side share
-        // the name, neither is found)
+        // own `enum ControlFlow { Break, .. }`, beside the prelude's that the name brings in. The prelude's it took the
+        // name from are kept in variant_shadowed, for the imports to decide (session). When two of one side share the
+        // name, neither is found)
         let mut own_names: FxSet<&str> = FxSet::default();
         for sid in 0..p.structs.len() {
             let sd = &p.structs[sid];
@@ -2002,10 +2007,13 @@ impl Program {
             let own = p.struct_item.get(sid).is_some_and(|&i| (i as usize) < user);
             for (vi, v) in sd.variants.iter().enumerate() {
                 if own && own_names.insert(v.name.as_str()) {
-                    p.variant_names.insert(v.name.clone(), Some((sid as u32, vi)));
+                    if let Some(Some(prev)) = p.variant_names.insert(v.name.clone(), Some((sid as u32, vi))) {
+                        p.variant_shadowed.push((v.name.clone(), prev));
+                    }
                     continue;
                 }
                 if !own && own_names.contains(v.name.as_str()) {
+                    p.variant_shadowed.push((v.name.clone(), (sid as u32, vi)));
                     continue;
                 }
                 p.variant_names
@@ -3613,12 +3621,17 @@ impl Program {
                 Ty::Struct(sid) if name == "Vec" => self.structs[sid as usize].args.first().copied(),
                 _ => None,
             };
-            if elem.is_some_and(|e| inner == squeeze(&format!("<[{}]>", self.tn(e)))) || ((b == Ty::Str || name == "String") && inner == "<str>") {
+            // (and a Vec's AsMut<Vec<T>>)
+            if elem.is_some_and(|e| inner == squeeze(&format!("<[{}]>", self.tn(e))))
+                || ((b == Ty::Str || name == "String") && inner == "<str>")
+                || (name == "Vec" && inner == squeeze(&format!("<{}>", self.tn(b))))
+            {
                 return true;
             }
         }
         // std's Extend of Vec<T> (`Extend<T>`, and `Extend<&T>` of a Copy T) and of String (`char`, `&char`, `&str`,
-        // `String`), whose own `extend` takes any of them. A program's own impls are asked below, by the trait's name
+        // `String`), whose own `extend` takes any of them; a program's own impls by their argument (a type with none is
+        // asked below, by the trait's name)
         if let Some(x) = tr.strip_prefix("Extend").map(str::trim).and_then(|r| r.strip_prefix('<')).and_then(|r| r.strip_suffix('>')) {
             if let Ty::Struct(sid) = t {
                 // (the argument's text without lifetimes or white space: `&'a bool` is `&bool`)
@@ -3642,6 +3655,14 @@ impl Program {
                     }
                     "String" if matches!(x2.as_str(), "char" | "&char" | "&str" | "String") => return true,
                     _ => {}
+                }
+                // (a program's own impls for the type: one whose argument is the bound's (`impl Extend<u8> for Bits`
+                // is no `Extend<bool>`), or one with the impl's parameters in it, which is taken to fit)
+                let own: Vec<&(Ty, Vec<Ty>, usize)> =
+                    self.impl_targs.get("Extend").map_or(vec![], |v| v.iter().filter(|(s, _, n)| self.match_ty(*s, t, &mut vec![None; *n])).collect());
+                if !own.is_empty() {
+                    let squeeze = |s: String| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+                    return own.iter().any(|(_, a, _)| a.len() != 1 || self.has_param(a[0]) || squeeze(self.tn(a[0])) == x2);
                 }
             }
         }

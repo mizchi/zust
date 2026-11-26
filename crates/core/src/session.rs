@@ -2000,6 +2000,9 @@ impl Session {
         let mut prog = Program::build_with_edition(&items, &mut sums, self.ctx.lib.is_none() && !lib_attr, user, self.opts.edition, deny_bare).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
+        if !prog.variant_shadowed.is_empty() {
+            imported_prelude_variants(&mut prog, &src, &items[..user]);
+        }
         if let Some(e) = cross_kind_duplicate(&prog, &src, &items, &sums, user) {
             return Err(e);
         }
@@ -5392,6 +5395,64 @@ fn dyn_in_signature(prog: &Program, src: &str, items: &[SrcItem]) -> Option<Stri
 /// E0428 for two of the program's items of one name and namespace that the build keeps in separate tables: a struct
 /// / enum, a trait or a type alias (types), a unit / tuple struct and a const / static / fn (values). At the later
 /// of the two. Costs a lookup for each of the program's structs, traits and aliases
+/// A bare variant name the program's own enum took from a prelude enum's (Program::build): the prelude's again where
+/// the program's imports bring that one into scope and not its own (`use std::ops::ControlFlow::*;` beside its own
+/// `enum Local { Break(u8) }`), and neither where they bring both (rustc's E0659 at a use). Read from the text of the
+/// program's `use` items: an import of `E::*`, `E::v` or `E::{.., v, ..}`. When the two enums have one name, the
+/// prelude's is the one imported through `std::` / `core::` / `alloc::`
+fn imported_prelude_variants(prog: &mut Program, src: &str, items: &[SrcItem]) {
+    // (each `use` item's text without white space, and whether its path starts at std / core / alloc)
+    let uses: Vec<(String, bool)> = items
+        .iter()
+        .filter_map(|it| {
+            let t: String = src.get(it.start..it.end)?.chars().filter(|c| !c.is_whitespace()).collect();
+            let t = t.strip_prefix("pub(crate)").or_else(|| t.strip_prefix("pub")).unwrap_or(&t).strip_prefix("use")?.to_string();
+            let t = t.strip_prefix("::").unwrap_or(&t).to_string();
+            let from_std = ["std::", "core::", "alloc::"].iter().any(|p| t.starts_with(p));
+            Some((t, from_std))
+        })
+        .collect();
+    if uses.is_empty() {
+        return;
+    }
+    let imports = |e: &str, v: &str, std_side: Option<bool>| {
+        let word = |c: char| c.is_alphanumeric() || c == '_';
+        uses.iter().filter(|(_, s)| std_side.is_none_or(|w| w == *s)).any(|(t, _)| {
+            t.match_indices(&format!("{e}::")).any(|(i, m)| {
+                if t[..i].chars().next_back().is_some_and(word) {
+                    return false;
+                }
+                let rest = &t[i + m.len()..];
+                let leaf = |x: &str| x == "*" || x == v;
+                match rest.strip_prefix('{') {
+                    Some(r) => r.split('}').next().unwrap_or("").split(',').any(leaf),
+                    None => leaf(rest.split(|c: char| !word(c) && c != '*').next().unwrap_or("")),
+                }
+            })
+        })
+    };
+    let shadowed = std::mem::take(&mut prog.variant_shadowed);
+    for (v, pre) in &shadowed {
+        let Some(Some(own)) = prog.variant_names.get(v).copied() else { continue };
+        let pname = prog.structs[pre.0 as usize].name.as_str();
+        let pname = pname.strip_prefix("__p_").unwrap_or(pname);
+        let oname = prog.structs[own.0 as usize].name.as_str();
+        let same = pname == oname;
+        let pre_in = imports(pname, v, same.then_some(true));
+        let own_in = imports(oname, v, same.then_some(false));
+        match (pre_in, own_in) {
+            (true, false) => {
+                prog.variant_names.insert(v.clone(), Some(*pre));
+            }
+            (true, true) => {
+                prog.variant_names.insert(v.clone(), None);
+            }
+            _ => {}
+        }
+    }
+    prog.variant_shadowed = shadowed;
+}
+
 fn cross_kind_duplicate<'p>(prog: &'p Program, src: &str, items: &[SrcItem], sums: &'p [Summary], user: usize) -> Option<String> {
     let user = user.min(sums.len());
     let mut first: Option<(usize, &'p str)> = None;

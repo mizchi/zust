@@ -3086,9 +3086,11 @@ impl Cx<'_> {
                 if let Some(Ty::Array(el, _) | Ty::Slice(el)) = self.peek(r).map(|t| self.strip_refs(t)) {
                     return Some(Ty::Ref(true, intern(Ty::Slice(el))));
                 }
-                // (a Vec's, where it is its AsMut<[T]>)
-                if let Some(el) = self.as_mut_slice_elem(r, None) {
-                    return Some(Ty::Ref(true, intern(Ty::Slice(intern(el)))));
+                // (a Vec's, where it is its AsMut<[T]> or its AsMut<Vec<T>>)
+                match self.as_mut_of_vec(r, None) {
+                    Some((true, el)) => return Some(Ty::Ref(true, intern(Ty::Slice(intern(el))))),
+                    Some((false, v)) => return Some(Ty::Ref(true, intern(v))),
+                    None => {}
                 }
             }
         }

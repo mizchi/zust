@@ -56,10 +56,12 @@ fn main() {
     println!("{:?}", layout_array::<u64>(usize::MAX).map(|l| l.size()));
     unsafe {
         let p = alloc::alloc(la) as *mut u16;
+        assert!(!p.is_null());
         for i in 0..4 {
             p.add(i).write(i as u16 * 10);
         }
         let q = alloc::realloc(p as *mut u8, la, 16) as *mut u16;
+        assert!(!q.is_null());
         let nla = Layout::from_size_align(16, 2).unwrap();
         for i in 4..8 {
             q.add(i).write(i as u16 * 10);
@@ -68,6 +70,7 @@ fn main() {
         println!("{:?}", s);
         alloc::dealloc(q as *mut u8, nla);
         let z = alloc::alloc_zeroed(Layout::array::<u32>(3).unwrap()) as *mut u32;
+        assert!(!z.is_null());
         println!("{:?}", std::slice::from_raw_parts(z, 3));
         alloc::dealloc(z as *mut u8, Layout::array::<u32>(3).unwrap());
         let big = Layout::from_size_align(256, 128).unwrap();
