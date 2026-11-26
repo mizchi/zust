@@ -117,7 +117,15 @@ const RESERVED: &[&str] = &[
     "finally", "for", "function", "import", "in", "instanceof", "new", "null", "return", "super", "switch", "this", "throw",
     "try", "typeof", "var", "void", "while", "with", "yield", "await", "enum", "implements", "interface", "package",
     "private", "protected", "public", "static", "arguments", "eval", "undefined", "NaN", "Infinity",
+    // globals the generated code reads
+    "Math", "String", "Number", "BigInt", "Array", "Object", "Float64Array", "Float32Array", "Int32Array", "console", "JSON",
+    "Map", "Set", "RangeError", "Promise", "Error", "TypeError", "Symbol",
 ];
+
+/// Field `f` of the JSON value `v`; a decoder reads only own properties, so an absent `toString` is `undefined`
+fn own(dec: bool, f: &str) -> String {
+    if dec { format!("(Object.hasOwn(v, {0}) ? v{1} : undefined)", js_str(f), member(f)) } else { format!("v{}", member(f)) }
+}
 
 pub fn ident(n: &str) -> String {
     if RESERVED.contains(&n) { format!("{n}$") } else { n.to_string() }
@@ -203,7 +211,7 @@ const HELPERS: &[(&str, &str)] = &[
     ("$find", "function $find(xs, f) {\n  for (let i = 0; i < xs.length; i++) if (f(xs[i])) return { TAG: \"Some\", _0: xs[i] };\n  return { TAG: \"None\" };\n}"),
     ("$find_index", "function $find_index(xs, f) {\n  for (let i = 0; i < xs.length; i++) if (f(xs[i])) return { TAG: \"Some\", _0: i };\n  return { TAG: \"None\" };\n}"),
     // (JSON, checked by the type: `json_decode`'s converters throw `{ $json }` where the value is not the type's)
-    ("$json_fail", "function $json_fail(want, v, p) {\n  const found = v === null ? \"null\" : Array.isArray(v) ? \"an array\" : v === undefined ? \"nothing\" : typeof v === \"object\" ? \"an object\" : JSON.stringify(v).slice(0, 40);\n  throw { $json: \"expected \" + want + \" at \" + p + \", found \" + found };\n}"),
+    ("$json_fail", "function $json_fail(want, v, p) {\n  const found = v === null ? \"null\" : Array.isArray(v) ? \"an array\" : v === undefined ? \"nothing\" : typeof v === \"object\" ? \"an object\" : String(JSON.stringify(v) ?? typeof v).slice(0, 40);\n  throw { $json: \"expected \" + want + \" at \" + p + \", found \" + found };\n}"),
     ("$json_decode", "function $json_decode(s, dec) {\n  let v;\n  try {\n    v = JSON.parse(s);\n  } catch (e) {\n    return { TAG: \"Err\", _0: String(e.message) };\n  }\n  try {\n    return { TAG: \"Ok\", _0: dec(v, \"$\") };\n  } catch (e) {\n    if (e !== null && typeof e === \"object\" && \"$json\" in e) return { TAG: \"Err\", _0: e.$json };\n    throw e;\n  }\n}"),
     ("$dj_i32", "function $dj_i32(v, p) {\n  if (typeof v !== \"number\" || !Number.isInteger(v) || v < -2147483648 || v > 2147483647) $json_fail(\"an i32\", v, p);\n  return v | 0;\n}"),
     ("$dj_u32", "function $dj_u32(v, p) {\n  if (typeof v !== \"number\" || !Number.isInteger(v) || v < 0 || v > 4294967295) $json_fail(\"a u32\", v, p);\n  return v >>> 0;\n}"),
@@ -1873,7 +1881,7 @@ impl<'a> Js<'a> {
                 let cs: Vec<String> = fields
                     .iter()
                     .map(|(f, t)| {
-                        let c = conv(self, t, &format!("v{}", member(f)), &format!("p + {}", js_str(&format!(".{f}"))));
+                        let c = conv(self, t, &own(dec, f), &format!("p + {}", js_str(&format!(".{f}"))));
                         format!("{}: {c}", json_key(f))
                     })
                     .collect();
@@ -1890,20 +1898,20 @@ impl<'a> Js<'a> {
                 } else {
                     let key = self.tag_key(&n);
                     let mut s = if dec { object.to_string() } else { String::new() };
-                    let _ = writeln!(s, "  switch (v{}) {{", member(&key));
+                    let _ = writeln!(s, "  switch ({}) {{", own(dec, &key));
                     for (v, fs) in &vs {
                         let tag = self.tag_js(&n, v);
                         let mut parts = vec![format!("{}: {tag}", json_key(&key))];
                         for (k, ft) in fs.iter().enumerate() {
                             let fk = self.field_key(&n, v, k);
-                            let c = conv(self, ft, &format!("v{}", member(&fk)), &format!("p + {}", js_str(&format!(".{fk}"))));
+                            let c = conv(self, ft, &own(dec, &fk), &format!("p + {}", js_str(&format!(".{fk}"))));
                             parts.push(format!("{}: {c}", json_key(&fk)));
                         }
                         let _ = writeln!(s, "    case {tag}: return {{ {} }};", parts.join(", "));
                     }
                     s.push_str("  }\n");
                     if dec {
-                        let _ = writeln!(s, "  $json_fail({}, v{}, p + {});", js_str(&format!("a variant of {n}")), member(&key), js_str(&format!(".{key}")));
+                        let _ = writeln!(s, "  $json_fail({}, {}, p + {});", js_str(&format!("a variant of {n}")), own(dec, &key), js_str(&format!(".{key}")));
                     }
                     s
                 }

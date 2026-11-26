@@ -21,3 +21,15 @@ export fn tree(s: String) -> String {
   match r { Ok(t) => json_encode(t), Err(m) => m }
 }
 export fn plain() -> String { json_encode([1, 2]) + json_encode("a\"b") + json_encode(Todo { id: 1, title: "x", done: false, tags: [], due: None }) }
+
+// (third review) a field named like an Object.prototype property is read only when the JSON has it; a fn named JSON
+// does not hide the global the decoder uses
+type Proto = { toString: Option<String>, n: i32 }
+fn JSON() -> i32 { 1 }
+export fn proto(s: String) -> String {
+  let r: Result<Proto, String> = json_decode(s);
+  match r {
+    Ok(p) => `${p.toString.unwrap_or("-")} ${p.n + JSON()}`,
+    Err(e) => `error: ${e}`,
+  }
+}

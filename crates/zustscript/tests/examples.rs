@@ -986,7 +986,8 @@ console.log(m.roundtrip(JSON.stringify(doc)));
 for (const bad of ['{"todos":[{"id":1.5}]}', '{"todos":[], "status":"Half"}', "[]", JSON.stringify({...doc, shapes:[{TAG:"Tri"}]}), JSON.stringify({...doc, pair:[1]}), JSON.stringify({...doc, meta:{a:"x"}})]) console.log(m.roundtrip(bad));
 console.log(m.todo('{"id":3,"title":"t","done":true,"tags":[],"due":"mon"}'), "|", m.todo('{"id":3,"title":"t","done":true,"tags":[]}'));
 console.log(m.tree('{"v":1,"kids":[{"v":2,"kids":[]}]}'), m.tree('{"v":1,"kids":[{"v":2}]}'));
-console.log(m.plain());"#,
+console.log(m.plain());
+console.log(m.proto('{"n":1}'), "|", m.proto('{"n":1,"toString":"s"}'), "|", m.proto('{"toString":2,"n":1}'));"#,
     );
     assert_eq!(
         out,
@@ -999,7 +1000,8 @@ console.log(m.plain());"#,
          error: expected an i32 at $.meta.a, found \"x\"\n\
          3 t mon | 3 t -\n\
          {\"v\":1,\"kids\":[{\"v\":2,\"kids\":[]}]} expected an array at $.kids[0].kids, found nothing\n\
-         [1,2]\"a\\\"b\"{\"id\":1,\"title\":\"x\",\"done\":false,\"tags\":[],\"due\":null}\n"
+         [1,2]\"a\\\"b\"{\"id\":1,\"title\":\"x\",\"done\":false,\"tags\":[],\"due\":null}\n\
+         - 2 | s 2 | error: expected a string at $.toString, found 2\n"
     );
     // (not JSON at all: JSON.parse's message, which depends on the engine)
     let out = node(&d, "const m = await import('./json.js'); console.log(m.roundtrip('{'));");
