@@ -2566,6 +2566,14 @@ fn macro_fragments_and_unit_patterns() {
         "known fragments, and the transcriber's text"
     );
     assert_eq!(first("fn main() {\n    macro_rules! m {\n        ($x:guard) => {};\n    }\n}\n"), e(3, "`guard` fragments in macro are unstable (E0658)"), "a gated fragment");
+    // (a `ty` fragment whose tokens begin a type that does not parse is an error of the call, as rustc's: no later
+    // rule is tried. `?Sized` is a type, a bare trait object)
+    assert_eq!(
+        first("macro_rules! m {\n    ($ty:ty) => { compile_error!(\"whoops\"); };\n    (impl async) => {};\n}\nm!(impl async);\nfn main() {}\n"),
+        e(5, "the tokens of `m!`'s `ty` fragment do not parse as a type"),
+        "a `ty` that does not parse"
+    );
+    assert_eq!(first("macro_rules! m {\n    ($ty:ty) => {};\n    (?$t:path) => { compile_error!(\"no\"); };\n}\nm!(?Sized);\nfn main() {}\n"), None, "`?Sized` for a `ty`");
     assert_eq!(first("pub mod break {\n}\nfn main() {}\n"), e(1, "expected identifier, found keyword `break`"), "a keyword for a module's name");
     assert_eq!(first("mod breaks {\n    pub fn f() {}\n}\nfn main() { breaks::f(); }\n"), None, "a name a keyword starts");
     assert_eq!(first("#![some_nonexistent_attribute]\nfn main() {}\n"), e(1, "cannot find attribute `some_nonexistent_attribute` in this scope"), "an unknown inner attribute");

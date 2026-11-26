@@ -5973,6 +5973,7 @@ compile-fail	parser/macro/macro-bad-delimiter-ident.rs
 check-pass	parser/macro/macro-bare-trait-object-maybe-trait-bound.rs
 compile-fail	parser/macro/macro-doc-comments-1.rs
 compile-fail	parser/macro/macro-doc-comments-2.rs
+check-pass	parser/macro/macro-dotdotdot-may-not-begin-a-type.rs
 compile-fail	parser/macro/macro-in-attribute.rs
 compile-fail	parser/macro/macro-keyword.rs
 compile-fail	parser/macro/macro-missing-right-paren.rs
@@ -8901,6 +8902,7 @@ check-pass	variance/variance-use-covariant-struct-2.rs
 compile-fail	variance/variance-use-invariant-struct-1.rs
 compile-fail	variants/variant-result-noresult-used-as-type.rs
 compile-fail	variants/variant-used-as-type.rs
+run-pass	view-types/regression-156016.rs
 compile-fail	wf/conflicting-impls.rs
 compile-fail	wf/ice-hir-wf-check-anon-const-issue-122199.rs
 compile-fail	wf/ice-hir-wf-issue-135341.rs
