@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795673815894,
+  "lastUpdate": 1795673818445,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -113514,6 +113514,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 93.249,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "181a2c28f9ea69e7854cdd41190d3ac17e3df08e",
+          "message": "zurgo check: every crate's errors at once, not only the first (#216)\n\n`zurgo check` prepares the crates as `zurgo build` does (build scripts and proc macros run), then type checks each one in dependency order with Session::check and prints all its errors, one `file:line:col: message` line each, instead of compiling it. A crate's errors do not stop the crates that depend on it. A crate that cannot be prepared (unreadable or unexpandable source, a failing build script, a proc-macro crate that cannot be read or does not build, or, without the proc-macro server, one that uses a stub's macro) has that error, the crates that use it are reported as not checked, and the others are checked. No objects or fingerprints are written. A build stops as before.\n\nOn wasm-bindgen 0.2.130 for wasm32: 63 errors in one run (~11 s), where a build shows one. KPIs within ±0.6%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9hDiRLf4kwKxcyPQ7u",
+          "timestamp": "2026-11-26T15:01:52+09:00",
+          "tree_id": "97d18e5d771017bfacc0fd1eacd805d4914d5ccf",
+          "url": "https://github.com/mizchi/zust/commit/181a2c28f9ea69e7854cdd41190d3ac17e3df08e"
+        },
+        "date": 1795673817909,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 93.548,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 85,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 82.353,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.939,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 81.25,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 92.359,
             "unit": "%"
           }
         ]
