@@ -104,6 +104,18 @@ pub fn rewrite_ctor_values(src: &str) -> Option<String> {
     let is_sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && toks[k].2 == toks[k].1 + 1 && s[toks[k].1] == c;
     let mut defs = vec![];
     let ar = arities(s, &toks, &mut defs);
+    // (whether the `=` at p is a type alias's or an associated type's, `type A where W: Sized = W;`: a `type` from
+    // the statement's start)
+    let alias_value = |p: usize| {
+        let mut q = p;
+        while q > 0 && !(is_sym(q - 1, b';') || is_sym(q - 1, b'{') || is_sym(q - 1, b'}')) {
+            q -= 1;
+            if toks[q].0 == 0 && tok(q) == b"type" {
+                return true;
+            }
+        }
+        false
+    };
     // Inside use statements and struct / enum definitions is not rewritten
     let mut in_use = vec![false; toks.len()];
     for &(a, b) in &defs {
@@ -210,7 +222,7 @@ pub fn rewrite_ctor_values(src: &str) -> Option<String> {
                 // (or the value of a `let` / `const` / assignment: `let f: fn(isize) -> Foo = Foo;`, not `type A = Foo;`)
                 // (not the argument of a fn pointer's type or an `Fn(..)` bound: `fn(Foo)`, `dyn Fn(Foo)` name the type)
                 .filter(|_| (is_sym(p, b'(') && p >= 1 && toks[p - 1].0 == 0 && !matches!(tok(p - 1), b"fn" | b"Fn" | b"FnMut" | b"FnOnce" | b"AsyncFn" | b"AsyncFnMut" | b"AsyncFnOnce"))
-                    || (eq && is_sym(last + 1, b';') && !(p >= 2 && tok(p - 2) == b"type".as_slice()) && !(p >= 1 && is_sym(p - 1, b'>'))))
+                    || (eq && is_sym(last + 1, b';') && !alias_value(p) && !(p >= 1 && is_sym(p - 1, b'>'))))
                 .map(|a| a.2),
             (t, _) => ar.iter().find(|a| a.0 == t && a.1 == *name).map(|a| a.2),
         };

@@ -151,7 +151,62 @@ fn box_reinit() {
     *d = S(113);
     println!("end box_reinit");
 }
+// (a match arm that assigns the scrutinee: after it, the scrutinee is not known to be the variant the arm matched)
+enum E2 {
+    A(S, S),
+    B(S, S),
+}
+fn arm_assigns(mut e: E2) {
+    match e {
+        E2::A(..) => e = E2::B(S(123), S(124)),
+        E2::B(..) => return,
+    }
+    match e {
+        E2::B(x, _) => drop(x),
+        _ => {}
+    }
+    println!("end arm_assigns");
+}
+// (all of a local moved after a part of it was: no part is dropped again)
+fn whole_after_part() {
+    let mut x = (S(131), S(132));
+    let a = x.0;
+    x.0 = S(133);
+    match x {
+        y => drop(y),
+    }
+    drop(a);
+    println!("end whole_after_part");
+}
+// (a field assigned whose parts a move split: the parts still there are dropped first)
+fn nested_assign() {
+    let mut x = ((S(141), S(142)), S(143));
+    let a = x.0.0;
+    x.0 = (S(144), S(145));
+    drop(a);
+    println!("end nested_assign");
+}
+// (a local moved, all of it and a part, in a loop it outlives)
+fn loop_whole() {
+    let mut x = (S(151), S(152));
+    for i in 0..2 {
+        let y = x;
+        drop(y);
+        x = (S(160 + i), S(170 + i));
+        if i == 1 {
+            break;
+        }
+        let a = x.0;
+        drop(a);
+        x.0 = S(180 + i);
+    }
+    println!("end loop_whole");
+}
 fn main() {
+    arm_assigns(E2::A(S(121), S(122)));
+    whole_after_part();
+    nested_assign();
+    loop_whole();
     box_reinit();
     reassign();
     field_reassign();

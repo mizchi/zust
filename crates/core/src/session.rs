@@ -8573,9 +8573,34 @@ fn undeclared_std_collection(src: &str) -> Option<String> {
                 }
                 i = j;
             }
-            "struct" | "enum" | "type" | "trait" | "union" | "mod" | "fn" | "macro_rules" => {
+            "struct" | "enum" | "type" | "trait" | "union" | "mod" | "fn" | "macro_rules" | "impl" => {
                 if let Some(n) = NAMES.iter().find(|n| **n == text(i + 1)) {
                     known.push(n);
+                }
+                // (a generic parameter of the name, `fn f<HashMap>(..)` / `impl<HashMap> ..`: declared where its list
+                // starts or after a `,` in it, before `:` / `,` / `>` / `=`)
+                let open = if text(i) == "impl" { i + 1 } else { i + 2 };
+                if text(open) == "<" {
+                    let mut d = 0;
+                    let mut j = open;
+                    while j < toks.len() {
+                        match text(j) {
+                            "<" => d += 1,
+                            ">" if text(j - 1) != "-" => {
+                                d -= 1;
+                                if d == 0 {
+                                    break;
+                                }
+                            }
+                            t if d == 1 && matches!(text(j - 1), "<" | ",") && matches!(text(j + 1), "," | ">" | "=") || d == 1 && text(j + 1) == ":" && !path_sep(j + 1) && matches!(text(j - 1), "<" | ",") => {
+                                if let Some(n) = NAMES.iter().find(|n| **n == t) {
+                                    known.push(n);
+                                }
+                            }
+                            _ => {}
+                        }
+                        j += 1;
+                    }
                 }
             }
             _ => {}
@@ -12449,9 +12474,16 @@ fn macro_body_at(src: &str, line: usize, col: usize, t: &str) -> Option<(usize, 
         }
         out
     };
+    // (the calls on the line: (where the name starts, the name, after it). The one the error is at, when it is at
+    // one; else the only one; with several and none at the place, the error stays)
+    let mut calls: Vec<(usize, &str, usize)> = vec![];
     let mut i = 0;
     while i < text.len() {
         let tx = text.as_bytes();
+        // (not in a comment after the code, `//~ NOTE in this expansion of m!`)
+        if tx[i..].starts_with(b"//") {
+            break;
+        }
         if !id(tx[i]) || (i > 0 && id(tx[i - 1])) {
             i += 1;
             continue;
@@ -12461,9 +12493,16 @@ fn macro_body_at(src: &str, line: usize, col: usize, t: &str) -> Option<(usize, 
             i += 1;
         }
         let n = &text[s0..i];
-        if tx.get(i) != Some(&b'!') || n == "macro_rules" {
-            continue;
+        if tx.get(i) == Some(&b'!') && n != "macro_rules" {
+            calls.push((s0, n, i));
         }
+    }
+    if let Some(&c) = calls.iter().find(|c| c.0 + 1 == col) {
+        calls = vec![c];
+    } else if calls.len() > 1 {
+        return None;
+    }
+    for (_, n, i) in calls {
         // (the call's arguments)
         let a = skip_ws(base + i + 1);
         let Some(ae) = close(a) else { continue };

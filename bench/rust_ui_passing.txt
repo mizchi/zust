@@ -4037,6 +4037,7 @@ run-pass	let-else/let-else-temp-borrowck.rs
 compile-fail	let-else/let-else-then-diverge.rs
 run-pass	let-else/let-else.rs
 compile-fail	let-else/uninitialized-refutable-let-issue-123844.rs
+run-pass	lexer/crlf-in-byte-string-literal.rs
 compile-fail	lexer/dont-ice-on-invalid-lifetime-in-macro-definition.rs
 compile-fail	lexer/lex-bad-binary-literal.rs
 compile-fail	lexer/lex-bad-char-literals-2.rs
@@ -7177,6 +7178,7 @@ check-pass	rfcs/rfc-2294-if-let-guard/shadowing.rs
 check-pass	rfcs/rfc-2294-if-let-guard/type-inference.rs
 compile-fail	rfcs/rfc-2294-if-let-guard/typeck.rs
 run-pass	rfcs/rfc-2302-self-struct-ctor/rfc-2302-self-struct-ctor.rs
+run-pass	rfcs/rfc-2361-dbg-macro/dbg-macro-expected-behavior.rs
 compile-fail	rfcs/rfc-2361-dbg-macro/dbg-macro-move-semantics.rs
 compile-fail	rfcs/rfc-2361-dbg-macro/dbg-macro-requires-debug.rs
 check-pass	rfcs/rfc-2396-target_feature-11/check-pass.rs

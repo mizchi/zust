@@ -618,7 +618,7 @@ impl Cx<'_> {
         let mc_recv: &Expr = mc_recv;
         let _ = (mc_name, mc_tf, mc_args);
         // (E0133: the pointer methods that are `unsafe fn` in std; the wrapping_* ones, is_null and cast are safe)
-        if matches!(mc_name.as_str(), "add" | "sub" | "offset" | "offset_from" | "read" | "read_volatile" | "read_unaligned" | "write" | "write_volatile" | "write_unaligned") {
+        if matches!(mc_name.as_str(), "add" | "sub" | "offset" | "offset_from" | "read" | "read_volatile" | "read_unaligned" | "write" | "write_volatile" | "write_unaligned" | "drop_in_place") {
             if let Expr::MethodCall(_, _, _, _, msp) = mc {
                 self.check_unsafe_op(mc_name, msp.at)?;
             }

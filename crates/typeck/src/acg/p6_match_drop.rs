@@ -304,6 +304,10 @@ impl Cx<'_> {
         let track = matches!(strip_paren(scrut), Expr::Path(..))
             && matches!(place.ty(), Ty::Struct(sid) if self.prog.structs[sid as usize].is_enum)
             && self.moved_root(scrut).is_some();
+        // (the scrutinee's flag, for a mark in known_var during each arm's body: an assignment to the scrutinee or a
+        // `&mut` of it there (forget_variant) removes it, and that arm's variant is not known after it)
+        let track_f = if track { self.moved_root(scrut).map(|r| r.2) } else { None };
+        const MARK: (u32, usize) = (u32::MAX, usize::MAX);
         for arm in arms {
             let next = self.b.create_block();
             // (after a guard that failed, the next arm tests the scrutinee again: what the guard moved out of it is
@@ -479,9 +483,16 @@ impl Cx<'_> {
                 self.bk_ev(borrowck::Ev::Def(id, vec![]));
             }
             let t0 = self.temps.len();
+            if let Some(f) = track_f {
+                self.known_var.push((f, MARK.0, MARK.1));
+            }
             let (v, t) = self.expr(&arm.body, result_ty.or(expected))?;
+            let kept = track_f.and_then(|f| self.known_var.iter().position(|k| *k == (f, MARK.0, MARK.1)));
+            if let Some(i) = kept {
+                self.known_var.remove(i);
+            }
             if track && t != Ty::Never {
-                let var = self.pat_variant(&arm.pat, place.ty());
+                let var = kept.and_then(|_| self.pat_variant(&arm.pat, place.ty()));
                 on_vars = match on_vars {
                     Some(Some(x)) if var != Some(x) => Some(None),
                     Some(x) => Some(x),
@@ -1752,8 +1763,9 @@ impl Cx<'_> {
             Pat::Ident(..) if const_lit_pat(self.prog, pat).is_some() => Ok(()),
             Pat::Ident(..) if self.const_pat_ok(pat, p.ty()) => Ok(()),
             // (a unit struct's name, of the value's type: a pattern that binds and moves nothing (`let Unit = *w;`
-            // through a Deref, `let Unit = u;` before a use of u))
-            Pat::Ident(false, false, n, None) if self.unit_struct_pat(n, p.ty()) => Ok(()),
+            // through a Deref, `let Unit = u;` before a use of u); through references too, by the default binding mode
+            // (`let U = &U;`))
+            Pat::Ident(false, false, n, None) if self.unit_struct_pat(n, self.strip_refs(p.ty())) => Ok(()),
             // (an aggregate constant, tested by pat_test: not a new name, so a nested match still compares with it)
             Pat::Ident(_, _, n, None)
                 if self.user_code
@@ -2531,7 +2543,12 @@ impl Cx<'_> {
                         let _ = via_field;
                         if let Some(f) = self.flag_of_loc(loc) {
                             if !self.split_moved(e0, loc, t, f, parts) {
+                                // (all of it moved: the flags of the parts an earlier move split out too)
                                 self.clear_flag(f);
+                                let pfs: Vec<StackSlot> = self.parts.iter().filter(|p| p.0 == f).map(|p| p.3).collect();
+                                for pf in pfs {
+                                    self.clear_flag(pf);
+                                }
                             }
                         }
                     }
@@ -2581,6 +2598,11 @@ impl Cx<'_> {
             return false;
         }
         let Some(depth) = self.owned.iter().rev().find(|o| o.flag == f).map(|o| o.depth) else { return false };
+        // (not in a loop the local outlives: code lowered before the split, which knows none of the parts' flags, runs
+        // again after it on the loop's next pass)
+        if self.in_loop_since(depth) {
+            return false;
+        }
         let Some((off, pt, whole)) = self.local_part(e, t) else { return false };
         let mut vars = vec![];
         let moved: Vec<(i32, Ty)> = match parts {
@@ -2607,6 +2629,11 @@ impl Cx<'_> {
         self.split_part((f, loc, depth), f, 0, t, &moved, true);
         self.part_vars.clear();
         true
+    }
+
+    /// Whether a loop entered after scope depth `depth` is being lowered (a local of that depth outlives its passes)
+    fn in_loop_since(&self, depth: usize) -> bool {
+        self.loops.iter().any(|l| !l.is_block && l.depth > depth)
     }
 
     /// The offset and type of the place e (a local, or its fields `x.a.b`) in the local of type t, and whether it is
@@ -3044,6 +3071,24 @@ impl Cx<'_> {
                 }
             }
         }
+        // (a field of a local: dropped only while the local's flag says it is all there. A move out of it in a loop it
+        // outlives (split_moved) cleared the flag, and the moved field is not dropped again; the rest leaks)
+        if let (Expr::Field(..), Place::Mem(a, o, t)) = (strip_paren(left), p) {
+            if let Some((Loc::Slot(_) | Loc::Ptr(_), _, f)) = self.moved_root(left) {
+                if self.needs_drop(t) {
+                    let addr = self.addr_plus(a, o);
+                    let x = self.b.ins().stack_load(types::I8, f, 0);
+                    let yes = self.b.create_block();
+                    let done = self.b.create_block();
+                    self.b.ins().brif(x, yes, &[], done, &[]);
+                    self.b.switch_to_block(yes);
+                    self.drop_in_place(addr, t);
+                    self.b.ins().jump(done, &[]);
+                    self.b.switch_to_block(done);
+                }
+                return None;
+            }
+        }
         // フィールド・`*p`・`a[i]`: 初期化済みなので必ず drop する
         let addr = match p {
             Place::Mem(a, o, _) => self.addr_plus(a, o),
@@ -3074,8 +3119,21 @@ impl Cx<'_> {
         if !self.needs_drop(pt) {
             return None;
         }
+        // (in a loop the local outlives, only a part split out before: no flag is made there (split_moved))
+        if self.in_loop_since(depth) && !self.parts.iter().any(|p| p.0 == f && p.1 == off && p.2 == pt) {
+            return None;
+        }
         self.split_part((f, loc, depth), f, 0, t, &[(off, pt)], false);
         let pf = self.parts.iter().find(|p| p.0 == f && p.1 == off && p.2 == pt)?.3;
+        // (the parts of x.a an earlier move split out: those still there are dropped, in order, and their flags
+        // cleared, so that the new value has x.a's flag alone)
+        let size = self.prog.size_align(pt).0 as i32;
+        let mut inner: Vec<(i32, Ty, StackSlot)> =
+            self.parts.iter().filter(|p| p.0 == f && off <= p.1 && p.1 < off + size && p.3 != pf).map(|p| (p.1, p.2, p.3)).collect();
+        inner.sort_by_key(|p| p.0);
+        for (o, k, flag) in inner {
+            self.emit_owned_drop(Owned { loc, ty: k, flag, depth: 0, off: o });
+        }
         self.emit_owned_drop(Owned { loc, ty: pt, flag: pf, depth: 0, off });
         Some(pf)
     }

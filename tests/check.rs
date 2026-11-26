@@ -3856,3 +3856,42 @@ fn vec_from_and_into_a_vec_by_std_s_from_impls() {
     let src = "fn foo() {}\nfn main() {\n    let _v: Vec<(&str, fn())> = Vec::from([(\"foo\", foo)]);\n}\n";
     assert_eq!(first(src).map(|x| x.0), Some(3));
 }
+
+#[test]
+fn a_dyn_call_s_where_clause_an_unsafe_drop_in_place_patterns_through_references_and_scans_of_names() {
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    // (E0277: a method `where Self::A: Foo` through a `dyn Tr<A = ()>` that does not meet it; met, it is called)
+    let src = "trait Foo {}\ntrait Tr { type A; fn m(&self) where Self::A: Foo; }\nimpl<T> Tr for T { type A = (); fn m(&self) where Self::A: Foo {} }\nfn main() {\n    let x: &dyn Tr<A = ()> = &5u8;\n    x.m();\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.2)), Some((6, "the trait bound `(): Foo` is not satisfied (E0277)".to_string())));
+    let src = "trait Foo {}\nimpl Foo for u8 {}\ntrait Tr { type A; fn m(&self) where Self::A: Foo; }\nimpl<T> Tr for T { type A = u8; fn m(&self) where Self::A: Foo {} }\nfn main() {\n    let x: &dyn Tr<A = u8> = &5u8;\n    x.m();\n}\n";
+    assert_eq!(first(src), None);
+    // (E0133: a raw pointer's `drop_in_place` outside `unsafe`)
+    let src = "fn main() {\n    let mut v = 5u32;\n    let p = &mut v as *mut u32;\n    unsafe { p.drop_in_place() };\n    p.drop_in_place();\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.2.contains("E0133"))), Some((5, true)));
+    // (a unit struct's name matches through a reference)
+    let src = "struct U;\nfn main() {\n    let U = &U;\n    let U = U;\n}\n";
+    assert_eq!(first(src), None);
+    // (`Vec::<u8>::from(x)`: x's elements must be u8s; `[foo, bar]` and `[foo as fn(), foo]` are arrays of fn pointers)
+    let src = "fn main() {\n    let _ = Vec::<u8>::from([1, 2]);\n    let _ = Vec::<u8>::from([300u16]);\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.2.contains("E0277"))), Some((3, true)));
+    let src = "fn foo() {}\nfn bar() {}\nfn main() {\n    let _f: Vec<fn()> = Vec::from([foo, bar]);\n    let _g: Vec<fn()> = Vec::from([foo as fn(), foo]);\n}\n";
+    assert_eq!(first(src), None);
+    // (a generic parameter named like a std collection is no use of it, beside another error)
+    let src = "fn f<HashMap>(_x: HashMap) {}\nfn main() {\n    let _x: u8 = \"s\";\n}\n";
+    assert_eq!(first(src).map(|x| x.0), Some(3));
+    // (a type alias with a where clause names the type, not its constructor)
+    let src = "struct W(u8);\ntype A where W: Sized = W;\nfn main() {\n    let a: A = W(3);\n    let _ = a.0;\n}\n";
+    assert_eq!(first(src).filter(|x| !x.2.starts_with("warning")), None);
+    // (a raw string's text is no named argument: `w` is the width's)
+    let src = "fn main() {\n    let width = 6;\n    let decoy = 1u8;\n    println!(\"{:w$}|\", r#\"\", w = decoy, \"\"#, w = width);\n    let _ = decoy;\n}\n";
+    assert_eq!(first(src), None);
+    // (`dbg!(a, b)` is the tuple of them)
+    let src = "fn main() {\n    assert_eq!((1u8, 2u32), dbg!(1, 2));\n}\n";
+    assert_eq!(first(src), None);
+    // (a string literal over a CR LF line end of the source holds a LF, as rustc reads the file normalized)
+    let src = "fn main() {\r\n    let s = b\"a\r\nb\";\r\n    let _: &[u8; 3] = s;\r\n    let t = r\"a\r\nb\";\r\n    assert_eq!(t.len(), 3);\r\n}\r\n";
+    assert_eq!(first(src), None);
+}

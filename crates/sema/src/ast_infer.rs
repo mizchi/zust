@@ -1709,6 +1709,14 @@ impl Inf<'_> {
         }
         if name == "dbg" {
             let Some(xs) = ast_closure::macro_args_at(g, self.mbase) else { return self.var() };
+            // (`dbg!(a, b)`: the tuple of them)
+            if xs.len() > 1 {
+                let base = self.prog.tuple_base(xs.len());
+                self.pos_record += 1;
+                let args: Vec<(String, u32)> = xs.into_iter().enumerate().map(|(i, x)| (i.to_string(), self.expr_kept(x, false))).collect();
+                self.pos_record -= 1;
+                return self.adt_ctor(base, None, args);
+            }
             let Some(x) = xs.into_iter().next() else { return self.var() };
             self.pos_record += 1;
             let v = self.expr_kept(x, false);
@@ -1984,7 +1992,16 @@ impl Inf<'_> {
         // (a `&str` / a String), as the code generator rewrites it
         if let (Expr::Path(None, p), [x]) = (f, args) {
             if p.segs.len() == 2 && p.segs[0].name == "Vec" && p.segs[1].name == "from" && self.prog.struct_index.contains_key("Vec") && self.fn_by(p).is_none() {
-                return self.vec_from(x);
+                let v = self.vec_from(x);
+                // (`Vec::<u8>::from([1, 2])`: the turbofish's elements)
+                if let Some(crate::parse::GArg::Ty(t)) = p.segs[0].args.first() {
+                    let el = self.elem_of(v);
+                    let tv = self.ty_var(t);
+                    if let Some(el) = el {
+                        self.unify(el, tv);
+                    }
+                }
+                return v;
             }
         }
         // (`mem::size_of::<T>()` / `align_of` / `size_of_val(&x)`: usize, the code generator's intrinsics, so a literal
@@ -3127,6 +3144,17 @@ fn named_fmt_arg<'a>(g: &'a str, name: &str) -> Option<&'a str> {
     let mut i = 0;
     while i < b.len() {
         match b[i] {
+            // (a raw string, `r#".."#` / `br".."`, to its end: what it holds is no argument)
+            b'r' if (i == 0 || !id(b[i - 1]) || (b[i - 1] == b'b' && (i == 1 || !id(b[i - 2])))) && matches!(b.get(i + 1), Some(b'"' | b'#')) => {
+                let hashes = b[i + 1..].iter().take_while(|&&c| c == b'#').count();
+                if b.get(i + 1 + hashes) == Some(&b'"') {
+                    let close: Vec<u8> = std::iter::once(b'"').chain(std::iter::repeat_n(b'#', hashes)).collect();
+                    let from = i + 2 + hashes;
+                    i = b[from..].windows(close.len()).position(|w| w == close.as_slice()).map_or(b.len(), |p| from + p + close.len() - 1);
+                }
+            }
+            // (a char literal of a quote, `'"'`)
+            b'\'' if b.get(i + 1) == Some(&b'"') && b.get(i + 2) == Some(&b'\'') => i += 2,
             b'"' => {
                 i += 1;
                 while i < b.len() && b[i] != b'"' {

@@ -22,11 +22,20 @@ pub enum TokKind {
 pub struct Tok {
     pub kind: TokKind,
     pub text: String,
-    /// Whether another punctuation character immediately follows (for assembling `>>` / `::` / `->`)
+    /// Whether another punctuation character immediately follows (for assembling `>>` / `::` / `->`). On an
+    /// identifier: a raw one, whose text is its name without the `r#` (unraw, is_raw)
     pub joint: bool,
     pub line: u32,
     pub col: u32,
     pub lo: u32,
+}
+
+impl Tok {
+    /// A raw identifier whose text is its name without the `r#` (unraw): a macro's text spells it with it
+    /// (`stringify!(r#foo)` is "r#foo")
+    pub fn is_raw(&self) -> bool {
+        self.kind == TokKind::Ident && self.joint
+    }
 }
 
 fn is_ident_start(c: char) -> bool {
@@ -286,6 +295,7 @@ fn unraw(out: &mut [Tok], raws: &[usize]) {
         if let Some(t) = out.get_mut(k) {
             if let Some(n) = t.text.strip_prefix("r#").filter(|n| !raw_kept(n)) {
                 t.text = n.to_string();
+                t.joint = true;
             }
         }
     }
@@ -1155,6 +1165,10 @@ impl Parser {
                 }
             }
             first = false;
+            if t.is_raw() {
+                s.push_str("r#");
+                col += 2;
+            }
             s.push_str(&t.text);
             // (the line / column after a multi-line token (a string))
             let nl = t.text.bytes().filter(|&c| c == b'\n').count() as u32;
@@ -1182,7 +1196,7 @@ impl Parser {
                 TokKind::Close => depth -= 1,
                 _ => {}
             }
-            if !s.is_empty() && !(t.kind == TokKind::Punct && self.i > 0 && self.toks[self.i - 1].joint) {
+            if !s.is_empty() && !(t.kind == TokKind::Punct && self.i > 0 && self.toks[self.i - 1].kind != TokKind::Ident && self.toks[self.i - 1].joint) {
                 s.push(' ');
             }
             s.push_str(&t.text);

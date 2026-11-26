@@ -3545,6 +3545,14 @@ impl Cx<'_> {
                 return err(SP, "cannot borrow data in a `&` reference as mutable (E0596)".to_string());
             }
         }
+        // (E0277: a where clause of the method on an associated type the object binds, `where Self::A: Foo` through
+        // `dyn Tr<A = ()>`: the vtable has no entry for it)
+        if !binds.is_empty() && self.prog.fn_preds.contains_key(&decls[idx]) {
+            if let Some(e) = self.dyn_pred_error(decls[idx], &binds) {
+                return err(SP, e);
+            }
+        }
+        let ds = &self.prog.sigs[decls[idx] as usize];
         // (a method the vtable has no entry for: `self` by value / no `self` / generics of its own)
         let by_box = matches!(ds.params.first(), Some(Ty::Box(_)));
         if !ds.has_self || !matches!(ds.params.first(), Some(Ty::Ref(..) | Ty::Box(_))) || ds.generics.len() > 1 + targs.len() {
@@ -4900,6 +4908,29 @@ fn has_ref(t: Ty, depth: u32) -> bool {
 
 impl Cx<'_> {
     /// The impl method of trait `tr`'s method `d` for type t has where clauses t does not meet (Program::fn_pred_error)
+    /// A where clause of the trait's method decl on `Self::X` that the type a trait object binds X to does not meet
+    #[cold]
+    #[inline(never)]
+    fn dyn_pred_error(&self, decl: u32, binds: &[(String, Ty)]) -> Option<String> {
+        let preds = self.prog.fn_preds.get(&decl)?;
+        let names: Vec<&str> = self.prog.sigs[decl as usize].generics.iter().map(|g| g.0.as_str()).collect();
+        for (syn, _, bounds) in preds {
+            let crate::types::TySyn::Assoc(b, name) = syn else { continue };
+            let (name, _) = crate::ast_types::split_trait_assoc(name);
+            if self.prog.resolve_g(b, &names).ok() != Some(Ty::Param(0)) {
+                continue;
+            }
+            let Some(&(_, bt)) = binds.iter().find(|x| x.0 == name) else { continue };
+            for tr in bounds {
+                let tname = tr.split('<').next().unwrap_or(tr).trim();
+                if self.prog.user_traits.contains(tname) && matches!(self.prog.evaluate(bt, tr), crate::program::Certainty::No) {
+                    return Some(format!("the trait bound `{}: {tr}` is not satisfied (E0277)", crate::traits::display_ty(self.prog, bt)));
+                }
+            }
+        }
+        None
+    }
+
     fn impl_method_preds_fail(&self, tr: &str, d: u32, t: Ty) -> bool {
         let Some(m) = self.prog.names[d as usize].rsplit("::").next() else { return false };
         (0..self.prog.sigs.len()).any(|i| {

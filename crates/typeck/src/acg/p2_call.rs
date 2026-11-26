@@ -57,8 +57,10 @@ fn simple_text(e: &Expr) -> Option<String> {
 pub(crate) fn vec_of(es: &[Expr]) -> Expr {
     let mut lets = vec![];
     let mut items = vec![];
+    // (with one element that is not simple, each one is evaluated into a let, in order: `[n, { n = 2; n }]` is [1, 2])
+    let all_simple = es.iter().all(|e| simple_text(e).is_some());
     for (i, e) in es.iter().enumerate() {
-        match simple_text(e) {
+        match simple_text(e).filter(|_| all_simple) {
             Some(t) => items.push(t),
             None => {
                 let n = format!("__exr_va{i}");
