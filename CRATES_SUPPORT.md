@@ -38,7 +38,56 @@ Crates of one kind tend to stop zustc in the same places. *Own errors*: the erro
 | date and time | 6 |  |  | 1 | 5 |  | 9 | cannot find value `…` (2); cannot find type `…` (1) |
 | embedded and no_std | 13 | 1 |  | 2 | 8 | 2 | 9 | macro expansion is too deep (recursion limit N) (3); impls for references to a type parameter (`…`) are supported only with methods that for… |
 
-## What to fix first
+## What to fix, by importance
+
+Every error, grouped by the fix it needs ([issues.tsv](cratebench/survey/issues.tsv) names the fixes with a tracking issue; the rest are grouped by their text without names), and ordered by what the fix holds back. Each surveyed crate that does not build shares its downloads equally among the fixes its graph needs (every error in it, its own and its dependencies', or why zurgo cannot plan or build it); a fix's share is the sum. *Alone*: the crates that need only this fix, as far as zustc shows (it stops a crate at its first item error, so another can come next).
+
+| # | fix | issue | holds back | crates | alone | packages | errors | example |
+|---:|---|---|---:|---:|---|---:|---:|---|
+| 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | #254 | 11.1% | 57 | 14: getrandom, log, socket2, regex-syntax, num-traits … | 22 | 27 | anyhow 1.0.105: src/error.rs:919:1: cannot find type `Backtrace` |
+| 2 | `impl<T: Tr> Tr for &T` | #144 | 7.1% | 43 | 12: futures-core, futures-task, futures-channel, futures-sink, futures-io … | 16 | 16 | allocator-api2 0.2.22: src/stable/alloc/mod.rs:378:1: impls for references to a type parameter (`imp… |
+| 3 | zurgo: renamed dependencies | #249 | 5.3% | 15 | 15: digest, sha2, rustls, rustls-webpki, reqwest … | 15 | 15 | digest: `digest` renames its dependency `crypto-common` to `common`: renamed dependencies are not su… |
+| 4 | mismatched types: expected `…`, found `…` | — | 2.8% | 32 | 1: ryu | 17 | 45 | base64 0.23.1: src/engine/general_purpose/decode.rs:209:37: mismatched types: expected `&T0`, found … |
+| 5 | no rules expected `…` | — | 2.8% | 19 | 3: zerocopy, ppv-lite86, half | 5 | 6 | event-listener 5.4.2: src/lib.rs:1053:109: no rules expected `<` |
+| 6 | prelude: type `Layout` | #250 | 2.7% | 18 | 5: smallvec, parking_lot_core, parking_lot, bumpalo, zlib-rs | 5 | 5 | bumpalo 3.20.4: src/alloc.rs:39:1: cannot find type `Layout` in this scope |
+| 7 | macro expansion too deep at a crate's first line | #252 | 2.4% | 20 | 4: aho-corasick, writeable, potential_utf, embassy-futures | 7 | 7 | aho-corasick 1.1.5: src/lib.rs:1:1: macro expansion is too deep (recursion limit 128) |
+| 8 | no method `…` on type `…` | — | 2.3% | 25 | 0 | 12 | 25 | base64 0.23.1: src/engine/simd.rs:129:81: no method `cast` on type `*const i8` |
+| 9 | prelude: type `Once` | #250 | 2.1% | 10 | 6: crossbeam-utils, lazy_static, crossbeam-epoch, crossbeam-deque, rayon-core … | 4 | 4 | cc 1.11.3: src/utilities.rs:143:1: cannot find type `Once` |
+| 10 | a derive's name resolved to a glob-imported type | #251 | 2.1% | 5 | 4: block-buffer, crypto-common, typenum, hybrid-array | 1 | 1 | typenum 1.20.1: src/lib.rs:91:1: cannot find derive macro `typenum__operator_aliases__Eq` in this sc… |
+| 11 | prelude: `impl Error for fmt::Error` | #197 | 1.9% | 8 | 2: serde_core, serde_spanned | 1 | 1 | serde_core 1.0.229: src/ser/fmt.rs:4:1: the trait bound `__FmtError: Error` is not satisfied (E0277) |
+| 12 | missing generics for `…` | — | 1.8% | 15 | 1: const-oid | 2 | 2 | bytes 1.12.2: src/fmt/debug.rs:13:1: missing generics for `Result` |
+| 13 | no method named `…` found for `…` | — | 1.8% | 22 | 2: unicode-width, atomic-waker | 11 | 14 | anstyle 1.0.14: src/style.rs:111:31: no method named `fmt` found for `anstyle__effect__EffectsDispla… |
+| 14 | expected an identifier (found …) | — | 1.6% | 11 | 0 | 3 | 3 | der 0.8.3: src/error.rs:385:43: expected an identifier (found `=`) |
+| 15 | the trait bound `…` is not satisfied (E0277) | — | 1.6% | 8 | 2: equivalent, stable_deref_trait | 2 | 2 | equivalent 1.0.3: src/lib.rs:110:1: the trait bound `Q: Equivalent` is not satisfied (E0277) |
+| 16 | cannot infer the `…` return type of `…` | — | 1.6% | 9 | 4: find-msvc-tools, clap_lex, openssl-probe, matchit | 5 | 5 | clap_lex 1.1.2: src/lib.rs:1:1: cannot infer the `impl Trait` return type of `clap_lex__RawArgs::rem… |
+| 17 | prelude: `impl Error for Infallible` | #250 | 1.5% | 3 | 1: rand_core | 2 | 2 | chacha20 0.10.2: src/rng.rs:342:1: the trait bound `Infallible: Error` is not satisfied (E0277) |
+| 18 | expected `…` (found …) | — | 1.5% | 18 | 2: zerovec, anstyle-parse | 4 | 4 | anstyle-parse 1.0.0: src/lib.rs:69:38: expected `:` (found `>`) |
+| 19 | impl has stricter requirements than trait (E0276) | — | 1.5% | 5 | 2: bitflags, nix | 2 | 2 | bitflags 2.13.2: src/traits.rs:441:580: impl has stricter requirements than trait (E0276) |
+| 20 | no rules of `…` matched this call | — | 1.5% | 9 | 2: httparse, time-core | 3 | 3 | httparse 1.10.1: src/lib.rs:934:20: no rules of `expect!` matched this call |
+| 21 | no method `…` on `…` | — | 1.4% | 21 | 0 | 8 | 12 | anstyle 1.0.14: src/style.rs:415:33: no method `fmt` on `&str` |
+| 22 | cannot find value (unsupported path) | — | 1.3% | 17 | 0 | 8 | 11 | base64 0.23.1: src/decode.rs:69:36: cannot find value (unsupported path) |
+| 23 | `…` takes N type arguments, but N were given | — | 1.2% | 8 | 3: unicode-segmentation, convert_case, fixedbitset | 3 | 3 | fixedbitset 0.5.9: src/lib.rs:1524:1: `Copied` takes 2 type arguments, but 1 were given |
+| 24 | prelude: type `File` | #250 | 1.2% | 8 | 3: same-file, is_terminal_polyfill, quick-xml | 3 | 3 | is_terminal_polyfill 1.70.2: src/lib.rs:42:1: cannot find type `File` in this scope |
+| 25 | `…` is only allowed in impls | — | 1.0% | 5 | 2: tinystr, zerotrie | 2 | 2 | tinystr 0.8.5: src/error.rs:9:1: `self` is only allowed in impls |
+| 26 | unsupported path in constant | — | 0.8% | 5 | 1: zmij | 2 | 2 | flate2 1.1.11: src/mem.rs:46:1: unsupported path in constant |
+| 27 | cannot evaluate `…` in a constant | — | 0.7% | 2 | 2: semver, rustc_version | 1 | 1 | semver 1.0.28: src/identifier.rs:83:1: cannot evaluate `size_of::<NonNull<u8>>()` in a constant |
+| 28 | prelude: `[T; N]: AsMut<[T]>` | #250 | 0.7% | 3 | 1: linux-raw-sys | 1 | 29 | linux-raw-sys 0.12.1: src/x86_64/general.rs:3136:50: the trait bound `[u8; 1]: AsMut<[u8]>` is not s… |
+| 29 | prelude: trait `Extend` | #250 | 0.7% | 5 | 1: bit-vec | 3 | 3 | bit-vec 0.10.2: src/lib.rs:2077:1: cannot find trait `Extend` |
+| 30 | closure may outlive the current function, but it borrows `…`, which is owned by the curren… | — | 0.7% | 12 | 0 | 2 | 5 | mime 0.3.18: src/lib.rs:180:23: closure may outlive the current function, but it borrows `end`, whic… |
+| 31 | expected an item (found …) | — | 0.7% | 9 | 1: defmt | 2 | 2 | defmt 1.2.0: src/impls/arrays.rs:33:203: expected an item (found `(`) |
+| 32 | zurgo: two versions of one crate in a graph | #28 | 0.7% | 5 | 5: quinn-proto, quinn, petgraph, embassy-time[std,generic-queue-8], embassy-embedded-hal | 5 | 5 | quinn-proto: two packages give the library `getrandom`: `getrandom v0.4.3` and `getrandom v0.2.17`. … |
+| 33 | a fn pointer cast to `*mut ()` in a static | #253 | 0.7% | 1 | 1: memchr | 1 | 1 | memchr: in static `FN__h46`: constants of type `*mut ()` are not supported |
+| 34 | the trait bound `…` is not satisfied (for `…`) | — | 0.6% | 9 | 0 | 4 | 5 | data-encoding 2.11.1: src/lib.rs:1838:23: the trait bound `Formatter: __FWr` is not satisfied (for `… |
+| 35 | prelude: type `Thread` | #250 | 0.6% | 10 | 0 | 1 | 1 | once_cell 1.21.4: src/imp_std.rs:139:1: cannot find type `Thread` |
+| 36 | prelude: value `cast_mut` | #250 | 0.6% | 10 | 0 | 1 | 1 | once_cell 1.21.4: src/race.rs:324:26: cannot find value `cast_mut` |
+| 37 | conflicting implementations of trait `…` (E0119) | — | 0.6% | 3 | 0 | 1 | 1 | foldhash 0.2.0: src/convenience.rs:30:1: conflicting implementations of trait `foldhash__convenience… |
+| 38 | conflicting implementations of trait `…` for type `…` | — | 0.6% | 2 | 1: zeroize | 1 | 1 | zeroize 1.9.2: src/lib.rs:524:1: conflicting implementations of trait `zeroize__Zeroize` for type `B… |
+| 39 | prelude: associated type `Owned` | #250 | 0.5% | 1 | 1: heck | 1 | 1 | heck 0.5.0: src/kebab.rs:25:1: cannot find associated type `Owned` for `str` |
+| 40 | prelude: type `ExitStatus` | #250 | 0.5% | 1 | 1: autocfg | 1 | 1 | autocfg 1.5.1: src/error.rs:48:1: cannot find type `ExitStatus` |
+
+99 fixes; 67 have no tracking issue yet (together 40.8%). The top ones without an issue are the next to file.
+
+## Packages with errors
 
 Packages with errors, ordered by the downloads of the surveyed crates that only they keep from checking (*alone*: no other package of the crate's graph has errors), then by how many surveyed crates need them. Errors are what zustc reports now; lines are the package's `.rs` lines.
 

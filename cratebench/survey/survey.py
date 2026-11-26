@@ -628,6 +628,85 @@ def graph_reasons(res):
     return sorted(G.items(), key=lambda kv: (-len(kv[1]), kv[0]))
 
 
+ISSUES = os.path.join(HERE, "issues.tsv")
+
+
+@functools.lru_cache(maxsize=None)
+def issue_rules():
+    """issues.tsv: (regex, issue or None, the fix's name), in order"""
+    rows = []
+    if os.path.exists(ISSUES):
+        for line in open(ISSUES):
+            if line.startswith("#") or not line.strip():
+                continue
+            pat, num, title = line.rstrip("\n").split("\t")
+            rows.append((re.compile(pat), int(num) if num.strip() else None, title))
+    return tuple(rows)
+
+
+def fix_of(msg, own):
+    """an error's fix: (its name, its issue or None). `own`: missing()'s classes of the names zustc cannot find"""
+    for pat, num, title in issue_rules():
+        if pat.search(msg):
+            return title, num
+    m = MISSING.search(msg)
+    if m:
+        o = own.get((m.group(1), m.group(2)))
+        if o is False:
+            return f"prelude: {m.group(1)} `{m.group(2)}`", 250
+        if o is True:
+            return "a crate's own item zustc cannot find (resolution, cfg, a macro's output)", 254
+    return kind_of(msg), None
+
+
+def fixes(res):
+    """What to fix, by importance. Each surveyed crate that does not build needs a set of fixes: those of every error
+    in its graph (its own and its dependencies'), or of why zurgo cannot plan or build it. Its downloads are shared
+    equally among them, and a fix's score is the sum of its shares: what it holds back, as far as zustc shows. A crate
+    that needs one fix only is *alone* for it: fixing it makes the crate check (or plan, or build), until the next error
+    shows"""
+    s = summarize(res)
+    own = {(m["what"], m["name"]): m.get("own") for m in missing(res)}
+    F = {}
+
+    def entry(key, num, example):
+        return F.setdefault(key, dict(fix=key, issue=num, score=0.0, crates=[], alone=[], packages=set(), errors=0,
+                                      example=example))
+    pkg_fixes = {}
+    for k, v in s["with_err"].items():
+        for e in v["errors"]:
+            key, num = fix_of(e, own)
+            g = entry(key, num, f"{k}: {e}")
+            g["packages"].add(k)
+            g["errors"] += 1
+            pkg_fixes.setdefault(k, set()).add(key)
+    for c in sorted(s["C"], key=lambda c: c["rank"]):
+        need = set()
+        if c["status"] in ("graph-fail", "build-fail", "timeout"):
+            msg = re.sub(r"^[\w.+-]+ \d[^:]*: ", "", c["first_error"])
+            key, num = fix_of(msg, own)
+            if num is None and c["status"] == "build-fail":
+                key = "build: " + key
+            g = entry(key, num, f'{c["id"]}: {c["first_error"]}')
+            g["packages"].add(f'{c["name"]} {c["version"]}')
+            g["errors"] += 1
+            need.add(key)
+        elif c["status"] in ("errors", "blocked"):
+            for p in [f'{c["name"]} {c["version"]}'] + list(c.get("blocked_by") or []):
+                need |= pkg_fixes.get(p, set())
+        for key in need:
+            F[key]["score"] += c["downloads"] / len(need)
+            F[key]["crates"].append(c["id"])
+            if len(need) == 1:
+                F[key]["alone"].append(c["id"])
+    rows = sorted(F.values(), key=lambda g: (-g["score"], -len(g["packages"]), g["fix"]))
+    for g in rows:
+        g["packages"] = sorted(g["packages"])
+        g["share"] = round(100 * g["score"] / s["dl"], 2)
+        g["score"] = round(g["score"])
+    return rows
+
+
 def cell(s, n=140):
     s = " ".join((s or "").split()).replace("|", "\\|")
     return (s[:n] + "…") if len(s) > n else s
@@ -694,7 +773,25 @@ def write_report(res, history):
         top = "; ".join(f"{k} ({v})" for k, v in sorted(ks.items(), key=lambda kv: (-kv[1], kv[0]))[:2])
         o.append(f"| {label} | {len(cs)} | {n('builds')} | {n('build-fail')} | {n('blocked')} | {n('errors')} | "
                  f"{n('graph-fail')} | {sum(c['errors'] for c in cs) or ''} | {cell(top, 140)} |")
-    o += ["", "## What to fix first", "",
+    fx = fixes(res)
+    o += ["", "## What to fix, by importance", "",
+          "Every error, grouped by the fix it needs ([issues.tsv](cratebench/survey/issues.tsv) names the fixes with a "
+          "tracking issue; the rest are grouped by their text without names), and ordered by what the fix holds back. "
+          "Each surveyed crate that does not build shares its downloads equally among the fixes its graph needs (every "
+          "error in it, its own and its dependencies', or why zurgo cannot plan or build it); a fix's share is the sum. "
+          "*Alone*: the crates that need only this fix, as far as zustc shows (it stops a crate at its first item "
+          "error, so another can come next).", "",
+          "| # | fix | issue | holds back | crates | alone | packages | errors | example |",
+          "|---:|---|---|---:|---:|---|---:|---:|---|"]
+    for n, g in enumerate(fx[:40], 1):
+        al = ", ".join(g["alone"][:5]) + (" …" if len(g["alone"]) > 5 else "")
+        iss = f"#{g['issue']}" if g["issue"] else "—"
+        o.append(f"| {n} | {cell(g['fix'], 90)} | {iss} | {g['share']:.1f}% | {len(g['crates'])} | "
+                 f"{len(g['alone'])}{': ' + al if al else ''} | {len(g['packages'])} | {g['errors']} | {cell(g['example'], 100)} |")
+    no_issue = [g for g in fx if not g["issue"]]
+    o += ["", f"{len(fx)} fixes; {len(no_issue)} have no tracking issue yet "
+              f"(together {sum(g['share'] for g in no_issue):.1f}%). The top ones without an issue are the next to file."]
+    o += ["", "## Packages with errors", "",
           "Packages with errors, ordered by the downloads of the surveyed crates that only they keep from checking "
           "(*alone*: no other package of the crate's graph has errors), then by how many surveyed crates need them. "
           "Errors are what zustc reports now; lines are the package's `.rs` lines.", "",
@@ -749,6 +846,7 @@ def write_report(res, history):
                          alone_downloads=sum(c["downloads"] for c in r["alone"]), needed_by=len(r["need"]))
                     for r in priorities(res)[:100]],
         kinds=[dict(kind=k, packages=sorted(g["packages"]), errors=g["errors"], example=g["example"]) for k, g in kinds(res)[:100]],
+        fixes=fx[:150],
         missing=missing(res)[:100],
         graph_reasons=[dict(reason=k, crates=[c["id"] for c in sorted(cs, key=lambda c: c["rank"])]) for k, cs in graph_reasons(res)])
     if history:
