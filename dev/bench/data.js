@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795654783139,
+  "lastUpdate": 1795654785558,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -83380,6 +83380,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 100.18,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "99fc03194eea8993245b3b044dcb02ba40038e3a",
+          "message": "lexer: a literal or comment the file ends in is reported before a mismatched delimiter (review of #223) (#227)\n\nFrom CodeRabbit's review of #223. Checked against rustc 1.100, the finding\nholds for a mismatched closing delimiter, not for the example it gave:\n\n- `fn main() { let _ = ([)]; }\\n/*`: rustc reports \"unexpected closing\n  delimiter\" at 1:27, as zustc already did. A closing delimiter with none open\n  comes first.\n- `fn main() { let _ = (1; }\\n/* x`: rustc reports E0758 at 2:1; zustc\n  reported \"mismatched closing delimiter\" at 1:25. The same holds for an\n  unterminated string (E0765) or raw string (E0748) after the mismatch.\n\n`split` now asks unterminated_literal when the delimiter error is a mismatch,\nand keeps an unexpected closing delimiter as the error.\n\nTests: six more cases in tests/check.rs `literals_and_comments_a_file_ends_in`\n(a mismatch before a comment, a comment in an item, a string and a raw\nstring; an unexpected closing delimiter before a comment; a mismatch alone),\neach at rustc's line and column.\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T09:54:24+09:00",
+          "tree_id": "6c51d3d77089d99cae97c1866fd1410e111057b4",
+          "url": "https://github.com/mizchi/zust/commit/99fc03194eea8993245b3b044dcb02ba40038e3a"
+        },
+        "date": 1795654785295,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.021,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.756,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.901,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 10.99,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.392,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.216,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 2.477,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 286.726,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 100.637,
             "unit": "MiB"
           }
         ]
