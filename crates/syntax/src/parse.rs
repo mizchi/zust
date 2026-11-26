@@ -1839,6 +1839,11 @@ impl Parser {
                 let r = self.eat_ident("ref");
                 let m = self.eat_ident("mut");
                 let n = self.decl_ident()?;
+                // (`Foo { ref x: pat }`: a binding mode is the shorthand's, so no `:` follows it, rustc's "expected `,`"
+                // at the `:`)
+                if (r || m) && self.is_punct(":") && !self.punct_at(1, ":") {
+                    return Err(self.err_plain("expected `,`"));
+                }
                 if self.eat_punct(":") {
                     fs.push((field_name(n), self.pat()?));
                 } else {
@@ -2670,6 +2675,11 @@ impl Parser {
                     "while" | "if" => self.peek_is(1, "{"),
                     _ => false,
                 },
+                // (`&mut if c { a } else { b }`: a reference has no position of its own, nor has what it borrows here)
+                Some(t) if t.kind == TokKind::Punct && (t.text == "&" || t.text == "&&") => {
+                    let k = if self.tok(1).is_some_and(|t| t.kind == TokKind::Ident && t.text == "mut") { 2 } else { 1 };
+                    self.tok(k).is_some_and(|t| t.kind == TokKind::Ident && matches!(t.text.as_str(), "if" | "match" | "loop" | "unsafe" | "while" | "for"))
+                }
                 // (`{ .. }`, `[]`, `()`, `(return)(..)`)
                 Some(t) if t.kind == TokKind::Open => {
                     t.text == "{"
@@ -3378,6 +3388,17 @@ impl Parser {
                     }
                     if prev_word && t.kind == TokKind::Ident && t.text != "as" && !s.ends_with("as") {
                         return Err(self.err("expected `;`"));
+                    }
+                    // (a lone `:` for `::`, `use std:fs::File;`; and in a braced list a token that cannot follow a
+                    // name, `use x::{A. B};`: rustc's messages, at the token)
+                    if t.kind == TokKind::Punct && prev_word {
+                        let pair = t.text == ":" && t.joint && self.punct_at(1, ":");
+                        if t.text == ":" && !pair {
+                            return Err(self.err_plain("expected `::`, found `:`"));
+                        }
+                        if !prefixes.is_empty() && !pair && !matches!(t.text.as_str(), "," | "}" | "{" | "*" | ":") {
+                            return Err(self.err_plain(&format!("expected one of `,`, `::`, `as`, or `}}`, found `{}`", t.text)));
+                        }
                     }
                     prev_word = word;
                     s.push_str(&t.text);
