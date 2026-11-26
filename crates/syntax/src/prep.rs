@@ -6,7 +6,8 @@
 //! - Every preprocessing step rewrites token by token using what is collected from the whole file (macro definitions, element counts of tuple structs and variants, the module tree and `use`s,
 //!   names of nested items), and does not change the number of lines (moved items are appended at the end).
 //!   What is collected depends only on item declarations, so the same things are collected from a "skeleton" with the expressions inside fn bodies blanked out (nested items, `use`s,
-//!   `macro_rules!`, calls of user macros, and brackets and `;` are kept; the number of lines is the same).
+//!   `macro_rules!`, calls of user macros, and brackets and `;` are kept; the number of lines is the same), and the fn signatures too (`fn name() {`: no name, module,
+//!   macro or arity is collected from one).
 //! - If the whole skeleton is the same as last time, unchanged chunks use the previous results, and only the changed chunks are preprocessed in a source where the rest is turned into
 //!   skeleton, and cut out by lines. If the skeleton changed (a declaration changed), the whole is preprocessed again.
 //! - `ZUSTC_PREP_VERIFY=1` compares with a full preprocessing every time. `ZUSTC_NO_PREP_INC=1` does not use the incremental path.
@@ -611,6 +612,31 @@ fn skeleton(t: &str, names: &[String]) -> (String, u64, bool) {
             None => false,
         };
         let in_init = k >= init_start && k < init_end;
+        // (a `macro_rules!` outside the bodies is kept as written, as one in a body is: a `fn f() { .. }` in its rules is
+        // no body to blank, and the calls of the changed chunks expand what it says)
+        if !in_body && !in_init && toks[k].0 == 0 && &s[toks[k].1..toks[k].2] == b"macro_rules" && k + 3 < n && is_sym(k + 1, b'!') && toks[k + 2].0 == 0 {
+            if toks[k + 3].0 == 1 && matches!(s[toks[k + 3].1], b'(' | b'[' | b'{') {
+                let mut d = 0i32;
+                let mut j = k + 3;
+                while j < n {
+                    if toks[j].0 == 1 {
+                        match s[toks[j].1] {
+                            b'(' | b'[' | b'{' => d += 1,
+                            b')' | b']' | b'}' => {
+                                d -= 1;
+                                if d == 0 {
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    j += 1;
+                }
+                k = j + 1;
+                continue;
+            }
+        }
         if (in_body || in_init) && toks[k].0 == 0 {
             let w = &s[toks[k].1..toks[k].2];
             let stmt_start = k == 0 || is_sym(k - 1, b'{') || is_sym(k - 1, b'}') || is_sym(k - 1, b';') || is_sym(k - 1, b']');
@@ -792,6 +818,7 @@ fn skeleton(t: &str, names: &[String]) -> (String, u64, bool) {
         }
         k += 1;
     }
+    let sig = blank_signatures(s, &toks, &kind, &blank, &spans);
     // (For a body with nothing to keep, remove everything inside, brackets included)
     for &(o, c, has) in &spans {
         if !has && c < n {
@@ -843,41 +870,164 @@ fn skeleton(t: &str, names: &[String]) -> (String, u64, bool) {
             }
         }
     }
+    // (a signature's tokens (sig) are blanked in the text, and hashed as kept: a changed signature changes the hash, as
+    // it did when it was kept)
     let mut h = FNV0;
     for k in 0..n {
         let (a, b) = (toks[k].1, toks[k].2);
         if a < last {
             continue;
         }
-        if blank[k] || (k > 0 && blank[k - 1]) {
+        let out_blank = blank[k] || sig[k] || (k > 0 && (blank[k - 1] || sig[k - 1]));
+        if out_blank {
             squeeze(&mut out, &s[last..a]);
         } else {
             out.extend_from_slice(&s[last..a]);
+        }
+        if !(blank[k] || (k > 0 && blank[k - 1])) {
             let prev = if k > 0 { kind[k - 1] } else { 0 };
             if !((prev == 1 || kind[k] == 1) && prev != 2 && kind[k] != 2) {
                 h = fnv(h, &s[last..a]);
             }
         }
-        if blank[k] {
+        if blank[k] || sig[k] {
             squeeze(&mut out, &s[a..b]);
             if !matches!(out.last(), Some(b' ') | Some(b'\n')) {
                 out.push(b' ');
             }
         } else {
             out.extend_from_slice(&s[a..b]);
-            if kind[k] != 1 || holds[k] {
-                h = fnv(mix(h, 1), &s[a..b]);
-            }
+        }
+        if !blank[k] && (kind[k] != 1 || holds[k]) {
+            h = fnv(mix(h, 1), &s[a..b]);
         }
         last = b;
     }
-    if n > 0 && blank[n - 1] {
+    if n > 0 && (blank[n - 1] || sig[n - 1]) {
         squeeze(&mut out, &s[last..]);
     } else {
         out.extend_from_slice(&s[last..]);
+    }
+    if !(n > 0 && blank[n - 1]) {
         h = fnv(h, &s[last..]);
     }
     (String::from_utf8(out).unwrap_or_else(|_| t.to_string()), h, odd)
+}
+
+/// The tokens of the skeleton's fn signatures to blank: of each `fn name<..>(..) -> .. where .. {` / `;` outside the
+/// bodies, its generics, what is in its parentheses and what is after them (`fn name() {`). What the preparation
+/// collects from the other chunks (names, modules, `use`s, macros, tuple arities) is in no signature, and a third of
+/// a skeleton's tokens were signatures. Left as written: one in a macro call or an attribute (a macro may read it),
+/// one with a `!`, `#` or brace in it (a macro call, an attribute, a struct pattern, a const block), and the
+/// signature of a fn whose body keeps something (a nested item is moved out with the generics around it in view)
+/// spans: the bodies, (their `{`, their `}`, whether they keep something)
+fn blank_signatures(s: &[u8], toks: &[(u8, usize, usize)], kind: &[u8], blank: &[bool], spans: &[(usize, usize, bool)]) -> Vec<bool> {
+    let n = toks.len();
+    let mut sig = vec![false; n];
+    let sym = |k: usize| -> Option<u8> { (k < n && toks[k].0 == 1).then(|| s[toks[k].1]) };
+    let word = |k: usize| -> &[u8] { if k < n && toks[k].0 == 0 { &s[toks[k].1..toks[k].2] } else { b"" } };
+    // (the closing bracket of the one opened at k)
+    let close_of = |k: usize| -> Option<usize> {
+        let mut d = 0i32;
+        for j in k..n {
+            match sym(j) {
+                Some(b'(' | b'[' | b'{') => d += 1,
+                Some(b')' | b']' | b'}') => {
+                    d -= 1;
+                    if d == 0 {
+                        return Some(j);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    };
+    let keeps: crate::fxhash::FxSet<usize> = spans.iter().filter(|x| x.2).map(|x| x.0).collect();
+    let mut k = 0;
+    while k + 2 < n {
+        if kind[k] != 0 || blank[k] {
+            k += 1;
+            continue;
+        }
+        // (a macro call (`m! { .. }`, `macro_rules! m { .. }`) or an attribute: passed over whole)
+        let opens_at = |j: usize| matches!(sym(j), Some(b'(' | b'[' | b'{'));
+        if toks[k].0 == 0 && sym(k + 1) == Some(b'!') && (opens_at(k + 2) || (toks[k + 2].0 == 0 && opens_at(k + 3))) {
+            let o = if opens_at(k + 2) { k + 2 } else { k + 3 };
+            k = close_of(o).map_or(n, |c| c + 1);
+            continue;
+        }
+        if sym(k) == Some(b'#') && (sym(k + 1) == Some(b'[') || (sym(k + 1) == Some(b'!') && sym(k + 2) == Some(b'['))) {
+            let o = if sym(k + 1) == Some(b'[') { k + 1 } else { k + 2 };
+            k = close_of(o).map_or(n, |c| c + 1);
+            continue;
+        }
+        if word(k) != b"fn" || toks[k + 1].0 != 0 || !matches!(sym(k + 2), Some(b'<' | b'(')) {
+            k += 1;
+            continue;
+        }
+        // Generics: to the `>` that closes the first `<` (not the `>` of `->`)
+        let mut j = k + 2;
+        let mut ok = true;
+        if sym(j) == Some(b'<') {
+            let mut d = 0i32;
+            loop {
+                if j >= n {
+                    ok = false;
+                    break;
+                }
+                match sym(j) {
+                    Some(b'<') => d += 1,
+                    Some(b'>') if !(sym(j - 1) == Some(b'-') && toks[j - 1].2 == toks[j].1) => {
+                        d -= 1;
+                        if d == 0 {
+                            break;
+                        }
+                    }
+                    Some(b'{' | b'}' | b';' | b'!' | b'#') => {
+                        ok = false;
+                        break;
+                    }
+                    _ => {}
+                }
+                j += 1;
+            }
+            j += 1;
+        }
+        // The parameters, then what is after them, to the body's `{` or the `;`
+        let close = if ok && sym(j) == Some(b'(') { close_of(j) } else { None };
+        let mut end = None;
+        if let Some(c) = close {
+            let mut d = 0i32;
+            let mut m = c + 1;
+            while m < n {
+                match sym(m) {
+                    Some(b'(' | b'[') => d += 1,
+                    Some(b')' | b']') => d -= 1,
+                    Some(b'{' | b';') if d == 0 => {
+                        end = Some(m);
+                        break;
+                    }
+                    Some(b'{' | b'}' | b'!' | b'#') => break,
+                    _ => {}
+                }
+                m += 1;
+            }
+        }
+        let (Some(c), Some(e)) = (close, end) else {
+            k += 1;
+            continue;
+        };
+        let inner = (k + 2..j).chain(j + 1..c).chain(c + 1..e);
+        let fine = inner.clone().all(|m| kind[m] == 0 && !blank[m] && !matches!(sym(m), Some(b'{' | b'}' | b'!' | b'#')));
+        if fine && !(sym(e) == Some(b'{') && keeps.contains(&e)) {
+            for m in inner {
+                sig[m] = true;
+            }
+        }
+        k = e;
+    }
+    sig
 }
 
 /// Splits the result of preprocessing per chunk (lines: each chunk's start line (0-based), the last is the total line count).

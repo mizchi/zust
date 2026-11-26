@@ -1997,7 +1997,7 @@ impl Session {
             }
         }
         unsafe_impls(&src, &items[..user_src])?;
-        let mut prog = Program::build_with_edition(&items, &sums, self.ctx.lib.is_none() && !lib_attr, user, self.opts.edition, deny_bare).map_err(|e| name_line(&e, &src, &items))?;
+        let mut prog = Program::build_with_edition(&items, &mut sums, self.ctx.lib.is_none() && !lib_attr, user, self.opts.edition, deny_bare).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
         if let Some(e) = cross_kind_duplicate(&prog, &src, &items, &sums, user) {
@@ -2048,7 +2048,8 @@ impl Session {
             })
         };
         if self.ctx.deps.is_empty() && self.ctx.lib.is_none() {
-            prog.trait_scopes = lexer::trait_scopes_with(src0, has_mod_word);
+            // (src0's tokens when they were read for the module scans: tokenizing a large text again was ~2% of an edit)
+            prog.trait_scopes = lexer::trait_scopes_in(src0, has_mod_word, src0_toks.as_deref());
             if !prog.trait_scopes.is_empty() {
                 prog.item_lines = items.iter().map(|it| it.line as u32).collect();
             }

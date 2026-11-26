@@ -1346,9 +1346,18 @@ impl Insts {
 }
 
 
-/// The summary with the items of `impl Alias { .. }` moved to the aliased type (`Alias::f` -> `Foo::f`)
-fn rebase_aliased(sm: &Summary, map: &FxMap<String, String>) -> Summary {
-    let mut sm = sm.clone();
+/// Whether rebase_aliased may change sm: it names an alias of the map where rebase_aliased looks (or more: the
+/// type parameters it leaves alone are not looked at)
+fn names_aliased(sm: &Summary, map: &FxMap<String, String>) -> bool {
+    let named = |n: &Option<String>| n.as_ref().is_some_and(|n| map.contains_key(n.as_str()));
+    named(&sm.impl_self)
+        || sm.fns.iter().any(|(_, s)| named(&s.impl_of))
+        || sm.closures.iter().any(|c| named(&c.sig.impl_of))
+        || sm.consts.iter().any(|c| c.0.split_once("::").is_some_and(|(a, _)| map.contains_key(a)))
+}
+
+/// sm with the items of `impl Alias { .. }` moved to the aliased type (`Alias::f` -> `Foo::f`)
+fn rebase_aliased(sm: &mut Summary, map: &FxMap<String, String>) {
     let re = |n: &mut String| {
         if let Some((a, rest)) = n.split_once("::") {
             if let Some(b) = map.get(a) {
@@ -1380,7 +1389,6 @@ fn rebase_aliased(sm: &Summary, map: &FxMap<String, String>) -> Summary {
     for c in &mut sm.consts {
         re(&mut c.0);
     }
-    sm
 }
 
 impl Program {
@@ -1458,20 +1466,34 @@ impl Program {
         None
     }
 
-    pub fn build(items: &[SrcItem], sums: &[Summary]) -> R<Program> {
+    pub fn build(items: &[SrcItem], sums: &mut [Summary]) -> R<Program> {
         Program::build_with(items, sums, true, items.len())
     }
 
     /// need_main: false means a library (no main needed)
     /// `user`: how many of the items are the program's (the rest are the prelude's)
-    pub fn build_with(items: &[SrcItem], sums: &[Summary], need_main: bool, user: usize) -> R<Program> {
+    pub fn build_with(items: &[SrcItem], sums: &mut [Summary], need_main: bool, user: usize) -> R<Program> {
         Program::build_with_edition(items, sums, need_main, user, 2021, false)
     }
 
     /// build_with in an edition: the types of the signatures and the fields are resolved in it (a trait's name behind
     /// a pointer is its trait object before 2021, bare_dyn)
     /// (deny_bare: the `bare_trait_objects` lint is denied, so such an object is an error)
-    pub fn build_with_edition(items: &[SrcItem], sums: &[Summary], need_main: bool, user: usize, edition: u16, deny_bare: bool) -> R<Program> {
+    /// (sums: the build rewrites a few of them for itself (`impl Alias`, closures of one name) and puts them back
+    /// before it returns, so the caller's are as they were; only those are copied)
+    pub fn build_with_edition(items: &[SrcItem], sums: &mut [Summary], need_main: bool, user: usize, edition: u16, deny_bare: bool) -> R<Program> {
+        let mut saved: Vec<(usize, Summary)> = vec![];
+        let r = Program::build_in(items, sums, &mut saved, need_main, user, edition, deny_bare);
+        // (the last saved first: a summary saved twice gets the first copy, the one from before the build)
+        for (i, sm) in saved.into_iter().rev() {
+            sums[i] = sm;
+        }
+        r
+    }
+
+    /// build_with_edition, saving each summary it rewrites in `saved` (its index, the summary before) first
+    fn build_in(items: &[SrcItem], sums_mut: &mut [Summary], saved: &mut Vec<(usize, Summary)>, need_main: bool, user: usize, edition: u16, deny_bare: bool) -> R<Program> {
+        let sums: &[Summary] = &*sums_mut;
         // (the crate's `main`, summed up as an ordinary function because it cannot be the entry (ast_summary): an error
         //  when it would be, so not under `--test`. First, as it was when the summary reported it)
         if need_main && !sums.iter().any(|s| s.fns.iter().any(|(n, _)| n == TEST_ENTRY)) {
@@ -1648,65 +1670,68 @@ impl Program {
                 .filter_map(|n| p.alias_base(n).map(|b| (n.clone(), b)))
                 .collect()
         };
-        let owned_sums;
-        let sums: &[Summary] = if alias_owner.is_empty() {
-            sums
-        } else {
-            owned_sums = sums.iter().map(|sm| rebase_aliased(sm, &alias_owner)).collect::<Vec<_>>();
-            &owned_sums
-        };
+        if !alias_owner.is_empty() {
+            for (ii, sm) in sums_mut.iter_mut().enumerate() {
+                if names_aliased(sm, &alias_owner) {
+                    saved.push((ii, sm.clone()));
+                    rebase_aliased(sm, &alias_owner);
+                }
+            }
+        }
+        let sums: &[Summary] = &*sums_mut;
         // (a closure is named after the fn it is in, `Vec::m::{closure#0}`, which leaves out the trait: two traits of
         // one name (in two modules) implemented for Vec, each with a closure in `m`, would share the name. A later
         // one also gets its item's number. It was an error before, so no program that built is renamed)
-        let owned_unique;
-        let sums: &[Summary] = {
+        {
             let mut seen: FxMap<&str, usize> = FxMap::default();
             let dup = sums.iter().enumerate().any(|(ii, sm)| sm.closures.iter().any(|c| *seen.entry(c.name.as_str()).or_insert(ii) != ii));
             if dup {
+                // (the first summary with each name keeps it: the others are renamed, and only they are rewritten)
                 let mut first: FxMap<String, usize> = FxMap::default();
-                owned_unique = sums
-                    .iter()
-                    .enumerate()
-                    .map(|(ii, sm)| {
-                        let mut sm = sm.clone();
-                        let mut renames: Vec<(String, String)> = vec![];
+                for (ii, sm) in sums.iter().enumerate() {
+                    for c in &sm.closures {
+                        first.entry(c.name.clone()).or_insert(ii);
+                    }
+                }
+                for (ii, sm) in sums_mut.iter_mut().enumerate() {
+                    if sm.closures.iter().all(|c| first[&c.name] == ii) {
+                        continue;
+                    }
+                    saved.push((ii, sm.clone()));
+                    let mut renames: Vec<(String, String)> = vec![];
+                    for c in &mut sm.closures {
+                        if first[&c.name] != ii {
+                            let to = format!("{}_{ii}", c.name);
+                            // (its `call` takes the closure struct by name)
+                            let from = std::mem::replace(&mut c.name, to.clone());
+                            for t in c.sig.params.iter_mut().chain(std::iter::once(&mut c.sig.ret)).chain(c.sig.self_ty.iter_mut()) {
+                                rename_tysyn(t, &from, &to);
+                            }
+                            if c.sig.impl_of.as_deref() == Some(from.as_str()) {
+                                c.sig.impl_of = Some(to.clone());
+                            }
+                            // (and its symbol, `<the fn's symbol>.c<k>`, which is the same for the two too)
+                            c.sig.symbol = format!("{}_{ii}", c.sig.symbol);
+                            renames.push((from, to));
+                        }
+                    }
+                    // (the fn a closure is in names it in its return type when it returns it, `-> impl Fn`)
+                    for (from, to) in &renames {
+                        for (_, sig) in &mut sm.fns {
+                            for t in sig.params.iter_mut().chain(std::iter::once(&mut sig.ret)) {
+                                rename_tysyn(t, from, to);
+                            }
+                        }
                         for c in &mut sm.closures {
-                            if *first.entry(c.name.clone()).or_insert(ii) != ii {
-                                let to = format!("{}_{ii}", c.name);
-                                // (its `call` takes the closure struct by name)
-                                let from = std::mem::replace(&mut c.name, to.clone());
-                                for t in c.sig.params.iter_mut().chain(std::iter::once(&mut c.sig.ret)).chain(c.sig.self_ty.iter_mut()) {
-                                    rename_tysyn(t, &from, &to);
-                                }
-                                if c.sig.impl_of.as_deref() == Some(from.as_str()) {
-                                    c.sig.impl_of = Some(to.clone());
-                                }
-                                // (and its symbol, `<the fn's symbol>.c<k>`, which is the same for the two too)
-                                c.sig.symbol = format!("{}_{ii}", c.sig.symbol);
-                                renames.push((from, to));
+                            for t in c.sig.params.iter_mut().chain(std::iter::once(&mut c.sig.ret)) {
+                                rename_tysyn(t, from, to);
                             }
                         }
-                        // (the fn a closure is in names it in its return type when it returns it, `-> impl Fn`)
-                        for (from, to) in &renames {
-                            for (_, sig) in &mut sm.fns {
-                                for t in sig.params.iter_mut().chain(std::iter::once(&mut sig.ret)) {
-                                    rename_tysyn(t, from, to);
-                                }
-                            }
-                            for c in &mut sm.closures {
-                                for t in c.sig.params.iter_mut().chain(std::iter::once(&mut c.sig.ret)) {
-                                    rename_tysyn(t, from, to);
-                                }
-                            }
-                        }
-                        sm
-                    })
-                    .collect::<Vec<_>>();
-                &owned_unique
-            } else {
-                sums
+                    }
+                }
             }
-        };
+        }
+        let sums: &[Summary] = &*sums_mut;
         // 0. The names of consts / statics (before types, since array lengths use them)
         for (ii, sm) in sums.iter().enumerate() {
             let cs = sm

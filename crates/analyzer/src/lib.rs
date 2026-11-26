@@ -1,4 +1,4 @@
-//! A minimal LSP server (stdio). Supported: initialize / didOpen / didChange (full sync) / didClose /
+//! A minimal LSP server (stdio). Supported: initialize / didOpen / didChange (incremental sync) / didClose /
 //! shutdown / exit / textDocument/documentSymbol / workspace/symbol / textDocument/definition / textDocument/references /
 //! textDocument/hover / textDocument/completion.
 //! Runs [`Session::check`] on every open / change and returns publishDiagnostics.
@@ -123,7 +123,7 @@ impl Server {
                     }));
                 }
                 vec![reply(json!({
-                    "capabilities": { "textDocumentSync": 1, "documentSymbolProvider": true, "workspaceSymbolProvider": true, "definitionProvider": true, "referencesProvider": true,
+                    "capabilities": { "textDocumentSync": 2, "documentSymbolProvider": true, "workspaceSymbolProvider": true, "definitionProvider": true, "referencesProvider": true,
                         "hoverProvider": true, "completionProvider": { "triggerCharacters": [".", ":"] },
                         "renameProvider": { "prepareProvider": true }, "signatureHelpProvider": { "triggerCharacters": ["(", ","] }, "documentHighlightProvider": true },
                     "serverInfo": { "name": "zustc", "version": env!("CARGO_PKG_VERSION") }
@@ -187,15 +187,30 @@ impl Server {
             }
             "textDocument/didChange" => {
                 let uri = p["textDocument"]["uri"].as_str().unwrap_or("").to_string();
-                // Full sync (textDocumentSync = 1), so the last change is the full text
-                let Some(text) = p["contentChanges"]
-                    .as_array()
-                    .and_then(|a| a.last())
-                    .and_then(|c| c["text"].as_str())
-                else {
+                let Some(changes) = p["contentChanges"].as_array().filter(|a| !a.is_empty()) else {
                     return vec![];
                 };
-                vec![self.diagnose(uri, text, p["textDocument"]["version"].clone())]
+                // Incremental sync (textDocumentSync = 2): each change replaces its range (UTF-16 columns) of the text
+                // the one before it left, in order; one without a range is the full text. (An edit sends what it
+                // changed, not the whole file: the message of a large file is no longer read whole per keystroke)
+                let mut text: Option<String> = None;
+                for c in changes {
+                    let Some(t) = c["text"].as_str() else { continue };
+                    let r = &c["range"];
+                    if r.is_null() {
+                        text = Some(t.to_string());
+                        continue;
+                    }
+                    let cur = text.get_or_insert_with(|| self.docs.get(&uri).map(|d| d.text.clone()).unwrap_or_default());
+                    let at = |q: &Value| {
+                        let (line, ch) = (q["line"].as_u64().unwrap_or(0) as u32, q["character"].as_u64().unwrap_or(0) as u32);
+                        offset(cur, line, ch).unwrap_or(cur.len())
+                    };
+                    let (a, b) = (at(&r["start"]), at(&r["end"]));
+                    cur.replace_range(a..b.max(a), t);
+                }
+                let Some(text) = text else { return vec![] };
+                vec![self.diagnose(uri, &text, p["textDocument"]["version"].clone())]
             }
             "textDocument/didClose" => {
                 let uri = p["textDocument"]["uri"].as_str().unwrap_or("").to_string();
@@ -830,15 +845,24 @@ fn skip_lib(rel: &str) -> bool {
     false
 }
 
-/// (line, UTF-16 column) → byte position
+/// (line, UTF-16 column) → byte position. A line ends at `\n`, `\r\n` or a lone `\r`, as LSP counts them; a column
+/// past the end of its line is the line's end, before its terminator (None: no such line)
 fn offset(text: &str, line: u32, ch: u32) -> Option<usize> {
+    let b = text.as_bytes();
+    // (most texts have no `\r`: their line ends are found with `find`)
+    let cr = text.contains('\r');
     let mut at = 0usize;
     for _ in 0..line {
-        at += text[at..].find('\n')? + 1;
+        if cr {
+            let i = at + b[at..].iter().position(|&c| c == b'\n' || c == b'\r')?;
+            at = if b[i] == b'\r' && b.get(i + 1) == Some(&b'\n') { i + 2 } else { i + 1 };
+        } else {
+            at += text[at..].find('\n')? + 1;
+        }
     }
     let mut col = 0u32;
     for (i, c) in text[at..].char_indices() {
-        if col >= ch || c == '\n' {
+        if col >= ch || c == '\n' || c == '\r' {
             return Some(at + i);
         }
         col += c.len_utf16() as u32;
@@ -1255,4 +1279,30 @@ fn mod_decls(text: &str) -> Vec<(Vec<String>, String, Option<String>)> {
         k += 1;
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::offset;
+
+    /// Lines end at `\n`, `\r\n` and a lone `\r`; a column past a line's end stops before its terminator (all of
+    /// `\r\n`); columns are UTF-16 units
+    #[test]
+    fn offsets_of_positions() {
+        let lf = "fn a() {}\nfn b() {}\n";
+        assert_eq!(offset(lf, 1, 3), Some(13));
+        assert_eq!(offset(lf, 0, 99), Some(9));
+        assert_eq!(offset(lf, 2, 0), Some(lf.len()));
+        assert_eq!(offset(lf, 3, 0), None);
+        let crlf = "fn a() {}\r\nfn b() {}\r\n";
+        assert_eq!(offset(crlf, 1, 3), Some(14));
+        assert_eq!(offset(crlf, 0, 99), Some(9));
+        assert_eq!(offset(crlf, 2, 0), Some(crlf.len()));
+        let cr = "fn a() {}\rfn b() {}";
+        assert_eq!(offset(cr, 1, 3), Some(13));
+        assert_eq!(offset(cr, 0, 99), Some(9));
+        // (`𝄞` is two UTF-16 units and four bytes)
+        let wide = "let s = \"𝄞x\";\r\n";
+        assert_eq!(offset(wide, 0, 11), Some(13));
+    }
 }

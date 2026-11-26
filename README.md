@@ -205,7 +205,7 @@ Any other editor works too, as long as its client can start an arbitrary command
 | publishDiagnostics | yes (diagnostics from zustc's check; code zustc cannot handle may get false diagnostics) |
 | semanticTokens / inlayHint / codeAction / formatting | no |
 
-Documents are synced in full: didChange receives the whole text.
+Documents are synced incrementally: didChange receives the ranges an edit changed (or the whole text, if the client sends it).
 
 ### Configuration (environment variables)
 
@@ -220,7 +220,7 @@ Known differences from rust-analyzer are listed in [CONTRIBUTING.md](CONTRIBUTIN
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-26, 022713c<!-- /measured --> by CI on each push to main. Details:
+Numbers measured <!-- measured -->2026-11-26, 77c9537<!-- /measured --> by CI on each push to main. Details:
 [SUPPORT.md](SUPPORT.md) (what is supported) and [PERFORMANCE.md](PERFORMANCE.md) (speed, size, memory, and
 comparisons with rustc and others).
 
@@ -248,10 +248,10 @@ table, with instruction counts, cache and binary sizes and memory, is in [PERFOR
 <!-- auto:kpi-summary -->
 | | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 171 ms | 732 ms |
-| no-op build | 1.1 ms | 0.9 ms |
-| build after editing one function | 28.5 ms | 91.3 ms |
-| `check` | 70 ms | 316 ms |
+| cold build | 131 ms | 615 ms |
+| no-op build | 0.7 ms | 0.6 ms |
+| build after editing one function | 18.5 ms | 69.8 ms |
+| `check` | 41 ms | 198 ms |
 <!-- /auto:kpi-summary -->
 
 Against `rustc -C incremental` on gen1000 (a snapshot measured by hand): about 6x faster cold, 15x faster after an
