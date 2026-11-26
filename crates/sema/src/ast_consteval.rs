@@ -169,6 +169,13 @@ fn write(prog: &Program, e: &Expr, ty: Ty, v: &mut DataVal, off: u32, depth: u32
                 return write(prog, &ce, ty, v, off, depth + 1);
             }
         }
+        // (an associated constant, `Lazy::INIT` (lazy_static's `static LAZY: Lazy<T> = Lazy::INIT;`): `Type::NAME`)
+        if !p.global && p.segs.len() == 2 && p.segs.iter().all(|s| s.args.is_empty() && s.fn_args.is_none()) && matches!(ty, Ty::Struct(_)) {
+            if let Some(&ci) = prog.const_index.get(&format!("{}::{}", p.segs[0].name, p.segs[1].name)) {
+                let ce = crate::parse::parse_expr(&prog.consts[ci as usize].expr)?;
+                return write(prog, &ce, ty, v, off, depth + 1);
+            }
+        }
     }
     match ty {
         t if t.is_int() || matches!(t, Ty::Bool | Ty::Char) => {

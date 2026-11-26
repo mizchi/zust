@@ -10896,6 +10896,50 @@ impl<T: Debug> Debug for RwLock<T> {
     }
 }
 
+/// `std::sync::Once`: a one-time initialization (one thread here: only whether it has run). The mark is set after
+/// the closure returns, as std's (a closure that panics leaves it to run again; std's is poisoned then)
+pub struct Once {
+    __once_done: bool,
+}
+/// `std::sync::ONCE_INIT` (deprecated): `Once::new()`
+pub const ONCE_INIT: Once = Once { __once_done: false };
+/// What `Once::call_once_force`'s closure is given
+pub struct OnceState {
+    __once_poisoned: bool,
+}
+impl Once {
+    pub const fn new() -> Once {
+        Once { __once_done: false }
+    }
+    pub fn call_once<F: FnOnce()>(&self, f: F) {
+        if !self.__once_done {
+            f();
+            let p = &self.__once_done as *const bool as *mut bool;
+            unsafe {
+                p.write(true);
+            }
+        }
+    }
+    pub fn call_once_force<F: FnOnce(&OnceState)>(&self, f: F) {
+        if !self.__once_done {
+            f(&OnceState { __once_poisoned: false });
+            let p = &self.__once_done as *const bool as *mut bool;
+            unsafe {
+                p.write(true);
+            }
+        }
+    }
+    pub fn is_completed(&self) -> bool {
+        self.__once_done
+    }
+    pub fn wait(&self) {}
+}
+impl OnceState {
+    pub fn is_poisoned(&self) -> bool {
+        self.__once_poisoned
+    }
+}
+
 // `std::sync::OnceLock` (スレッドは 1 本なので、初期化済みかどうかと値だけ)
 pub struct OnceLock<T> {
     val: Option<T>,
@@ -10981,6 +11025,9 @@ impl<T> Cell<T> {
     }
     pub fn into_inner(self) -> T {
         self.val
+    }
+    pub const fn as_ptr(&self) -> *mut T {
+        &self.val as *const T as *mut T
     }
     pub fn take(&self) -> T {
         self.replace(__exr_default::<T>())
