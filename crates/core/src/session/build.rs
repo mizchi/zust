@@ -1683,10 +1683,13 @@ impl Session {
                                     l.via.push(v);
                                 }
                             }
-                            // (a proc-macro dependency under another name: its macros through that name, `derive::Describe`)
+                            // (a proc-macro dependency under another name: its macros through that name, `derive::Describe`;
+                            // its own name, when the crate gives it to another dependency, is that one's: `pm_a::answer!()`
+                            // with `pm_a = { package = "pm_b" }`)
                             for (a, _) in aliases.iter().filter(|x| x.1 == l.name) {
                                 l.via.push((a.clone(), "*".to_string(), "*".to_string()));
                             }
+                            l.named = !aliases.iter().any(|x| x.0 == l.name);
                         }
                     }
                 }

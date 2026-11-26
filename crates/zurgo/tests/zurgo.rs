@@ -1048,3 +1048,34 @@ fn proc_macros_through_libraries_renamed_to_each_others_names_run_like_cargo() {
     assert!(ok, "zurgo run: {err}");
     assert_eq!(got, want);
 }
+
+/// Two proc-macro dependencies, each under the other's name: `pm_b = { package = "pm_a" }` and `pm_a = { package =
+/// "pm_b" }`, both with an `answer!`. A path from `pm_a` is the crate pm_b's, and one from `pm_b` pm_a's, whatever order
+/// they are in
+#[test]
+fn proc_macro_dependencies_renamed_to_each_others_names_run_like_cargo() {
+    let sc = Scratch::new("renamed-pm-swap");
+    let pkg = |name: &str, more: &str| format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n{more}");
+    let pm = |v: u32| format!("extern crate proc_macro;\nuse proc_macro::TokenStream;\n#[proc_macro]\npub fn answer(_i: TokenStream) -> TokenStream {{\n    \"{v}u32\".parse().unwrap()\n}}\n");
+    sc.write(&[
+        ("pm_a/Cargo.toml", &pkg("pm_a", "[lib]\nproc-macro = true\n")),
+        ("pm_a/src/lib.rs", &pm(1)),
+        ("pm_b/Cargo.toml", &pkg("pm_b", "[lib]\nproc-macro = true\n")),
+        ("pm_b/src/lib.rs", &pm(2)),
+        (
+            "app/Cargo.toml",
+            &pkg("app", "[workspace]\n[dependencies]\npm_b = { path = \"../pm_a\", package = \"pm_a\" }\npm_a = { path = \"../pm_b\", package = \"pm_b\" }\n"),
+        ),
+        ("app/src/main.rs", "fn main() {\n    println!(\"{} {}\", pm_a::answer!(), pm_b::answer!());\n}\n"),
+    ]);
+    let app = sc.0.join("app/Cargo.toml");
+    let t = sc.0.join("target");
+    let (ok, _, err) = cargo(&["generate-lockfile", "--offline"], &app, &t);
+    assert!(ok, "{err}");
+    let (ok, want, err) = cargo(&["run", "-q", "--offline"], &app, &t);
+    assert!(ok, "cargo run: {err}");
+    assert_eq!(want, "2 1\n");
+    let (ok, got, err) = zurgo(&["run"], &app, &t);
+    assert!(ok, "zurgo run: {err}");
+    assert_eq!(got, want);
+}
