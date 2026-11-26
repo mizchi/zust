@@ -1010,12 +1010,14 @@ mod tests {
     /// annotation and a binding among generics the type
     #[test]
     fn a_fn_named_like_a_primitive_as_a_value() {
-        let src = "mod d {\n    pub fn u32() -> usize { 1 }\n    pub fn run() -> usize {\n        let f = u32;\n        let g: fn() -> usize = u32;\n        let x: u32 = 4;\n        let i: Option<Box<dyn Iterator<Item = u32>>> = None;\n        f() + g() + x as usize + i.map_or(0, |_| 1)\n    }\n}\nfn main() {}\n";
+        let src = "mod d {\n    pub fn u32() -> usize { 1 }\n    pub fn run() -> usize {\n        let f = u32;\n        let g: fn() -> usize = u32;\n        let x: u32 = 4;\n        let i: Option<Box<dyn Iterator<Item = u32>>> = None;\n        f() + g() + x as usize + i.map_or(0, |_| 1)\n    }\n    pub fn cmp(f: fn() -> usize, n: u32) -> bool {\n        f == u32 as fn() -> usize && (u32 != f) && n == u32::MAX && n as u32 == 4\n    }\n}\nfn main() {}\n";
         let out = rename_module_collisions_in(src, &["d".to_string()]).unwrap();
         assert!(out.contains("let f = d__u32;"), "{out}");
         assert!(out.contains("let g: fn() -> usize = d__u32;"), "{out}");
         assert!(out.contains("let x: u32 = 4;"), "{out}");
         assert!(out.contains("Iterator<Item = u32>"), "{out}");
+        // (a comparison's operands, `f == u32` / `u32 != f`; a path's head and a cast's type stay the type's)
+        assert!(out.contains("f == d__u32 as fn() -> usize && (d__u32 != f) && n == u32::MAX && n as u32 == 4"), "{out}");
     }
 
     /// A block's import named like a primitive shadows it in a type's place too (#254 review):
@@ -4301,17 +4303,21 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 }
                 false
             };
-            // (and so is a value in an expression's place: a `let`'s or an assignment's, `let f = u32;` (not `==` / `<=`
-            //  .., nor a binding or a default among generics, `Iterator<Item = u8>` / `<T = u8>`), an arm's, `=> u32`,
-            //  and after `return` / `break`. A type's place is many more (`[u8]`, `(u8, char)`, `impl X for u8`, ..): what
-            //  is neither is a type)
+            // (and so is a value in an expression's place: a `let`'s or an assignment's, `let f = u32;` (not a binding or
+            //  a default among generics, `Iterator<Item = u8>` / `<T = u8>`), an operand of a comparison, `f == u32` /
+            //  `u32 != f` / `f <= u32` (fn pointers compare; arithmetic on them is no Rust), an arm's, `=> u32`, and after
+            //  `return` / `break`. A type's place is many more (`[u8]`, `(u8, char)`, `impl X for u8`, ..): what is
+            //  neither is a type. A path's head, `n == u32::MAX`, is the type's in any place)
             let value_place = || {
                 if is_sym(k - 1, b'=') {
+                    // (`==` / `!=` / `<=` / `>=`, or a compound assignment: an operand)
                     let op = k >= 2 && toks[k - 2].0 == 1 && toks[k - 2].2 == toks[k - 1].1 && b"=!<>+-*/%&|^".contains(&s[toks[k - 2].1]);
                     let binding = k >= 3 && toks[k - 2].0 == 0 && (is_sym(k - 3, b'<') || is_sym(k - 3, b','));
-                    return !op && !binding;
+                    return op || !binding;
                 }
-                (k >= 2 && is_sym(k - 1, b'>') && is_sym(k - 2, b'=')) || is_id(k - 1, b"return") || is_id(k - 1, b"break")
+                // (the left operand of `==` / `!=`; not of `<=` / `>=`, whose `>` may close generics, `Vec<u8>= ..`)
+                let cmp_next = k + 2 < toks.len() && (is_sym(k + 1, b'=') || is_sym(k + 1, b'!')) && is_sym(k + 2, b'=') && toks[k + 1].2 == toks[k + 2].1;
+                cmp_next || (k >= 2 && is_sym(k - 1, b'>') && is_sym(k - 2, b'=')) || is_id(k - 1, b"return") || is_id(k - 1, b"break")
             };
             let prim = (j > k || !call) && is_primitive_name(n) && !(j == k && k >= 1 && want != NS_TYPE && (call_arg() || value_place()));
             // (a block's own import first: `fn f() { use b::g; g() }` beside a module-level `g`; for a primitive's name,

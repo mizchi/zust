@@ -3,6 +3,7 @@
 // beside such a fn, a number's suffix (`0u8`) and a path through the type (`u32::MAX`) stay the primitive; a call, a
 // fn passed as an argument (`.map_or(x, char)`) and a fn as a value (`let f = u32;`) are the fn, and a block's
 // `use .. as u8` shadows the primitive (#254)
+#[allow(unpredictable_function_pointer_comparisons)]
 mod rng {
     pub fn u8(n: u8) -> u8 {
         n.wrapping_add(1)
@@ -28,7 +29,9 @@ mod rng {
         let f = u32;
         let g: fn(u8) -> u8 = u8;
         let it: Option<Box<dyn Iterator<Item = u8>>> = None;
-        (f().unwrap_or(0) - u32::MAX + 1, g(it.map_or(3, |_| 0)))
+        let fp: fn() -> Result<u32, ()> = u32;
+        let same = fp == u32 as fn() -> Result<u32, ()> && !(fp != u32 as fn() -> Result<u32, ()>);
+        (f().unwrap_or(0) - u32::MAX + same as u32, g(it.map_or(3, |_| 0)))
     }
     #[derive(Debug)]
     #[allow(dead_code)]
