@@ -3540,7 +3540,11 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 } else if (is_sym(q, b'(') || is_sym(q, b'[') || is_sym(q, b'{')) && close[q] != usize::MAX {
                     // (`const B: bool = { 2 > 1 }`: its `>` is no end)
                     q = close[q];
-                } else if d == 1 && toks[q].0 == 0 && (is_sym(q - 1, b'<') || is_sym(q - 1, b',') || is_id(q - 1, b"const")) && renamed_names.contains(&tok(q)) {
+                // (not a lifetime's name: `fn union<'union>()` binds no type `union`, which the item's `&'union union`
+                // still names)
+                } else if d == 1 && toks[q].0 == 0 && (is_sym(q - 1, b'<') || is_sym(q - 1, b',') || is_id(q - 1, b"const")) && renamed_names.contains(&tok(q))
+                    && !(toks[q].1 >= 1 && s[toks[q].1 - 1] == b'\'')
+                {
                     names.push(tok(q));
                 }
                 q += 1;
@@ -3756,7 +3760,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     let names = names_with!(&final_globs, &imp_map);
     let mut k = 0;
     while k < toks.len() {
-        if toks[k].0 != 0 || skip[k] || local_tok[k] {
+        // (not a lifetime's name, `'union`: a lifetime is no item to rename)
+        if toks[k].0 != 0 || skip[k] || local_tok[k] || (toks[k].1 >= 1 && s[toks[k].1 - 1] == b'\'') {
             k += 1;
             continue;
         }
@@ -3869,7 +3874,10 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             false
         };
         let is_def = def_tok[k];
-        {
+        // (the contextual keyword of a union's declaration, `union union { .. }` in a module that renames a `union`:
+        // the keyword stays, its name after it is the one renamed)
+        let union_kw = tok(k) == b"union" && k + 2 < toks.len() && toks[k + 1].0 == 0 && (is_sym(k + 2, b'{') || is_sym(k + 2, b'<') || is_id(k + 2, b"where"));
+        if !union_kw {
             let n = tok(k);
             // (a block's own import first: `fn f() { use b::g; g() }` beside a module-level `g`)
             let in_block = || if is_def { None } else { block_imports.iter().filter(|b| b.0 < k && k < b.1 && b.2 == n && b.4 == sc).max_by_key(|b| b.0).map(|b| b.3.clone()) };

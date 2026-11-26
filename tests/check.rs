@@ -3489,3 +3489,19 @@ fn a_tuple_struct_in_a_fn_pointer_type_or_an_fn_bound() {
     // (a tuple struct passed as a function is still its constructor)
     assert!(errs("struct W(u8);\nfn main() {\n    let v: Vec<W> = vec![1u8].into_iter().map(W).collect();\n    let _ = v.len();\n}\n").is_empty());
 }
+
+#[test]
+fn modules_that_rename_a_union_or_a_name_a_lifetime_shares() {
+    // (with modules, colliding names are renamed: not the `union` keyword of `union union { .. }`, nor a lifetime of
+    // the same name (`fn union<'union>() -> &'union union`), which binds no type `union`)
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    let src = "#![allow(non_camel_case_types, non_upper_case_globals)]\n\
+        mod u { pub type union = i32; pub fn union() -> union { 1 } }\n\
+        mod su {\n    pub struct union { pub union: u32 }\n    static union: union = union { union: 0 };\n    impl union {\n        pub fn union<'union>() -> &'union union { &union }\n    }\n}\n\
+        mod uu {\n    pub union union { pub union: u32 }\n    const union: union = union { union: 0 };\n    impl union { pub fn union() -> union { union } }\n}\n\
+        fn main() {\n    let _ = u::union();\n    let _ = su::union::union().union;\n    let x = uu::union::union();\n    let _ = unsafe { x.union };\n}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+}

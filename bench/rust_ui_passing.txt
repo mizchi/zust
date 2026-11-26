@@ -5933,6 +5933,7 @@ compile-fail	parser/keyword-struct-as-identifier.rs
 compile-fail	parser/keyword-trait-as-identifier.rs
 compile-fail	parser/keyword-type-as-identifier.rs
 compile-fail	parser/keyword-typeof.rs
+check-pass	parser/keyword-union-as-identifier.rs
 compile-fail	parser/keyword-unsafe-as-identifier.rs
 compile-fail	parser/keyword-use-as-identifier.rs
 compile-fail	parser/keyword-where-as-identifier.rs
