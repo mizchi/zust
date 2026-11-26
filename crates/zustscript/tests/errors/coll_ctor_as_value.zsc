@@ -1,0 +1,2 @@
+// expect: `Set::from` is built in: call it
+fn f() -> i32 { let mk = Set::from; mk([1]).len() }

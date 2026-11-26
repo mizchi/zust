@@ -2459,7 +2459,7 @@ pub(crate) fn pat_takes_whole(q: &Pat) -> bool {
     match q {
         Pat::Ident(false, _, n, _) => n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && n != "_",
         // (`x @ Some(_) | x @ None`: each alternative takes it)
-        Pat::Or(ps) => !ps.is_empty() && ps.iter().all(pat_takes_whole),
+        Pat::Or(ps, _) => !ps.is_empty() && ps.iter().all(pat_takes_whole),
         _ => false,
     }
 }
@@ -2474,7 +2474,7 @@ pub(crate) fn pat_binds_ref(p: &Pat) -> bool {
 fn pat_binds_ref_outside_ref(p: &Pat) -> bool {
     match p {
         Pat::Ident(r, _, _, sub) => *r || sub.as_deref().is_some_and(pat_binds_ref_outside_ref),
-        Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Or(ps) | Pat::Slice(ps) => ps.iter().any(pat_binds_ref_outside_ref),
+        Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Or(ps, _) | Pat::Slice(ps) => ps.iter().any(pat_binds_ref_outside_ref),
         Pat::Struct(_, fs, _) => fs.iter().any(|(_, q)| pat_binds_ref_outside_ref(q)),
         _ => false,
     }
@@ -2495,7 +2495,7 @@ fn pat_any(p: &Pat, f: &dyn Fn(&Pat) -> bool) -> bool {
     }
     match p {
         Pat::Ident(_, _, _, Some(s)) => pat_any(s, f),
-        Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Or(ps) | Pat::Slice(ps) => ps.iter().any(|q| pat_any(q, f)),
+        Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Or(ps, _) | Pat::Slice(ps) => ps.iter().any(|q| pat_any(q, f)),
         Pat::Struct(_, fs, _) => fs.iter().any(|(_, q)| pat_any(q, f)),
         Pat::Ref(_, q) => pat_any(q, f),
         _ => false,
@@ -2644,7 +2644,7 @@ impl Cx<'_> {
     /// `const` name, which a pattern of a program with `lower_consts` takes)
     pub(crate) fn takes_whole(&self, q: &Pat) -> bool {
         match q {
-            Pat::Or(ps) => !ps.is_empty() && ps.iter().all(|p| self.takes_whole(p)),
+            Pat::Or(ps, _) => !ps.is_empty() && ps.iter().all(|p| self.takes_whole(p)),
             // (not a constant's name, nor a unit variant's in scope (`none` of `use G::*;`): the pattern compares with
             // it. A static's is a binding (no pattern names a static))
             Pat::Ident(_, _, n, sub) => {

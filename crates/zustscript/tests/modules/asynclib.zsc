@@ -1,0 +1,2 @@
+// tests/examples.rs modules_async_patterns_escapes: an async fn, imported (its callers get a Promise)
+export async fn doubled(n: i32) -> Result<i32, String> { if n > 0 { Ok(n * 2) } else { Err("not positive") } }

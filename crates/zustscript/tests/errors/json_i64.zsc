@@ -1,0 +1,3 @@
+// expect: JSON holds numbers (not i64: JSON.parse rounds past 2^53)
+type P = { n: i64 }
+fn f(p: P) -> String { json_encode(p) }

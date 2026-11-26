@@ -1,0 +1,2 @@
+// expect: `return` cannot be used on the right of `&&` / `||` or in a `while` condition
+fn f(x: bool) -> bool { x && return false }

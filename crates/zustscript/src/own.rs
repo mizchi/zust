@@ -40,6 +40,9 @@ fn copy_rec(t: &Ty, info: &Info, seen: &mut Vec<String>) -> bool {
                 (&r.params, r.fields.iter().map(|f| &f.1).collect())
             } else if let Some(e) = info.enums.get(n) {
                 (&e.params, e.variants.iter().flat_map(|v| v.1.iter()).collect())
+            } else if n == "Map" || n == "Set" {
+                // (the built-in collections: they own their entries)
+                return false;
             } else {
                 return true;
             };
@@ -177,10 +180,13 @@ impl Resolve {
             }
             EK::Match(sc, arms) => {
                 self.expr(sc);
-                for (p, body) in arms {
+                for a in arms {
                     self.scopes.push(HashMap::new());
-                    self.pat(p, body.id);
-                    self.expr(body);
+                    self.pat(&a.pat, a.body.id);
+                    if let Some(g) = &a.guard {
+                        self.expr(g);
+                    }
+                    self.expr(&a.body);
                     self.scopes.pop();
                 }
             }
@@ -261,6 +267,9 @@ pub fn pat_names(p: &Pat) -> Vec<String> {
         match p {
             Pat::Bind(n) => out.push(n.clone()),
             Pat::Tuple(ps) | Pat::Variant(_, _, ps, _) => ps.iter().for_each(|p| go(p, out)),
+            Pat::Record(_, fs, _, _) => fs.iter().for_each(|f| go(&f.1, out)),
+            // (each alternative binds the same names)
+            Pat::Or(alts) => alts.iter().take(1).for_each(|p| go(p, out)),
             Pat::Wild | Pat::Lit(_) => {}
         }
     }
@@ -279,8 +288,10 @@ fn children(e: &Expr) -> Vec<&Expr> {
         EK::Array(xs) | EK::Tuple(xs) | EK::Perform(_, _, xs) | EK::Interp(_, xs) => xs.iter().collect(),
         EK::If(c, t, el) => std::iter::once(&**c).chain(std::iter::once(&**t)).chain(el.as_deref()).collect(),
         EK::While(c, b) => vec![c, b],
+        EK::Loop(b) => vec![b],
+        EK::Return(x) => x.as_deref().into_iter().collect(),
         EK::Assign(_, x) => vec![x],
-        EK::Match(sc, arms) => std::iter::once(&**sc).chain(arms.iter().map(|a| &a.1)).collect(),
+        EK::Match(sc, arms) => std::iter::once(&**sc).chain(arms.iter().flat_map(|a| a.guard.iter().chain(std::iter::once(&a.body)))).collect(),
         EK::For(_, it, b) => vec![it, b],
         EK::Closure(_, b) => vec![b],
         EK::Block(stmts, tail) => stmts
@@ -407,6 +418,27 @@ impl Lv<'_> {
                 }
                 self.expr(x, live);
             }
+            // (nothing after it runs: only the value is live)
+            EK::Return(x) => {
+                live.clear();
+                if let Some(x) = x {
+                    self.expr(x, live);
+                }
+            }
+            EK::Loop(body) => {
+                // (left only by a `break`, which finds `after` live)
+                let after = live.clone();
+                let head = self.fixpoint(&after, |lv, h| {
+                    let mut l = h.clone();
+                    lv.expr(body, &mut l);
+                    l
+                });
+                self.loops.push((head.clone(), after));
+                let mut l = head;
+                self.expr(body, &mut l);
+                self.loops.pop();
+                *live = l;
+            }
             EK::Break => {
                 if let Some((_, after)) = self.loops.last() {
                     *live = after.clone();
@@ -430,8 +462,11 @@ impl Lv<'_> {
                 let after = live.clone();
                 let root = self.binding_of(sc);
                 let (mut reads, mut assigns) = (HashSet::new(), HashSet::new());
-                for (_, body) in arms {
-                    self.used(body, &mut reads, &mut assigns);
+                for a in arms {
+                    if let Some(g) = &a.guard {
+                        self.used(g, &mut reads, &mut assigns);
+                    }
+                    self.used(&a.body, &mut reads, &mut assigns);
                 }
                 // (the locals the scrutinee reads: it may borrow from any of them, also through a call that returns
                 // a borrow, `match pick(t) { .. }`)
@@ -458,11 +493,22 @@ impl Lv<'_> {
                 }
                 let n = self.frozen.len();
                 self.frozen.extend(frozen);
-                let mut acc = HashSet::new();
-                for (p, body) in arms {
+                // (last arm first: a guard that fails goes on to the arms after it, their guards included, so what
+                // is live after it is its body's and theirs)
+                let mut acc: HashSet<usize> = HashSet::new();
+                for a in arms.iter().rev() {
                     let mut l = after.clone();
-                    self.expr(body, &mut l);
-                    self.kill_pat(p, body.id, &mut l);
+                    self.expr(&a.body, &mut l);
+                    if let Some(g) = &a.guard {
+                        l.extend(acc.iter().copied());
+                        // (a guard runs before the arm is taken: Rust does not let it move what the pattern binds)
+                        let binds: Vec<usize> = pat_names(&a.pat).into_iter().filter_map(|n| self.r.binds.get(&(a.body.id, n)).copied()).collect();
+                        let n = self.frozen.len();
+                        self.frozen.extend(binds);
+                        self.expr(g, &mut l);
+                        self.frozen.truncate(n);
+                    }
+                    self.kill_pat(&a.pat, a.body.id, &mut l);
                     acc.extend(l);
                 }
                 self.frozen.truncate(n);
@@ -631,6 +677,45 @@ impl Lv<'_> {
 ///   `any` / `all` / `push` / `concat`, an operator), or is its last use (then it may go anywhere: it is dead here).
 ///
 /// A mutable local cannot be captured by a closure, so no closure can see it either.
+/// `m = m.insert(k, f(m.get(k)))`: the old collection is dead after the change (`m` is assigned its result), and
+/// the arguments use `m` only as the receiver of a Map's / Set's reading method (`get`, `contains_key`, `len`, ..).
+/// They are all evaluated before the change and keep nothing of the collection, so it can be changed in place (no
+/// closure, block or `match` in them: a name there could be another local)
+pub fn assigned_change<'e>(e: &'e Expr, info: &Info) -> Option<&'e Expr> {
+    let EK::Assign(n, x) = &e.kind else { return None };
+    let EK::Method(r, _, args) = &x.kind else { return None };
+    (coll_change(info, x.id) && matches!(&r.kind, EK::Var(m) if m == n) && reads_only(n, args, info)).then_some(x)
+}
+
+fn reads_only(name: &str, args: &[Expr], info: &Info) -> bool {
+    use crate::check::{Builtin as B, On};
+    fn walk(e: &Expr, name: &str, info: &Info, uses: &mut Vec<(Id, bool)>) -> bool {
+        match &e.kind {
+            EK::Closure(..) | EK::Async(_) | EK::Block(..) | EK::Match(..) | EK::Handle(..) => false,
+            EK::Var(n) if n == name => {
+                uses.push((e.id, false));
+                true
+            }
+            EK::Method(r, _, a)
+                if matches!(&r.kind, EK::Var(n) if n == name)
+                    && matches!(info.builtin.get(&e.id), Some(B::Std(On::Map | On::Set, "get" | "contains_key" | "contains" | "len" | "is_empty"))) =>
+            {
+                uses.push((r.id, true));
+                a.iter().all(|x| walk(x, name, info, uses))
+            }
+            _ => children(e).into_iter().all(|c| walk(c, name, info, uses)),
+        }
+    }
+    let mut uses = vec![];
+    args.iter().all(|a| walk(a, name, info, &mut uses)) && uses.iter().all(|u| u.1)
+}
+
+/// A Map's / Set's `insert` or `remove`: a new collection, made in place when no one else sees the old one
+fn coll_change(info: &Info, id: Id) -> bool {
+    use crate::check::{Builtin as B, On};
+    matches!(info.builtin.get(&id), Some(B::Std(On::Map | On::Set, "insert" | "remove")))
+}
+
 pub fn inplace_pushes(params: &[String], body: &Expr, info: &Info) -> HashSet<Id> {
     use crate::check::{Builtin as B, Callee};
     let live = liveness(params, body, &|_| false);
@@ -666,8 +751,8 @@ pub fn inplace_pushes(params: &[String], body: &Expr, info: &Info) -> HashSet<Id
     lets(body, &r, &mut values);
     let fresh = |x: &Expr| match &x.kind {
         EK::Array(_) => !info.typed_lit.contains_key(&x.id),
-        EK::Method(..) => matches!(info.builtin.get(&x.id), Some(B::Map | B::Filter | B::Push | B::Concat)),
-        EK::Call(f, _) => matches!(info.callee.get(&f.id), Some(Callee::Range)),
+        EK::Method(..) => matches!(info.builtin.get(&x.id), Some(B::Map | B::Filter | B::Push | B::Concat)) || coll_change(info, x.id),
+        EK::Call(f, _) => matches!(info.callee.get(&f.id), Some(Callee::Range | Callee::Coll(..))),
         _ => false,
     };
     let mut ok: HashSet<usize> = values.iter().filter(|(_, vs)| vs.iter().all(|x| fresh(x))).map(|(b, _)| *b).collect();
@@ -685,7 +770,8 @@ pub fn inplace_pushes(params: &[String], body: &Expr, info: &Info) -> HashSet<Id
         }
         match &e.kind {
             EK::Method(recv, _, args) => {
-                let reads = matches!(info.builtin.get(&e.id), Some(B::Len | B::Map | B::Filter | B::Fold | B::Any | B::All | B::Push | B::Concat | B::Join));
+                // (a Map's / Set's methods give a new value or a part: none keeps the collection)
+                let reads = matches!(info.builtin.get(&e.id), Some(B::Len | B::Map | B::Filter | B::Fold | B::Any | B::All | B::Push | B::Concat | B::Join | B::Std(crate::check::On::Map | crate::check::On::Set, _)));
                 uses(recv, !reads, r, info, live, ok);
                 for a in args {
                     uses(a, true, r, info, live, ok);
@@ -755,8 +841,8 @@ pub fn inplace_pushes(params: &[String], body: &Expr, info: &Info) -> HashSet<Id
     fn pushes(e: &Expr, r: &Resolve, info: &Info, live: &Live, ok: &HashSet<usize>, out: &mut HashSet<Id>) {
         use crate::check::Builtin as B;
         if let EK::Method(recv, _, args) = &e.kind
-            && matches!(info.builtin.get(&e.id), Some(B::Push | B::Concat))
-            && let EK::Var(_) = recv.kind
+            && (matches!(info.builtin.get(&e.id), Some(B::Push | B::Concat)) || coll_change(info, e.id))
+            && let EK::Var(_) = &recv.kind
             && let Some(b) = r.uses.get(&recv.id)
             && ok.contains(b)
             && live.last.contains(&recv.id)
@@ -770,6 +856,14 @@ pub fn inplace_pushes(params: &[String], body: &Expr, info: &Info) -> HashSet<Id
             if !assigns.contains(b) {
                 out.insert(e.id);
             }
+        }
+        // (`m = m.insert(k, m.get(k) ..)`: the receiver is read by the arguments too, so it is not its last use; but
+        // the old value is dead once the result is assigned)
+        if let Some(x) = assigned_change(e, info)
+            && let EK::Method(recv, ..) = &x.kind
+            && r.uses.get(&recv.id).is_some_and(|b| ok.contains(b))
+        {
+            out.insert(x.id);
         }
         for c in children(e) {
             pushes(c, r, info, live, ok, out);

@@ -1,0 +1,2 @@
+// expect: `P::f` performs effects and cannot be used as a value
+enum Log { Say(String) -> () } type P = { x: i32 } impl P { fn f(self) -> i32 { perform Say("x"); 1 } } fn g(ps: Array<P>) -> Array<i32> { ps.map(P::f) }

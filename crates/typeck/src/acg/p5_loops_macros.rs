@@ -295,7 +295,7 @@ impl HoistScan {
                     self.visit_expr(b);
                 }
             }
-            Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Or(ps) | Pat::Slice(ps) => {
+            Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Or(ps, _) | Pat::Slice(ps) => {
                 for p in ps {
                     self.visit_pat(p);
                 }

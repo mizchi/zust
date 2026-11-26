@@ -1,0 +1,3 @@
+// expect: fn(i32) -> i32 does not satisfy the bound `Eq`
+fn same<T: Eq>(x: T, y: T) -> bool { x == y }
+export fn f() -> bool { same((x: i32) => x, (x: i32) => x) }

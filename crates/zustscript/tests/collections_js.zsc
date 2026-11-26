@@ -1,0 +1,35 @@
+// tests/examples.rs collections_in_js: Map / Set in the JS layer: JS's own Map / Set, changed in place when the local
+// is seen by no one else, a pair as a tuple; generic functions bounded by Eq / Ord / Hash
+type Group<K, T> = { key: K, items: Array<T> }
+
+fn group_by<T, K: Hash>(xs: Array<T>, key: fn(T) -> K) -> Array<Group<K, Array<T>>> {
+  let mut m: Map<K, Array<T>> = Map::new();
+  for x in xs {
+    let k = key(x);
+    m = m.insert(k, m.get(k).unwrap_or([]).push(x));
+  }
+  m.entries().map((e) => Group { key: e.0, items: [e.1] })
+}
+
+fn uniq<T: Hash>(xs: Array<T>) -> Array<T> { Set::from(xs).values() }
+
+export fn words(s: String) -> String {
+  let mut counts: Map<String, i32> = Map::new();
+  for w in s.split(" ") {
+    if !w.is_empty() { counts = counts.insert(w, counts.get(w).unwrap_or(0) + 1); }
+  }
+  counts.entries().map((e) => `${e.0}=${e.1}`).join(",")
+}
+
+export fn shared() -> String {
+  // (`a` is kept: `b` is a new Map, `a` is unchanged)
+  let a = Map::from([(1, "one"), (2, "two")]);
+  let mut b = a;
+  b = b.insert(3, "three");
+  `${a.len()} ${b.len()} ${b.get(3).unwrap_or("-")} ${a.get(3).unwrap_or("-")}`
+}
+
+export fn grouped() -> String {
+  let g = group_by(["apple", "avocado", "banana", "blueberry", "cherry"], (s) => s.slice(0, 1));
+  `${g.map((x) => `${x.key}:${x.items[0].join("/")}`).join(" ")} ${uniq([3, 1, 3, 2, 1]).map((n) => n.to_string()).join(",")}`
+}

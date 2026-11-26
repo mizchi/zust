@@ -37,7 +37,7 @@ zust を土台にした、フロントエンド向け言語の試作。目標は
 - effect 多相は入れず、簡単な制約で済ませる(将来の拡張の余地は残す)
 - 配列は TS の `readonly T[]` そのもの。JS の配列をコピーも変換もなしに渡せるので、コードサイズとブリッジの両面で有利。不変として扱い、`push` は新しい配列を作る
 - 可変性はローカル変数に限る(Koka の `var` に近い)
-  - `let mut` の変数への代入と `+=` などの複合代入、`while`、`for x in xs` / `for i in range(a, b)`、`break` / `continue` を書ける
+  - `let mut` の変数への代入と `+=` などの複合代入、`while`、`for x in xs` / `for i in range(a, b)`、`loop`、`break` / `continue`、`return` を書ける
   - レコードと配列は不変のまま。可変のローカル変数はクロージャから捕捉できない
   - そのため関数は外から見て純粋なまま。JS ではただの `let` と `for` になり、Rust では `let mut` になるので、借用の問題も起きない
 - `.d.ts` の数値は branded type にする
@@ -209,6 +209,30 @@ export fn primes_below(n: i32) -> i32 {
 
 - `let mut` でない変数への代入、可変のローカル変数をクロージャが捕捉すること、ループの外の `break` はエラーになる
 - ループの本体は `()` を返す
+- `loop { .. }` は `break` か `return` で抜ける。`break` で抜けるループは `()`、`break` のないループは値を持たない(どの型としても使える)。`break value` はまだない
+
+`return` は、いちばん内側の関数かクロージャから値を返します(Rust と同じ)。
+
+```zsc
+fn find_pos(xs: Array<i32>, v: i32) -> i32 {
+  let mut i = 0;
+  loop {
+    if i >= xs.len() { return -1; }
+    if xs[i] == v { return i; }
+    i += 1;
+  }
+}
+
+fn doubled(o: Option<i32>) -> i32 {
+  let n = match o { Some(n) => n, None => return 0 };   // JS: if (o.TAG === "Some") { n = o._0; } else { return 0; }
+  n * 2
+}
+```
+
+- `return;` は `()` を返す。値の型は関数(クロージャ)の結果の型と同じでなければならない
+- `{ ..; return x; }` のように `return`(か `break` / `continue`、`break` のない `loop`)で終わるブロックは、値を持たない。`if` の片方の枝や `match` の腕に書ける
+- 式の中の `return` は、`?` と同じく、その式の前の文として書き出す(`f(g(), match o { .., None => return 0 })` は `g()` を先に評価してから返る)
+- 書けない所: `handle` の中(本体と腕は JS では別の関数)、`&&` / `||` の右辺と `while` の条件(`?` と同じ)、`@wasm` / `--emit-rust` のクロージャの中
 
 ### ガイドライン: 数値の型と、どの層で書くか
 
@@ -365,6 +389,140 @@ export async fn load(url: String) -> Result<String, String> {
 - `--check-externs` は、メンバーも TS の型と照合する(`Option` の結果は `T | null | undefined`、`Result` の結果は `T` として)
 - まだないもの: `@wasm` での extern type、`==`(同じ値かどうか)、型引数を持つメソッド、TS の `.d.ts` からの自動の取り込み
 
+### 標準ライブラリ: 配列・文字列・数値のメソッド
+
+名前と意味は Rust に合わせ、JS と `@wasm` で同じ結果にします。文字列の位置と長さは JS と同じ UTF-16 の単位です(`tests/stdlib.zsc` で JS と wasm の結果を比べている)。
+
+| 対象 | メソッド |
+| --- | --- |
+| 配列 | `len` `map` `filter` `fold` `any` `all` `push` `concat` `join` `try_map`、`get(i)` / `first()` / `last()`(`Option`)、`is_empty`、`slice(a, b)`、`reverse`、`includes(x)` / `index_of(x)`(`==` と同じく中身で比べる)、`find(f)` / `find_index(f)`、`flat_map(f)`、`sort()`(数値か文字列)、`sort_by((a, b) => ..)`(負・0・正の i32 を返す。安定) |
+| 文字列 | `len` `to_upper` `to_lower` `trim` `trim_start` `trim_end` `contains` `starts_with` `ends_with` `split`、`index_of(s)`(`Option<i32>`)、`slice(a, b)`、`replace(from, to)`(すべて置き換える)、`repeat(n)`、`chars()`(コードポイントごとの `Array<String>`)、`is_empty`、`to_i32()` / `to_f64()`(`Option`) |
+| f32 / f64 | `floor` `ceil` `round` `trunc` `sqrt` `abs` `max` `min`、`pow(y)`、`exp` `ln` `log10` `log2`、`sin` `cos` `tan` `asin` `acos` `atan` `atan2(x)`、`is_nan` |
+| i32 / u32 / i64 | `abs`(u32 以外)、`min(y)` `max(y)`、`pow(e)`(`e: i32`。桁あふれは折り返し、負の `e` はエラー) |
+
+```zsc
+fn top(names: Array<String>) -> String {
+  let sorted = names.filter((n) => !n.is_empty()).sort();
+  match sorted.first() { Some(n) => n.to_lower(), None => "-" }
+}
+fn parse_all(xs: Array<String>) -> Option<Array<i32>> { xs.try_map((x) => x.trim().to_i32()) }
+```
+
+- `slice(a, b)` は JS の `slice` と同じ: 負の位置は末尾から数え、範囲は長さに切り詰める
+- `to_i32` / `to_f64` は Rust の `parse` と同じ: 符号と数字だけ(空白や `0x` は `None`)。小数は `.5`、`1e3`、`inf`、`NaN` も読む
+- `sort()` の NaN は、どの数とも等しい扱い(JS の比較と同じ)。NaN を含む配列の並びは決まらない
+- `@wasm` の数学関数(`pow` `sin` など)は、グルーが JS の `Math` を zustc に渡すので、JS 層とビット単位で同じ。`--emit-rust` では Rust の std(libm)の結果になり、最後の桁が違うことがある
+- 分かっている違い: サロゲートペアの途中で切る文字列の `slice` は、JS では孤立したサロゲート、wasm では U+FFFD になる
+- まだないもの: 乱数、`enumerate`
+
+### パターン: `|`、ガード、レコード
+
+```zsc
+fn kind(t: Tok) -> i32 {
+  match t {
+    Plus | Minus => 1,
+    Num(n) if n < 0 => -1,          // ガード: パターンの名前が使える
+    Num(_) => 2,
+    _ => 0,
+  }
+}
+fn x_of(e: Ev) -> i32 { match e { Click(x, _) | Move(_, x, _) => x, Key(_) => -1 } }
+fn quadrant(p: Point) -> i32 {
+  match p { Point { x: 0, y: 0 } => 0, Point { x, y } if x > 0 && y > 0 => 1, _ => 2 }
+}
+fn greet(u: User) -> String { let User { name, .. } = u; name }
+```
+
+- `A | B` は入れ子にも書ける(`Some(Circle(_) | Square(_))`)。どの選択肢も同じ名前を同じ型で束縛する。名前を束縛する `|` にはガードを付けられない(腕を分ける)
+- ガード `pat if cond =>` は、パターンの名前を使える(`?` も書ける)。ガードのある腕は網羅性の検査では数えない
+- レコードのパターン `Point { x, y: py, .. }` は `match` / `if let` / `let` に書ける。書かないフィールドがあれば `..` で終える。`let` には `|` を書けない(`match` で書く)
+- JS
+  - `|` は 1 つの条件(`e.TAG === "A" || e.TAG === "B"`)。束縛は、合った選択肢でのその位置
+  - ガードのある match はラベル付きのブロックで、腕ごとの `if` が合えばそこから抜ける
+  - `let` の分解は JS の分割代入(`const { name, age } = u;`)
+- Rust では Rust の `|`、ガード、構造体のパターン(`@wasm` での `let` の分解はまだない)
+- まだないもの: バリアントの `..`(`Rect(..)`)、クロージャの引数と `for` の分解
+
+### `impl`: メソッドと関連関数
+
+```zsc
+type V2 = { x: f64, y: f64 }
+impl V2 {
+  fn new(x: f64, y: f64) -> Self { Self { x, y } }       // V2::new(1.0, 2.0)
+  fn add(self, o: V2) -> V2 { V2 { x: self.x + o.x, y: self.y + o.y } }
+  fn len(self) -> f64 { (self.x * self.x + self.y * self.y).sqrt() }
+}
+impl<T> Stack<T> {
+  fn push(self, x: T) -> Stack<T> { Stack { items: self.items.push(x) } }
+}
+impl<T: Eq> Stack<T> {
+  fn has(self, x: T) -> bool { self.items.includes(x) }
+}
+
+fn demo() -> f64 { V2::new(3.0, 4.0).add(V2::new(0.0, 0.0)).len() }   // JS: V2$len(V2$add(V2$new(3, 4), ..))
+```
+
+- レコードにも enum にも書ける。最初の引数が `self`(型は書かない)の関数はメソッド `v.len()`、それ以外は `V2::new()` で呼ぶ。`V2::len(v)` や `vs.map(V2::len)` のように関数としても使える
+- `Self` はその型(型、`Self { .. }`、`Self::new()`、パターン)
+- 中身はトップレベルの関数 `V2$len`(引数の最初が受け手)で、JS でも Rust でも普通の呼び出しになる。`impl<T>` の型引数は関数の型引数になる(bound も)
+- まだできないこと
+  - `export`(TS から呼ぶ名前を決めていない: 呼び出す関数を `export` する)
+  - effect を perform するメソッドのメソッド呼び出し(`P::f(x)` と関数として呼ぶ)
+  - 他のモジュールから取り込んだ型のメソッド、トレイト
+
+### 総称関数の bound: `Eq` / `Ord` / `Hash`
+
+```zsc
+fn dedupe<T: Eq>(xs: Array<T>) -> Array<T> {
+  xs.fold([], (acc: Array<T>, x) => if acc.includes(x) { acc } else { acc.push(x) })
+}
+fn max_of<T: Ord>(xs: Array<T>, d: T) -> T { xs.fold(d, (m, x) => if x > m { x } else { m }) }
+fn uniq<T: Hash>(xs: Array<T>) -> Array<T> { Set::from(xs).values() }
+```
+
+- `T: Eq` で `==`(中身で比べる。関数や JSX は渡せない)、`T: Ord` で `<`(数値と文字列)、`T: Hash` で `Map` のキー・`Set` の要素(整数、文字列、bool、データのない enum)。数値の bound(`Num` など)はどれも `Eq` を、`Integer` は `Hash` も満たす
+- 数値の bound と同じく、使われた型ごとに別の関数として書き出す(JS の `dedupe$P`、Rust の `zs_dedupe__P`)
+- `export fn` には付けられない(型を列挙できない): 使う型ごとの関数を `export` する
+
+### `Map` / `Set`
+
+```zsc
+fn words(s: String) -> Map<String, i32> {
+  let mut counts: Map<String, i32> = Map::new();
+  for w in s.split(" ") {
+    counts = counts.insert(w, counts.get(w).unwrap_or(0) + 1);   // JS: counts = counts.set(w, ..)(その場で)
+  }
+  counts
+}
+```
+
+- 生成: `Map::new()`、`Map::from([(k, v), ..])`、`Set::new()`、`Set::from(xs)`
+- `Map`: `len` `is_empty` `get(k)`(`Option`) `contains_key(k)` `insert(k, v)` `remove(k)` `keys()` `values()` `entries()`(`Array<(K, V)>`)。`Set`: `len` `is_empty` `contains(x)` `insert(x)` `remove(x)` `values()`
+- 配列と同じく不変: `insert` / `remove` は新しい値を返す。ほかから見えないローカル変数なら、その場で変える(`m = m.insert(k, f(m.get(k)))` の形も)
+- 順序は JS の Map / Set と同じ挿入順(既にあるキーを入れ直しても位置は変わらない)。JS では JS の `Map` / `Set` そのもので、`.d.ts` は `ReadonlyMap` / `ReadonlySet`
+- `@wasm` では、挿入順の配列と `HashMap` の索引を持つ型(`ZsMap` / `ZsSet`)。JS と同じ結果になる(`tests/collections.zsc`)。`Map::from` と `entries()`(タプル)、境界を越えることはまだできない
+- `==` では比べられない。`Map` / `Set` という名前の型は宣言できない(`extern type` も。組み込みの名前)。`Map::new` などは呼び出す形でだけ書ける(値として渡すならクロージャで包む。`json_encode` / `range` も同じ)
+
+### JSON: `json_decode` / `json_encode`
+
+```zsc
+type Todo = { id: i32, title: String, due: Option<String> }
+
+fn load(s: String) -> Result<Array<Todo>, String> { json_decode(s) }   // 型どおりか確かめて読む
+fn save(ts: Array<Todo>) -> String { json_encode(ts) }
+```
+
+- `json_decode(s)` は、JSON が型どおりかを確かめて読む。違えば `Err("expected an i32 at $.todos[0].id, found 1.5")` のように場所を付けて返す(構文の誤りは JSON.parse のメッセージ)
+- 型は文脈から決まる(決まらなければ注釈を求める)。型ごとに確かめる関数を書き出す
+- JSON での形
+  - 数値(i32 / u32 は整数で範囲内のもの)、文字列、bool、配列、タプル(配列)
+  - レコードはオブジェクト(宣言にないフィールドは読み捨てる)
+  - `Option` は `null` か値(フィールドがなければ `None`)
+  - データのない enum は文字列、データのある enum は JS での値(`{ "TAG": "Circle", "_0": 1.5 }`、TS から読んだ union はその形)
+  - `Map<String, V>` はオブジェクト(他のキーは `[key, value]` の配列)、`Set` は配列
+- 使えない型: i64(JSON.parse が 2^53 を超える整数を丸める)、`Option<Option<T>>`(`None` と `Some(None)` がどちらも `null` になる)、関数、JSX、`extern type`、総称の型引数
+- JS 層だけ(`@wasm` ではエラー)
+
 ### 代数的エフェクト(enum で宣言する)
 
 ```rust
@@ -453,9 +611,9 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
     - 配列と、配列を含むレコード / enum は Copy にならない。借用、move、clone は zsc が推論する(次の「所有権の推論」)
     - JS との境界を越えられるのは、数値の配列、スカラーだけのレコード / enum、そして文字列や配列を含むレコードと、レコード・文字列・配列の配列(次の「バイト列で越える値」)
   - 構文: `let` / `let mut` と代入、`while` / `for` / `break` / `continue`、`if`、`match`(数値、bool、enum のバリアント、入れ子のパターン)、レコードの生成・フィールド・`..base` での更新、`as`、`T::zero()` / `T::one()`
-  - 配列の操作: `len` `map` `filter` `fold` `any` `all` `push` `concat`、添字、`range(a, b)`(Rust では配列を作らずイテレータ `a..b` になる)
+  - 配列の操作: `len` `map` `filter` `fold` `any` `all` `push` `concat`、添字、`range(a, b)`(Rust では配列を作らずイテレータ `a..b` になる)、上の「標準ライブラリ」のメソッド
   - 呼び出し: Rust に変換可能な通常の補助関数、他の `@wasm` 関数、`wasm fn`、再帰
-  - 文字列: 引数は `&str`、戻り値は `String`。`+`、`==` と大小比較、`len` `to_upper` `trim` `contains` `split`、配列の `join`、整数と bool の `to_string`(次の「文字列と `==`」)
+  - 文字列: 引数は `&str`、戻り値は `String`。`+`、`==` と大小比較、`len` `to_upper` `trim` `contains` `split` と上の「標準ライブラリ」のメソッド、配列の `join`、整数と bool の `to_string`(次の「文字列と `==`」)
   - 使えないもの: タプル、effect、値としての関数、文字列のパターン、浮動小数点数の `to_string`(JS と Rust で書式が違う)
 - `T: Num` の関数は、wasm でもインスタンスごとに単相化する(`zs_total__f64`、`zs_total__i64` など)
   - JS から呼ばれるインスタンスだけに wrapper とグルーを付ける
