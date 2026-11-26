@@ -1,0 +1,2 @@
+// expect: cannot compare bool with `<`
+fn f(xs: Array<bool>) -> Array<bool> { xs.sort() }

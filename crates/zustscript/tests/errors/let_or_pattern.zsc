@@ -1,0 +1,2 @@
+// expect: an `|` pattern in a `let`: use `match`
+type P = { v: (i32, i32) } fn f(p: P) -> i32 { let P { v: (x, 0) | (_, x) } = p; x }

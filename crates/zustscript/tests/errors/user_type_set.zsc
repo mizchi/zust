@@ -1,0 +1,2 @@
+// expect: `Set` is the built-in collection: name this type otherwise
+type Set<T> = { item: T }

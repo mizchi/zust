@@ -1,0 +1,2 @@
+// expect: no method `abs` on u32
+fn f(x: u32) -> u32 { x.abs() }

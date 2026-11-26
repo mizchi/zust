@@ -54,6 +54,8 @@ pub struct Js<'a> {
     /// the comparators written for `==` by content (one per type, `$eq1` ..), and their definitions
     eqs: HashMap<Ty, String>,
     eq_defs: String,
+    /// the JSON converters written (`$dj1` decodes, `$ej1` encodes), by (type, decoding)
+    jsons: HashMap<(Ty, bool), String>,
     /// locals in scope: (source name, JS name), innermost last. Every JS name a function uses is unique in it
     /// (`x`, then `x$1` for a second `x`), so flattened blocks, shadowing and match arms never collide
     locals: Vec<(String, String)>,
@@ -115,7 +117,15 @@ const RESERVED: &[&str] = &[
     "finally", "for", "function", "import", "in", "instanceof", "new", "null", "return", "super", "switch", "this", "throw",
     "try", "typeof", "var", "void", "while", "with", "yield", "await", "enum", "implements", "interface", "package",
     "private", "protected", "public", "static", "arguments", "eval", "undefined", "NaN", "Infinity",
+    // globals the generated code reads
+    "Math", "String", "Number", "BigInt", "Array", "Object", "Float64Array", "Float32Array", "Int32Array", "console", "JSON",
+    "Map", "Set", "RangeError", "Promise", "Error", "TypeError", "Symbol",
 ];
+
+/// Field `f` of the JSON value `v`; a decoder reads only own properties, so an absent `toString` is `undefined`
+fn own(dec: bool, f: &str) -> String {
+    if dec { format!("(Object.hasOwn(v, {0}) ? v{1} : undefined)", js_str(f), member(f)) } else { format!("v{}", member(f)) }
+}
 
 pub fn ident(n: &str) -> String {
     if RESERVED.contains(&n) { format!("{n}$") } else { n.to_string() }
@@ -192,6 +202,40 @@ const HELPERS: &[(&str, &str)] = &[
     ("$o_ok_or", "function $o_ok_or(o, e) {\n  return o.TAG === \"Some\" ? { TAG: \"Ok\", _0: o._0 } : { TAG: \"Err\", _0: e };\n}"),
     ("$o_ok_or_else", "function $o_ok_or_else(o, f) {\n  return o.TAG === \"Some\" ? { TAG: \"Ok\", _0: o._0 } : { TAG: \"Err\", _0: f() };\n}"),
     ("$o_ok", "function $o_ok(r) {\n  return r.TAG === \"Ok\" ? { TAG: \"Some\", _0: r._0 } : { TAG: \"None\" };\n}"),
+    // (the standard library: arrays, strings, numbers. Each as the `@wasm` layer's Rust means it: see lower.rs)
+    ("$get", "function $get(xs, i) {\n  return i >= 0 && i < xs.length ? { TAG: \"Some\", _0: xs[i] } : { TAG: \"None\" };\n}"),
+    ("$last", "function $last(xs) {\n  return xs.length > 0 ? { TAG: \"Some\", _0: xs[xs.length - 1] } : { TAG: \"None\" };\n}"),
+    // (by `==`: `eq` compares by content, otherwise `===`, so NaN is never found, as in Rust)
+    ("$index_of", "function $index_of(xs, x, eq) {\n  for (let i = 0; i < xs.length; i++) if (eq ? eq(xs[i], x) : xs[i] === x) return { TAG: \"Some\", _0: i };\n  return { TAG: \"None\" };\n}"),
+    ("$includes", "function $includes(xs, x, eq) {\n  for (let i = 0; i < xs.length; i++) if (eq ? eq(xs[i], x) : xs[i] === x) return true;\n  return false;\n}"),
+    ("$find", "function $find(xs, f) {\n  for (let i = 0; i < xs.length; i++) if (f(xs[i])) return { TAG: \"Some\", _0: xs[i] };\n  return { TAG: \"None\" };\n}"),
+    ("$find_index", "function $find_index(xs, f) {\n  for (let i = 0; i < xs.length; i++) if (f(xs[i])) return { TAG: \"Some\", _0: i };\n  return { TAG: \"None\" };\n}"),
+    // (JSON, checked by the type: `json_decode`'s converters throw `{ $json }` where the value is not the type's)
+    ("$json_fail", "function $json_fail(want, v, p) {\n  const found = v === null ? \"null\" : Array.isArray(v) ? \"an array\" : v === undefined ? \"nothing\" : typeof v === \"object\" ? \"an object\" : String(JSON.stringify(v) ?? typeof v).slice(0, 40);\n  throw { $json: \"expected \" + want + \" at \" + p + \", found \" + found };\n}"),
+    ("$json_decode", "function $json_decode(s, dec) {\n  let v;\n  try {\n    v = JSON.parse(s);\n  } catch (e) {\n    return { TAG: \"Err\", _0: String(e.message) };\n  }\n  try {\n    return { TAG: \"Ok\", _0: dec(v, \"$\") };\n  } catch (e) {\n    if (e !== null && typeof e === \"object\" && \"$json\" in e) return { TAG: \"Err\", _0: e.$json };\n    throw e;\n  }\n}"),
+    ("$dj_i32", "function $dj_i32(v, p) {\n  if (typeof v !== \"number\" || !Number.isInteger(v) || v < -2147483648 || v > 2147483647) $json_fail(\"an i32\", v, p);\n  return v | 0;\n}"),
+    ("$dj_u32", "function $dj_u32(v, p) {\n  if (typeof v !== \"number\" || !Number.isInteger(v) || v < 0 || v > 4294967295) $json_fail(\"a u32\", v, p);\n  return v >>> 0;\n}"),
+    ("$dj_f64", "function $dj_f64(v, p) {\n  if (typeof v !== \"number\") $json_fail(\"a number\", v, p);\n  return v;\n}"),
+    ("$dj_f32", "function $dj_f32(v, p) {\n  if (typeof v !== \"number\") $json_fail(\"a number\", v, p);\n  return Math.fround(v);\n}"),
+    ("$dj_str", "function $dj_str(v, p) {\n  if (typeof v !== \"string\") $json_fail(\"a string\", v, p);\n  return v;\n}"),
+    ("$dj_bool", "function $dj_bool(v, p) {\n  if (typeof v !== \"boolean\") $json_fail(\"a bool\", v, p);\n  return v;\n}"),
+    ("$m_get", "function $m_get(m, k) {\n  return m.has(k) ? { TAG: \"Some\", _0: m.get(k) } : { TAG: \"None\" };\n}"),
+    ("$m_remove", "function $m_remove(m, k) {\n  const r = new Map(m);\n  r.delete(k);\n  return r;\n}"),
+    ("$s_remove", "function $s_remove(s, x) {\n  const r = new Set(s);\n  r.delete(x);\n  return r;\n}"),
+    ("$cmp", "function $cmp(a, b) {\n  return a < b ? -1 : a > b ? 1 : 0;\n}"),
+    ("$s_index_of", "function $s_index_of(s, t) {\n  const i = s.indexOf(t);\n  return i < 0 ? { TAG: \"None\" } : { TAG: \"Some\", _0: i };\n}"),
+    // (Rust's `str::replace`: every match; an empty pattern matches at each character's boundary)
+    ("$replace", "function $replace(s, a, b) {\n  return a === \"\" ? b + Array.from(s, (c) => c + b).join(\"\") : s.split(a).join(b);\n}"),
+    // (Rust's `parse`: a sign and digits only (no white space, no `0x`), in range; for a float also `.5`, `1e3`,
+    // `inf`, `NaN`)
+    ("$to_i32", "function $to_i32(s) {\n  if (!/^[+-]?[0-9]+$/.test(s)) return { TAG: \"None\" };\n  const n = Number(s);\n  return n >= -2147483648 && n <= 2147483647 ? { TAG: \"Some\", _0: n | 0 } : { TAG: \"None\" };\n}"),
+    ("$to_f64", "function $to_f64(s) {\n  if (!/^[+-]?(?:inf|infinity|nan|(?:[0-9]+\\.?[0-9]*|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?)$/i.test(s)) return { TAG: \"None\" };\n  const t = s.replace(/^[+-]/, \"\").toLowerCase();\n  const v = t === \"nan\" ? NaN : t.startsWith(\"inf\") ? Infinity : Number(t);\n  return { TAG: \"Some\", _0: s.startsWith(\"-\") ? -v : v };\n}"),
+    // (Rust's `wrapping_pow`; a negative exponent is an error)
+    ("$pow_i32", "function $pow_i32(a, e) {\n  if (e < 0) throw new RangeError(\"a negative exponent\");\n  let r = 1;\n  while (e > 0) {\n    if (e & 1) r = Math.imul(r, a);\n    a = Math.imul(a, a);\n    e >>>= 1;\n  }\n  return r;\n}"),
+    ("$pow_i64", "function $pow_i64(a, e) {\n  if (e < 0) throw new RangeError(\"a negative exponent\");\n  let r = 1n;\n  while (e > 0) {\n    if (e & 1) r = BigInt.asIntN(64, r * a);\n    a = BigInt.asIntN(64, a * a);\n    e >>>= 1;\n  }\n  return r;\n}"),
+    ("$abs_i64", "function $abs_i64(a) {\n  return a < 0n ? BigInt.asIntN(64, -a) : a;\n}"),
+    ("$min_big", "function $min_big(a, b) {\n  return a < b ? a : b;\n}"),
+    ("$max_big", "function $max_big(a, b) {\n  return a > b ? a : b;\n}"),
     // (what JS gives an extern: `null` / `undefined` is `None`; a `Result` catches what it throws, as its message or
     // as the value thrown; a `Promise` of one, its rejection too. And an `Option` handed to JS: `undefined` for `None`)
     ("$nullable", "function $nullable(x) {\n  return x == null ? { TAG: \"None\" } : { TAG: \"Some\", _0: x };\n}"),
@@ -237,6 +281,7 @@ impl<'a> Js<'a> {
             inplace: HashSet::new(),
             eqs: HashMap::new(),
             eq_defs: String::new(),
+            jsons: HashMap::new(),
             locals: vec![],
             declared: HashSet::new(),
             module_names: HashSet::new(),
@@ -302,7 +347,7 @@ impl<'a> Js<'a> {
                 _ => {}
             }
         }
-        for t in ["Math", "String", "Number", "BigInt", "Array", "Object", "Float64Array", "Float32Array", "Int32Array", "console"] {
+        for t in ["Math", "String", "Number", "BigInt", "Array", "Object", "Float64Array", "Float32Array", "Int32Array", "console", "JSON", "Map", "Set", "RangeError"] {
             self.module_names.insert(t.to_string());
         }
         let mut bodies: HashMap<&String, &Item> = HashMap::new();
@@ -495,7 +540,7 @@ impl<'a> Js<'a> {
     fn complex(e: &Expr) -> bool {
         match &e.kind {
             EK::Block(s, t) => !s.is_empty() || t.as_ref().is_some_and(|t| Self::complex(t)),
-            EK::Match(..) | EK::Assign(..) | EK::While(..) | EK::For(..) | EK::Break | EK::Continue => true,
+            EK::Match(..) | EK::Assign(..) | EK::While(..) | EK::For(..) | EK::Loop(_) | EK::Break | EK::Continue | EK::Return(_) => true,
             // (a `?` in a branch runs only on that branch: not a `? :` whose operands were written before it)
             EK::If(_, t, el) => Self::complex(t) || el.as_ref().is_none_or(|x| Self::complex(x)) || has_try(t) || el.as_deref().is_some_and(has_try),
             _ => false,
@@ -614,6 +659,30 @@ impl<'a> Js<'a> {
                 unit(self);
                 return;
             }
+            EK::Loop(body) => {
+                self.line("for (;;) {");
+                self.loop_body(body);
+                unit(self);
+                return;
+            }
+            // (from the function being written: an expression around it is written as statements before it, as for `?`)
+            EK::Return(x) => {
+                match x {
+                    None => self.line("return;"),
+                    Some(x) if Self::complex(x) => {
+                        // (assigned first: a statement with no value still gives `()`, which is `undefined`)
+                        let t = self.fresh();
+                        self.line(&format!("let {t};"));
+                        self.stmt_expr(x, &Dest::Assign(t.clone()));
+                        self.line(&format!("return {t};"));
+                    }
+                    Some(x) => {
+                        let v = self.expr(x);
+                        self.line(&format!("return {v};"));
+                    }
+                }
+                return;
+            }
             EK::Break => return self.line("break;"),
             EK::Continue => return self.line("continue;"),
             _ => {}
@@ -680,8 +749,10 @@ impl<'a> Js<'a> {
             }
             EK::Match(s, arms) => {
                 // (an arm's bindings get names of their own, so they never hide the subject)
+                // (a guard may assign the local: the arms after it test the value matched, kept first)
+                let guarded = arms.iter().any(|a| a.guard.is_some());
                 let subj = match &s.kind {
-                    EK::Var(n) if matches!(self.info.callee.get(&s.id), Some(Callee::Local)) => self.local(n),
+                    EK::Var(n) if matches!(self.info.callee.get(&s.id), Some(Callee::Local)) && !guarded => self.local(n),
                     _ => {
                         let t = self.fresh();
                         let v = self.expr(s);
@@ -689,8 +760,63 @@ impl<'a> Js<'a> {
                         t
                     }
                 };
+                // (a guard that fails goes on to the next arms: each arm is an `if` of its own in a block the taken
+                // one leaves)
+                if arms.iter().any(|a| a.guard.is_some()) {
+                    let label = format!("$m{}", {
+                        self.tmp += 1;
+                        self.tmp
+                    });
+                    self.line(&format!("{label}: {{"));
+                    self.ind += 1;
+                    for (k, a) in arms.iter().enumerate() {
+                        let conds = self.pat_cond(&a.pat, &subj);
+                        // (the last arm without a guard needs no test: the match is exhaustive)
+                        let open = !(conds.is_empty() || k + 1 == arms.len() && a.guard.is_none());
+                        if open {
+                            self.line(&format!("if ({}) {{", conds.join(" && ")));
+                            self.ind += 1;
+                        }
+                        let mark = self.locals.len();
+                        let mut binds = vec![];
+                        self.pat_binds(&a.pat, &subj, &mut binds);
+                        for (n, v) in binds {
+                            let js = self.bind(&n);
+                            self.line(&format!("const {js} = {v};"));
+                        }
+                        let guarded = if let Some(g) = &a.guard {
+                            let g = self.expr(g);
+                            self.line(&format!("if ({}) {{", unparen(&g)));
+                            self.ind += 1;
+                            true
+                        } else {
+                            false
+                        };
+                        self.stmt_expr(&a.body, d);
+                        // (a body written as `return` may still write nothing, `{}`: the block is left either way)
+                        let ends = !guarded && !open;
+                        if !ends {
+                            self.line(&format!("break {label};"));
+                        }
+                        if guarded {
+                            self.ind -= 1;
+                            self.line("}");
+                        }
+                        self.locals.truncate(mark);
+                        if open {
+                            self.ind -= 1;
+                            self.line("}");
+                        }
+                        if ends {
+                            break;
+                        }
+                    }
+                    self.ind -= 1;
+                    self.line("}");
+                    return;
+                }
                 let mut opened = false;
-                for (k, (p, body)) in arms.iter().enumerate() {
+                for (k, Arm { pat: p, body, .. }) in arms.iter().enumerate() {
                     let last = k + 1 == arms.len();
                     let conds = self.pat_cond(p, &subj);
                     if k == 0 && !(conds.is_empty() || last) {
@@ -769,6 +895,19 @@ impl<'a> Js<'a> {
         match p {
             Pat::Bind(n) => self.bind(n),
             Pat::Tuple(ps) => format!("[{}]", ps.iter().map(|p| if matches!(p, Pat::Wild) { String::new() } else { self.pat_lhs(p) }).collect::<Vec<_>>().join(", ")),
+            Pat::Record(_, fs, _, _) => {
+                let plain = |f: &str| !f.is_empty() && f.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$') && !f.starts_with(|c: char| c.is_ascii_digit());
+                let parts: Vec<String> = fs
+                    .iter()
+                    .filter(|f| !matches!(f.1, Pat::Wild))
+                    .map(|(f, p)| {
+                        let lhs = self.pat_lhs(p);
+                        let key = if plain(f) { f.clone() } else { js_str(f) };
+                        if lhs == key { lhs } else { format!("{key}: {lhs}") }
+                    })
+                    .collect();
+                format!("{{ {} }}", parts.join(", "))
+            }
             _ => self.fresh(),
         }
     }
@@ -789,6 +928,14 @@ impl<'a> Js<'a> {
                 }
                 c
             }
+            Pat::Record(_, fs, _, _) => fs.iter().flat_map(|(f, p)| self.pat_cond(p, &format!("{s}{}", member(f)))).collect(),
+            Pat::Or(alts) => {
+                let cs: Vec<Vec<String>> = alts.iter().map(|a| self.pat_cond(a, s)).collect();
+                if cs.iter().any(|c| c.is_empty()) {
+                    return vec![];
+                }
+                vec![format!("({})", cs.iter().map(|c| if c.len() == 1 { c[0].clone() } else { format!("({})", c.join(" && ")) }).collect::<Vec<_>>().join(" || "))]
+            }
         }
     }
 
@@ -804,6 +951,37 @@ impl<'a> Js<'a> {
                 let en = self.info.variant_of[v].clone();
                 for (k, p) in subs.iter().enumerate() {
                     self.pat_binds(p, &format!("{s}.{}", self.field_key(&en, v, k)), out);
+                }
+            }
+            Pat::Record(_, fs, _, _) => {
+                for (f, p) in fs {
+                    self.pat_binds(p, &format!("{s}{}", member(f)), out);
+                }
+            }
+            // (a name of an `|` is where the alternative that matched has it: `s._0` for both of `A(x) | B(x)`, or
+            // `cond ? s._0 : s._1`)
+            Pat::Or(alts) => {
+                let per: Vec<Vec<(String, String)>> = alts
+                    .iter()
+                    .map(|a| {
+                        let mut b = vec![];
+                        self.pat_binds(a, s, &mut b);
+                        b
+                    })
+                    .collect();
+                for (n, _) in per[0].clone() {
+                    let paths: Vec<String> = per.iter().map(|b| b.iter().find(|x| x.0 == n).map_or("undefined".into(), |x| x.1.clone())).collect();
+                    if paths.iter().all(|p| *p == paths[0]) {
+                        out.push((n, paths[0].clone()));
+                        continue;
+                    }
+                    let mut v = paths.last().unwrap().clone();
+                    for (a, p) in alts.iter().zip(&paths).rev().skip(1) {
+                        let c = self.pat_cond(a, s);
+                        let c = if c.is_empty() { "true".to_string() } else { c.join(" && ") };
+                        v = format!("({c}) ? {p} : {v}");
+                    }
+                    out.push((n, v));
                 }
             }
             _ => {}
@@ -949,6 +1127,89 @@ impl<'a> Js<'a> {
         }
     }
 
+    /// A method of the standard library (beyond the first ones): `recv` is the receiver's JS, the arguments are
+    /// evaluated after it, in order
+    fn std_method(&mut self, e: &Expr, on: crate::check::On, m: &str, recv: String, args: &[Expr]) -> String {
+        use crate::check::On;
+        let h = |js: &mut Js, name: &'static str| {
+            js.helpers.insert(name);
+            name
+        };
+        let a: Vec<String> = self.seq(&args.iter().collect::<Vec<_>>());
+        let t = self.num(e.id);
+        let fround = |s: String| if t == Ty::F32 { format!("Math.fround({s})") } else { s };
+        match (on, m) {
+            (On::Array, "get") => format!("{}({recv}, {})", h(self, "$get"), a[0]),
+            (On::Array, "first") => format!("{}({recv}, 0)", h(self, "$get")),
+            (On::Array, "last") => format!("{}({recv})", h(self, "$last")),
+            (On::Array | On::Str, "is_empty") => format!("({recv}.length === 0)"),
+            (On::Array | On::Str, "slice") => format!("{recv}.slice({}, {})", a[0], a[1]),
+            (On::Array, "reverse") => format!("[...{recv}].reverse()"),
+            (On::Array, "includes" | "index_of") => {
+                let name = h(self, if m == "includes" { "$includes" } else { "$index_of" });
+                let el = self.info.deep_eq.get(&e.id).cloned().map(|t| subst_ty(&t, &self.subst));
+                match el.and_then(|t| self.eq_fn(&t)) {
+                    Some(f) => format!("{name}({recv}, {}, {f})", a[0]),
+                    None => format!("{name}({recv}, {})", a[0]),
+                }
+            }
+            (On::Array, "find" | "find_index") => {
+                let name = h(self, if m == "find" { "$find" } else { "$find_index" });
+                let f = self.adapt(&args[0], a[0].clone(), 1);
+                format!("{name}({recv}, {f})")
+            }
+            (On::Array, "flat_map") => format!("{recv}.flatMap({})", self.adapt(&args[0], a[0].clone(), 1)),
+            (On::Array, "sort") => format!("[...{recv}].sort({})", h(self, "$cmp")),
+            (On::Array, _) => format!("[...{recv}].sort({})", self.adapt(&args[0], a[0].clone(), 2)),
+            (On::Str, "to_lower") => format!("{recv}.toLowerCase()"),
+            (On::Str, "starts_with") => format!("{recv}.startsWith({})", a[0]),
+            (On::Str, "ends_with") => format!("{recv}.endsWith({})", a[0]),
+            (On::Str, "index_of") => format!("{}({recv}, {})", h(self, "$s_index_of"), a[0]),
+            (On::Str, "replace") => format!("{}({recv}, {}, {})", h(self, "$replace"), a[0], a[1]),
+            (On::Str, "repeat") => format!("{recv}.repeat({})", a[0]),
+            (On::Str, "trim_start") => format!("{recv}.trimStart()"),
+            (On::Str, "trim_end") => format!("{recv}.trimEnd()"),
+            (On::Str, "chars") => format!("Array.from({recv})"),
+            (On::Str, "to_i32") => format!("{}({recv})", h(self, "$to_i32")),
+            (On::Str, _) => format!("{}({recv})", h(self, "$to_f64")),
+            (On::Float, "ceil") => format!("Math.ceil({})", unparen(&recv)),
+            (On::Float, "trunc") => format!("Math.trunc({})", unparen(&recv)),
+            (On::Float, "is_nan") => format!("Number.isNaN({})", unparen(&recv)),
+            (On::Float, "pow") => fround(format!("Math.pow({}, {})", unparen(&recv), a[0])),
+            (On::Float, "atan2") => fround(format!("Math.atan2({}, {})", unparen(&recv), a[0])),
+            (On::Float, _) => {
+                let f = if m == "ln" { "log" } else { m };
+                fround(format!("Math.{f}({})", unparen(&recv)))
+            }
+            (On::Int, "abs") if t == Ty::I64 => format!("{}({recv})", h(self, "$abs_i64")),
+            (On::Int, "abs") => format!("(Math.abs({}) | 0)", unparen(&recv)),
+            (On::Int, "min" | "max") if t == Ty::I64 => format!("{}({recv}, {})", h(self, if m == "min" { "$min_big" } else { "$max_big" }), a[0]),
+            (On::Int, "min") => format!("Math.min({}, {})", unparen(&recv), a[0]),
+            (On::Int, "max") => format!("Math.max({}, {})", unparen(&recv), a[0]),
+            // (a new collection for each change, unless the local is not seen elsewhere: then in place, as `push`)
+            (On::Map | On::Set, "len") => format!("{recv}.size"),
+            (On::Map | On::Set, "is_empty") => format!("({recv}.size === 0)"),
+            (On::Map, "get") => format!("{}({recv}, {})", h(self, "$m_get"), a[0]),
+            (On::Map, "contains_key") | (On::Set, "contains") => format!("{recv}.has({})", a[0]),
+            (On::Map, "insert") if self.inplace.contains(&e.id) => format!("{recv}.set({}, {})", a[0], a[1]),
+            (On::Map, "insert") => format!("new Map({recv}).set({}, {})", a[0], a[1]),
+            (On::Set, "insert") if self.inplace.contains(&e.id) => format!("{recv}.add({})", a[0]),
+            (On::Set, "insert") => format!("new Set({recv}).add({})", a[0]),
+            (On::Map | On::Set, "remove") if self.inplace.contains(&e.id) => format!("({recv}.delete({}), {recv})", a[0]),
+            (On::Map, "remove") => format!("{}({recv}, {})", h(self, "$m_remove"), a[0]),
+            (On::Set, "remove") => format!("{}({recv}, {})", h(self, "$s_remove"), a[0]),
+            (On::Map, "keys") => format!("[...{recv}.keys()]"),
+            (On::Map | On::Set, "values") => format!("[...{recv}.values()]"),
+            (On::Map, _) => format!("[...{recv}]"),
+            (On::Set, _) => unreachable!(),
+            (On::Int, _) => match t {
+                Ty::I64 => format!("{}({recv}, {})", h(self, "$pow_i64"), a[0]),
+                Ty::U32 => format!("({}({recv}, {}) >>> 0)", h(self, "$pow_i32"), a[0]),
+                _ => format!("{}({recv}, {})", h(self, "$pow_i32"), a[0]),
+            },
+        }
+    }
+
     fn num(&self, id: Id) -> Ty {
         subst_ty(&self.info.num.get(&id).cloned().unwrap_or(Ty::F64), &self.subst)
     }
@@ -1061,6 +1322,24 @@ impl<'a> Js<'a> {
                 if let Some(Callee::TypedCtor(el, c)) = self.info.callee.get(&f.id).cloned() {
                     let ctor = typed_js(&el);
                     return if c == "zeros" { format!("new {ctor}({})", a[0]) } else { format!("{ctor}.from({})", a[0]) };
+                }
+                // (checked and converted by its type: see `json_fn`)
+                if let Some(Callee::Json(dec)) = self.info.callee.get(&f.id).cloned() {
+                    let t = subst_ty(&self.info.json[&f.id], &self.subst);
+                    return if dec {
+                        let d = self.json_fn(&t, true).unwrap();
+                        format!("{}({}, {d})", self.helper_name("$json_decode"), a[0])
+                    } else {
+                        match self.json_fn(&t, false) {
+                            Some(e) => format!("JSON.stringify({e}({}))", a[0]),
+                            None => format!("JSON.stringify({})", a[0]),
+                        }
+                    };
+                }
+                // (JS's own Map / Set: a pair is a `[k, v]` array, as a tuple is)
+                if let Some(Callee::Coll(set, c)) = self.info.callee.get(&f.id).cloned() {
+                    let ctor = if set { "Set" } else { "Map" };
+                    return if c == "new" { format!("new {ctor}()") } else { format!("new {ctor}({})", a[0]) };
                 }
                 if let EK::Var(n) | EK::Path(_, n) = &f.kind {
                     match self.info.callee.get(&f.id).cloned() {
@@ -1208,6 +1487,7 @@ impl<'a> Js<'a> {
                         self.helpers.insert(h);
                         format!("{h}({recv}, {})", self.callback(&args[0], 1))
                     }
+                    Some(B::Std(on, m)) => self.std_method(e, on, m, recv, args),
                     None => {
                         let a: Vec<String> = self.seq(&args.iter().collect::<Vec<_>>());
                         format!("{recv}.{m}({})", a.join(", "))
@@ -1255,7 +1535,7 @@ impl<'a> Js<'a> {
             }
             EK::Block(_, Some(t)) => self.expr(t),
             EK::Block(_, None) => "undefined".into(),
-            EK::Match(..) | EK::Assign(..) | EK::While(..) | EK::For(..) | EK::Break | EK::Continue => unreachable!(),
+            EK::Match(..) | EK::Assign(..) | EK::While(..) | EK::For(..) | EK::Loop(_) | EK::Break | EK::Continue | EK::Return(_) => unreachable!(),
             EK::Closure(ps, body) => {
                 let saved = (self.gen_, std::mem::take(&mut self.conts), std::mem::take(&mut self.dconts), std::mem::replace(&mut self.arm_tail, false));
                 self.gen_ = false;
@@ -1467,6 +1747,179 @@ impl<'a> Js<'a> {
             _ => unreachable!(),
         };
         let _ = write!(self.eq_defs, "function {f}(a, b) {{\n{body}}}\n\n");
+        Some(f)
+    }
+
+    fn helper_name(&mut self, h: &'static str) -> &'static str {
+        self.helpers.insert(h);
+        h
+    }
+
+    /// The JS value of `t` is JSON's as it is (encoding it needs no conversion): no Option, Map or Set in it
+    fn json_plain(&self, t: &Ty, seen: &mut Vec<Ty>) -> bool {
+        use crate::check::subst_named;
+        match t {
+            Ty::Array(e) => self.json_plain(e, seen),
+            Ty::Tuple(ts) => ts.iter().all(|t| self.json_plain(t, seen)),
+            Ty::Named(n, _) if n == "Option" || n == "Map" || n == "Set" => false,
+            Ty::Named(n, targs) => {
+                if seen.contains(t) {
+                    return true;
+                }
+                let (params, fields): (Vec<String>, Vec<Ty>) = match self.info.records.get(n) {
+                    Some(r) => (r.params.clone(), r.fields.iter().map(|f| f.1.clone()).collect()),
+                    None => {
+                        let e = &self.info.enums[n];
+                        (e.params.clone(), e.variants.iter().flat_map(|v| v.1.iter().cloned()).collect())
+                    }
+                };
+                let m: HashMap<String, Ty> = params.into_iter().zip(targs.iter().cloned()).collect();
+                seen.push(t.clone());
+                let ok = fields.iter().all(|f| self.json_plain(&subst_named(f, &m), seen));
+                seen.pop();
+                ok
+            }
+            _ => true,
+        }
+    }
+
+    /// The converter of values of `t` from JSON's (`dec`: it checks the value is `t`'s, and throws where it is not,
+    /// with the path) or to JSON's (None: the value is JSON's as it is). A record is an object of its fields
+    /// (others are ignored), an `Option` is `null` or the value (a field that is not there is `None`), an enum
+    /// without data a string, one with data its JS value (`{ TAG, _0, .. }`), a `Map` with String keys an object
+    /// (other keys: an array of `[key, value]` pairs), a `Set` an array
+    fn json_fn(&mut self, t: &Ty, dec: bool) -> Option<String> {
+        use crate::check::subst_named;
+        if let Some(f) = self.jsons.get(&(t.clone(), dec)) {
+            return Some(f.clone());
+        }
+        let prim = match t {
+            Ty::I32 => Some("$dj_i32"),
+            Ty::U32 => Some("$dj_u32"),
+            Ty::F32 => Some("$dj_f32"),
+            Ty::F64 => Some("$dj_f64"),
+            Ty::Str => Some("$dj_str"),
+            Ty::Bool => Some("$dj_bool"),
+            _ => None,
+        };
+        if let Some(h) = prim {
+            if dec {
+                self.helpers.insert("$json_fail");
+            }
+            return dec.then(|| self.helper_name(h).to_string());
+        }
+        if !dec && self.json_plain(t, &mut vec![]) {
+            return None;
+        }
+        self.helpers.insert("$json_fail");
+        // (named before its body is written: a recursive type's converter calls itself)
+        let f = format!("${}j{}", if dec { "d" } else { "e" }, self.jsons.len() + 1);
+        self.jsons.insert((t.clone(), dec), f.clone());
+        // (`x` converted by `t`, with the path `p`)
+        let conv = |js: &mut Js, t: &Ty, x: &str, p: &str| match js.json_fn(t, dec) {
+            Some(g) if dec => format!("{g}({x}, {p})"),
+            Some(g) => format!("{g}({x})"),
+            None => x.to_string(),
+        };
+        let object = "  if (v === null || typeof v !== \"object\" || Array.isArray(v)) $json_fail(\"an object\", v, p);\n";
+        let array = |what: &str| format!("  if (!Array.isArray(v)) $json_fail(\"{what}\", v, p);\n");
+        let body = match t {
+            Ty::Array(e) if dec => {
+                let c = conv(self, e, "x", "p + \"[\" + i + \"]\"");
+                format!("{}  return v.map((x, i) => {c});\n", array("an array"))
+            }
+            Ty::Array(e) => format!("  return v.map((x) => {});\n", conv(self, e, "x", "")),
+            Ty::Tuple(ts) => {
+                let cs: Vec<String> = ts.iter().enumerate().map(|(k, t)| conv(self, t, &format!("v[{k}]"), &format!("p + \"[{k}]\""))).collect();
+                if dec {
+                    format!("  if (!Array.isArray(v) || v.length !== {}) $json_fail(\"an array of {}\", v, p);\n  return [{}];\n", ts.len(), ts.len(), cs.join(", "))
+                } else {
+                    format!("  return [{}];\n", cs.join(", "))
+                }
+            }
+            Ty::Named(n, a) if n == "Option" && a.len() == 1 => {
+                let c = conv(self, &a[0], "v", "p");
+                if dec {
+                    format!("  return v === null || v === undefined ? {{ TAG: \"None\" }} : {{ TAG: \"Some\", _0: {c} }};\n")
+                } else {
+                    let c = conv(self, &a[0], "v._0", "");
+                    format!("  return v.TAG === \"None\" ? null : {c};\n")
+                }
+            }
+            Ty::Named(n, a) if n == "Map" && a.len() == 2 && !self.info.records.contains_key(n) && !self.info.enums.contains_key(n) => {
+                let (k, v) = (&a[0], &a[1]);
+                if *k == Ty::Str {
+                    if dec {
+                        let c = conv(self, v, "v[k]", "p + \".\" + k");
+                        format!("{object}  const m = new Map();\n  for (const k of Object.keys(v)) m.set(k, {c});\n  return m;\n")
+                    } else {
+                        format!("  return Object.fromEntries(Array.from(v, ([k, x]) => [k, {}]));\n", conv(self, v, "x", ""))
+                    }
+                } else if dec {
+                    let ck = conv(self, k, "e[0]", "p + \"[\" + i + \"][0]\"");
+                    let cv = conv(self, v, "e[1]", "p + \"[\" + i + \"][1]\"");
+                    format!(
+                        "{}  return new Map(v.map((e, i) => {{\n    if (!Array.isArray(e) || e.length !== 2) $json_fail(\"a [key, value] pair\", e, p + \"[\" + i + \"]\");\n    return [{ck}, {cv}];\n  }}));\n",
+                        array("an array of [key, value] pairs")
+                    )
+                } else {
+                    format!("  return Array.from(v, ([k, x]) => [{}, {}]);\n", conv(self, k, "k", ""), conv(self, v, "x", ""))
+                }
+            }
+            Ty::Named(n, a) if n == "Set" && a.len() == 1 && !self.info.records.contains_key(n) && !self.info.enums.contains_key(n) => {
+                if dec {
+                    let c = conv(self, &a[0], "x", "p + \"[\" + i + \"]\"");
+                    format!("{}  return new Set(v.map((x, i) => {c}));\n", array("an array"))
+                } else {
+                    format!("  return Array.from(v, (x) => {});\n", conv(self, &a[0], "x", ""))
+                }
+            }
+            Ty::Named(n, targs) if self.info.records.contains_key(n) => {
+                let r = &self.info.records[n];
+                let m: HashMap<String, Ty> = r.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                let fields: Vec<(String, Ty)> = r.fields.iter().map(|(f, t)| (f.clone(), subst_named(t, &m))).collect();
+                let cs: Vec<String> = fields
+                    .iter()
+                    .map(|(f, t)| {
+                        let c = conv(self, t, &own(dec, f), &format!("p + {}", js_str(&format!(".{f}"))));
+                        format!("{}: {c}", json_key(f))
+                    })
+                    .collect();
+                format!("{}  return {{ {} }};\n", if dec { object } else { "" }, cs.join(", "))
+            }
+            Ty::Named(n, targs) => {
+                let n = n.clone();
+                let e = &self.info.enums[&n];
+                let m: HashMap<String, Ty> = e.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                let vs: Vec<(String, Vec<Ty>)> = e.variants.iter().map(|(v, fs)| (v.clone(), fs.iter().map(|t| subst_named(t, &m)).collect())).collect();
+                if self.string_enum(&n) {
+                    let tags: Vec<String> = vs.iter().map(|(v, _)| self.tag_js(&n, v)).collect();
+                    format!("  if (typeof v !== \"string\" || ![{}].includes(v)) $json_fail({}, v, p);\n  return v;\n", tags.join(", "), js_str(&format!("one of {}", tags.join(", "))))
+                } else {
+                    let key = self.tag_key(&n);
+                    let mut s = if dec { object.to_string() } else { String::new() };
+                    let _ = writeln!(s, "  switch ({}) {{", own(dec, &key));
+                    for (v, fs) in &vs {
+                        let tag = self.tag_js(&n, v);
+                        let mut parts = vec![format!("{}: {tag}", json_key(&key))];
+                        for (k, ft) in fs.iter().enumerate() {
+                            let fk = self.field_key(&n, v, k);
+                            let c = conv(self, ft, &own(dec, &fk), &format!("p + {}", js_str(&format!(".{fk}"))));
+                            parts.push(format!("{}: {c}", json_key(&fk)));
+                        }
+                        let _ = writeln!(s, "    case {tag}: return {{ {} }};", parts.join(", "));
+                    }
+                    s.push_str("  }\n");
+                    if dec {
+                        let _ = writeln!(s, "  $json_fail({}, {}, p + {});", js_str(&format!("a variant of {n}")), own(dec, &key), js_str(&format!(".{key}")));
+                    }
+                    s
+                }
+            }
+            _ => unreachable!(),
+        };
+        let ps = if dec { "v, p" } else { "v" };
+        let _ = write!(self.eq_defs, "function {f}({ps}) {{\n{body}}}\n\n");
         Some(f)
     }
 
@@ -1748,10 +2201,10 @@ fn assigns_local(e: &Expr) -> bool {
     }
 }
 
-/// A `?` in `e` that is not inside a closure of its own (it returns from the function `e` is in)
+/// A `?` or a `return` in `e` that is not inside a closure of its own (it returns from the function `e` is in)
 pub fn has_try(e: &Expr) -> bool {
     match &e.kind {
-        EK::Try(_) => true,
+        EK::Try(_) | EK::Return(_) => true,
         EK::Closure(..) | EK::Async(_) => false,
         _ => crate::check::subexprs(e).into_iter().any(has_try),
     }
@@ -1771,7 +2224,8 @@ fn loop_exit(e: &Expr) -> Option<Pos> {
     fn walk(e: &Expr) -> Option<Pos> {
         match &e.kind {
             EK::Break | EK::Continue => Some(e.pos),
-            EK::While(..) | EK::For(..) | EK::Closure(..) => None,
+            EK::While(..) | EK::For(..) | EK::Loop(_) | EK::Closure(..) => None,
+            EK::Return(Some(x)) => walk(x),
             EK::Block(stmts, tail) => stmts
                 .iter()
                 .find_map(|s| match s {
@@ -1779,7 +2233,7 @@ fn loop_exit(e: &Expr) -> Option<Pos> {
                 })
                 .or_else(|| tail.as_deref().and_then(walk)),
             EK::If(c, t, el) => walk(c).or_else(|| walk(t)).or_else(|| el.as_deref().and_then(walk)),
-            EK::Match(s, arms) => walk(s).or_else(|| arms.iter().find_map(|a| walk(&a.1))),
+            EK::Match(s, arms) => walk(s).or_else(|| arms.iter().find_map(|a| a.guard.as_ref().and_then(walk).or_else(|| walk(&a.body)))),
             EK::Assign(_, x) | EK::Un(_, x) | EK::Field(x, _) | EK::Cast(x, _) | EK::Try(x) | EK::Await(x) => walk(x),
             EK::Bin(_, a, b) | EK::Index(a, b) => walk(a).or_else(|| walk(b)),
             EK::Call(f, a) => walk(f).or_else(|| a.iter().find_map(walk)),
@@ -1877,6 +2331,8 @@ pub fn ts(t: &Ty) -> String {
         Ty::Tuple(ts_) => format!("readonly [{}]", ts_.iter().map(ts).collect::<Vec<_>>().join(", ")),
         Ty::Fn(a, r) => format!("({}) => {}", a.iter().enumerate().map(|(k, t)| format!("a{k}: {}", ts(t))).collect::<Vec<_>>().join(", "), ts(r)),
         Ty::Named(n, a) if a.is_empty() => n.clone(),
+        // (the built-in collections: JS's own, read-only to TS as they are immutable here)
+        Ty::Named(n, a) if (n == "Map" && a.len() == 2) || (n == "Set" && a.len() == 1) => format!("Readonly{n}<{}>", a.iter().map(ts).collect::<Vec<_>>().join(", ")),
         Ty::Named(n, a) => format!("{n}<{}>", a.iter().map(ts).collect::<Vec<_>>().join(", ")),
         Ty::Param(p) => p.clone(),
         Ty::Var(_) => "unknown".into(),
@@ -2097,6 +2553,17 @@ pub fn extern_check(items: &[Item], info: &Info) -> Option<(String, Vec<(usize, 
 }
 
 /// The name of the shared runtime module (`zsc-runtime.js` and `.d.ts`, written next to the modules)
+/// A property name in an object literal the JSON converters build: `__proto__` as a computed key, so it is an own
+/// property, not the object's prototype
+fn json_key(f: &str) -> String {
+    if f == "__proto__" { format!("[{}]", js_str(f)) } else { js_str(f) }
+}
+
+/// The JS of the helper `name` (the wasm glue shares some: `$to_f64`)
+pub fn helper_code(name: &str) -> &'static str {
+    HELPERS.iter().find(|h| h.0 == name).map_or("", |h| h.1)
+}
+
 pub const RUNTIME: &str = "zsc-runtime";
 /// The first line of the shared runtime file: how zsc tells it from a module of the same name.
 pub const RUNTIME_HEADER: &str = "// generated by zsc: the runtime the modules share (helpers, and the constructors of the numeric brands)\n";

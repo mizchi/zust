@@ -1,0 +1,16 @@
+// tests/examples.rs patterns_in_js: a record destructured by `let` and `if let`, `|` binding a name at different
+// places, string alternatives, a guard with `?`
+type User = { name: String, age: i32, email: Option<String> }
+enum Ev { Click(i32, i32), Key(String), Move(i32, i32, i32) }
+fn greet(u: User) -> String { let User { name, age, .. } = u; `${name}:${age}` }
+fn mail(u: User) -> String { if let User { email: Some(e), .. } = u { e } else { "-" } }
+fn x_of(e: Ev) -> i32 { match e { Click(x, _) | Move(_, x, _) => x, Key(_) => -1 } }
+fn cmd(s: String) -> String { match s { "q" | "quit" => "exit", "h" | "help" | "?" => "help", other if other.starts_with(":") => "colon", _ => "?" } }
+fn checked(o: Option<i32>, lim: Option<i32>) -> Option<String> {
+  match o { Some(n) if n > lim? => Some("over"), Some(n) => Some(n.to_string()), None => None }
+}
+export fn run() -> String {
+  let u = User { name: "ann", age: 30, email: Some("a@x") };
+  let v = User { name: "bo", age: 4, email: None };
+  `${greet(u)} ${mail(u)} ${mail(v)} ${x_of(Click(1, 2))} ${x_of(Move(7, 8, 9))} ${x_of(Key("k"))} ${cmd("quit")} ${cmd("?")} ${cmd(":w")} ${cmd("x")} ${checked(Some(5), Some(3)).unwrap_or("none")} ${checked(Some(2), Some(3)).unwrap_or("none")} ${checked(Some(2), None).unwrap_or("none")}`
+}

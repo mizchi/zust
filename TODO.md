@@ -307,9 +307,14 @@ test by test (`cratebench/test_result.md`). fnv, rustc-hash, cfg-if and adler2 m
 
 ## Tooling
 
+- `tests/selfhost.sh`: rustc builds every step's combined source, but zustc compiles only the `link` and `minclif`
+  steps (the script stops at `lexer`). zustc's own sources use what zustc does not support yet: `[u8]::starts_with`
+  and `Option::get_or_insert` (lexer.rs), `as_deref` on an `Option<Box<Vec<_>>>` (parse.rs `Spos::entries`),
+  `str::get(..2)`, `String::ends_with` with a closure, `std::process::Child` (pm.rs), and maybe more behind these.
+  The `enc` step's own `main` stops at `"x".into()` in a struct literal with `..Default::default()`.
 - `tests/selfhost_compiler.sh` fails on main: rustc does not build the combined source
-  (`tests/selfhost/build_compiler.py`), with 6 errors E0277 "can't compare `Ident` with `&str`" (e.g.
-  `*i == *l.as_str()`).
+  (`tests/selfhost/build_compiler.py`), which lacks the modules `pm`, `test_harness` and session's `dead` /
+  `dyncompat`.
 - `bench/rust_ui.py --check` checks nothing without `--baseline`: it exits 0 whatever passes. CI runs
   `python3 bench/rust_ui.py --baseline bench/rust_ui_passing.txt --check`, which compares test by test and against
   `bench/rust_ui_ratchet.txt`; run that locally before pushing a change to the compiler.

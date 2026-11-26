@@ -1,0 +1,3 @@
+// expect: non-exhaustive match: `Neg` not covered
+enum Ex { Lit(i32), Neg(Ex), Add(Ex, Ex) }
+fn simp(e: Ex) -> i32 { match e { Neg(Lit(n)) => -n, Lit(n) => n, Add(a, b) => 0 } }
