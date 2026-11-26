@@ -226,17 +226,30 @@ fn plan_keeping(g: &Graph, o: &BuildOpts, mut errs: Option<&mut Vec<(String, Str
                     lib.name, g.pkgs[other].m.name, g.pkgs[other].m.version, pk.name, pk.version
                 ));
             }
-            let src = std::fs::read_to_string(&lib.path).map_err(|e| format!("{}: {e}", lib.path.display()))?;
+            // (a check: one whose root cannot be read, or that does not build, is its crate's error; it is not a stub
+            //  then, whose uses would be errors of their own)
+            let mut failed = false;
+            let src = match std::fs::read_to_string(&lib.path) {
+                Ok(t) => t,
+                Err(e) => {
+                    let e = format!("{}: {e}", lib.path.display());
+                    match errs.as_mut() {
+                        Some(v) => {
+                            v.push((lib.name.clone(), e));
+                            failed = true;
+                            String::new()
+                        }
+                        None => return Err(e),
+                    }
+                }
+            };
             // (its root with its features: `#[cfg_attr(feature = "x", proc_macro_attribute)]`)
             let cfg = zustc::cfg::CfgSet { features: r.nodes[&pn].features.iter().cloned().collect(), debug_assertions: !o.release, ..Default::default() };
             let m = proc_macro_stub::macros_of(&zustc::cfg::strip(&src, &cfg).unwrap_or(src));
             let stub = stub_dir.join(format!("{}.rs", lib.name));
             // (its macros run when rustc builds it and the toolchain's proc-macro server is there: zustc asks the
             //  server. Otherwise its uses are errors, below)
-            // (a check: one that does not build is its crate's error; it is not a stub then, whose uses would be
-            //  errors of their own)
-            let mut failed = false;
-            let dylib = match run_pm.then(|| bs.proc_macro_dylib(pn)) {
+            let dylib = match (run_pm && !failed).then(|| bs.proc_macro_dylib(pn)) {
                 Some(Ok(d)) => Some(d),
                 Some(Err(e)) => match errs.as_mut() {
                     Some(v) => {

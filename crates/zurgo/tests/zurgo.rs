@@ -473,14 +473,23 @@ fn check_goes_on_past_a_crate_the_plan_cannot_take() {
         ("pm/src/lib.rs", "extern crate proc_macro;\nuse proc_macro::TokenStream;\n#[proc_macro_attribute]\npub fn traced(_a: TokenStream, i: TokenStream) -> TokenStream {\n    let x: u8 = \"no\";\n    i\n}\n"),
     ]);
     let (ok, _, err) = zurgo(&["check"], &m, &t);
-    for want in [
+    let pm_rest = [
         "error: crate `pm`: ".to_string(),
         rest[0].clone(),
         "warning: crate `util` not checked: its dependency `pm` could not be read or expanded".to_string(),
         "warning: crate `app` not checked".to_string(),
         "error: 2 errors in 2 crates".to_string(),
-    ] {
-        assert!(!ok && err.contains(&want), "missing `{want}`:\n{err}");
+    ];
+    for want in &pm_rest {
+        assert!(!ok && err.contains(want.as_str()), "missing `{want}`:\n{err}");
+    }
+    // (a proc-macro crate whose root cannot be read (not UTF-8), with or without the server)
+    std::fs::write(d.join("pm/src/lib.rs"), [0xffu8, 0xfe, 0x0a]).unwrap();
+    for zurgo in [self::zurgo, zurgo_no_pm] {
+        let (ok, _, err) = zurgo(&["check"], &m, &t);
+        for want in &pm_rest {
+            assert!(!ok && err.contains(want.as_str()), "missing `{want}`:\n{err}");
+        }
     }
 }
 
