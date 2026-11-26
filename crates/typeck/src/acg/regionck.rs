@@ -886,7 +886,7 @@ pub fn fnmut_escape(body: &Expr, caps: &[&str]) -> Option<Sp> {
     fn returns(st: &Stmt, caps: &[&str], depth: u32) -> Option<Sp> {
         match st {
             Stmt::Expr(e, _) => match strip(e) {
-                Expr::Return(Some(v)) => value(v, caps, depth + 1),
+                Expr::Return(Some(v), _) => value(v, caps, depth + 1),
                 _ => None,
             },
             _ => None,
@@ -898,7 +898,7 @@ pub fn fnmut_escape(body: &Expr, caps: &[&str]) -> Option<Sp> {
 /// e has no value: it panics, returns, breaks or continues (as written)
 fn diverges(e: &Expr) -> bool {
     match strip(e) {
-        Expr::Return(_) | Expr::Break(..) | Expr::Continue(..) => true,
+        Expr::Return(..) | Expr::Break(..) | Expr::Continue(..) => true,
         Expr::Macro(p, _, _) => p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")),
         Expr::Block(_, _, b) => match b.stmts.last() {
             Some(Stmt::Expr(t, _)) => diverges(t),

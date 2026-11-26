@@ -4453,7 +4453,7 @@ fn first_unreachable(b: &crate::parse::Block, user_process: bool) -> Option<(cra
     USER_PROCESS.with(|c| c.set(user_process));
     fn diverges(e: &Expr) -> bool {
         match e {
-            Expr::Return(_) | Expr::Break(..) | Expr::Continue(..) => true,
+            Expr::Return(..) | Expr::Break(..) | Expr::Continue(..) => true,
             Expr::Macro(p, _, _) => matches!(p.segs.last().map(|s| s.name.as_str()), Some("panic" | "unreachable" | "todo" | "unimplemented")),
             Expr::Loop(_, body) => !format!("{body:?}").contains("Break("),
             Expr::Paren(x) | Expr::Unary(_, x, _) | Expr::Ref(_, x) | Expr::Cast(x, _) | Expr::Field(x, _, _) => diverges(x),

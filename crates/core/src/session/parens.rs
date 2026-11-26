@@ -74,10 +74,9 @@ fn lead(e: &Expr) -> Option<(Pos, Vec<&'static str>)> {
         Expr::Ref(m, x) => with(x, if *m { &["mut", "&"] } else { &["&"] }),
         Expr::If(c, ..) => with(c, &["if"]),
         Expr::Match(x, _) => with(x, &["match"]),
-        Expr::Return(Some(x)) => with(x, &["return"]),
         Expr::Call(x, _) | Expr::MethodCall(x, ..) | Expr::Field(x, ..) | Expr::Index(x, ..) | Expr::Cast(x, _) | Expr::Try(x) | Expr::Assign(x, _) | Expr::AssignOp(_, x, ..) | Expr::Range(Some(x), ..) => lead(x),
         Expr::Unary(_, _, s) | Expr::Binary(_, _, _, s) | Expr::Macro(_, _, s) => Some((s.start, vec![])),
-        Expr::Lit(_, p) | Expr::Closure(.., p) => Some((*p, vec![])),
+        Expr::Lit(_, p) | Expr::Closure(.., p) | Expr::Return(_, p) => Some((*p, vec![])),
         Expr::Path(None, p) | Expr::Struct(p, ..) => Some((p.pos, vec![])),
         // (at the label, when there is one)
         Expr::Break(l, _, p) => Some((*p, if l.is_some() { vec!["break"] } else { vec![] })),
@@ -103,7 +102,7 @@ fn struct_lit(e: &Expr) -> bool {
 fn ends_with_brace(e: &Expr) -> bool {
     match e {
         Expr::Struct(..) | Expr::Block(..) | Expr::Const(..) | Expr::If(..) | Expr::Match(..) | Expr::Loop(..) | Expr::While(..) | Expr::For(..) | Expr::Macro(..) => true,
-        Expr::Binary(_, _, r, _) | Expr::Unary(_, r, _) | Expr::Ref(_, r) | Expr::RawRef(_, r) | Expr::Assign(_, r) | Expr::AssignOp(_, _, r, _) | Expr::Closure(_, _, _, r, _) | Expr::Range(_, Some(r), _) | Expr::Return(Some(r)) | Expr::Break(_, Some(r), _) => ends_with_brace(r),
+        Expr::Binary(_, _, r, _) | Expr::Unary(_, r, _) | Expr::Ref(_, r) | Expr::RawRef(_, r) | Expr::Assign(_, r) | Expr::AssignOp(_, _, r, _) | Expr::Closure(_, _, _, r, _) | Expr::Range(_, Some(r), _) | Expr::Return(Some(r), _) | Expr::Break(_, Some(r), _) => ends_with_brace(r),
         _ => false,
     }
 }
@@ -145,7 +144,7 @@ fn kept(e: &Expr, at: At) -> bool {
     loop {
         x = match x {
             Expr::Unary(_, y, _) | Expr::Binary(_, _, y, _) | Expr::AssignOp(_, _, y, _) | Expr::Assign(_, y) | Expr::Ref(_, y) | Expr::RawRef(_, y) => y,
-            Expr::Return(_) | Expr::Closure(..) | Expr::Macro(..) => return true,
+            Expr::Return(..) | Expr::Closure(..) | Expr::Macro(..) => return true,
             Expr::Break(_, v, _) => return v.as_deref().is_some_and(|v| matches!(v, Expr::Block(..) | Expr::Const(..) | Expr::Path(..) | Expr::Struct(..))),
             Expr::Range(_, Some(r), _) => return matches!(**r, Expr::Block(..) | Expr::Const(..)),
             _ => return false,
@@ -213,7 +212,7 @@ fn delims(e: &Expr, out: &mut Found) {
         Expr::While(_, c, _) => cond(c, At::While, out),
         Expr::For(_, _, x, _) => check(x, At::For, out),
         Expr::Match(x, _) => check(x, At::Match, out),
-        Expr::Return(Some(v)) => check(v, At::Return, out),
+        Expr::Return(Some(v), _) => check(v, At::Return, out),
         // (`break 'a ({ .. })`: without them the block would be the loop's label's)
         Expr::Break(l, Some(v), _) if !(l.is_some() && matches!(&**v, Expr::Paren(i) if matches!(**i, Expr::Block(..)))) => check(v, At::Break, out),
         Expr::Index(_, i, _) => check(i, At::Index, out),
@@ -278,7 +277,7 @@ fn expr(e: &Expr, out: &mut Found) {
             expr(c, out);
             block(b, out);
         }
-        Expr::Break(_, Some(v), _) | Expr::Return(Some(v)) => expr(v, out),
+        Expr::Break(_, Some(v), _) | Expr::Return(Some(v), _) => expr(v, out),
         Expr::Tuple(xs) | Expr::Array(xs) => xs.iter().for_each(|x| expr(x, out)),
         Expr::Struct(_, fs, base) => {
             fs.iter().for_each(|f| expr(&f.1, out));
