@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795728461491,
+  "lastUpdate": 1795730275966,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -61850,6 +61850,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 38.264,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "edee429d5a416a428482749611deeac1a2e44505",
+          "message": "prelude: std names the surveyed crates need, first part (#250) (#279)\n\nAdds to the prelude the std items that stopped the most surveyed crates:\n- thread: current, park/unpark, id, name, ThreadId, JoinHandle::thread; green threads get a park token\n- Once: call_once, call_once_force, OnceState, is_completed\n- AsMut<[T]> for arrays, slices and Vec, as a bound and as a method; the target comes from the expected type first\n- Layout, LayoutError and std::alloc::{alloc, alloc_zeroed, realloc, dealloc, handle_alloc_error}\n- Infallible: Error + Display; Extend, which a program can implement (impls matched by their argument)\n- Condvar, ControlFlow, iter::Repeat\n\nA program that uses none of these gets the same prelude as before. Their impls are selected only together with their type.\n\nWhere rustc's program would hang (a park nothing wakes, a Condvar nobody notifies, a re-lock of a held Mutex, a recursive call_once), zustc panics with \"deadlock: every thread is waiting\".\n\nFixes found along the way:\n- a program's own enum variants win over a prelude enum's, except where only the prelude enum's variants are imported;\n- finish_non_exhaustive's {:#?} output;\n- __p_ / __u_ prefixes are dropped in Debug output only where the compiler added them.\n\nSurvey: linux-raw-sys, rand_core and lazy_static build. cc, crossbeam-utils, smallvec and once_cell move on to their next errors.\n\nLeftovers from the review: #282. Part of #250.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T06:51:36+09:00",
+          "tree_id": "edf876ab4522ad267e168457ea916744441e5255",
+          "url": "https://github.com/mizchi/zust/commit/edee429d5a416a428482749611deeac1a2e44505"
+        },
+        "date": 1795730275052,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 176.394,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.836,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 23.941,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 56.935,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.492,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 129.846,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 797.558,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 795.771,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.898,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 84.097,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 257.344,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.637,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 611.56,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3925.82,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 69.388,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 113.028,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 52.978,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 68.027,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 124.619,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 178.206,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 51.273,
             "unit": "ms"
           }
         ]
