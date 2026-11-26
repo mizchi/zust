@@ -1,0 +1,8 @@
+# Lists that parallel branches append to: a merge takes the lines of both sides instead of a conflict.
+# - rust_ui_passing.txt: one test a line, never removed. A test both sides add is one line; the order is restored by
+#   the next --write-baseline. --check reads it as a set.
+#   (Not rust_ui_accidental.txt: a line one side removes would come back, and its test would leave the counts.)
+# - rust_ui_ratchet.txt: one kind a line. When both sides raise a kind, both lines stay, and bench/rust_ui.py reads
+#   the higher one (it never lowers the ratchet); --write-baseline writes one line a kind again.
+bench/rust_ui_passing.txt merge=union
+bench/rust_ui_ratchet.txt merge=union

@@ -1,0 +1,3 @@
+// expect: unterminated block comment
+fn main() -> i32 { 1 }
+/* not closed

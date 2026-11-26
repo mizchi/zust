@@ -1,25 +1,25 @@
-//! クロージャの解析 (src/closure.rs と同じこと) を、自前の構文木 (src/parse.rs) の上で行う。
-//! syn から離れるための移植の 1 つ目: 本体の中のクロージャ (前順・マクロの引数の中も)、自由変数、
-//! キャプチャを値として使うか。tests/ast_closure.rs が syn 版と同じ結果になることを確かめる。
-//! 外部クレートに依存しないので zustc 自身でもコンパイルできる。
+//! Closure analysis (what src/closure.rs does), done on our own syntax tree (src/parse.rs).
+//! The first step of the port off syn: closures in a body (preorder, in macro arguments too), free variables,
+//! and whether a capture is used by value. tests/ast_closure.rs checks that the results match the syn version.
+//! It depends on no external crate, so zustc itself can compile it.
 
 use crate::parse::{Block, Expr, Pat, Path, Pos, Stmt, TokKind, Ty, parse_expr, parse_expr_at, pos_at, tokenize};
 
-/// マクロの引数 (`( a , b )` のテキスト) を `,` 区切りの式の列として読む。読めなければ None
+/// Reads a macro's arguments (the text `( a , b )`) as `,`-separated expressions. None if they do not parse
 pub fn macro_args(g: &str) -> Option<Vec<Expr>> {
     macro_args_at(g, Pos::default())
 }
 
-/// macro_args と同じ。base は g (開き括弧) のソース上の位置: 読んだ式の位置を元のソースの位置にする
+/// As macro_args; base is the source position of g (its opening bracket), so expressions get source positions
 pub fn macro_args_at(g: &str, base: Pos) -> Option<Vec<Expr>> {
     let inner = strip_delims(g)?;
-    // (inner は g の 1 文字目 (開き括弧) の次から)
+    // (inner starts after g's first character (the opening bracket))
     let ioff = g.find(inner).unwrap_or(1);
     let mut out = Vec::new();
     if inner.trim().is_empty() {
         return Some(out);
     }
-    // (`,` で分けてから式として読む: 括弧の中の `,` は分けない)
+    // (split at `,`, then parse as expressions: a `,` inside brackets does not split)
     let parts = split_top_commas_at(inner)?;
     let mut i = 0;
     while i < parts.len() {
@@ -60,7 +60,7 @@ fn strip_delims(g: &str) -> Option<&str> {
     Some(&t[1..t.len() - 1])
 }
 
-/// split_top_commas と同じで、各部分の s の中の byte の位置も返す
+/// As split_top_commas, also returning each part's byte offset in s
 fn split_top_commas_at(s: &str) -> Option<Vec<(usize, String)>> {
     let toks = tokenize(s).ok()?;
     let mut parts = Vec::new();
@@ -81,7 +81,7 @@ fn split_top_commas_at(s: &str) -> Option<Vec<(usize, String)>> {
     Some(parts)
 }
 
-/// トップレベルの `,` で分ける (トークン単位: 文字列・文字の中の `,` は数えない)
+/// Splits at top-level `,` (by tokens: a `,` inside a string or char does not count)
 fn split_top_commas(s: &str) -> Option<Vec<String>> {
     let toks = tokenize(s).ok()?;
     let mut parts = Vec::new();
@@ -102,12 +102,12 @@ fn split_top_commas(s: &str) -> Option<Vec<String>> {
     Some(parts)
 }
 
-/// マクロの引数のうちクロージャを含むもの (`|` の記号があるときだけ)。`vec![x; n]` も
+/// The macro arguments that contain closures (only when a `|` token is present). `vec![x; n]` too
 pub fn macro_exprs(g: &str) -> Vec<Expr> {
     macro_exprs_at(g, Pos::default())
 }
 
-/// macro_exprs と同じ。base は g のソース上の位置
+/// As macro_exprs. base is g's position in the source
 pub fn macro_exprs_at(g: &str, base: Pos) -> Vec<Expr> {
     let Ok(toks) = tokenize(g) else { return Vec::new() };
     if !toks.iter().any(|t| t.kind == TokKind::Punct && t.text == "|") {
@@ -117,20 +117,20 @@ pub fn macro_exprs_at(g: &str, base: Pos) -> Vec<Expr> {
         return es;
     }
     let Some(inner) = strip_delims(g) else { return Vec::new() };
-    // (`matches!(e, PAT if guard)`: 式と guard の中のクロージャ)
+    // (`matches!(e, PAT if guard)`: the closures in the expression and the guard)
     if let Some((e, _, guard)) = matches_parts(g, base) {
         let mut out = vec![e];
         out.extend(guard);
         return out;
     }
-    // (`vec![x; n]`: 配列の式として、元の位置で読む)
+    // (`vec![x; n]`: parsed as an array expression, at the original position)
     match parse_expr_at(&format!("[{inner}]"), base) {
         Ok(e) => vec![e],
         Err(_) => Vec::new(),
     }
 }
 
-/// `matches!(e, PAT if guard)` の (e, PAT, guard)。型推論とコード生成が同じ構文木 (同じ位置) で読むための共通の読み方
+/// (e, PAT, guard) of `matches!(e, PAT if guard)`: one reading for type inference and codegen (same positions)
 pub fn matches_parts(g: &str, base: Pos) -> Option<(Expr, Pat, Option<Expr>)> {
     let inner = strip_delims(g)?;
     let ioff = g.find(inner).unwrap_or(1);
@@ -144,7 +144,7 @@ pub fn matches_parts(g: &str, base: Pos) -> Option<(Expr, Pat, Option<Expr>)> {
     Some((e, p, guard))
 }
 
-/// `vec![x; n]` の x と n (macro_exprs_at と同じ読み方: 位置も同じになる)
+/// The x and n of `vec![x; n]` (read as macro_exprs_at reads them: the positions match too)
 pub fn vec_repeat_parts(g: &str, base: Pos) -> Option<(Expr, Expr)> {
     let inner = strip_delims(g)?;
     match parse_expr_at(&format!("[{inner}]"), base).ok()? {
@@ -153,7 +153,7 @@ pub fn vec_repeat_parts(g: &str, base: Pos) -> Option<(Expr, Expr)> {
     }
 }
 
-/// 子の式を順に f に渡す (ブロック・文の中も。アイテムには入らない)
+/// Passes the child expressions to f in order (inside blocks and statements too, but not into items)
 fn each_child(e: &Expr, f: &mut dyn FnMut(&Expr)) {
     match e {
         Expr::Lit(_, _) | Expr::Path(..) | Expr::Continue(..) => {}
@@ -248,7 +248,7 @@ fn block_exprs(b: &Block, f: &mut dyn FnMut(&Expr)) {
     }
 }
 
-/// 本体の中のクロージャ式 (前順。マクロの引数の中も)
+/// The closure expressions in a body (in preorder, macro arguments included)
 pub fn closures_of(b: &Block) -> Vec<Expr> {
     let mut out = Vec::new();
     block_exprs(b, &mut |e| collect_closures(e, &mut out));
@@ -268,8 +268,8 @@ fn collect_closures(e: &Expr, out: &mut Vec<Expr>) {
     each_child(e, &mut |c| collect_closures(c, out));
 }
 
-/// closures_of と同じ順の、クロージャが `unsafe { }` の中に書かれているか (その本体は unsafe の文脈:
-/// 外のものは E0133 を検査する)
+/// In closures_of's order, whether each closure is written inside `unsafe { }` (its body is an unsafe context:
+/// the others are checked for E0133)
 pub fn closures_in_unsafe(b: &Block) -> Vec<bool> {
     let mut out = Vec::new();
     block_exprs(b, &mut |e| collect_in_unsafe(e, false, &mut out));
@@ -290,13 +290,13 @@ fn collect_in_unsafe(e: &Expr, u: bool, out: &mut Vec<bool>) {
     each_child(e, &mut |c| collect_in_unsafe(c, u, out));
 }
 
-/// クロージャを式の形で引くときのキー (式の形のハッシュ)
+/// The key a closure is looked up by through its expression's shape (the shape hash)
 pub fn closure_key(e: &Expr) -> String {
     format!("#{:x}", expr_hash(e))
 }
 
-/// closures_of と同じ順の、クロージャの場所: 本体に書かれたものはアドレス (Some)、マクロの引数の中のもの
-/// (読み直すのでアドレスが決まらない) は None と式の Debug の文字列
+/// Each closure's place, in closures_of's order: one in the body has its address (Some); one in macro arguments
+/// (reparsed, so with no fixed address) has None and the expression's Debug string
 pub fn closure_slots(b: &Block) -> Vec<(Option<usize>, String)> {
     let mut out = Vec::new();
     block_exprs(b, &mut |e| collect_slots(e, &mut out));
@@ -320,7 +320,7 @@ fn collect_slots(e: &Expr, out: &mut Vec<(Option<usize>, String)>) {
     each_child(e, &mut |c| collect_slots(c, out));
 }
 
-/// パターンが束縛する名前 (大文字で始まる裸の名前はパスのパターン)
+/// The names a pattern binds (a bare name starting with an uppercase letter is a path pattern)
 pub fn pat_idents(p: &Pat, out: &mut Vec<String>) {
     match p {
         Pat::Ident(r, m, n, sub) => {
@@ -347,7 +347,7 @@ pub fn pat_idents(p: &Pat, out: &mut Vec<String>) {
     }
 }
 
-/// 書式文字列の `{name}` / `{name:?}` に直接書いた名前
+/// The names written directly in a format string's `{name}` / `{name:?}`
 pub fn fmt_inline_names(f: &str) -> Vec<String> {
     let b = f.as_bytes();
     let mut out = vec![];
@@ -374,7 +374,7 @@ pub fn fmt_inline_names(f: &str) -> Vec<String> {
     out
 }
 
-/// 文字列リテラルの中身 (`"..."` / `r#"..."#`。エスケープはそのまま)
+/// The contents of a string literal (`"..."` / `r#"..."#`; escapes left as they are)
 fn str_lit_body(t: &str) -> Option<&str> {
     let t = t.strip_prefix('r').unwrap_or(t);
     let t = t.trim_matches('#');
@@ -400,7 +400,7 @@ impl Free {
         self.scopes.last_mut().unwrap().extend(v);
     }
     fn name(&mut self, n: &str, at: Pos) {
-        // (`_` は式としては推論の穴 (syn の Expr::Infer) で、変数ではない)
+        // (`_` as an expression is an inference hole (syn's Expr::Infer), not a variable)
         if n != "_" && !self.bound(n) && !self.out.iter().any(|x| x == n) {
             self.out.push(n.to_string());
             self.at.push(at);
@@ -484,8 +484,8 @@ impl Free {
                 self.scopes.pop();
             }
             Expr::Macro(mp, g, sp) if mp.segs.len() == 1 && mp.segs[0].name == "matches" => {
-                // `matches!(e, pat if guard)`: e と guard の中を見る (パターンの束縛は guard の中だけ)。位置はマクロの
-                // 引数の位置から (matches_parts: 型推論と同じ読み方)
+                // `matches!(e, pat if guard)`: walk e and guard (the pattern binds only within the guard), with positions
+                // from the macro arguments' position (matches_parts: read as type inference reads it)
                 let Some((e, pat, guard)) = matches_parts(g, sp.at) else { return };
                 self.expr(&e);
                 if let Some(gd) = guard {
@@ -543,7 +543,7 @@ fn wild_read_only(e: &Expr) -> bool {
     }
 }
 
-/// クロージャの自由変数 (使われた順)
+/// A closure's free variables (in order of use)
 pub fn free_vars(c: &Expr) -> Vec<String> {
     let mut v = Free { scopes: vec![vec![]], out: Vec::new(), at: Vec::new(), keep_wild: false };
     v.expr(c);
@@ -787,7 +787,7 @@ fn tail_caps(body: &Expr, caps: &[String]) -> Vec<String> {
     cur
 }
 
-/// each_child と同じだが、ブロックの let の右辺の判定 (moves_in の中) のために子のブロックも辿る
+/// As each_child, but also walks child blocks, to judge the right-hand sides of a block's lets (in moves_in)
 fn each_child_stmts(e: &Expr, f: &mut dyn FnMut(&Expr)) {
     match e {
         Expr::If(c, t, els) => {
@@ -809,7 +809,7 @@ fn each_child_stmts(e: &Expr, f: &mut dyn FnMut(&Expr)) {
     }
 }
 
-/// クロージャの本体がキャプチャした変数を値として使うか (関数の引数・本体の値・`let y = x;` の右辺・`return x`)
+/// Whether the closure body uses a capture by value (call argument, body value, in `let y = x;`, `return x`)
 pub fn moves_capture(c: &Expr, caps: &[String]) -> bool {
     moves_capture_by(c, caps, &by_value)
 }
@@ -897,7 +897,7 @@ fn move_site_in(e: &Expr, caps: &[String], by: MovesBy) -> Option<(String, Pos)>
     found
 }
 
-/// 子の式を順に f に渡す (外から使う版)
+/// Passes the child expressions to f in order (the version for outside use)
 /// Every use of the capture n in the closure c is through a deref of it: a method call's receiver (`n.m(..)`), a
 /// field's or an index's base (`n.f`, `n[i]`), `*n`, a call's argument or callee (`f(n)`, `n()`). With n a shared
 /// reference, edition 2021 captures `*n` by reference there (a reborrow of the referent, not a borrow of n), which is
@@ -1035,13 +1035,13 @@ fn assigns_in(e: &Expr, caps: &[String]) -> bool {
     found
 }
 
-/// クロージャの本体がキャプチャした変数に代入するか (`r = ..` / `n += 1` / `v.x = ..`)
+/// Whether the closure body assigns to a captured variable (`r = ..` / `n += 1` / `v.x = ..`)
 pub fn assigns_capture(c: &Expr, caps: &[String]) -> bool {
     let Expr::Closure(_, _, _, body, _) = c else { return false };
     assigns_in(body, caps)
 }
 
-/// 式の形のハッシュ (式の木の形と位置。Debug の表示が同じなら同じになる)
+/// A hash of an expression's shape (the tree's shape and positions; the same whenever the Debug output is)
 pub fn expr_hash(e: &Expr) -> u64 {
     let mut h = EHash { h: 0xcbf2_9ce4_8422_2325, memo: false };
     let mut m = crate::fxhash::FxMap::default();
@@ -1049,18 +1049,18 @@ pub fn expr_hash(e: &Expr) -> u64 {
     h.h
 }
 
-/// 部分式のハッシュをアドレスで覚えながら引く (式が生きている間だけ使う)
+/// The same hash, memoizing subexpression hashes by address (use only while the expression is alive)
 pub fn expr_hash_memo(e: &Expr, memo: &mut crate::fxhash::FxMap<usize, u64>) -> u64 {
     let mut h = EHash { h: 0xcbf2_9ce4_8422_2325, memo: true };
     h.expr_in(e, memo);
     h.h
 }
 
-/// 木をたどって混ぜるハッシュ (部分式は自分のハッシュの値で混ぜる。式でない葉は Debug の文字列で)
-/// (FNV 風: zustc でもコンパイルできるよう trait を使わずに書く)
+/// Hash mixed over a tree walk (subexpressions by their own hash, non-expression leaves by their Debug string)
+/// (FNV-like: written without traits so zustc can compile it too)
 struct EHash {
     h: u64,
-    /// 部分式のハッシュをアドレスで覚えるか
+    /// Whether to memoize subexpression hashes by address
     memo: bool,
 }
 

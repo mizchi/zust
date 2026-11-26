@@ -3,4 +3,4 @@
 run-pass	1916
 check-pass	1564
 build-pass	104
-compile-fail	5376
+compile-fail	5382

@@ -69,6 +69,8 @@ pub fn prep_full(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, c
         None => s2,
     };
     let mut moved: Option<Vec<(usize, usize)>> = None;
+    // (where the moved items start in the hoisted text: after the body, which renaming may have made shorter than s3)
+    let mut appended_at = 0usize;
     let hoisted = match lexer::hoist_nested_items_parts(s3) {
         Some((body, parts)) => {
             if parts.is_empty() {
@@ -77,6 +79,7 @@ pub fn prep_full(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, c
                 // (Start lines of the moved ones: the body has the same sequence of lines as the input)
                 let bb = body.as_bytes();
                 let mut info = vec![];
+                appended_at = body.len();
                 let mut out = body.clone().into_bytes();
                 let (mut at, mut line) = (0usize, 0usize);
                 for (pos, t) in &parts {
@@ -95,7 +98,8 @@ pub fn prep_full(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, c
     };
     // (a `mod` moved out of a function body is flattened like the others)
     let reflat = match &hoisted {
-        Some(t) if moved.is_some() && t[s3.len().min(t.len())..].contains("mod ") => lexer::flatten_modules_fix(t, crates, fix),
+        // (in the moved items only, by bytes)
+        Some(t) if moved.is_some() && t.as_bytes()[appended_at.min(t.len())..].windows(4).any(|w| w == b"mod ") => lexer::flatten_modules_fix(t, crates, fix),
         _ => None,
     };
     let hoisted = reflat.or(hoisted);

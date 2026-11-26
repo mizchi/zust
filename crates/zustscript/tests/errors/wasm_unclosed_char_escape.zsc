@@ -1,0 +1,3 @@
+// expect: unterminated character literal
+wasm {
+    const C: char = '\
