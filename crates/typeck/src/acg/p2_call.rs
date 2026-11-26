@@ -1265,6 +1265,9 @@ impl Cx<'_> {
         let mut through_ref = false;
         // (a Box value that is not a place: `Box::new(s).m()`, for `self: Box<Self>`)
         let mut recv_box: Option<(Value, Ty)> = None;
+        // (the reference the struct is reached through last, for self_method_at: None by value, a Box or a deref; a
+        // reference value that is not a place (`(&mut s).f()`) is taken off here already)
+        let mut wrap: Option<bool> = None;
         let mut p = if is_place_expr(recv) {
             self.place(recv)?
         } else {
@@ -1293,6 +1296,9 @@ impl Cx<'_> {
                     through_ref |= matches!(t, Ty::Ref(..));
                     if matches!(t, Ty::Box(_)) {
                         recv_box = Some((v, t));
+                    }
+                    if let Ty::Ref(m, _) = t {
+                        wrap = Some(m);
                     }
                     Place::Mem(v, 0, *i)
                 }
@@ -1353,6 +1359,11 @@ impl Cx<'_> {
         let ref_call = ref_impl(p0_ty).filter(|_| is_place_expr(recv));
         let (a, o, sid, id) = loop {
             let (a, o, sid) = loop {
+                wrap = match p.ty() {
+                    Ty::Ref(m, _) => Some(m),
+                    Ty::Struct(_) => wrap,
+                    _ => None,
+                };
                 p = match p {
                     Place::Mem(a, o, Ty::Struct(sid)) => break (a, o, sid),
                     Place::Mem(a, o, rt @ (Ty::Ref(_, Ty::Dyn(tr)) | Ty::Box(Ty::Dyn(tr)))) => {
@@ -1477,7 +1488,7 @@ impl Cx<'_> {
             }
             // (a method with `self`: an associated function of the name is none, `v.get(i)` beside `impl Wire for Vec<T>
             // { fn get(r: &[u8]) -> Self }` is the inherent `get` (self_method))
-            if let Some(id) = self.prog.self_method(sid, &name).or_else(|| self.prog.self_default_method(sid, &name)) {
+            if let Some(id) = self.prog.self_method_at(sid, &name, wrap).or_else(|| self.prog.self_default_method(sid, &name)) {
                 // (inherent overloads, in impls for other instances of the type: the one for this receiver's, before its
                 // receiver is borrowed (or not) as that method takes self)
                 let c = self.prog.inherent_overload_for(id, Ty::Struct(sid));
@@ -1508,6 +1519,7 @@ impl Cx<'_> {
                 };
                 p = Place::Mem(v.unwrap(), 0, inner_t);
                 via_deref = true;
+                wrap = None;
                 if shared_deref.is_none() {
                     shared_deref = self.shared_deref(sid);
                 }
@@ -2882,8 +2894,14 @@ impl Cx<'_> {
         let has_self = |c: &u32| self.prog.sigs[*c as usize].has_self;
         let cands: &Vec<u32> = if own.has_self && recv.is_some() && !cands.iter().all(has_self) {
             // (a method call of a method with `self`: a function without it is no candidate, `s.f()` with `impl S { fn
-            // f(x: &S) }` beside `impl Tr for S { fn f(&self) }` is Tr's (self_method, #207))
-            same_self = cands.iter().copied().filter(has_self).collect();
+            // f(x: &S) }` beside `impl Tr for S { fn f(&self) }` is Tr's (self_method, #207). Nor one that takes its
+            // receiver another way: self_method_at chose by the receiver's step, and the receiver is passed as that one
+            // takes it, `(&mut s).f()` with `Take::f(&mut self)` beside `S::f(&self)` is Take's)
+            let kind = |c: u32| match self.prog.sigs[c as usize].params.first() {
+                Some(Ty::Ref(m, _)) => Some(*m),
+                _ => None,
+            };
+            same_self = cands.iter().copied().filter(|c| has_self(c) && kind(*c) == kind(id)).collect();
             &same_self
         } else if own.has_self || cands.iter().all(|&c| self.prog.sigs[c as usize].self_ty == own.self_ty) {
             cands

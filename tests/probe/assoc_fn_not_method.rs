@@ -14,6 +14,9 @@
 // receiver's instance has decides (`Tg<u16>`'s `edit(&mut self)` reached through a DerefMut beside `Wr`'s associated
 // `edit()` goes through `deref_mut`; `Wc<u16>`'s `m(&self)` in a closure that is not `mut`). An inherent method beside
 // a trait's `unsafe fn` and another trait's associated function of the name (`Sa(0).f()` is the inherent, safe one).
+// With methods of the name that take their receiver in different ways, rustc's receiver steps decide, an inherent
+// method winning only within one step (`Rs(0).f()` is `ByVal::f(self)`'s, `(&rs).f()` the inherent `f(&self)`; the
+// cases of assoc_fn_receiver_steps, here in a program with a `mod`).
 
 #![deny(unused_mut)]
 
@@ -286,4 +289,75 @@ fn main() {
     g();
     println!("{} {}", f(), g());
     println!("{} {} {}", Sa(0).f(), <Sa as AssocF>::f(), unsafe { OtherF::f(&Sa(0)) });
+
+    let rs = Rs(0);
+    let r = &rs;
+    println!("{} {} {} {}", Rs(0).f(), (&rs).f(), r.f(), Box::new(Rs(0)).f());
+    let mut rm = Rs(0);
+    println!("{} {}", Rs(0).g(), (&mut rm).g());
+    let m = &mut rm;
+    println!("{} {}", m.g(), rm.0);
+    let c = Rk(0);
+    let cr = &c;
+    println!("{} {}", cr.f(), c.f());
+    println!("{} {}", Rg(1u16).f(), Rg(1u8).f());
+    <Rs as RsAssoc>::f();
+    <Rk as RsAssoc>::g();
+}
+
+// (methods of one name that take their receiver in different ways, beside an associated function of the name)
+struct Rs(u8);
+trait RsAssoc {
+    fn f();
+    fn g();
+}
+impl RsAssoc for Rs {
+    fn f() {}
+    fn g() {}
+}
+trait ByVal {
+    fn f(self) -> u8;
+}
+impl ByVal for Rs {
+    fn f(self) -> u8 { 11 + self.0 }
+}
+impl Rs {
+    fn f(&self) -> u8 { 21 + self.0 }
+}
+trait ByMut {
+    fn g(&mut self) -> u8;
+}
+impl ByMut for Rs {
+    fn g(&mut self) -> u8 {
+        self.0 += 1;
+        12
+    }
+}
+impl Rs {
+    fn g(&self) -> u8 { 22 + self.0 }
+}
+
+#[derive(Clone, Copy)]
+struct Rk(u8);
+impl RsAssoc for Rk {
+    fn f() {}
+    fn g() {}
+}
+impl ByVal for Rk {
+    fn f(self) -> u8 { 13 + self.0 }
+}
+impl Rk {
+    fn f(&self) -> u8 { 23 }
+}
+
+struct Rg<T>(T);
+impl<T> RsAssoc for Rg<T> {
+    fn f() {}
+    fn g() {}
+}
+impl ByVal for Rg<u8> {
+    fn f(self) -> u8 { 14 }
+}
+impl Rg<u16> {
+    fn f(&self) -> u8 { 24 }
 }

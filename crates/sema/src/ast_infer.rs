@@ -2384,8 +2384,19 @@ impl Inf<'_> {
             Some(Shape::Adt(b, _, _)) => Some(b),
             _ => None,
         };
-        // (a method with `self`: an associated function of the name is none (self_method))
-        let mut callee = sid.and_then(|sid| self.prog.self_method(sid, n).or_else(|| self.prog.self_default_method(sid, n)));
+        // (a method with `self`: an associated function of the name is none (self_method), by the reference the receiver
+        // reaches its struct through last, as the lowering's lookup (self_method_at))
+        let mut wrap = None;
+        let mut v = r;
+        while sid.is_some() {
+            let x = self.find(v);
+            match self.shape[x as usize] {
+                Some(Shape::Ref(m, i)) => (wrap, v) = (Some(m), i),
+                Some(Shape::Bx(i)) => (wrap, v) = (None, i),
+                _ => break,
+            }
+        }
+        let mut callee = sid.and_then(|sid| self.prog.self_method_at(sid, n, wrap).or_else(|| self.prog.self_default_method(sid, n)));
         let mut rv = rv;
         let mut sid = sid;
         let mut hops = 0;
