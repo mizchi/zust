@@ -117,9 +117,10 @@ pub fn str_lit(t: &str) -> Option<(bool, Vec<u8>)> {
                 let ch = char::from_u32(u32::from_str_radix(&h, 16).ok()?)?;
                 out.extend_from_slice(ch.to_string().as_bytes());
             }
-            // A `\` at the end of a line: skip the newline and the whitespace at the start of the next line
+            // A `\` at the end of a line: skip the newline and the whitespace at the start of the next line, as rustc's
+            // lexer: spaces, tabs and line ends only (a form feed `\x0c` stays, with a warning in rustc)
             '\n' | '\r' => {
-                while cs.peek().is_some_and(|c| c.is_whitespace()) {
+                while cs.peek().is_some_and(|c| matches!(c, ' ' | '\t' | '\n' | '\r')) {
                     cs.next();
                 }
             }

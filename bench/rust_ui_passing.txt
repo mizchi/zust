@@ -4626,6 +4626,7 @@ run-pass	macros/issue-8851.rs
 check-pass	macros/issue-95267.rs
 check-pass	macros/issue-95533.rs
 check-pass	macros/issue-98466-allow.rs
+check-pass	macros/issue-98466.rs
 check-pass	macros/issue-99261.rs
 check-pass	macros/issue-99907.rs
 compile-fail	macros/local-ambiguity-multiple-parsing-options.rs
@@ -7453,6 +7454,7 @@ compile-fail	str/str-add-operator.rs
 compile-fail	str/str-array-assignment.rs
 compile-fail	str/str-as-char.rs
 compile-fail	str/str-concat-on-double-ref.rs
+check-pass	str/str-escape.rs
 compile-fail	str/str-idx.rs
 compile-fail	str/str-lit-type-mismatch.rs
 compile-fail	str/str-mut-idx.rs

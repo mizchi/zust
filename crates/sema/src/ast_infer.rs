@@ -603,7 +603,9 @@ impl Inf<'_> {
             if name.is_empty() || name.as_bytes()[0].is_ascii_digit() {
                 continue;
             }
-            if let Some(v) = self.lookup(name) {
+            // (a named argument's name (`{r:rw$}` with `rw = width`): the variable it is given is the usize)
+            let var = named_fmt_arg(g, name).unwrap_or(name);
+            if let Some(v) = self.lookup(var) {
                 let u = self.known(Ty::Usize);
                 self.unify(v, u);
             }
@@ -3001,4 +3003,41 @@ fn lets_in_expr(e: &Expr, out: &mut Vec<*const Stmt>) {
         }
         _ => ast_closure::each_child_pub(e, &mut |c| lets_in_expr(c, out)),
     }
+}
+
+/// The variable a format macro's named argument `name = var` is given (`println!("{:w$}", x, w = width)`), when it is
+/// one: the arguments after the format string, at the top level of the call
+fn named_fmt_arg<'a>(g: &'a str, name: &str) -> Option<&'a str> {
+    let b = g.as_bytes();
+    let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+    let mut depth = 0i32;
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth -= 1,
+            b',' if depth <= 1 => {
+                let rest = g[i + 1..].trim_start();
+                if let Some(r) = rest.strip_prefix(name).filter(|r| !r.starts_with(|c: char| c == '_' || c.is_ascii_alphanumeric())) {
+                    if let Some(r) = r.trim_start().strip_prefix('=').filter(|r| !r.starts_with('=')) {
+                        let r = r.trim_start();
+                        let n = r.bytes().take_while(|&c| id(c)).count();
+                        let after = r[n..].trim_start();
+                        if n > 0 && !r.as_bytes()[0].is_ascii_digit() && (after.is_empty() || after.starts_with([',', ')', ']', '}'])) {
+                            return Some(&r[..n]);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
 }

@@ -3453,3 +3453,17 @@ fn operators_on_a_unit_or_a_reference_to_a_number() {
     assert_eq!(line("fn f(a: &u8, b: u8) -> bool {\n    a < b\n}\nfn main() {}\n"), Some(2));
     assert_eq!(line("fn f(a: &i32, b: i32) -> i32 {\n    let _ = *a == b;\n    let _ = a == &b;\n    a + b\n}\nfn main() {\n    let _ = () == ();\n    let _ = f(&1, 2);\n}\n"), None);
 }
+
+#[test]
+fn a_line_continuation_and_a_named_width_argument() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| (d.line, d.msg)).collect::<Vec<_>>()
+    };
+    // (a `\` line continuation skips spaces, tabs and line ends only, as rustc: a form feed stays in the string)
+    assert!(errs("fn main() {\n    let s = b\"a\\\n    \u{c}b\";\n    let _t: &[u8; 3] = s;\n}\n").is_empty());
+    assert!(errs("fn main() {\n    let s = b\"a\\\n    \tb\";\n    let _t: &[u8; 2] = s;\n}\n").is_empty());
+    // (a named argument used as a width or a precision (`{r:rw$}`, `rw = width`): the variable it is given is a usize)
+    assert!(errs("fn main() {\n    let width = 8;\n    let p = 2;\n    println!(\"[{:w$.pr$}]\", 1.5f64, w = width, pr = p);\n}\n").is_empty());
+    assert_eq!(errs("fn main() {\n    let width = 8;\n    println!(\"{:w$}\", 1, w = width);\n    let _n: i32 = width;\n}\n").first().map(|e| e.0), Some(4));
+}
