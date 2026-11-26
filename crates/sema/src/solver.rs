@@ -919,6 +919,8 @@ impl Solver<'_> {
     /// 型パラメータを含む型を、呼び出しごとの新しい型変数 (pv) で置き換えて作る
     pub fn known_g(&mut self, t: Ty, pv: &mut Vec<Option<u32>>) -> u32 {
         match t {
+            // (each `_` written in a type is a variable of its own: `Result<_, Result<_, _>>`)
+            Ty::Param(crate::program::HOLE) => self.var(),
             Ty::Param(i) => match pv.get(i as usize).copied().flatten() {
                 Some(v) => v,
                 None => {

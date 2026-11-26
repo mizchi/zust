@@ -2372,7 +2372,12 @@ impl Cx<'_> {
                     };
                     // (a Sized error of the annotation stands: `let (a, b): (Vec<str>, u8) = loop {};`)
                     let ann = match ann_ty.as_ref().map(|t| self.parse_ty(t)) {
-                        Some(Ok(a)) => Some(a),
+                        // (the holes are what inference found, as for a plain `let`: `let (Ok(y) | Err(y)): Result<_, _>
+                        // = Ok(1);`)
+                        Some(Ok(a)) => Some(match self.lets.get(&crate::ast_infer::stmt_key(st)).copied() {
+                            Some(inf) if self.fills_holes(a, inf) => written_muts(inf, a),
+                            _ => a,
+                        }),
                         Some(Err(e)) if e.contains(crate::traits::SOLVED_NO) => return Err(e),
                         _ => None,
                     };
@@ -2597,8 +2602,7 @@ impl Cx<'_> {
                                 // (only an instance of the annotation: `Box<_>` is not filled with a `bool`)
                                 // (a reference's mutability as written: inference does not unify `&mut T` with the `&T` of
                                 // its initializer (`let y: &mut [_] = &x[..];` is a mismatch))
-                                Some(inf) if has_hole(self.prog, a) && !has_hole(self.prog, inf) && !self.prog.has_param(inf) && std::mem::discriminant(&inf) == std::mem::discriminant(&a)
-                                    && !matches!((inf, a), (Ty::Struct(x), Ty::Struct(y)) if self.prog.base_of(x) != self.prog.base_of(y)) => Some(written_muts(inf, a)),
+                                Some(inf) if self.fills_holes(a, inf) => Some(written_muts(inf, a)),
                                 _ => Some(a),
                             }
                         }
@@ -3709,6 +3713,18 @@ pub(crate) fn pat_binds_ref_mut(p: &Pat) -> bool {
         Pat::Struct(_, fs, _) => fs.iter().any(|f| pat_binds_ref_mut(&f.1)),
         Pat::Ref(_, x) => pat_binds_ref_mut(x),
         _ => false,
+    }
+}
+
+impl Cx<'_> {
+    /// inf, what inference found for a `let`, fills the holes of its annotation a: an instance of it, with none left
+    /// (`Box<_>` is not filled with a `bool`)
+    fn fills_holes(&self, a: Ty, inf: Ty) -> bool {
+        has_hole(self.prog, a)
+            && !has_hole(self.prog, inf)
+            && !self.prog.has_param(inf)
+            && std::mem::discriminant(&inf) == std::mem::discriminant(&a)
+            && !matches!((inf, a), (Ty::Struct(x), Ty::Struct(y)) if self.prog.base_of(x) != self.prog.base_of(y))
     }
 }
 

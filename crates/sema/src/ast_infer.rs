@@ -823,8 +823,24 @@ impl Inf<'_> {
                 self.pat(p, i, None);
             }
             Pat::Or(cs) => {
+                // (the alternatives bind the same names, each of one type: `Ok(y) | Err(y)` makes the error type the
+                // ok one. The first alternative's bindings are the names, the others' are unified with them)
+                let n0 = self.scopes.last().map_or(0, |s| s.len());
+                let mut n1 = None;
                 for c in cs {
+                    let k = self.scopes.last().map_or(0, |s| s.len());
                     self.pat(c, v, mode);
+                    let Some(n1) = n1 else {
+                        n1 = Some(self.scopes.last().map_or(0, |s| s.len()));
+                        continue;
+                    };
+                    let Some(sc) = self.scopes.last_mut() else { continue };
+                    let new: Vec<(String, u32)> = sc.drain(k.max(n1)..).collect();
+                    for (n, x) in new {
+                        if let Some(y) = self.scopes.last().and_then(|sc| sc[n0..n1].iter().find(|b| b.0 == n)).map(|b| b.1) {
+                            self.unify(x, y);
+                        }
+                    }
                 }
             }
             Pat::Lit(e) => {

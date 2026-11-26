@@ -3310,7 +3310,16 @@ impl Cx<'_> {
                         *slot = Some(*a);
                     }
                 }
-                let (mut fid, _) = self.resolve_call(d, &recv, sol, None, span)?;
+                let (mut fid, _) = match self.resolve_call(d, &recv, sol, None, span) {
+                    Ok(x) => x,
+                    // (a method whose where clauses this type does not meet has no entry, as in rustc: `fn m(&self)
+                    // where Self::A: Foo` of `impl<T> Tr for T { type A = (); }`)
+                    Err(_) if self.impl_method_preds_fail(tr, d, t) => {
+                        fns.push(u32::MAX);
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                };
                 // A method of a generic impl (`impl<T> Tr for W<T>`) is instantiated further
                 if (fid as usize) < self.prog.sigs.len() && self.prog.sigs[fid as usize].is_generic() {
                     let g = self.prog.sigs[fid as usize].generics.len();
@@ -4872,5 +4881,25 @@ fn has_ref(t: Ty, depth: u32) -> bool {
         Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => has_ref(*i, depth + 1),
         Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&x| has_ref(x, depth + 1)),
         _ => false,
+    }
+}
+
+impl Cx<'_> {
+    /// The impl method of trait `tr`'s method `d` for type t has where clauses t does not meet (Program::fn_pred_error)
+    fn impl_method_preds_fail(&self, tr: &str, d: u32, t: Ty) -> bool {
+        let Some(m) = self.prog.names[d as usize].rsplit("::").next() else { return false };
+        (0..self.prog.sigs.len()).any(|i| {
+            let s = &self.prog.sigs[i];
+            let (Some(st), Some(it)) = (s.self_ty, s.impl_trait.as_deref()) else { return false };
+            if it.split('<').next().unwrap_or(it).trim() != tr || self.prog.names[i].rsplit("::").next() != Some(m) || !self.prog.fn_preds.contains_key(&(i as u32)) {
+                return false;
+            }
+            let mut sol = vec![None; s.generics.len()];
+            if !self.prog.match_ty(st, t, &mut sol) {
+                return false;
+            }
+            let Some(args) = sol.into_iter().collect::<Option<Vec<Ty>>>() else { return false };
+            self.prog.fn_pred_error(i as u32, &args).is_some()
+        })
     }
 }

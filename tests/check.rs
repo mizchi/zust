@@ -3553,3 +3553,21 @@ fn a_raw_pointer_s_drop_in_place() {
     // (`p.drop_in_place()`, also of a temporary pointer `(&raw mut s)`)
     assert!(errs("struct S;\nfn main() {\n    unsafe {\n        let mut s = std::mem::ManuallyDrop::new(S);\n        let p: *mut S = &mut *s;\n        p.drop_in_place();\n        let mut t = S;\n        (&raw mut t).drop_in_place();\n        std::mem::forget(t);\n    }\n}\n").is_empty());
 }
+
+#[test]
+fn a_vtable_method_whose_where_clause_fails_and_or_patterns_of_one_binding_type() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (a method whose where clause the type does not meet has no vtable entry; a call of it is E0277)
+    let tr = "pub trait Foo {\n    type Bar;\n}\npub trait Broken {\n    type Assoc;\n    fn broken(&self) where Self::Assoc: Foo;\n}\nimpl<T> Broken for T {\n    type Assoc = ();\n    fn broken(&self) where Self::Assoc: Foo {\n        let _x: <Self::Assoc as Foo>::Bar;\n    }\n}\n";
+    assert!(errs(&format!("{tr}fn main() {{\n    let _m: &dyn Broken<Assoc = ()> = &();\n}}\n")).is_empty());
+    let e = errs(&format!("{tr}fn main() {{\n    ().broken();\n}}\n"));
+    assert!(e.iter().any(|m| m.contains("the trait bound `(): Foo` is not satisfied")), "{e:?}");
+    // (the alternatives of an or-pattern bind each name at one type: the error type is the ok one, also under an
+    // annotation with holes, each its own)
+    assert!(errs("fn main() {\n    let (Ok(y) | Err(y)) = Ok(1);\n    let (Ok(z) | Err(z)): Result<_, _> = Ok(1);\n    let _: i32 = y + z;\n}\n").is_empty());
+    let tri = "enum Tri<S, T, U> {\n    V1(S),\n    V2(T),\n    V3(U),\n}\nuse Tri::*;\n";
+    assert!(errs(&format!("{tri}fn main() {{\n    let (Ok((V1(a) | V2(a) | V3(a), b)) | Err(Ok((a, b)) | Err((a, b)))): Result<_, Result<_, _>> = Ok((V1(1), 1));\n    let _: i32 = a + b;\n}}\n")).is_empty());
+}

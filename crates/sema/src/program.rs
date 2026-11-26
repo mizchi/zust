@@ -1037,42 +1037,8 @@ impl Insts {
                 }
             }
         }
-        // (the where clauses on other than a parameter, `where T::A: Bar`: the type each names for these arguments,
-        // normalized by the trait that gives it, must meet the bound. Bounds of the program's traits only, as for the
-        // nested goals of impls)
-        if let Some(preds) = prog.fn_preds.get(&base) {
-            let names: Vec<&str> = b.generics.iter().map(|g| g.0.as_str()).collect();
-            for (syn, qtr, bounds) in preds {
-                let Some(st) = prog.pred_subject(syn, qtr, b, &names, &args) else { continue };
-                // (nor a type implements does not see the program's impls for: a Box, an array, a slice, a type with a
-                // trait object in it; as for the supertraits and item bounds of impls)
-                if prog.opaque_to_impls(st) {
-                    continue;
-                }
-                // (nor one with a placeholder in it: the instance checks the generic fn's own body, where its where
-                // clauses are what it may assume, not what it must prove (`where &'max G: Get`))
-                if prog.holds_placeholder(st, 0) {
-                    continue;
-                }
-                for tr in bounds {
-                    // (its bindings too, `where W<T>: Tr<A = u32>`, as for a parameter's bounds: of the program's fns)
-                    let own = prog.item_of.get(base as usize).copied().flatten().is_some_and(|i| i < prog.prelude_from);
-                    if let Some((proj, want, got)) = own.then(|| prog.binding_mismatch(st, tr, &names, &args)).flatten() {
-                        return Err(format!("type mismatch resolving `{proj} == {}`: it is `{}` (E0271)", prog.tn(want), prog.tn(got)));
-                    }
-                    let tname = tr.split('<').next().unwrap_or(tr).trim();
-                    if !prog.user_traits.contains(tname) {
-                        continue;
-                    }
-                    match prog.evaluate(st, tr) {
-                        Certainty::No => return Err(format!("the trait bound `{}: {tr}` is not satisfied (E0277)", prog.tn(st))),
-                        Certainty::Maybe(MaybeCause::Cycle) => {
-                            return Err(format!("overflow evaluating the requirement `{}: {tr}` (E0275)", prog.tn(st)));
-                        }
-                        _ => {}
-                    }
-                }
-            }
+        if let Some(e) = prog.fn_pred_error(base, &args) {
+            return Err(e);
         }
         let names: Vec<String> = args.iter().map(|&t| prog.tn(t)).collect();
         let impl_of = if b.trait_of.is_some() {
@@ -5684,6 +5650,49 @@ impl Program {
         found
     }
 
+    /// The first of fn `base`'s where clauses on other than a parameter that its instance for `args` does not meet
+    /// (`where T::A: Bar`), as the instance's error: none when they hold or cannot be told
+    pub fn fn_pred_error(&self, base: u32, args: &[Ty]) -> Option<String> {
+        // (the where clauses on other than a parameter, `where T::A: Bar`: the type each names for these arguments,
+        // normalized by the trait that gives it, must meet the bound. Bounds of the program's traits only, as for the
+        // nested goals of impls)
+        let b = &self.sigs[base as usize];
+        let preds = self.fn_preds.get(&base)?;
+        let names: Vec<&str> = b.generics.iter().map(|g| g.0.as_str()).collect();
+        for (syn, qtr, bounds) in preds {
+            let Some(st) = self.pred_subject(syn, qtr, b, &names, args) else { continue };
+            // (nor a type implements does not see the program's impls for: a Box, an array, a slice, a type with a
+            // trait object in it; as for the supertraits and item bounds of impls)
+            if self.opaque_to_impls(st) {
+                continue;
+            }
+            // (nor one with a placeholder in it: the instance checks the generic fn's own body, where its where
+            // clauses are what it may assume, not what it must prove (`where &'max G: Get`))
+            if self.holds_placeholder(st, 0) {
+                continue;
+            }
+            for tr in bounds {
+                // (its bindings too, `where W<T>: Tr<A = u32>`, as for a parameter's bounds: of the program's fns)
+                let own = self.item_of.get(base as usize).copied().flatten().is_some_and(|i| i < self.prelude_from);
+                if let Some((proj, want, got)) = own.then(|| self.binding_mismatch(st, tr, &names, args)).flatten() {
+                    return Some(format!("type mismatch resolving `{proj} == {}`: it is `{}` (E0271)", self.tn(want), self.tn(got)));
+                }
+                let tname = tr.split('<').next().unwrap_or(tr).trim();
+                if !self.user_traits.contains(tname) {
+                    continue;
+                }
+                match self.evaluate(st, tr) {
+                    Certainty::No => return Some(format!("the trait bound `{}: {tr}` is not satisfied (E0277)", self.tn(st))),
+                    Certainty::Maybe(MaybeCause::Cycle) => {
+                        return Some(format!("overflow evaluating the requirement `{}: {tr}` (E0275)", self.tn(st)));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        None
+    }
+
     /// The type a where clause on other than a parameter names for the arguments `args` of a fn's parameters
     /// `names` (Insts::request). A projection is a normalizes-to goal: `<T as Tr>::A` by Tr's impls, `T::A` by those of
     /// the traits T's bounds name, which must agree. None when it is not known (a parameter is left, nothing
@@ -5723,7 +5732,12 @@ impl Program {
             let mut traits: Vec<String> = if !qtr.is_empty() {
                 vec![qtr.to_string()]
             } else if let Ty::Param(i) = a.base {
-                sig.generics.get(i as usize)?.1.iter().map(|b| b.split('<').next().unwrap_or(b).trim().to_string()).collect()
+                let mut v: Vec<String> = sig.generics.get(i as usize)?.1.iter().map(|b| b.split('<').next().unwrap_or(b).trim().to_string()).collect();
+                // (`Self::A` in a method of a blanket impl, `impl<T> Tr for T`: by the impl's trait too)
+                if let (Some(tr), true) = (sig.impl_trait.as_deref(), sig.self_ty == Some(a.base)) {
+                    v.push(tr.split('<').next().unwrap_or(tr).trim().to_string());
+                }
+                v
             } else {
                 // (`Self::A` in a method of `impl Tr for S`: by the impl's trait, and its supertraits below)
                 let tr = sig.impl_trait.as_deref()?;

@@ -340,6 +340,7 @@ check-pass	associated-types/issue-48551.rs
 run-pass	associated-types/issue-54467.rs
 run-pass	associated-types/issue-55846.rs
 compile-fail	associated-types/issue-64855.rs
+check-pass	associated-types/issue-69398.rs
 compile-fail	associated-types/issue-72806.rs
 check-pass	associated-types/issue-91069.rs
 run-pass	associated-types/method-on-impl-with-assoc-type-projection.rs
@@ -4926,6 +4927,7 @@ run-pass	mir/issue-76803-branches-not-same.rs
 run-pass	mir/issue-77359-simplify-arm-identity.rs
 compile-fail	mir/issue-83499-input-output-iteration-ice.rs
 run-pass	mir/issue-89485.rs
+check-pass	mir/issue-91745.rs
 compile-fail	mir/issue-92893.rs
 check-pass	mir/issue-99866.rs
 compile-fail	mir/mir-build-2021-closure-capture-ice-110453-2.rs
@@ -5472,6 +5474,7 @@ run-pass	or-patterns/basic-switch.rs
 run-pass	or-patterns/basic-switchint.rs
 run-pass	or-patterns/bindings-runpass-1.rs
 run-pass	or-patterns/bindings-runpass-2.rs
+check-pass	or-patterns/consistent-bindings.rs
 compile-fail	or-patterns/exhaustiveness-non-exhaustive.rs
 check-pass	or-patterns/exhaustiveness-pass.rs
 compile-fail	or-patterns/exhaustiveness-unreachable-pattern.rs
@@ -5489,6 +5492,7 @@ compile-fail	or-patterns/mismatched-bindings-async-fn.rs
 compile-fail	or-patterns/missing-bindings.rs
 run-pass	or-patterns/mix-with-wild.rs
 compile-fail	or-patterns/multiple-pattern-typo.rs
+check-pass	or-patterns/or-patterns-default-binding-modes.rs
 compile-fail	or-patterns/or-patterns-syntactic-fail.rs
 run-pass	or-patterns/or-patterns-syntactic-pass-2021.rs
 check-pass	or-patterns/or-patterns-syntactic-pass.rs
@@ -6284,6 +6288,7 @@ run-pass	pattern/bindings-after-at/bind-by-copy.rs
 compile-fail	pattern/bindings-after-at/bind-by-move-neither-can-live-while-the-other-survives-1.rs
 compile-fail	pattern/bindings-after-at/bind-by-move-no-subbindings-fun-param.rs
 compile-fail	pattern/bindings-after-at/borrowck-move-and-move.rs
+check-pass	pattern/bindings-after-at/borrowck-pat-by-copy-bindings-in-at.rs
 compile-fail	pattern/bindings-after-at/borrowck-pat-by-move-and-ref-inverse-promotion.rs
 compile-fail	pattern/bindings-after-at/borrowck-pat-by-move-and-ref-inverse.rs
 compile-fail	pattern/bindings-after-at/borrowck-pat-by-move-and-ref.rs
@@ -8323,6 +8328,7 @@ compile-fail	traits/suggest-where-clause.rs
 run-pass	traits/superdefault-generics.rs
 compile-fail	traits/test-2.rs
 compile-fail	traits/test.rs
+check-pass	traits/trait-associated-type-bounds-36839.rs
 compile-fail	traits/trait-bound-mismatch-14853.rs
 compile-fail	traits/trait-impl-missing-method.rs
 compile-fail	traits/trait-impl-overflow-with-where-clause-20413.rs
