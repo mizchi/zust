@@ -417,7 +417,8 @@ pub enum Pat {
     Struct(Path, Vec<(String, Pat)>, bool),
     Path(Path),
     Ref(bool, Box<Pat>),
-    Or(Vec<Pat>),
+    /// (the alternatives, and where each starts)
+    Or(Vec<Pat>, Vec<Pos>),
     Slice(Vec<Pat>),
     Macro(String),
 }
@@ -475,7 +476,7 @@ pub fn pat_pos(p: &Pat) -> Pos {
     match p {
         Pat::Path(pa) | Pat::TupleStruct(pa, _) | Pat::Struct(pa, _, _) => pa.pos,
         Pat::Ref(_, i) => pat_pos(i),
-        Pat::Tuple(ps) | Pat::Or(ps) | Pat::Slice(ps) => ps.iter().map(pat_pos).find(|q| q.line != 0).unwrap_or_default(),
+        Pat::Tuple(ps) | Pat::Or(ps, _) | Pat::Slice(ps) => ps.iter().map(pat_pos).find(|q| q.line != 0).unwrap_or_default(),
         _ => Pos::default(),
     }
 }
@@ -1608,17 +1609,20 @@ impl Parser {
 
     fn pat(&mut self) -> R<Pat> {
         self.eat_punct("|");
+        let p0 = self.pos();
         let first = self.pat_one()?;
         if !self.is_punct("|") || self.punct_at(0, "||") {
             self.no_double_binding(&first)?;
             return Ok(first);
         }
         let mut v = vec![first];
+        let mut at = vec![p0];
         while self.is_punct("|") && !self.punct_at(0, "||") {
             self.i += 1;
+            at.push(self.pos());
             v.push(self.pat_one()?);
         }
-        let p = Pat::Or(v);
+        let p = Pat::Or(v, at);
         self.no_double_binding(&p)?;
         Ok(p)
     }
@@ -3866,7 +3870,7 @@ pub(crate) fn double_binding<'a>(p: &'a Pat, seen: &mut crate::fxhash::FxSet<&'a
         Pat::Ref(_, q) => double_binding(q, seen),
         // (each alternative on its own: `(x, y) | (y, x)` is fine, `(x, y) | (y, y)` is not; the first one's names
         // stay bound for the rest of the pattern)
-        Pat::Or(ps) => {
+        Pat::Or(ps, _) => {
             let before = seen.clone();
             for q in ps.iter().skip(1) {
                 let mut s2 = before.clone();
