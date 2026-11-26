@@ -289,13 +289,46 @@ fn expr(e: &Expr, out: &mut Found) {
     }
 }
 
-/// The first unnecessary parentheses in the program's fns and its consts' and statics' values, where the lint is
-/// denied (for the crate, or by an attribute around them): `line:col: unnecessary parentheses around ..`, at the `(`
-pub(super) fn first_unused(src: &str, src0: &str, items: &[SrcItem], crate_deny: bool) -> Option<String> {
+/// The lint's levels at a place: its own (0 allow / expect, 1 warn, 2 deny, 3 forbid) and whether `warnings` is denied,
+/// which makes it an error while it is at warn; rustc keeps the two apart (`#[allow(warnings)]` leaves a deny of it,
+/// `#[warn(unused_parens)]` is an error under `#![deny(warnings)]`)
+pub(super) type Levels = (u8, bool);
+
+/// Whether the lint is an error at those levels
+pub(super) fn denied((lv, warnings): Levels) -> bool {
+    lv >= 2 || (lv == 1 && warnings)
+}
+
+/// The levels after an attribute (super::lint_attr's level and names): a forbid of the lint stays
+fn apply(at: &mut Levels, level: u8, names: u8) {
+    if names & 1 != 0 && at.0 != 3 {
+        at.0 = match level {
+            2 => 3,
+            1 => 2,
+            _ if names & 4 != 0 => 1,
+            _ => 0,
+        };
+    }
+    if names & 2 != 0 {
+        at.1 = level > 0;
+    }
+}
+
+/// The first unnecessary parentheses in the crate's own fns (on its first `own_lines` lines; all of them at 0) and its
+/// consts' and statics' values, where the lint is denied: by the crate's levels, then those of the modules, impls and
+/// traits around (levels_around: line ranges), then the attributes in the item's text. `line:col: unnecessary
+/// parentheses around ..`, at the `(`
+pub(super) fn first_unused(src: &str, src0: &str, items: &[SrcItem], own_lines: usize, crate_levels: Levels, around: &[(usize, usize, u8, u8)]) -> Option<String> {
     // (the starts of the lines of the source as written, read once something is found)
     let mut lines0: Option<Vec<usize>> = None;
-    for it in items {
+    for it in items.iter().filter(|it| own_lines == 0 || it.line <= own_lines) {
         let text = src.get(it.start..it.end).unwrap_or("");
+        // (the levels of the blocks it is in, or that are in it (a fn's inner attribute), outer ones first)
+        let mut base = crate_levels;
+        let last = it.line + text.matches('\n').count();
+        for &(_, _, level, names) in around.iter().filter(|r| r.0 <= last && it.line <= r.1) {
+            apply(&mut base, level, names);
+        }
         let body = text[super::leading_attrs(text).len()..].trim_start();
         // (past the visibility: `pub`, `pub(crate)`)
         let body = match body.strip_prefix("pub").map(str::trim_start) {
@@ -309,7 +342,7 @@ pub(super) fn first_unused(src: &str, src0: &str, items: &[SrcItem], crate_deny:
             continue;
         }
         let attrs = if text.contains("unused") || text.contains("warnings") { super::lint_attrs(text, "unused_parens") } else { vec![] };
-        if !crate_deny && !attrs.iter().any(|a| a.2 > 0) {
+        if !denied(base) && !attrs.iter().any(|a| a.2 > 0) {
             continue;
         }
         let Ok(f) = crate::parse::parse_file(text) else { continue };
@@ -325,18 +358,13 @@ pub(super) fn first_unused(src: &str, src0: &str, items: &[SrcItem], crate_deny:
         if found.is_empty() {
             continue;
         }
-        // (the level at a place of the item's text: the crate's, then each attribute that covers it, in order)
-        let denied = |o: usize| {
-            let (mut on, mut forbid) = (crate_deny, false);
-            for &(_, _, l) in attrs.iter().filter(|a| a.0 <= o && o < a.1) {
-                if l == 2 {
-                    on = true;
-                    forbid = true;
-                } else if !forbid {
-                    on = l == 1;
-                }
+        // (at a place of the item's text: the levels around it, then each attribute that covers it, in order)
+        let denied_at = |o: usize| {
+            let mut at = base;
+            for &(_, _, level, names) in attrs.iter().filter(|a| a.0 <= o && o < a.1) {
+                apply(&mut at, level, names);
             }
-            on
+            denied(at)
         };
         let starts: Vec<usize> = std::iter::once(0).chain(text.match_indices('\n').map(|(i, _)| i + 1)).collect();
         let tb = text.as_bytes();
@@ -362,7 +390,7 @@ pub(super) fn first_unused(src: &str, src0: &str, items: &[SrcItem], crate_deny:
                 o -= t.len();
                 true
             });
-            if !ok || !denied(o) {
+            if !ok || !denied_at(o) {
                 continue;
             }
             let abs = it.start + o;
@@ -381,66 +409,126 @@ pub(super) fn first_unused(src: &str, src0: &str, items: &[SrcItem], crate_deny:
     None
 }
 
-/// Whether an `allow` / `expect` / `warn` of unused_parens (or of `unused`) covers more than the item or statement it
-/// is written on, which the items' text does not show: one on a `mod` (its header is gone from the flattened text), an
-/// `impl` or a `trait` (their members are items of their own), or an inner one past the crate's head
-pub(super) fn allowed_wide(src0: &str) -> bool {
+/// Past spaces and comments from b[i]
+fn skip_space(b: &[u8], mut i: usize) -> usize {
+    while i < b.len() {
+        match super::literal_or_comment_end(b, i) {
+            Some(e) if b[i] == b'/' => i = e,
+            _ if b[i].is_ascii_whitespace() => i += 1,
+            _ => break,
+        }
+    }
+    i
+}
+
+/// Where a source's text starts: past a byte order mark and a `#!` line (not `#![`)
+fn head_start(b: &[u8]) -> usize {
+    let i = if b.starts_with(b"\xEF\xBB\xBF") { 3 } else { 0 };
+    if b[i..].starts_with(b"#!") && !b[i..].starts_with(b"#![") {
+        return i + b[i..].iter().position(|&c| c == b'\n').unwrap_or(b.len() - i);
+    }
+    i
+}
+
+/// The crate's levels of the lint: by its inner attributes, in its head (before its first item), in order
+pub(super) fn crate_levels(src0: &str) -> Levels {
+    let b = src0.as_bytes();
+    let mut at = (1, false);
+    let mut i = skip_space(b, head_start(b));
+    while b[i..].starts_with(b"#![") {
+        let Some(close) = super::attr_close(b, i + 2) else { break };
+        let text: String = src0[i + 3..close].chars().filter(|c| !c.is_whitespace()).collect();
+        if let Some((level, names)) = super::lint_attr(&text, "unused_parens") {
+            apply(&mut at, level, names);
+        }
+        i = skip_space(b, close + 1);
+    }
+    at
+}
+
+/// The `allow` / `expect` / `warn` of the lint (of unused_parens, `unused` or `warnings`) that cover more than the item
+/// or statement they are written on, which the items' text does not show, read from the source as written past its
+/// literals and comments: one on a `mod` (its header is gone from the flattened text), an `impl` or a `trait` (their
+/// members are items of their own), or an inner one past the crate's head. Each as the lines of the block it covers,
+/// its level and names (super::lint_attr), outer ones first. None where what one covers is not known (`#[allow(..)]
+/// mod x;`): the lint is left off then. A deny there is not followed (what it would report is missed, never more)
+pub(super) fn levels_around(src0: &str) -> Option<Vec<(usize, usize, u8, u8)>> {
     let b = src0.as_bytes();
     let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
-    // (the crate's head: the inner attributes the crate's level was read from)
-    let head = {
-        let mut i = 0;
-        loop {
-            while i < b.len() && b[i].is_ascii_whitespace() {
-                i += 1;
+    let line = |at: usize| 1 + b[..at].iter().filter(|&&c| c == b'\n').count();
+    let skip = |i: usize| skip_space(b, i);
+    let word = |i: usize, w: &str| b[i..].starts_with(w.as_bytes()) && !b.get(i + w.len()).is_some_and(|&c| id(c));
+    // (the blocks open, and the attributes waiting for the end of theirs: where each is, its `{`, level and names)
+    let (mut open, mut waiting, mut out) = (vec![], vec![], vec![]);
+    // (in the crate's head, before its first item: its inner attributes are the crate's levels (crate_levels))
+    let mut head = true;
+    let mut i = head_start(b);
+    while i < b.len() {
+        if let Some(e) = super::literal_or_comment_end(b, i) {
+            head = head && b[i] == b'/';
+            i = e.max(i + 1);
+            continue;
+        }
+        match b[i] {
+            b'{' => open.push(i),
+            b'}' => {
+                let o = open.pop()?;
+                out.extend(waiting.iter().filter(|w: &&(usize, usize, u8, u8)| w.1 == o).map(|w| (w.0, line(o), line(i), w.2, w.3)));
             }
-            if b[i..].starts_with(b"//") {
-                i += b[i..].iter().position(|&c| c == b'\n').unwrap_or(b.len() - i);
-            } else if b[i..].starts_with(b"/*") {
-                i += src0[i + 2..].find("*/").map_or(b.len() - i, |k| k + 4);
-            } else if b[i..].starts_with(b"#![") {
-                i += src0[i..].find(']').map_or(b.len() - i, |k| k + 1);
-            } else {
-                break;
+            b'#' if b.get(i + 1) == Some(&b'[') || (b.get(i + 1) == Some(&b'!') && b.get(i + 2) == Some(&b'[')) => {
+                let at = i;
+                let inner = b[i + 1] == b'!';
+                let close = super::attr_close(b, if inner { i + 2 } else { i + 1 })?;
+                i = close + 1;
+                let text: String = src0[if inner { at + 3 } else { at + 2 }..close].chars().filter(|c| !c.is_whitespace()).collect();
+                let lint = super::lint_attr(&text, "unused_parens").filter(|l| l.0 == 0);
+                if inner {
+                    match (lint, open.last()) {
+                        (None, _) => {}
+                        // (the crate's own, in its levels)
+                        (Some(_), None) if head => {}
+                        (Some(_), None) => return None,
+                        (Some((level, names)), Some(&o)) => waiting.push((at, o, level, names)),
+                    }
+                    continue;
+                }
+                head = false;
+                let Some((level, names)) = lint else { continue };
+                // (what it is on: past the attributes after it, the visibility and `unsafe`)
+                let mut j = skip(i);
+                while b[j..].starts_with(b"#[") {
+                    j = skip(super::attr_close(b, j + 1)? + 1);
+                }
+                if word(j, "pub") {
+                    j = skip(j + 3);
+                    if b.get(j) == Some(&b'(') {
+                        j = skip(j + b[j..].iter().position(|&c| c == b')')? + 1);
+                    }
+                }
+                if word(j, "unsafe") {
+                    j = skip(j + 6);
+                }
+                if !(word(j, "mod") || word(j, "impl") || word(j, "trait") || word(j, "auto")) {
+                    continue;
+                }
+                // (its block: the first `{` on, before any `;`)
+                while j < b.len() && b[j] != b'{' {
+                    if b[j] == b';' {
+                        return None;
+                    }
+                    j = super::literal_or_comment_end(b, j).unwrap_or(j + 1).max(j + 1);
+                }
+                waiting.push((at, j, level, names));
+                continue;
             }
+            c if !c.is_ascii_whitespace() => head = false,
+            _ => {}
         }
-        i.min(4096)
-    };
-    let word = |t: &str, w: &str| t.starts_with(w) && !t.as_bytes().get(w.len()).is_some_and(|&c| id(c));
-    src0.match_indices("unused").any(|(i, _)| {
-        let end = i + 6;
-        let name = (i == 0 || !id(b[i - 1])) && (!b.get(end).is_some_and(|&c| id(c)) || word(&src0[end..], "_parens"));
-        if !name || i < head {
-            return false;
-        }
-        // (in the list of an attribute's level: `#[allow(` / `#![expect(`, other names before it)
-        let Some(open) = src0[..i].rfind('(') else { return false };
-        if !src0[open + 1..i].bytes().all(|c| id(c) || c == b',' || c.is_ascii_whitespace()) {
-            return false;
-        }
-        let before = src0[..open].trim_end();
-        let Some(lv) = ["allow", "expect", "warn"].into_iter().find(|l| before.ends_with(l)) else { return false };
-        let Some(before) = before[..before.len() - lv.len()].trim_end().strip_suffix('[') else { return false };
-        let before = before.trim_end();
-        if let Some(inner) = before.strip_suffix('!') {
-            return inner.trim_end().ends_with('#');
-        }
-        if !before.ends_with('#') {
-            return false;
-        }
-        // (an outer one: what it is on, past its list, the attributes after it and the visibility)
-        let Some(close) = src0[i..].find(']') else { return false };
-        let mut rest = src0[i + close + 1..].trim_start();
-        while rest.starts_with("#[") {
-            rest = rest.find(']').map_or("", |k| rest[k + 1..].trim_start());
-        }
-        if let Some(r) = rest.strip_prefix("pub") {
-            let r = r.trim_start();
-            rest = if r.starts_with('(') { r.find(')').map_or("", |k| r[k + 1..].trim_start()) } else { r };
-        }
-        if let Some(r) = rest.strip_prefix("unsafe") {
-            rest = r.trim_start();
-        }
-        word(rest, "mod") || word(rest, "impl") || word(rest, "trait") || word(rest, "auto")
-    })
+        i += 1;
+    }
+    if !open.is_empty() {
+        return None;
+    }
+    out.sort_by_key(|r| r.0);
+    Some(out.into_iter().map(|(_, a, z, level, names)| (a, z, level, names)).collect())
 }

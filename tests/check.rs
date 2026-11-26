@@ -3653,3 +3653,49 @@ fn unused_parens_under_deny() {
     let mac = "#![deny(unused_parens)]\nmacro_rules! pick {\n    ($c:expr) => {\n        if $c { 1 } else { 2 }\n    };\n}\nfn f(x: i32) -> i32 {\n    let y = pick!(x > 1);\n    y\n}\nfn main() { println!(\"{}\", f(1)); }\n";
     assert_eq!(first(mac), None);
 }
+
+/// unused_parens' levels as rustc 1.97 has them (the review of #244): each by the last attribute naming it, the lint's
+/// own and `warnings` apart (`allow(warnings)` leaves a deny of the lint; `warn(unused_parens)` is an error under
+/// `deny(warnings)`; a crate's later `allow(warnings)` undoes its `deny(warnings)`, a group's forbid lets the lint be
+/// allowed); an item's deny under the crate's allow; no attribute read from a string or a comment; and the levels of a
+/// module, an impl or a trait for what is in it, not for the items beside it. The accepted ones have no error at all
+#[test]
+fn unused_parens_levels() {
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+    let e = |line: usize, col: usize, what: &str| Some((line, col, format!("unnecessary parentheses around {what}")));
+    // (the review's finding each is for: 1 the crate's `warnings`, 2 an item's deny under the crate's allow, 4 strings
+    // and comments, 5 the lint and `warnings` apart, 6 modules, impls and traits)
+    for (finding, src, want) in [
+        (1, "#![deny(warnings)]\n#![allow(warnings)]\nfn main() { let _ = (1); }\n", None),
+        (1, "#![deny(warnings)]\n#![warn(warnings)]\nfn main() { let _ = (1); }\n", None),
+        (1, "#![forbid(warnings)]\n#![allow(warnings)]\nfn main() { let _ = (1); }\n", None),
+        (1, "#![forbid(unused)]\n#![allow(unused_parens)]\nfn main() { let _ = (1); }\n", None),
+        (1, "#![deny(unused_parens)]\n#![deny(warnings)]\n#![allow(warnings)]\nfn main() { let _ = (1); }\n", e(4, 21, "assigned value")),
+        (4, "#[deny(unused_variables)] fn main() { let _ = \"#[deny(unused_parens)]\"; let _ = (1); }\n", None),
+        (4, "#[deny(unused_variables)] fn main() { let _ = r#\"#[deny(unused_parens)]\"#; let _ = (1); }\n", None),
+        (4, "#[deny(unused_variables)] fn main() {\n    // #[deny(unused_parens)]\n    /* #[deny(unused_parens)] */\n    let _ = (1);\n}\n", None),
+        (4, "#![deny(unused_parens)]\nfn main() { let _ = \"#[allow(unused_parens)]\"; let _ = (1); }\n", e(2, 56, "assigned value")),
+        (4, "#![deny(unused_parens)]\nfn main() {\n    // #[allow(unused_parens)]\n    let _ = (1);\n}\n", e(4, 13, "assigned value")),
+        (2, "#![allow(unused_parens)]\n#[deny(unused_parens)]\nfn main() { let _ = (1); }\n", e(3, 21, "assigned value")),
+        (2, "#![allow(unused_parens)]\n#[deny(unused)]\nfn main() { let _ = (1); }\n", e(3, 21, "assigned value")),
+        (2, "#![allow(unused_parens)]\n#[deny(warnings)]\nfn main() { let _ = (1); }\n", None),
+        (5, "#![deny(unused_parens)]\n#[allow(warnings)]\nfn main() { let _ = (1); }\n", e(3, 21, "assigned value")),
+        (5, "#![deny(unused_parens)]\nfn main() {\n    #[allow(warnings)]\n    let _ = (1);\n}\n", e(4, 13, "assigned value")),
+        (5, "#![deny(warnings)]\n#[warn(unused_parens)]\nfn main() { let _ = (1); }\n", e(3, 21, "assigned value")),
+        (5, "#![deny(warnings)]\nfn main() {\n    #[warn(unused_parens)]\n    let _ = (1);\n}\n", e(4, 13, "assigned value")),
+        (5, "#![deny(warnings)]\n#[allow(warnings)]\nfn main() { let _ = (1); }\n", None),
+        (6, "#![deny(unused_parens)]\n#[allow(unused_parens)]\nmod m {\n    pub fn f() { let _ = (1); }\n}\nfn main() { m::f(); let _ = (2); }\n", e(6, 29, "assigned value")),
+        (6, "#![deny(unused_parens)]\nstruct S;\n#[allow(unused_parens)]\nimpl S {\n    fn f() { let _ = (1); }\n}\nfn main() { S::f(); let _ = (2); }\n", e(7, 29, "assigned value")),
+        (6, "#![deny(unused_parens)]\nmod m {\n    #![allow(unused_parens)]\n    pub fn f() { let _ = (1); }\n}\nfn main() { m::f(); let _ = (2); }\n", e(6, 29, "assigned value")),
+        (6, "#![deny(unused_parens)]\nfn g() {\n    #![allow(unused_parens)]\n    let _ = (1);\n}\nfn main() { g(); let _ = (2); }\n", e(6, 26, "assigned value")),
+        (6, "#![deny(warnings)]\n#[allow(warnings)]\nmod m {\n    pub fn f() { let _ = (1); }\n}\nfn main() { m::f(); }\n", None),
+        (6, "#![deny(warnings)]\nstruct S;\n#[allow(warnings)]\nimpl S {\n    fn f() { let _ = (1); }\n}\nfn main() { S::f(); }\n", None),
+        (6, "#![deny(warnings)]\nmod m {\n    #![allow(warnings)]\n    pub fn f() { let _ = (1); }\n}\nfn main() { m::f(); let _ = (2); }\n", e(6, 29, "assigned value")),
+    ] {
+        let d = s.check(src);
+        match want {
+            None => assert!(d.is_empty(), "finding {finding}: {src:?}: {d:?}"),
+            Some(w) => assert_eq!(d.first().map(|d| (d.line, d.col, d.msg.clone())), Some(w), "finding {finding}: {src:?}"),
+        }
+    }
+}
