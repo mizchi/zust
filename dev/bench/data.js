@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795678983536,
+  "lastUpdate": 1795678987228,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -85204,6 +85204,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 131.859,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "eba656622a70939f18bafe75b435167be5c2bf7c",
+          "message": "selfhost: the build scripts take in the modules the sources now use (#212) (#234)\n\nEach tests/selfhost/build_*.py pastes a fixed list of zustc's sources into\none file, and the sources have started using modules missing from those\nlists: ast_summary uses regions and wf (#212); parse uses regions and\nfxhash; ast_types uses ast_summary; program uses simd_sig; macros uses pm,\nfxhash and parts of proc_macro2 that tests/selfhost/mini_pm2.rs lacked.\nbuild_minclif.py searched for a comment that is now in English.\n\nThe scripts now take in those modules, mini_pm2.rs has the missing pieces\n(printing tokens as proc_macro2 does), and build_minclif.py finds the\nEnglish comment. rustc now builds the combined source of all 11 steps\n(before: 4, lexer, prelude, link, enc). `link` and `minclif` pass end to\nend; the other steps still fail where zustc compiles its own sources\n(prelude gaps listed in the PR and in TODO.md), so #212 stays open.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-26T16:36:52+09:00",
+          "tree_id": "bba5af59f1703a47448fc9b28a880bbdbc407497",
+          "url": "https://github.com/mizchi/zust/commit/eba656622a70939f18bafe75b435167be5c2bf7c"
+        },
+        "date": 1795678986496,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.335,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 1.025,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 2.074,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 6.375,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.356,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.351,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 3.14,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 355.605,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 131.23,
             "unit": "MiB"
           }
         ]
