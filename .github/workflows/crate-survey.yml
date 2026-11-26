@@ -1,0 +1,70 @@
+name: Crate survey
+
+# Builds the top crates of crates.io (cratebench/survey/crates.tsv) with zurgo, each in a probe package in a temporary
+# directory (sources from crates.io, versions from cratebench/survey/Cargo.lock), and commits what it finds to main:
+# CRATES_SUPPORT.md, cratebench/survey/results.json and a row of cratebench/survey/history.tsv. The Pages workflow then
+# rebuilds /crates/ from them. It reports; it does not fail on a crate that does not build yet.
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/**
+      - crates/**
+      - Cargo.lock
+      - cratebench/survey/survey.py
+      - cratebench/survey/crates.tsv
+      - cratebench/survey/Cargo.lock
+      - .github/workflows/crate-survey.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# (one run at a time; a push while one runs waits, and only the latest waiting one runs: every run finishes)
+concurrency:
+  group: crate-survey
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  survey:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+      - name: Build zustc and zurgo
+        run: cargo build --release -p zustc -p zurgo
+      - name: Survey the crates
+        run: python3 cratebench/survey/survey.py run --work "$RUNNER_TEMP/crate-survey" --commit "${GITHUB_SHA::7}" --history
+      - name: Summary
+        if: always()
+        run: sed -n '/^## Summary/,/^## What to fix first/p' CRATES_SUPPORT.md | head -n -1 >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: crate-survey
+          path: |
+            CRATES_SUPPORT.md
+            cratebench/survey/results.json
+      # (as bench.yml commits the README's numbers: on main only, retried when main moves on)
+      - name: Commit the results
+        if: github.ref == 'refs/heads/main'
+        run: |
+          files="CRATES_SUPPORT.md cratebench/survey/results.json cratebench/survey/history.tsv"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add $files
+          if git diff --cached --quiet; then echo "$files unchanged"; exit 0; fi
+          git commit -q -m "CRATES_SUPPORT.md: crate survey on ${GITHUB_SHA::7} [skip ci]"
+          for i in 1 2 3 4; do
+            if git pull -q --rebase origin main && git push -q origin HEAD:main; then exit 0; fi
+            git rebase --abort 2>/dev/null || true
+            sleep $((i * 5))
+          done
+          echo "::warning::could not push $files (main moved on); the next run writes them again"
