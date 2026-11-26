@@ -10877,6 +10877,62 @@ impl<T> Drop for MutexGuard<T> {
     }
 }
 
+// `std::sync::Condvar` (green threads: a wait lets the mutex go, waits for a notify, and takes the mutex again; when no
+// other thread can run, it returns, a spurious wakeup, which std allows)
+pub struct Condvar {
+    __cv_seq: u64,
+}
+/// What `Condvar::wait_timeout` gives with the guard (a green thread's wait ends with a notify: never a timeout)
+pub struct WaitTimeoutResult(bool);
+impl WaitTimeoutResult {
+    pub fn timed_out(&self) -> bool {
+        self.0
+    }
+}
+impl Condvar {
+    pub const fn new() -> Condvar {
+        Condvar { __cv_seq: 0 }
+    }
+    pub fn wait<T>(&self, guard: MutexGuard<T>) -> Result<MutexGuard<T>, ()> {
+        let m = guard.m;
+        let p = guard.p;
+        __core_forget(guard);
+        let seq = &self.__cv_seq as *const u64 as *mut u64;
+        let start = unsafe { *seq };
+        unsafe {
+            *m = false;
+        }
+        __exr_green_progress();
+        __exr_green_wait(|| unsafe { *seq != start });
+        __exr_green_wait(|| unsafe { !*m });
+        unsafe {
+            *m = true;
+        }
+        Ok(MutexGuard { p: p, m: m })
+    }
+    pub fn wait_while<T, F: FnMut(&mut T) -> bool>(&self, guard: MutexGuard<T>, mut cond: F) -> Result<MutexGuard<T>, ()> {
+        let mut g = guard;
+        while cond(unsafe { &mut *g.p }) {
+            g = self.wait(g)?;
+        }
+        Ok(g)
+    }
+    pub fn wait_timeout<T>(&self, guard: MutexGuard<T>, _dur: Duration) -> Result<(MutexGuard<T>, WaitTimeoutResult), ()> {
+        let g = self.wait(guard)?;
+        Ok((g, WaitTimeoutResult(false)))
+    }
+    pub fn notify_one(&self) {
+        let seq = &self.__cv_seq as *const u64 as *mut u64;
+        unsafe {
+            *seq += 1;
+        }
+        __exr_green_progress();
+    }
+    pub fn notify_all(&self) {
+        self.notify_one();
+    }
+}
+
 // `std::sync::RwLock` (green threads, as Mutex: `read` waits while a writer holds it, `write` while anyone does; a
 // guard's drop lets it go)
 pub struct RwLock<T> {

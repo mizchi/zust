@@ -577,7 +577,7 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "Duration" | "AtomicPtr" | "RangeTo" | "RangeToInclusive" | "Fuse" | "Wrapping" | "Saturating"
                         | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList"
                         | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError"
-                        | "Layout" | "LayoutError" | "Once" | "OnceState" | "Infallible" | "Thread" | "ThreadId" | "Builder" => Some(w),
+                        | "Layout" | "LayoutError" | "Once" | "OnceState" | "Infallible" | "Thread" | "ThreadId" | "Builder" | "Condvar" | "WaitTimeoutResult" => Some(w),
                         // (std::num's NonZero types: their impls only with them)
                         w if w.starts_with("NonZero") => Some(w),
                         // HashMap's iterators (HmIter and so on) only when HashMap is used
@@ -619,7 +619,7 @@ const SHADOWABLE: &[&str] = &[
     "NonZeroI8", "NonZeroI16", "NonZeroI32", "NonZeroI64", "NonZeroI128", "NonZeroIsize",
     "FromStr", "CString", "CStr", "NulError", "LinkedList", "Ipv4Addr", "Ipv6Addr", "IpAddr", "SocketAddrV4", "SocketAddrV6",
     "SocketAddr", "AddrParseError", "RwLock", "SystemTime", "SystemTimeError", "Bound", "Arguments", "Once", "OnceState",
-    "Layout", "Thread", "ThreadId", "Builder",
+    "Layout", "Thread", "ThreadId", "Builder", "Condvar",
 ];
 
 /// The name a struct / enum / trait / union item defines (from its first identifiers: `pub struct Name`)
