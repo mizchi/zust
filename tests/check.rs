@@ -3217,6 +3217,14 @@ fn const_overflow_and_division_by_zero_are_e0080_at_the_operation() {
     // (one a macro writes that reads a constant whose error is placed: that one's only)
     let src = "const Y: u8 = 200 + 100;\nmacro_rules! k {\n    ($n:ident) => {\n        const $n: u8 = Y + 0;\n    };\n}\nk!(X);\nfn main() {}\n";
     assert_eq!(all(src), vec![over(1, 15, "200_u8 + 100_u8")]);
+    // (through `&`, `==`, `^` / `|` and `!` of an associated constant that fails: at each one's line (zustc's place;
+    // rustc's is at W, 3:19, with a note at each))
+    let src = "struct T;\nimpl T {\n    const W: u8 = 255 + 1;\n}\nconst X: u8 = T::W & 1;\nconst B: bool = T::W == 0;\nconst C: u8 = T::W ^ 1 | 0;\nconst D: u8 = !T::W;\nfn main() {}\n";
+    let at = |l: usize, n: &str| (l, 1, format!("in constant `{n}`: attempt to compute `u8::MAX + 1_u8`, which would overflow (E0080)"));
+    assert_eq!(all(src), vec![at(5, "X"), at(6, "B"), at(7, "C"), at(8, "D")]);
+    // (the declaration, not one in a comment or a string)
+    let src = "// const A: u8 = 1 / 0;\n/* const A: u8 = 1 / 0; */\nconst S: &str = \"const A: u8 = 1 / 0;\";\nconst A: u8 = 255 + 1;\nfn main() {}\n";
+    assert_eq!(all(src), vec![max1(4, 15)]);
     // (`pow` and `abs`: the operation in core that overflows, at the call)
     let src = "const P: u8 = 2u8.pow(8);\nconst Q: i8 = i8::MIN.abs();\nconst V: i32 = (3i32.pow(21));\nconst W: u64 = 10u64.pow(20);\nconst X: i16 = (-2i16).pow(15) - 1;\nconst Y: u8 = 3u8.pow(5) + 2u8.pow(7);\nconst OK: u32 = 2u32.pow(31) + 7i8.abs() as u32;\nfn main() {}\n";
     assert_eq!(

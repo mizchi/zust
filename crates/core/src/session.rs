@@ -12521,7 +12521,9 @@ impl Session {
             let mut errs_of: FxMap<&str, (String, bool)> = FxMap::default();
             let mut at_lines: Vec<(&str, String)> = vec![];
             let own = |c: &crate::program::ConstDef| c.item < a.prog.prelude_from && !a.ext_items.get(c.item as usize).copied().unwrap_or(false) && !c.name.contains("::");
-            for c in a.prog.consts.iter().filter(|c| (c.ty.is_int() || c.ty == Ty::Bool) && own(c) && c.expr.bytes().any(|b| matches!(b, b'+' | b'-' | b'*' | b'/' | b'%' | b'<' | b'>' | b'('))) {
+            // (an operator, `<<` and `==` too, or a call: `T::W & 1` reads a failing associated constant)
+            let ops = |e: &str| e.bytes().any(|b| matches!(b, b'+' | b'-' | b'*' | b'/' | b'%' | b'<' | b'>' | b'(' | b'&' | b'|' | b'^' | b'!')) || e.contains("==");
+            for c in a.prog.consts.iter().filter(|c| (c.ty.is_int() || c.ty == Ty::Bool) && own(c) && ops(&c.expr)) {
                 let Err(e) = a.prog.const_int(&c.name, 0) else { continue };
                 if !e.ends_with("(E0080)") {
                     continue;
@@ -12615,15 +12617,63 @@ fn const_err_line(e: String, src: &str, prog: &Program) -> String {
     format!("{line}:1: in constant `{name}`: {msg}")
 }
 
+/// Where the literal or comment at b[i] ends (past it): a string or char literal (literal_end), `//` to the line's
+/// end, `/* .. */` (nested); None for anything else
+fn literal_or_comment_end(b: &[u8], i: usize) -> Option<usize> {
+    if let Some(e) = literal_end(b, i) {
+        return Some(e);
+    }
+    if b[i] != b'/' {
+        return None;
+    }
+    match b.get(i + 1) {
+        Some(b'/') => Some(b[i..].iter().position(|&c| c == b'\n').map_or(b.len(), |p| i + p)),
+        // (`/* .. /* .. */ .. */` nests)
+        Some(b'*') => {
+            let (mut end, mut n) = (i, 0usize);
+            while end < b.len() {
+                if b[end..].starts_with(b"/*") {
+                    n += 1;
+                    end += 2;
+                } else if b[end..].starts_with(b"*/") {
+                    n -= 1;
+                    end += 2;
+                    if n == 0 {
+                        break;
+                    }
+                } else {
+                    end += 1;
+                }
+            }
+            Some(end)
+        }
+        _ => None,
+    }
+}
+
 /// Where the `=` of the initializer of the constant or static `name` is in the source (`const X: u8 = ..`; not one
 /// inside its type's brackets, `[u8; N]`), or its `;` when it has none
 fn const_init_eq(src: &str, name: &str) -> Option<usize> {
     let b = src.as_bytes();
     let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
-    let at = src.match_indices(name).map(|(i, _)| i).find(|&i| {
-        let before = src[..i].trim_end();
-        (i == 0 || !word(b[i - 1])) && b.get(i + name.len()).is_none_or(|&c| !word(c)) && (before.ends_with("const") || before.ends_with("static"))
-    })?;
+    // (outside comments and literals: not `// const A: u8 = 1 / 0;`)
+    let mut at = 0;
+    loop {
+        if at >= b.len() {
+            return None;
+        }
+        if let Some(e) = literal_or_comment_end(b, at) {
+            at = e;
+            continue;
+        }
+        if b[at..].starts_with(name.as_bytes()) && (at == 0 || !word(b[at - 1])) && b.get(at + name.len()).is_none_or(|&c| !word(c)) {
+            let before = src[..at].trim_end();
+            if before.ends_with("const") || before.ends_with("static") {
+                break;
+            }
+        }
+        at += 1;
+    }
     let mut eq = at + name.len();
     let mut depth = 0i32;
     while eq < b.len() {
@@ -12652,7 +12702,8 @@ fn const_reads(prog: &Program, n: &str) -> Vec<String> {
             continue;
         }
         let x = if k >= 3 && colons(k - 2) && ts[k - 3].kind == TokKind::Ident { format!("{}::{}", ts[k - 3].text, t.text) } else { t.text.clone() };
-        if prog.const_index.contains_key(x.as_str()) {
+        // (once each: `C1 + C1` is followed once)
+        if prog.const_index.contains_key(x.as_str()) && !out.contains(&x) {
             out.push(x);
         }
     }
@@ -12691,34 +12742,11 @@ fn const_op_err(prog: &Program, name: &str, src: &str, eq: usize) -> Option<Opti
     let close = |from: usize, stop: u8| {
         let (mut end, mut depth) = (from, 0i32);
         while end < b.len() {
-            if let Some(e) = literal_end(b, end) {
+            if let Some(e) = literal_or_comment_end(b, end) {
                 end = e;
                 continue;
             }
             match b[end] {
-                b'/' if b.get(end + 1) == Some(&b'/') => {
-                    end = b[end..].iter().position(|&c| c == b'\n').map_or(b.len(), |p| end + p);
-                    continue;
-                }
-                // (`/* .. /* .. */ .. */` nests)
-                b'/' if b.get(end + 1) == Some(&b'*') => {
-                    let mut n = 0usize;
-                    while end < b.len() {
-                        if b[end..].starts_with(b"/*") {
-                            n += 1;
-                            end += 2;
-                        } else if b[end..].starts_with(b"*/") {
-                            n -= 1;
-                            end += 2;
-                            if n == 0 {
-                                break;
-                            }
-                        } else {
-                            end += 1;
-                        }
-                    }
-                    continue;
-                }
                 b'[' | b'(' | b'{' => depth += 1,
                 b']' | b')' | b'}' if depth == 0 => break,
                 b']' | b')' | b'}' => depth -= 1,
