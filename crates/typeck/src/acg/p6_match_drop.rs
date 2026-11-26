@@ -25,6 +25,18 @@ impl Cx<'_> {
     // --- match / if let / while let --------------------------------------
 
     /// match 対象を place にする。値なら一時変数に置く。None は発散
+    /// The scrutinee's place for patterns `pats` (bk_scrutinee): a mutable place when one of them binds by `ref mut`, so
+    /// that a scrutinee through a user `Deref` (`match *b { ref mut n => .. }`, `let ref mut z = *y;`) calls `deref_mut`
+    pub(crate) fn scrut_place(&mut self, e: &Expr, expected: Option<Ty>, pats: &[&Pat]) -> R<Option<Place>> {
+        // (only a place reached through something (`*b`, `p.x`) can be through a Deref: a local's pattern is not read)
+        if !matches!(strip_paren(e), Expr::Path(..)) && is_place_expr(e) && pats.iter().any(|p| binds_ref_mut(p)) {
+            self.scrut_mut = true;
+        }
+        let r = self.bk_scrutinee(e, expected, pats);
+        self.scrut_mut = false;
+        r
+    }
+
     pub(crate) fn scrutinee(&mut self, e: &Expr) -> R<Option<Place>> {
         self.scrutinee_as(e, None)
     }
@@ -46,7 +58,11 @@ impl Cx<'_> {
         }
         let bare_none = expected.is_some() && matches!(strip_paren(e), Expr::Path(None, pa) if pa.segs.len() == 1 && pa.segs[0].name == "None");
         if is_place_expr(e) && !bare_none {
-            let p = self.place(e)?;
+            let m = self.bk.place_mut || std::mem::take(&mut self.scrut_mut);
+            let pm = std::mem::replace(&mut self.bk.place_mut, m);
+            let p = self.place(e);
+            self.bk.place_mut = pm;
+            let p = p?;
             // (the annotation is the place's type (`let ref s: String = n;` with n an i32 is E0308); not a pointer's,
             // to which a coercion may apply)
             let coercible = |t: Ty| matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_) | Ty::Fn(_) | Ty::Dyn(_) | Ty::Never);
@@ -240,7 +256,7 @@ impl Cx<'_> {
             }
             _ => self.bare_none_ty(scrut, &pats)?,
         };
-        let Some(place) = self.bk_scrutinee(scrut, scrut_exp, &pats)? else {
+        let Some(place) = self.scrut_place(scrut, scrut_exp, &pats)? else {
             return Ok((None, Ty::Never));
         };
         let scrut_drop = self.bk.scrut_drop.take();
@@ -417,7 +433,7 @@ impl Cx<'_> {
                 }
                 for c in cs {
                     if let Expr::Let(lpat, lexpr) = c {
-                        let Some(lplace) = ({ let ex = self.bare_none_ty(lexpr, &[&**lpat])?; self.bk_scrutinee(lexpr, ex, &[&**lpat])? }) else {
+                        let Some(lplace) = ({ let ex = self.bare_none_ty(lexpr, &[&**lpat])?; self.scrut_place(lexpr, ex, &[&**lpat])? }) else {
                             break;
                         };
                         // (a pattern that is not of the value's type: at the pattern, `Ok(x) if let Err(_) = x`)
@@ -503,7 +519,7 @@ impl Cx<'_> {
             return err(SP, "internal: if_let without `let`");
         };
         let t0 = self.temps.len();
-        let Some(place) = ({ let ex = self.bare_none_ty(lexpr, &[&**lpat])?; self.bk_scrutinee(lexpr, ex, &[&**lpat])? }) else {
+        let Some(place) = ({ let ex = self.bare_none_ty(lexpr, &[&**lpat])?; self.scrut_place(lexpr, ex, &[&**lpat])? }) else {
             return Ok((None, Ty::Never));
         };
         let sflag = self.last_scrut;
@@ -585,7 +601,7 @@ impl Cx<'_> {
         // 毎回 match 対象を評価し直す (一時値は 1 回ごとに drop する)
         let t0 = self.temps.len();
         let bk_t0 = self.bk.stmt_temps.len();
-        let Some(place) = ({ let ex = self.bare_none_ty(e, &[pat])?; self.bk_scrutinee(e, ex, &[pat])? }) else {
+        let Some(place) = ({ let ex = self.bare_none_ty(e, &[pat])?; self.scrut_place(e, ex, &[pat])? }) else {
             return Ok((None, Ty::Never));
         };
         let sflag = self.last_scrut;
@@ -2079,6 +2095,17 @@ impl Cx<'_> {
     }
 }
 
+/// Whether pattern p binds a name by `ref mut`
+fn binds_ref_mut(p: &Pat) -> bool {
+    match p {
+        Pat::Ident(by_ref, m, _, sub) => (*by_ref && *m) || sub.as_deref().is_some_and(binds_ref_mut),
+        Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Or(ps) | Pat::Slice(ps) => ps.iter().any(binds_ref_mut),
+        Pat::Struct(_, fs, _) => fs.iter().any(|f| binds_ref_mut(&f.1)),
+        Pat::Ref(_, q) => binds_ref_mut(q),
+        _ => false,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Drop
 // ---------------------------------------------------------------------------
@@ -2917,6 +2944,21 @@ impl Cx<'_> {
         // when the flag says it is there)
         if let Some(r) = self.assign_part(left) {
             return Some(r);
+        }
+        // (`*b = v` of a Box local: what b holds is dropped only when it is there (`*b;` moved it out, which clears b's
+        // flag); b holds a value again after it, as rustc re-initializes `*b`)
+        if let (Expr::Unary(op, inner, _), Place::Mem(a, o, t)) = (strip_paren(left), p) {
+            if op == "*" {
+                if let Expr::Path(_, pp) = strip_paren(inner) {
+                    if let Some((loc, Ty::Box(_))) = ident_of(pp).and_then(|id| self.lookup(id)) {
+                        if let Some(flag) = self.flag_of_loc(loc) {
+                            let addr = self.addr_plus(a, o);
+                            self.emit_owned_drop(Owned { loc: Loc::Ptr(addr), ty: t, flag, depth: 0, off: 0 });
+                            return Some(flag);
+                        }
+                    }
+                }
+            }
         }
         // フィールド・`*p`・`a[i]`: 初期化済みなので必ず drop する
         let addr = match p {

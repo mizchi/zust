@@ -141,7 +141,18 @@ fn t3() {
     let _x = b.0;
     println!("end t3");
 }
+// (`*b;` moves what a Box holds out; `*b = v` then drops nothing old, and b holds v again)
+fn box_reinit() {
+    let mut b = Box::new(S(110));
+    let c = *b;
+    println!("moved {}", c.0);
+    *b = S(111);
+    let mut d = Box::new(S(112));
+    *d = S(113);
+    println!("end box_reinit");
+}
 fn main() {
+    box_reinit();
     reassign();
     field_reassign();
     cond(true);

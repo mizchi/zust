@@ -527,6 +527,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         pat_vars: vec![],
         rel_parts: None,
         index_owns: false,
+        scrut_mut: false,
         part_vars: vec![],
         known_var: vec![],
         owned: vec![],
@@ -1280,6 +1281,8 @@ pub struct Cx<'p> {
     pub rel_parts: Option<PatParts>,
     /// The next indexable owns a new value it indexes (an index expression's place, `[A(1)][0]`)
     pub index_owns: bool,
+    /// The next scrutinee is placed mutable: a pattern binds by `ref mut` (scrut_place)
+    pub scrut_mut: bool,
     /// The variants (offset in the local, enum, variant) of the split under way (split_moved)
     pub part_vars: Vec<(i32, u32, usize)>,
     /// Locals (their drop flags) that a match left known to be one variant (enum, variant): every arm that went on
@@ -2451,7 +2454,7 @@ impl Cx<'_> {
                     if self.bk_on() {
                         borrowck::extended_refs(self.prog, init, &mut self.bk.extended);
                     }
-                    let sc = self.bk_scrutinee(init, ann, &[pat]);
+                    let sc = self.scrut_place(init, ann, &[pat]);
                     self.bk.extended.truncate(ext1);
                     self.bk.let_scrut = false;
                     let Some(place) = sc? else {

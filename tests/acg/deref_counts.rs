@@ -30,7 +30,11 @@ struct Point {
 }
 
 fn main() {
-    let mut p = Counter { imm: Cell::new(0), mutable: 0, value: Point { x: 0, y: 0 } };
+    let mut p = Counter {
+        imm: Cell::new(0),
+        mutable: 0,
+        value: Point { x: 0, y: 0 },
+    };
     let _ = p.x;
     let a = p.y;
     let _ = &p.x;
@@ -39,8 +43,27 @@ fn main() {
     p.x += 3;
     p.y = 5;
     println!("{} {} {} {}", p.imm.get(), p.mutable, p.value.x, p.value.y);
-    let mut v = Counter { imm: Cell::new(0), mutable: 0, value: [1, 2, 3] };
+    let mut v = Counter {
+        imm: Cell::new(0),
+        mutable: 0,
+        value: [1, 2, 3],
+    };
     v[0] += 10;
     let b = v[1];
     println!("{} {} {b} {}", v.imm.get(), v.mutable, v.value[0]);
+    // (a scrutinee bound by `ref mut` is reached by `deref_mut`, by `ref` by `deref`)
+    let mut c = Counter {
+        imm: Cell::new(0),
+        mutable: 0,
+        value: 7,
+    };
+    match *c {
+        ref mut n => *n += 1,
+    }
+    let ref mut z = *c;
+    *z += 1;
+    match *c {
+        ref n => println!("n {n}"),
+    }
+    println!("{} {} {}", c.imm.get(), c.mutable, c.value);
 }

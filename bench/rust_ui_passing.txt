@@ -2403,6 +2403,7 @@ run-pass	drop/issue-2735-2.rs
 run-pass	drop/issue-2735-3.rs
 run-pass	drop/issue-2735.rs
 build-pass	drop/issue-35546.rs
+run-pass	drop/issue-48962.rs
 run-pass	drop/issue-90752-raw-ptr-shenanigans.rs
 run-pass	drop/issue-90752.rs
 run-pass	drop/issue-979.rs
@@ -5535,6 +5536,7 @@ run-pass	overloaded/overloaded-deref.rs
 run-pass	overloaded/overloaded-index-assoc-list.rs
 run-pass	overloaded/overloaded-index-in-field.rs
 run-pass	overloaded/overloaded-index.rs
+run-pass	overloaded/overloaded_deref_with_ref_pattern.rs
 run-pass	overloaded/overloaded_deref_with_ref_pattern_issue15609.rs
 run-pass	overloaded/subtyping-both-lhs-and-rhs-in-add-impl.rs
 run-pass	packed/misaligned-reference-drop-field-99838.rs

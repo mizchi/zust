@@ -1,3 +1,9 @@
+moved 110
+drop 112
+end box_reinit
+drop 113
+drop 110
+drop 111
 drop 2
 end reassign
 drop 1
