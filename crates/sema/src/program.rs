@@ -3843,6 +3843,38 @@ impl Program {
         }
     }
 
+    /// The names of std_inherent's that `[T]` has as `&mut self` methods: rustc's probe reaches them only with a `&mut`
+    /// autoref (or a `&mut [T]` receiver as it is), after a trait's `&self` method of the name for `[T]`
+    pub fn mut_self_inherent(t: Ty, name: &str) -> bool {
+        let mut t = t;
+        while let Ty::Ref(_, i) = t {
+            t = *i;
+        }
+        matches!(t, Ty::Slice(_)) && Self::slice_mut_self(name)
+    }
+
+    /// Whether `[T]` has a `&mut self` method of the name (std_inherent's)
+    pub fn slice_mut_self(name: &str) -> bool {
+        matches!(
+            name,
+            "first_mut" | "last_mut" | "split_first_mut" | "split_last_mut" | "get_mut" | "get_unchecked_mut" | "as_mut_ptr" | "swap"
+                | "reverse" | "iter_mut" | "chunks_mut" | "chunks_exact_mut" | "split_at_mut" | "split_mut" | "sort" | "sort_by"
+                | "sort_by_key" | "sort_by_cached_key" | "sort_unstable" | "sort_unstable_by" | "sort_unstable_by_key"
+                | "rotate_left" | "rotate_right" | "fill" | "fill_with" | "clone_from_slice" | "copy_from_slice" | "copy_within"
+                | "swap_with_slice"
+        )
+    }
+
+    /// std_inherent, for a receiver that is a `&mut` reference to t or not: a `&mut self` method of `[T]` comes before a
+    /// trait's `&self` method (id) of the name only for a `&mut [T]` receiver
+    /// (mut_recv and trait_method are asked only for a `&mut self` method's name)
+    pub fn std_inherent_first(&self, t: Ty, name: &str, mut_recv: impl FnOnce() -> bool, trait_method: impl FnOnce() -> Option<u32>) -> bool {
+        Self::std_inherent(t, name)
+            && (!Self::mut_self_inherent(t, name)
+                || mut_recv()
+                || !trait_method().is_some_and(|id| matches!(self.sigs[id as usize].params.first(), Some(Ty::Ref(false, _)))))
+    }
+
     pub fn prim_self_method(&self, t: Ty, name: &str) -> Option<u32> {
         // (`impl<T> Fake for T {}`: the trait's methods are methods of every type, numbers too)
         let Some(id) = self.prim_method(t, name) else {

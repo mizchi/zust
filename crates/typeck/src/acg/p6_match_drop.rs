@@ -2707,8 +2707,9 @@ impl Cx<'_> {
     fn presplit_block(&mut self, b: &PBlock) {
         for s in &b.stmts {
             match s {
-                Stmt::Let(_, _, init, els, ..) => {
+                Stmt::Let(pat, _, init, els, ..) => {
                     if let Some(e) = init {
+                        self.presplit_pat(pat, e);
                         self.presplit_scan(e);
                     }
                     if let Some(b) = els {
@@ -2753,8 +2754,117 @@ impl Cx<'_> {
                     }
                 }
             }
-            Expr::Closure(..) | Expr::Macro(..) => {}
-            _ => crate::ast_closure::each_child_pub(e, &mut |c| self.presplit_scan(c)),
+            Expr::Closure(..) => {}
+            Expr::Macro(p, g, _) => self.presplit_macro(p, g),
+            _ => {
+                match e {
+                    Expr::Match(x, arms) => {
+                        for a in arms {
+                            self.presplit_pat(&a.pat, x);
+                        }
+                    }
+                    Expr::Let(pat, x) => self.presplit_pat(pat, x),
+                    _ => {}
+                }
+                crate::ast_closure::each_child_pub(e, &mut |c| self.presplit_scan(c))
+            }
+        }
+    }
+
+    /// presplit_scan of a macro call's arguments, when they may name a field (`dbg!({ x.1 = v; })`, `vec![x.0]`): a
+    /// format macro's argument that is a field is only borrowed
+    #[inline(never)]
+    fn presplit_macro(&mut self, p: &Path, g: &str) {
+        if !g.contains('.') {
+            return;
+        }
+        let name = p.segs.last().map_or("", |s| s.name.as_str());
+        if matches!(name, "matches" | "stringify" | "concat" | "include_str" | "include_bytes" | "cfg" | "env") {
+            return;
+        }
+        let Some(args) = crate::ast_closure::macro_args_at(g, Default::default()) else { return };
+        let fmt = matches!(
+            name,
+            "println" | "print" | "eprintln" | "eprint" | "format" | "format_args" | "write" | "writeln" | "panic" | "assert"
+                | "assert_eq" | "assert_ne" | "debug_assert" | "debug_assert_eq" | "debug_assert_ne" | "unreachable" | "todo"
+                | "unimplemented"
+        );
+        for a in &args {
+            if !(fmt && matches!(strip_paren(a), Expr::Field(..))) {
+                self.presplit_scan(a);
+            }
+        }
+    }
+
+    /// presplit_loop of what a pattern moves out of a local or a field of one (`let (a, _) = x`, `match x.0 { S { a, .. } => .. }`)
+    fn presplit_pat(&mut self, pat: &Pat, x: &Expr) {
+        if matches!(pat, Pat::Ident(..) | Pat::Wild) || !matches!(strip_paren(x), Expr::Path(..) | Expr::Field(..)) {
+            return;
+        }
+        let Some((loc, t, f)) = self.moved_root(x) else { return };
+        if !matches!(loc, Loc::Slot(_) | Loc::Ptr(_)) {
+            return;
+        }
+        let Some(depth) = self.owned.iter().rev().find(|o| o.flag == f).map(|o| o.depth) else { return };
+        let Some((off, pt, _)) = self.local_part(x, t) else { return };
+        let mut moved = vec![];
+        if self.pat_move_parts(pat, pt, off, &mut moved).is_none() {
+            return;
+        }
+        moved.retain(|&(_, k)| self.needs_drop(k));
+        if moved.is_empty() || moved.iter().any(|&(o, k)| o == 0 && k == t) {
+            return;
+        }
+        let mut need = vec![];
+        if self.part_plan(f, 0, t, &moved, false, &mut need).is_none() {
+            return;
+        }
+        for (o, k) in need {
+            self.part_flag((f, loc, depth), o, k);
+        }
+    }
+
+    /// The parts (offset, type) of a place of type t at off that pat binds by value: None for a pattern of an enum, a
+    /// slice or alternatives, which are not looked into
+    fn pat_move_parts(&self, pat: &Pat, t: Ty, off: i32, out: &mut Vec<(i32, Ty)>) -> Option<()> {
+        match pat {
+            Pat::Wild | Pat::Rest | Pat::Lit(_) | Pat::Range(..) | Pat::Path(_) | Pat::Ident(true, ..) => Some(()),
+            Pat::Ident(false, ..) => {
+                out.push((off, t));
+                Some(())
+            }
+            Pat::Tuple(ps) | Pat::TupleStruct(_, ps) => {
+                let Ty::Struct(sid) = t else { return None };
+                let sd = &self.prog.structs[sid as usize];
+                if sd.is_enum {
+                    return None;
+                }
+                let rest = ps.iter().position(|p| matches!(p, Pat::Rest));
+                for (i, p) in ps.iter().enumerate() {
+                    if matches!(p, Pat::Rest) {
+                        continue;
+                    }
+                    let fi = match rest {
+                        Some(r) if i > r => sd.fields.len().checked_sub(ps.len() - i)?,
+                        _ => i,
+                    };
+                    let (ft, fo) = self.prog.field(sid, &fi.to_string())?;
+                    self.pat_move_parts(p, ft, off + fo as i32, out)?;
+                }
+                Some(())
+            }
+            Pat::Struct(_, fs, _) => {
+                let Ty::Struct(sid) = t else { return None };
+                if self.prog.structs[sid as usize].is_enum {
+                    return None;
+                }
+                for (n, p) in fs {
+                    let (ft, fo) = self.prog.field(sid, n)?;
+                    self.pat_move_parts(p, ft, off + fo as i32, out)?;
+                }
+                Some(())
+            }
+            _ => None,
         }
     }
 

@@ -2832,7 +2832,17 @@ impl Inf<'_> {
                 }
             }
             if let Some(t) = self.resolve(rv) {
-                if let Some(id) = self.prog.prim_method(t, n).filter(|_| !crate::program::Program::std_inherent(t, n)) {
+                // (the reference around the slice, as rustc's autoderef reaches it: `&&mut [T]`'s is `&mut`)
+                let mut mut_recv = false;
+                if crate::program::Program::mut_self_inherent(t, n) {
+                    let mut rr = self.find(r) as usize;
+                    for _ in 0..8 {
+                        let Some(Shape::Ref(m, i)) = self.shape[rr] else { break };
+                        mut_recv = m;
+                        rr = self.find(i) as usize;
+                    }
+                }
+                if let Some(id) = self.prog.prim_method(t, n).filter(|&id| !self.prog.std_inherent_first(t, n, || mut_recv, || Some(id))) {
                     return self.apply_recv(Some(id), avs, rv);
                 }
             }

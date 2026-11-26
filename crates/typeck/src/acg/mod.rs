@@ -2932,6 +2932,12 @@ impl Cx<'_> {
                             tail_t0 = Some(t0);
                         }
                     } else {
+                        // (the value of a `vec![..];` / `format!(..);` / `dbg!(..);` is the statement's temporary, dropped at its end)
+                        if let (Some(v), t @ Ty::Struct(_)) = r {
+                            if matches!(p.segs.last().map(|s| s.name.as_str()), Some("vec" | "format" | "dbg")) {
+                                self.own_temp(v, t);
+                            }
+                        }
                         self.drop_temps(t0);
                     }
                 }

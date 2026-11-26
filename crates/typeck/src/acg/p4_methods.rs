@@ -317,6 +317,10 @@ impl Cx<'_> {
             // `s.get(a..b)` / `get_mut`: Some(&s[a..b]) if the range is inside
             "get" | "get_mut" if matches!(args.first(), Some(Expr::Range(..))) => {
                 let Some(rg) = args.first().copied() else { unreachable!() };
+                // (E0596 for `get_mut(a..b)` through a `&[T]`, as for an element's)
+                if name == "get_mut" && matches!(self.peek(&*mc_recv), Some(Ty::Ref(false, _))) {
+                    return Err(self.at(expr_start(&mc_recv), MUT_THROUGH_SHARED.to_string()));
+                }
                 let (base, len, elem) = self.indexable(&*mc_recv)?;
                 let (lo, hi) = self.range_bounds(rg, len)?;
                 let m = name == "get_mut";

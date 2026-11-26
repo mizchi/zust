@@ -622,7 +622,9 @@ impl Cx<'_> {
             let bt = self.peek(b).map(|t| self.strip_refs(t));
             let is_text = bt.is_some_and(|t| t == Ty::Str || matches!(t, Ty::Struct(sid) if self.prog.structs[sid as usize].name == "String"));
             if matches!(&**ix, Expr::Range(..)) && !is_text && method != "try_into" {
-                let ne = Expr::MethodCall(Box::new(Expr::Ref(false, Box::new(strip_paren(recv).clone()))), method.clone(), gargs.clone(), margs.clone(), crate::parse::Span::default());
+                // (`&mut` for a `&mut self` method of the slice: `v[1..].first_mut()`, `v.get_mut(a..b)` as `v[..].get_mut(a..b)`)
+                let m = crate::program::Program::slice_mut_self(method);
+                let ne = Expr::MethodCall(Box::new(Expr::Ref(m, Box::new(strip_paren(recv).clone()))), method.clone(), gargs.clone(), margs.clone(), crate::parse::Span::default());
                 let ne = self.keep_expr(ne);
                 return self.method_call(ne, expected);
             }
@@ -2364,7 +2366,21 @@ impl Cx<'_> {
         // (not of a name `[T]` / `str` has a method of its own: that one first)
         if matches!(t, Ty::Str | Ty::Slice(_) | Ty::Array(..)) {
             if matches!(t, Ty::Str | Ty::Slice(_)) && crate::program::Program::std_inherent(t, &name) {
-                return Ok(None);
+                // (rustc's autoderef reaches `&mut [T]` itself, where the `&mut self` method takes it as it is)
+                let mut_recv = || {
+                    self.peek(recv).is_some_and(|mut rt| {
+                        while let Ty::Ref(m, i) = rt {
+                            if matches!(i, Ty::Slice(_) | Ty::Str) {
+                                return m;
+                            }
+                            rt = *i;
+                        }
+                        false
+                    })
+                };
+                if self.prog.std_inherent_first(t, &name, mut_recv, || self.prog.prim_self_method(t, &name)) {
+                    return Ok(None);
+                }
             }
             let Some(id) = self.prog.prim_self_method(t, &name) else {
                 return Ok(None);
@@ -4473,25 +4489,24 @@ impl Cx<'_> {
                             // (`It::iter(s)` with s: &[u8] and `impl It for [u8]`: that impl's, not the slice's own
                             // `iter`, which `s.iter()` is)
                             // (only for an impl for `[T]` / `str` itself: `impl Tr for &[u8]` is the reference's)
-                            let own_impl = || {
-                                self.prog.prim_self_method(t, &ms).is_some_and(|id| {
-                                    self.prog.sigs[id as usize].impl_trait.as_deref().is_some_and(|it| it.split('<').next().unwrap_or(it).trim() == tr)
-                                })
-                            };
                             if matches!(t, Ty::Slice(_) | Ty::Str) && crate::program::Program::std_inherent(t, &ms) {
+                                // (this trait's, among the impls of the name's other traits)
+                                let own = self.prog.prim_self_method(t, &ms).and_then(|id| self.trait_candidate(&self.prog.names[id as usize], &tr));
                                 // (or `impl Tr for &[u8]`'s (`__slice::__ref_m`): `<&[u8] as Tr>::m`)
-                                let ref_impl = || {
-                                    matches!(t, Ty::Slice(_))
-                                        && self.prog.index.get(&format!("__slice::__ref_{ms}")).is_some_and(|&id| {
-                                            self.prog.sigs[id as usize].impl_trait.as_deref().is_some_and(|it| it.split('<').next().unwrap_or(it).trim() == tr)
-                                        })
-                                };
-                                let amp = if own_impl() {
-                                    Some("")
-                                } else if ref_impl() {
-                                    Some("&")
-                                } else {
-                                    None
+                                let rf = if matches!(t, Ty::Slice(_)) { self.trait_candidate(&format!("__slice::__ref_{ms}"), &tr) } else { None };
+                                // (with both, Self is the first argument's type, less the `&` of a `&self` method:
+                                // `Tr::iter(&s)` is the impl for `&[u8]`, `Tr::iter(s)` the one for `[u8]`)
+                                let by_ref = own.or(rf).is_some_and(|id| matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(..))));
+                                let self_ty = self.peek(a0).and_then(|ta| match ta {
+                                    Ty::Ref(_, i) if by_ref => Some(*i),
+                                    _ if by_ref => None,
+                                    _ => Some(ta),
+                                });
+                                let amp = match (own, rf, self_ty) {
+                                    (_, Some(_), Some(Ty::Ref(_, Ty::Slice(_)))) => Some("&"),
+                                    (Some(_), _, _) => Some(""),
+                                    (None, Some(_), _) => Some("&"),
+                                    _ => None,
                                 };
                                 if let Some(amp) = amp {
                                     if let Ok(Expr::Path(q, qp)) = crate::parse::parse_expr(&format!("<{amp}{} as {tr}>::{ms}", self.prog.tn(t))) {
