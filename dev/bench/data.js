@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795694750361,
+  "lastUpdate": 1795694752978,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -116529,6 +116529,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/6d7e2c275dd721502f5aa0060477e9a4b8fb101d"
         },
         "date": 1795693191937,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 77.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 66.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 90.625,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 88.235,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.308,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.749,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "44f2a680b4b1ec5881480d146c814c3a1e15e93d",
+          "message": "typeck: an associated function without self is no method candidate (#207) (#235)\n\n* typeck: an associated function without self is no method candidate (#207)\n\nWith a trait's associated function `fn get(r: &[u8]) -> Self` (no `self`)\nimplemented for `Vec<T>`, `v.get(i)` on a Vec failed with \"`Vec<i32>::get`\nis an associated function, not a method\", also when the trait sat in\nanother module and was not imported. rustc accepts it: the slice's `get` is\nthe method. std's own calls broke the same way (`v.first()` is\n`self.get(0)` in the prelude, so the error pointed there).\n\nFns are registered as `Type::name`; the first one takes the index entry and\nlater ones become overloads (`Vec::get#1`). The program's items come before\nthe prelude's, so the trait impl's `get` took `Vec::get` and the inherent\n`Vec::get(&self, i)` became its overload. The method-call lookup, in type\ninference (ast_infer's method_call) and in the lowering\n(method_call_inner), took the index entry whatever its receiver, and the\nlowering then rejected it.\n\n`Program::self_method(sid, name)` is the lookup a method call uses: the\nindex entry when it has `self`, else the first overload of the name with\n`self`, else None (then autoderef and the default methods go on, as rustc's\nprobe does). Inference, the lowering, `peek` of a method call's type, and\nthe checks that ask whether the receiver's type has its own method of the\nname (before a builtin rewrite) all use it, so they agree. When nothing is\nfound, the error still says \"is an associated function, not a method\" if\nan associated function of the name exists. In pick_overload, a call with a\nreceiver of a method with `self` no longer takes a function without `self`\nfrom the group: `s.f()` with `impl S { fn f(x: &S) }` beside\n`impl Tr for S { fn f(&self) }` is Tr's, as in rustc. The common path costs\none `has_self` check more.\n\nTests: tests/probe/assoc_fn_not_method.rs (with its expected files) has the\nissue's program (the trait in a module, not imported), `v.get` / `get_mut`\non a Vec whose element type has such an impl, in a generic fn and through\nstd's `first` / `last`, the associated function called as\n`<Vec<u8> as Wire>::get(..)`, `Wire::get(..)` and `T::get(..)`, a method of\nthe same trait (`put(&self)`) by a method call, an inherent associated\nfunction beside a trait's method of the same name, and a type's associated\nfunction beside the method of what it derefs to. It matches rustc; zustc\nbefore this change rejects it.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\n* typeck: receiver lookups skip associated functions everywhere (#207)\n\nReview follow-up. The first change left three receiver lookups that still\ntook a function without `self` for a method:\n\n- A trait's default associated function (`trait Dflt { fn val() -> i32 {\n  5 } }`, `impl Dflt for D {}`, D derefs to Inner with `fn val(&self)`):\n  `default_method` checked `has_body` but not `has_self`, so `d.val()`\n  stopped at the default and failed with \"`D::val` is an associated\n  function, not a method\" instead of reaching Inner's `val`.\n- `deref_mut_recv` (and `takes_mut_self`) asked `method(sid, m)`: with\n  `impl E { fn edit() }` and E: DerefMut to Inner with `fn edit(&mut\n  self)`, it returned early, the main lookup then skipped the associated\n  function and derefed with the shared `deref`, so `e.edit()` ran without\n  the user's `deref_mut` (wrong output: its side effect was lost).\n- `cmp_at` took an associated `partial_cmp` / `cmp` (no `self`) beside a\n  derived PartialOrd / Ord for a hand-written impl and called it as a\n  method, which compiled back into the field comparison: the comparison\n  failed to compile (\"unsupported path\" in the prelude) instead of\n  comparing the fields.\n\n`Program::self_default_method` is default_method for a method call: the\ntrait defaults (and the blanket method) with `self`. The receiver lookups\nthat paired self_method with default_method use it, as do deref_mut_recv\nand takes_mut_self; cmp_at uses self_method. The remaining receiver\nlookups by the method's name switch to self_method too: the `&mut self` /\nby-value checks of a method call in borrowck and in the capture analysis,\nthe turbofish's region requirements, the blanket impl's inherent-method\ncheck, and the for loop's Option / Result rewrite. The error for a call\nthat finds nothing still says \"is an associated function, not a method\"\nwhen a default associated function of the name exists.\n\nTests: tests/probe/assoc_fn_not_method.rs gains the three cases (`d.val()`\nand `<D as Dflt>::val()`, `e.edit()` twice counting the `deref_mut` calls,\n`a.partial_cmp(&b)`, `a < b`, `Q(4).cmp(&Q(2))`, `Q(1).max(Q(3))` beside\n`P::partial_cmp()` / `Q::cmp(7)`), and its expected files are regenerated\nfrom rustc. It matches rustc; the previous commit's zustc rejects it.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\n* typeck: closure captures see default methods; overload picks by the group's name (#207)\n\nSecond review follow-up.\n\nThe closure capture checks classify a method call on a captured value by\nits receiver (borrowck's bk_cap_muts, its `&mut` argument reborrows and\nbk_may_consume, and the lowering's owned_mutation / fn_mutation). They\nasked self_method only (and `method` before it), so a trait's default\n`&mut self` method was not seen: `let f = || c.bump(); f();` compiled\n(rustc: E0596, `f` is not `mut`), so did a use of `c` while such a closure\nlived (rustc: E0502), and `#![deny(unused_mut)]` rejected the `mut c` that\nthe closure needs. They now fall back to self_default_method.\n\nself_method can give an overload of the name, `W::f#1`, when an\nassociated function without `self` took the index entry. The overload\ngroups are keyed by the name without the suffix, so inherent_overload_for\nand pick_inherent_overload missed the group and kept that candidate: with\n`impl Mk for W<bool> { fn f() }` first, `unsafe fn f(&self)` in\n`impl W<u8>` and `fn f(&self)` in `impl W<u16>`, `a.f()` on a `W<u16>`\nkept `W<u8>`'s `f` and failed with \"expected `u8`, found `u16`\". Both look\nthe group up by the name before the `#`.\n\nTests: tests/probe/assoc_fn_not_method.rs (now under\n`#![deny(unused_mut)]`) gains both cases, with its expected files\nregenerated from rustc. tests/compile_errors gains\nclosure_default_mut_self_not_mut (E0596), closure_default_mut_self_conflict\n(E0502) and assoc_fn_first_unsafe_overload (the `W<u8>` method still needs\n`unsafe`, E0133). The previous commit's zustc fails the probe and accepts\nthe first two.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\n* typeck: receiver modes read from the receiver's instance's overload (#207)\n\nThird review follow-up: inherent methods of one name in impls for two\ninstances of a struct.\n\nWhat reads how a method call takes its receiver asked self_method, whose\nid is the first method of the name with `self`, not the one for the\nreceiver's instance. With `impl Tg<u8> { fn edit(&self) }` and\n`impl Tg<u16> { fn edit(&mut self) }`, a `Wr` that derefs (with a counting\nDerefMut) to `Tg<u16>` and has an associated `fn edit()`: takes_mut_self\nsaw `Tg<u8>`'s `&self`, so deref_mut_recv did not take `deref_mut`, and\n`wr.edit()` was lowered through the shared `deref` (prints `20 0 9 5`,\nrustc `20 2 9 5`; main rejected it with \"associated function, not a\nmethod\"). A closure `|| wc.m()` on a `Wc<u16>` whose `m` takes `&self` was\ntaken for a mutation because `Wc<u8>`'s `m` takes `&mut self` (\"cannot\nborrow `wc` as mutable\").\n\n`Program::self_method_of(sid, name)` is self_method resolved by\ninherent_overload_for for sid's instance. takes_mut_self, borrowck's\nbk_cap_muts (both lookups) and bk_may_consume, and the lowering's\nowned_mutation / fn_mutation use it.\n\nWhen the index entry has no `self`, self_method now prefers an inherent\nmethod with `self` for sid's instance over a trait's, as rustc's probe\ntakes the inherent methods first at one receiver type: with\n`impl AssocF for Sa { fn f() }`, `impl OtherF for Sa { unsafe fn f(&self) }`\nand `impl Sa { fn f(&self) }`, `Sa(0).f()` is the inherent one (it was a\nbogus E0133 from the check made before pick_overload).\n\nTests: tests/probe/assoc_fn_not_method.rs gains the three cases, with its\nexpected files regenerated from rustc. It matches rustc; the previous\nhead's zustc fails it (and prints `20 0 9 5` for the DerefMut case alone).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\n* typeck: a method beside an associated function follows rustc's receiver steps (#207)\n\nFourth review follow-up. The previous change made self_method prefer an\ninherent method over a trait's whenever the index entry has no `self`.\nrustc prefers an inherent method only within one receiver step, and the\nsteps come first: with `impl Assoc for S { fn f() }`,\n`impl Take for S { fn f(self) }` and `impl S { fn f(&self) }`, `S(0).f()`\nis Take's (the by-value step comes before `&S`), but zustc called the\ninherent one (prints 21, rustc 11) when a `mod` in the program turns off\nmethod_pick. Before that change, the first method with `self` in source\norder was taken, which was as wrong for other orders and receivers\n(`Take::f(&mut self)` beside `S::f(&self)`, a Copy type through `&`).\n\n`Program::self_method_at(sid, name, wrap)` picks among the methods with\n`self`, by the reference the receiver reaches the struct through last\n(`wrap`): by value `self` < `&self` < `&mut self`, through a `&`\n`&self` < `self` < `&mut self`, through a `&mut` `&mut self` < `self` <\n`&self`, and within one step an inherent method before the traits'; the\nones for sid's instance first. self_method is it by value. The lowering's\nmethod-call lookup tracks `wrap` through the receiver's references (a\nreference value that is not a place, `(&mut s).f()`, too; a Box or a\nderef resets it), and type inference reads it from the receiver's shape.\npick_overload, for a call of such a group, keeps the candidates that take\nthe receiver the way the chosen one does, since the receiver is passed so.\n\nAlso fn_mutation (an `Fn` closure's mutations) classifies `w.0.touch()`\nby the receiver's own type, as owned_mutation does, not by the captured\nroot's: with an associated `W::touch()` and a trait default\n`touch(&mut self)` on W, and `touch(&self)` on the field, it reported\nE0596 at the call where rustc reports E0594 at the later `w.0 .0 = 1`.\n\nTests: tests/probe/assoc_fn_receiver_steps.rs (no `mod`, the method_pick\npath) and the same cases in tests/probe/assoc_fn_not_method.rs (with a\n`mod`): by value, `(&rs).f()`, `r.f()` through a `&`, a Box, `Rs(0).g()`\nand `(&mut rm).g()` / `m.g()` with `ByMut::g(&mut self)` beside the\ninherent `g(&self)`, a Copy type through `&` and by value, and impls for\ntwo instances of a generic type; expected files from rustc. The previous\nhead's zustc gives wrong output for both probes. tests/compile_errors\ngains fn_closure_field_method_then_assign (E0594).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\n* sema: the receiver-reference walk without a destructuring assignment (#207)\n\ntests/parse.rs compares the parser's counts on the repository's own sources\nwith syn's, and zust's parser counts `(wrap, v) = (Some(m), i)` as lets\n(549 vs 551 for ast_infer.rs). The walk in method_call assigns the two\nvariables one by one instead; the code does the same.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T21:00:37+09:00",
+          "tree_id": "db23b6b42ab6d24a6da631e4563579c30e8e3333",
+          "url": "https://github.com/mizchi/zust/commit/44f2a680b4b1ec5881480d146c814c3a1e15e93d"
+        },
+        "date": 1795694752578,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
