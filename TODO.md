@@ -6,6 +6,38 @@ failing. Once a case passes, the test fails until its `todo` line and its entry 
 only shrink. `todo_md_lists_every_todo` checks that every marked case is named here. How a case reads:
 [tests/security/README.md](tests/security/README.md). Background: [docs/reports/2026-11-21-01-security-cves.md](docs/reports/2026-11-21-01-security-cves.md).
 
+## Crate coverage: what to fix next
+
+The order of work for crates.io's top crates (epic [#248](https://github.com/mizchi/zust/issues/248)), from the last
+crate survey: each fix is ranked by the share of the surveyed crates' downloads it holds back. The table between the
+markers is written by `cratebench/survey/survey.py` (CI rewrites it after each survey on main); the full ranking is in
+[CRATES_SUPPORT.md](CRATES_SUPPORT.md#what-to-fix-by-importance) and on the
+[dashboard](https://mizchi.github.io/zust/crates/). Pick the top row whose issue is open; a row without an issue
+needs one filed first (then add it to [cratebench/survey/issues.tsv](cratebench/survey/issues.tsv)).
+
+<!-- crate-priorities -->
+
+Survey of 2026-11-26 15:59 UTC on `5498281e`: 38 of 273 crates build (13.5% of their downloads); 391 errors in 168 packages.
+
+| # | fix | issue | holds back | crates it alone unblocks |
+|---:|---|---|---:|---:|
+| 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | [#254](https://github.com/mizchi/zust/issues/254) | 11.1% | 14 |
+| 2 | `impl<T: Tr> Tr for &T` | [#144](https://github.com/mizchi/zust/issues/144) | 7.1% | 12 |
+| 3 | zurgo: renamed dependencies | [#249](https://github.com/mizchi/zust/issues/249) | 5.3% | 15 |
+| 4 | mismatched types: expected `…`, found `…` | none yet | 2.8% | 1 |
+| 5 | no rules expected `…` | none yet | 2.8% | 3 |
+| 6 | prelude: type `Layout` | [#250](https://github.com/mizchi/zust/issues/250) | 2.7% | 5 |
+| 7 | macro expansion too deep at a crate's first line | [#252](https://github.com/mizchi/zust/issues/252) | 2.4% | 4 |
+| 8 | no method `…` on type `…` | none yet | 2.3% | 0 |
+| 9 | prelude: type `Once` | [#250](https://github.com/mizchi/zust/issues/250) | 2.1% | 6 |
+| 10 | a derive's name resolved to a glob-imported type | [#251](https://github.com/mizchi/zust/issues/251) | 2.1% | 4 |
+| 11 | prelude: `impl Error for fmt::Error` | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 2 |
+| 12 | missing generics for `…` | none yet | 1.8% | 1 |
+
+No issue yet, the next to file: mismatched types: expected `…`, found `…` (2.8%); no rules expected `…` (2.8%); no method `…` on type `…` (2.3%); missing generics for `…` (1.8%); no method named `…` found for `…` (1.8%).
+
+<!-- /crate-priorities -->
+
 ## Security: holes zustc does not catch yet (`tests/security/`)
 
 These are in the type and borrow checks that the compat and region-check work changes, so they were left there.

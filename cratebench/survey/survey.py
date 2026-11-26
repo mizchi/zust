@@ -46,6 +46,7 @@ LOCK = os.path.join(HERE, "Cargo.lock")
 RESULTS = os.path.join(HERE, "results.json")
 HISTORY = os.path.join(HERE, "history.tsv")
 DOC = os.path.join(ROOT, "CRATES_SUPPORT.md")
+TODO = os.path.join(ROOT, "TODO.md")
 ZURGO = os.environ.get("ZURGO") or os.path.join(os.environ.get("CARGO_TARGET_DIR") or os.path.join(ROOT, "target"), "release/zurgo")
 TARGET = "x86_64-unknown-linux-gnu"
 TIMEOUT = 900
@@ -839,6 +840,7 @@ def write_report(res, history):
             o.append(f"| {c['rank']} | {c['name']} {c['version']}{feats} | {st} | {c['errors'] or ''} | {cell(bb, 60)} | "
                      f"{cell(c['first_error'], 100)} |")
     open(DOC, "w").write("\n".join(o) + "\n")
+    write_todo(res, s, fx)
     print(f"{DOC}: {s['builds']} / {len(C)} build; {s['n_err']} errors in {len(s['with_err'])} packages")
     derived = dict(
         priorities=[dict(package=r["package"], errors=r["errors"], lines=r["lines"], first=r["first"],
@@ -879,6 +881,30 @@ def save(res, derived):
             else:
                 h.write(f"{json.dumps(k)}: {json.dumps(v, ensure_ascii=False)}" + end)
         h.write("}\n")
+
+
+def write_todo(res, s, fx):
+    """TODO.md's "Crate coverage: what to fix next": the top fixes, between its markers (nothing when they are not there)"""
+    if not os.path.exists(TODO):
+        return
+    text = open(TODO).read()
+    start, end = "<!-- crate-priorities -->", "<!-- /crate-priorities -->"
+    if start not in text or end not in text:
+        return
+    url = "https://github.com/mizchi/zust/issues/"
+    o = [start, "",
+         f"Survey of {res['date']} on `{res['commit']}`: {s['builds']} of {len(s['C'])} crates build "
+         f"({pct(s['builds_dl'], s['dl'])} of their downloads); {s['n_err']} errors in {len(s['with_err'])} packages.", "",
+         "| # | fix | issue | holds back | crates it alone unblocks |", "|---:|---|---|---:|---:|"]
+    for n, g in enumerate(fx[:12], 1):
+        iss = f"[#{g['issue']}]({url}{g['issue']})" if g["issue"] else "none yet"
+        o.append(f"| {n} | {cell(g['fix'], 80)} | {iss} | {g['share']:.1f}% | {len(g['alone'])} |")
+    nxt = [g for g in fx if not g["issue"]][:5]
+    if nxt:
+        o += ["", "No issue yet, the next to file: " + "; ".join(f"{cell(g['fix'], 60)} ({g['share']:.1f}%)" for g in nxt) + "."]
+    o += ["", end]
+    a, b = text.index(start), text.index(end) + len(end)
+    open(TODO, "w").write(text[:a] + "\n".join(o) + text[b:])
 
 
 def cmd_report(a):
