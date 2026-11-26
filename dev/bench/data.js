@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795674174091,
+  "lastUpdate": 1795674176334,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -137030,6 +137030,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/181a2c28f9ea69e7854cdd41190d3ac17e3df08e"
         },
         "date": 1795673821054,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.69,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1915,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.88,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1557,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 72.95,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5388,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1577be0678bd5fec4f64b6233bc21a51adbe920d",
+          "message": "Merge pull request #230 from mizchi/claude/refs-name-nodes-188\n\nrefs: a fn refers to names, not to each fn of a name (#188)",
+          "timestamp": "2026-11-26T15:14:47+09:00",
+          "tree_id": "8fb277d2e7d721e8553e5de2e44e01d53badb863",
+          "url": "https://github.com/mizchi/zust/commit/1577be0678bd5fec4f64b6233bc21a51adbe920d"
+        },
+        "date": 1795674176033,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
