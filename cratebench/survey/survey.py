@@ -883,6 +883,11 @@ def save(res, derived):
         h.write("}\n")
 
 
+def tier_of(share):
+    """an issue's tier from the share of the surveyed downloads its fixes hold back together"""
+    return "T0" if share >= 2 else "T1" if share >= 1 else "T2"
+
+
 def write_todo(res, s, fx):
     """TODO.md's "Crate coverage: what to fix next": the top fixes, between its markers (nothing when they are not there)"""
     if not os.path.exists(TODO):
@@ -899,6 +904,19 @@ def write_todo(res, s, fx):
     for n, g in enumerate(fx[:12], 1):
         iss = f"[#{g['issue']}]({url}{g['issue']})" if g["issue"] else "none yet"
         o.append(f"| {n} | {cell(g['fix'], 80)} | {iss} | {g['share']:.1f}% | {len(g['alone'])} |")
+    # (by issue: the issues' tiers, the labels T0 / T1 / T2 on GitHub)
+    tot = {}
+    for g in fx:
+        if g["issue"]:
+            t = tot.setdefault(g["issue"], dict(share=0.0, fixes=[]))
+            t["share"] += g["share"]
+            t["fixes"].append(g["fix"])
+    o += ["", "By issue, with its tier (the issue's label: **T0** holds back 2% or more of the surveyed downloads with "
+              "all its fixes, **T1** 1% or more, **T2** less; relabel an issue when its tier here changes):", "",
+          "| tier | issue | holds back | fixes | the largest |", "|---|---|---:|---:|---|"]
+    for num, t in sorted(tot.items(), key=lambda kv: -kv[1]["share"]):
+        o.append(f"| {tier_of(t['share'])} | [#{num}]({url}{num}) | {t['share']:.1f}% | {len(t['fixes'])} | "
+                 f"{cell(t['fixes'][0], 70)} |")
     nxt = [g for g in fx if not g["issue"]][:5]
     if nxt:
         o += ["", "No issue yet, the next to file: " + "; ".join(f"{cell(g['fix'], 60)} ({g['share']:.1f}%)" for g in nxt) + "."]

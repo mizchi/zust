@@ -21,20 +21,44 @@ Survey of 2026-11-26 15:59 UTC on `5498281e`: 38 of 273 crates build (13.5% of t
 
 | # | fix | issue | holds back | crates it alone unblocks |
 |---:|---|---|---:|---:|
-| 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | [#254](https://github.com/mizchi/zust/issues/254) | 11.1% | 14 |
+| 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | [#254](https://github.com/mizchi/zust/issues/254) | 11.2% | 14 |
 | 2 | `impl<T: Tr> Tr for &T` | [#144](https://github.com/mizchi/zust/issues/144) | 7.1% | 12 |
 | 3 | zurgo: renamed dependencies | [#249](https://github.com/mizchi/zust/issues/249) | 5.3% | 15 |
-| 4 | mismatched types: expected `…`, found `…` | none yet | 2.8% | 1 |
-| 5 | no rules expected `…` | none yet | 2.8% | 3 |
-| 6 | prelude: type `Layout` | [#250](https://github.com/mizchi/zust/issues/250) | 2.7% | 5 |
-| 7 | macro expansion too deep at a crate's first line | [#252](https://github.com/mizchi/zust/issues/252) | 2.4% | 4 |
-| 8 | no method `…` on type `…` | none yet | 2.3% | 0 |
-| 9 | prelude: type `Once` | [#250](https://github.com/mizchi/zust/issues/250) | 2.1% | 6 |
-| 10 | a derive's name resolved to a glob-imported type | [#251](https://github.com/mizchi/zust/issues/251) | 2.1% | 4 |
-| 11 | prelude: `impl Error for fmt::Error` | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 2 |
-| 12 | missing generics for `…` | none yet | 1.8% | 1 |
+| 4 | methods zustc does not find (std methods the prelude lacks; lookup) | [#256](https://github.com/mizchi/zust/issues/256) | 4.9% | 4 |
+| 5 | macro_rules: calls zustc's matcher rejects | [#258](https://github.com/mizchi/zust/issues/258) | 4.6% | 6 |
+| 6 | parser: syntax zustc does not parse | [#257](https://github.com/mizchi/zust/issues/257) | 4.3% | 4 |
+| 7 | mismatched types (to sort by cause) | [#259](https://github.com/mizchi/zust/issues/259) | 3.0% | 1 |
+| 8 | prelude: type `Layout` | [#250](https://github.com/mizchi/zust/issues/250) | 2.8% | 5 |
+| 9 | macro expansion too deep at a crate's first line | [#252](https://github.com/mizchi/zust/issues/252) | 2.5% | 4 |
+| 10 | prelude: type `Once` | [#250](https://github.com/mizchi/zust/issues/250) | 2.1% | 6 |
+| 11 | a derive's name resolved to a glob-imported type | [#251](https://github.com/mizchi/zust/issues/251) | 2.1% | 4 |
+| 12 | prelude: `impl Error for fmt::Error` | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 2 |
 
-No issue yet, the next to file: mismatched types: expected `…`, found `…` (2.8%); no rules expected `…` (2.8%); no method `…` on type `…` (2.3%); missing generics for `…` (1.8%); no method named `…` found for `…` (1.8%).
+By issue, with its tier (the issue's label: **T0** holds back 2% or more of the surveyed downloads with all its fixes, **T1** 1% or more, **T2** less; relabel an issue when its tier here changes):
+
+| tier | issue | holds back | fixes | the largest |
+|---|---|---:|---:|---|
+| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 14.5% | 24 | prelude: type `Layout` |
+| T0 | [#254](https://github.com/mizchi/zust/issues/254) | 11.2% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
+| T0 | [#144](https://github.com/mizchi/zust/issues/144) | 7.1% | 1 | `impl<T: Tr> Tr for &T` |
+| T0 | [#249](https://github.com/mizchi/zust/issues/249) | 5.3% | 1 | zurgo: renamed dependencies |
+| T0 | [#256](https://github.com/mizchi/zust/issues/256) | 4.9% | 1 | methods zustc does not find (std methods the prelude lacks; lookup) |
+| T0 | [#258](https://github.com/mizchi/zust/issues/258) | 4.6% | 1 | macro_rules: calls zustc's matcher rejects |
+| T0 | [#257](https://github.com/mizchi/zust/issues/257) | 4.3% | 1 | parser: syntax zustc does not parse |
+| T0 | [#259](https://github.com/mizchi/zust/issues/259) | 3.0% | 1 | mismatched types (to sort by cause) |
+| T0 | [#252](https://github.com/mizchi/zust/issues/252) | 2.5% | 1 | macro expansion too deep at a crate's first line |
+| T0 | [#251](https://github.com/mizchi/zust/issues/251) | 2.1% | 1 | a derive's name resolved to a glob-imported type |
+| T1 | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 1 | prelude: `impl Error for fmt::Error` |
+| T1 | [#260](https://github.com/mizchi/zust/issues/260) | 1.9% | 1 | `missing generics for` a type used without its parameters |
+| T1 | [#261](https://github.com/mizchi/zust/issues/261) | 1.6% | 1 | false E0277: a bound zustc does not see |
+| T1 | [#262](https://github.com/mizchi/zust/issues/262) | 1.6% | 1 | cannot infer an `impl Trait` return type |
+| T1 | [#264](https://github.com/mizchi/zust/issues/264) | 1.5% | 1 | false E0276 in bitflags' impls |
+| T1 | [#265](https://github.com/mizchi/zust/issues/265) | 1.3% | 1 | value paths zustc cannot resolve |
+| T1 | [#266](https://github.com/mizchi/zust/issues/266) | 1.2% | 1 | std iterator adapters' arity (`Copied`, `Cloned`, `Map`) |
+| T2 | [#28](https://github.com/mizchi/zust/issues/28) | 0.7% | 1 | zurgo: two versions of one crate in a graph |
+| T2 | [#253](https://github.com/mizchi/zust/issues/253) | 0.7% | 1 | a fn pointer cast to `*mut ()` in a static |
+
+No issue yet, the next to file: `…` is only allowed in impls (1.0%); unsupported path in constant (0.8%); cannot evaluate `…` in a constant (0.7%); closure may outlive the current function, but it borrows `…`… (0.7%); the trait bound `…` is not satisfied (for `…`) (0.6%).
 
 <!-- /crate-priorities -->
 
