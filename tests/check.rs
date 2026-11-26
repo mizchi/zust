@@ -377,6 +377,19 @@ fn dead_code_fields_variants_members_aliases() {
     assert_eq!(first(ok), None);
 }
 
+#[test]
+fn a_doc_comment_a_crate_file_ends_in() {
+    // (rustc 1.100: the same error for a crate built from its files, at the file's comment)
+    let dir = std::env::temp_dir().join(format!("zust-doc-at-end-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("main.rs");
+    std::fs::write(&f, "fn main() {}\n/// hi\n").unwrap();
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_zustc")).arg("check").arg(&f).output().unwrap();
+    let err = String::from_utf8_lossy(&o.stderr).into_owned();
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(err.contains(":2:1: expected item after doc comment"), "{err}");
+}
+
 /// `#![deny(unreachable_code)]` inside expressions: an argument after one that diverges, a call whose last argument
 /// diverges, an operation whose operand diverges, and the statement after a `match` on an empty enum or an
 /// `if`/`else` whose branches both diverge; not the right of `||`, which may not run
@@ -3175,6 +3188,200 @@ fn macro_matchers_rustc_rejects_what_follows_a_fragment_in_and_names_bound_twice
     assert_eq!(first("macro_rules! m {\n    ($a:ident) => {};\n    ($a:path) => {};\n}\nfn main() {}\n", 2021), None);
 }
 
+#[test]
+fn macro_matchers_with_no_fragment_no_repetition_operator_or_an_empty_repetition() {
+    // (rustc 1.100, at its line and column: a `$name` with no fragment specifier, at the `$`; a `$( .. )` with no `*` /
+    // `+` / `?` (a closing delimiter after it is no separator), and a repetition with no separator that can match
+    // nothing, at the `(` of `$(`. `$crate` and a separator before the operator are fine)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    assert_eq!(first("macro_rules! m {\n    ($a) => {};\n}\nfn main() {}\n"), e(2, 6, "missing fragment specifier"));
+    assert_eq!(first("macro_rules! m {\n    (($($b:tt))*) => {};\n}\nfn main() {}\n"), e(2, 8, "expected one of: `*`, `+`, or `?`"));
+    assert_eq!(first("macro_rules! m {\n    ($()*) => {};\n}\nfn main() {}\n"), e(2, 7, "repetition matches empty token tree"));
+    assert_eq!(first("macro_rules! m {\n    ($($v:vis)*) => {};\n}\nfn main() {}\n"), e(2, 7, "repetition matches empty token tree"));
+    assert_eq!(first("macro_rules! m {\n    ($($a:ident),* $crate) => {};\n    ($($x:tt);* ) => {};\n}\nfn main() {}\n"), None);
+    // (a nested repetition separated by `::` can match nothing too; one that must match a token is fine)
+    assert_eq!(first("macro_rules! m { ($($($i:ident)::*)*) => {} }\nfn main() {}\n"), e(1, 20, "repetition matches empty token tree"));
+    assert_eq!(first("macro_rules! m { ($($($i:ident)::+)*) => {} }\nfn main() {}\n"), None);
+}
+
+#[test]
+fn a_doc_comment_the_source_ends_in() {
+    // (rustc 1.100: "expected item after doc comment" at the comment; one before an item documents it)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize| Some((l, c, "expected item after doc comment".to_string()));
+    assert_eq!(first("fn main() {}\n/// hi\n"), e(2, 1));
+    // (the last of several, past plain comments; a block doc comment at its start)
+    assert_eq!(first("fn main() {}\n/// a\n/// b\n// plain\n"), e(3, 1));
+    assert_eq!(first("fn main() {}\n/** a */\n"), e(2, 1));
+    assert_eq!(first("fn main() {}\n//// four slashes are a plain comment\n"), None);
+    assert_eq!(first("fn main() {}\n/// hi\nfn f() {}\n"), None);
+    // (a plain block comment after the doc is whitespace; a `/**` inside a line comment or a block comment opens no doc)
+    assert_eq!(first("fn main() {}\n/// hi\n/* plain */\n"), e(2, 1));
+    assert_eq!(first("fn main() {} // /** text */\n"), None);
+    assert_eq!(first("fn main() {}\n/* outer /** nested */ */\n"), None);
+    assert_eq!(first("fn main() {}\nconst S: &str = \"/// in a string\";\n"), None);
+    // (the doc comment of a `macro_rules!` the source ends in, which the expansion takes out of the text: cfg-if's)
+    assert_eq!(first("fn main() {}\n/// The macro.\n#[macro_export]\nmacro_rules! m { () => {} }\n"), None);
+}
+
+#[test]
+fn types_that_nothing_declares_in_impl_headers_and_type_aliases() {
+    // (rustc 1.100's E0412 "cannot find type `B` in this scope": at the impl header (not a member that uses it), at a
+    // type alias's right-hand side (not the fn that names the alias), and in an impl with no members)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |src: &str| first(src).map(|e| e.0);
+    assert_eq!(at("struct Core<T>(T);\nimpl Core<XXX> {\n    pub fn spawn(self) {}\n}\nfn main() {}\n"), Some(2));
+    assert_eq!(at("type Foo = Bar;\nfn check(f: impl FnOnce(Foo), val: Foo) {\n    f(val);\n}\nfn main() {}\n"), Some(1));
+    assert_eq!(first("struct A;\nimpl A<B> {}\nfn main() {}\n"), Some((2, "cannot find type `B` in this scope (E0412)".to_string())));
+    // (not a lifetime of a higher-ranked binder, or a fn pointer's parameter name)
+    assert_eq!(first("trait Tr {}\nimpl<F> Tr for (F, for<'A> fn(&'A ())) {}\nfn main() {}\n"), None);
+    assert_eq!(first("trait Local {}\nimpl Local for fn(Arg: u8) {}\nfn main() {}\n"), None);
+    // (not a const generic argument's const, std's types and traits, an impl's own parameters, or `->` in a bound)
+    let ok = "struct V<const N: usize>;\nconst L: usize = 2;\ntrait Tr {}\nimpl Tr for V<L> {}\nimpl<T> Tr for Box<T> {}\n\
+              impl<'a, F: Fn(&'a i32) -> &'a i32> Tr for Option<F> {}\nimpl<'a, A> Tr for &'a (dyn for<'x> Fn(&'x A) + 'a) {}\nfn main() {}\n";
+    assert_eq!(first(ok), None);
+}
+
+#[test]
+fn a_name_a_macro_argument_writes_is_reported_at_the_argument() {
+    // (rustc 1.100: "cannot find value `x` in this scope" at the `x` the call passes, not at the call)
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+    let d = s.check("macro_rules! foo {\n    ($id: ident) => {\n        $id\n    }\n}\nfn main() {\n    foo!(\n        x\n    );\n}\n");
+    assert_eq!(d.first().map(|d| (d.line, d.col)), Some((8, 9)), "{d:?}");
+    // (by tokens: a `)` in a string argument closes nothing)
+    let d = s.check("macro_rules! m { ($s:literal, $id:ident) => { $id } }\nfn main() {\n    m!(\")\",\n        x\n    );\n}\n");
+    assert_eq!(d.first().map(|d| (d.line, d.col)), Some((4, 9)), "{d:?}");
+    // (a name the definition writes itself may come from its body: it stays at the call)
+    let d = s.check("macro_rules! m {\n    ($unused:ident) => { x };\n}\nfn main() {\n    m!(\n        x\n    );\n}\n");
+    assert_eq!(d.first().map(|d| (d.line, d.col)), Some((5, 5)), "{d:?}");
+}
+
+#[test]
+fn literal_patterns_wrap_to_the_scrutinee_type() {
+    // (rustc 1.100: with overflowing_literals allowed, `256` and `512` of a `u8` are both 0, so the second arm is
+    // unreachable under deny(unreachable_patterns))
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+    let d = s.check("#![allow(overflowing_literals)]\n#![deny(unreachable_patterns)]\nfn t(v: u8) {\n    match v {\n        256 => {}\n        512 => {}\n        _ => {}\n    }\n}\nfn main() { t(1); }\n");
+    assert_eq!(d.first().map(|d| (d.line, d.msg.as_str())), Some((6, "unreachable pattern")), "{d:?}");
+}
+
+#[test]
+fn no_rules_expected_at_the_furthest_token_a_rule_reaches() {
+    // (rustc 1.100: "no rules expected `!`" at the `//!` a `(#[$m:meta])` rule cannot take, not at the call)
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+    let d = s.check("macro_rules! outer {\n    (#[$outer:meta]) => ()\n}\nouter! {\n    //! Inner\n}\nfn main() {}\n");
+    assert_eq!(d.first().map(|d| (d.line, d.msg.as_str())), Some((5, "no rules expected `!`")), "{d:?}");
+}
+
+#[test]
+fn unreachable_slice_patterns() {
+    // (rustc 1.100 under deny(unreachable_patterns): a slice pattern of `[T]` covered by the arms before it, by length
+    // and elements; `[x, ..]` covers every length from 1 on)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let un = |l: usize| Some((l, "unreachable pattern".to_string()));
+    assert_eq!(first("#![deny(unreachable_patterns)]\nfn f(s: &[bool]) {\n    match s {\n        [true, ..] => {}\n        [true] => {}\n        [..] => {}\n    }\n}\nfn main() { f(&[]); }\n"), un(5));
+    assert_eq!(first("#![deny(unreachable_patterns)]\nfn f(s: &[u8]) {\n    match *s {\n        [] => {}\n        [_, ..] => {}\n        _ => {}\n    }\n}\nfn main() { f(&[]); }\n"), un(6));
+    assert_eq!(first("#![deny(unreachable_patterns)]\nfn f(s: &[u8]) {\n    match s {\n        [1, ..] => {}\n        [.., 2] => {}\n        [_, _] => {}\n        _ => {}\n    }\n}\nfn main() { f(&[]); }\n"), None);
+}
+
+#[test]
+fn a_macro_export_beside_a_reexport_of_std_s_macro() {
+    // (rustc 1.100: `pub use std::panic;` brings the macro `panic!` too, so a `#[macro_export] macro_rules! panic` is
+    // E0255 at the macro; a re-export of a fn or a module of another name is no conflict)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(first("pub use std::panic;\n\n#[macro_export]\nmacro_rules! panic { () => {} }\n\nfn main() {}\n"), Some((4, 1, "the name `panic` is defined multiple times (E0255)".to_string())));
+    assert_eq!(first("pub use std::mem::swap;\n#[macro_export]\nmacro_rules! swap { () => {} }\nfn main() {}\n"), None);
+}
+
+#[test]
+fn use_paths_with_a_lone_colon_or_a_bad_token_in_a_list() {
+    // (rustc 1.100, at its line and column: `use std:fs::File;` is "expected `::`, found `:`" at the `:`, and
+    // `use x::{A. B};` "expected one of `,`, `::`, `as`, or `}`, found `.`" at the `.`)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(first("use std:fs::File;\nfn main() {}\n"), Some((1, 8, "expected `::`, found `:`".to_string())));
+    assert_eq!(first("pub mod x {\n    pub struct A;\n    pub struct B;\n}\nuse x::{A. B};\nfn main() {}\n"), Some((5, 10, "expected one of `,`, `::`, `as`, or `}`, found `.`".to_string())));
+    assert_eq!(first("pub mod x {\n    pub mod y { pub struct A; }\n}\nuse x::{y::A, y::{self}};\nuse std::fmt::{self, Write as _};\nfn main() {}\n"), None);
+}
+
+#[test]
+fn a_binding_mode_shorthand_with_a_pattern_and_a_dollar_bracket_in_a_macro_body() {
+    // (rustc 1.100, at its line and column: `Foo { ref x: ref x }` is "expected `,`" at the `:`; `$[count($i)]` in a
+    // rule's body "expected `(` or `{`, found `[`" at the `[`, used or not)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(first("struct Foo { x: isize }\nfn main() {\n    match (Foo { x: 10 }) {\n        Foo { ref x: ref x } => {},\n    }\n}\n"), Some((4, 20, "expected `,`".to_string())));
+    assert_eq!(first("macro_rules! foo {\n    ( $( $i:ident ),* ) => {\n        $[count($i)]\n    };\n}\nfn main() {}\n"), Some((3, 10, "expected `(` or `{`, found `[`".to_string())));
+    assert_eq!(first("struct Foo { x: isize }\nfn main() {\n    let Foo { ref x } = Foo { x: 1 };\n    let _ = x;\n}\n"), None);
+}
+
+#[test]
+fn a_mismatch_at_the_use_of_a_value_made_with_another_type_argument() {
+    // (rustc 1.100, at its line: `let foo = Foo(1u8); takes_foo(foo);` with `fn takes_foo(_: Foo<i32>)` is at the
+    // call, not at the `let` (the value keeps the type it was made with); so is `Option<u8>` for
+    // `Option<i32>`. A closure's first `return` gives its type: `Foo(())` after `return Foo(0)` is the mismatch)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    assert_eq!(first("struct Foo<T>(T);\nfn takes_foo(_: Foo<i32>) {}\nfn main() {\n    let foo = Foo(1u8);\n    takes_foo(foo);\n}\n"), Some((5, "mismatched types: expected `Foo<i32>`, found `Foo<u8>`".to_string())));
+    assert_eq!(first("fn main() {\n    let some = Some(1u8);\n    let Some(a): Option<i32> = some else { return };\n    let _ = a;\n}\n"), Some((3, "mismatched types: expected `Option<i32>`, found `Option<u8>`".to_string())));
+    // (a turbofish writes the type: the field is the mismatch)
+    assert_eq!(first("struct Foo<T> { value: T }\nfn main() {\n    let f = Foo::<u8> { value: 300u16 };\n    let _ = f.value;\n}\n").map(|x| x.1), Some("mismatched types: expected `u8`, found `u16`".to_string()));
+    assert_eq!(first("struct Foo<T>(T);\nfn main() {\n    let _ = || {\n        if false {\n            return Foo(0);\n        }\n        Foo(())\n    };\n}\n").map(|x| x.0), Some(7));
+    // (an unsuffixed literal takes its type from the use)
+    assert_eq!(first("struct Foo<T>(T);\nfn takes_foo(_: Foo<u8>) {}\nfn main() {\n    let foo = Foo(1);\n    takes_foo(foo);\n}\n"), None);
+}
+
+#[test]
+fn a_method_of_another_instance_only() {
+    // (rustc 1.100: `impl Point<f64> { fn distance(&self) }` has no method for a `Point<i32>`, E0599 at the call)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let src = "struct Point<T> { x: T }\nimpl Point<f64> {\n    fn distance(&self) -> f64 { self.x }\n}\nfn main() {\n    let p = Point { x: 1_i32 };\n    let _ = p.distance();\n}\n";
+    assert_eq!(first(src), Some((7, "no method named `distance` found for struct `Point<i32>` in the current scope (E0599)".to_string())));
+    assert_eq!(first(&src.replace("1_i32", "1.0")), None);
+}
+
+#[test]
+fn where_a_value_that_is_not_the_type_its_place_wants_is() {
+    // (rustc 1.100, at its line: a `match` statement without `;` that is not `()` is its block arm's tail (`foo()`);
+    // `let _: i32 = 'a: loop { break };` the `break`; a function's tail `&mut if c { .. }` the `&`)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| d.line)
+    };
+    assert_eq!(first("fn main() {\n    match 3 {\n        4 => 1,\n        3 => {\n            foo()\n        }\n        _ => 2\n    }\n    let _ = ();\n}\nfn foo() -> i32 { 42 }\n"), Some(5));
+    assert_eq!(first("fn main() {\n    let _: i32 =\n        'a:\n        loop { break };\n}\n"), Some(4));
+    assert_eq!(first("fn main() {}\nfn f() -> bool {\n    &\n    mut\n    if true { true } else { false }\n}\n"), Some(3));
+    // (an `if let` guard's pattern of another type: at the pattern; a float assigned to an integer literal's local: at
+    // the assignment)
+    assert_eq!(first("fn ok() -> Result<Option<bool>, ()> { Ok(Some(true)) }\nfn main() {\n    match ok() {\n        Ok(x) if let Err(_) = x => {},\n        _ => {}\n    }\n}\n"), Some(4));
+    assert_eq!(first("fn main() {\n    let mut x\n        =\n        2;\n    x = 5.0;\n    let _ = x;\n}\n"), Some(5));
+}
+
 /// Review of #180, each checked against rustc: a struct whose tail is a `?Sized` parameter is unsized by value in a
 /// signature (E0277); a program trait whose supertrait is Clone makes a `?Sized` parameter sized; a closure does not
 /// make its parent's `?Sized` parameter sized
@@ -3213,6 +3420,20 @@ fn sized_review_cases() {
         let d = check(src);
         assert!(d.is_empty(), "{src}\n{d:?}");
     }
+}
+
+#[test]
+fn macro_rules_with_whitespace_before_the_bang() {
+    // (rustc 1.100 accepts `macro_rules ! m { .. }`, also with a line break before the `!`; the lines after it keep
+    // their numbers)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    assert_eq!(first("macro_rules ! m { () => { 1 } }\nfn main() { let _x: i32 = m!(); }\n"), None);
+    assert_eq!(first("macro_rules\n  ! m { () => { 1 } }\nfn main() { let _x: u8 = m!(); let _y: i32 = \"a\"; }\n"), Some((3, "mismatched types: expected `i32`, found `&str`".to_string())));
+    // (a name that only starts with it is no definition)
+    assert_eq!(first("macro_rules! m { () => { 1 } }\nfn main() { let my_macro_rules = 1; let _x = my_macro_rules != m!(); }\n"), None);
 }
 
 /// #174: E0408, an or-pattern whose alternatives do not all bind a name, at the first alternative that does not (each
