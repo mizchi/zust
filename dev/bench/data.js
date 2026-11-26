@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795691754263,
+  "lastUpdate": 1795691756999,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -115970,6 +115970,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 93.738,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a17594d218b0b48e1a82b204e1b638769421f4d2",
+          "message": "syntax: a position for Expr::Return; E0069 at the return (#177) (#241)\n\nA bare `return` in a function whose return type is not `()` was reported\nat the wrong place when it had no statement of its own. For a match arm\n(`0 => return,`) zustc pointed at the scrutinee (2:11) where rustc points\nat the `return` (3:14); the same for an arm of a match used as a value\nor in a closure, and for an argument (`Some(return)`).\n\nCause: `Expr::Return` carried no position, so the type check raised E0069\nat `SP` and the position was filled in from whatever enclosing statement\nor expression had one. That is right when the `return` starts a statement\nor is a block's tail, but not inside a match arm or an argument.\n\nFix: `Expr::Return` gets a `Pos` as its last field, as `Break` and\n`Continue` have, which the parser sets at the `return` keyword. E0069 is\nreported at it. The other match sites ignore it. `size_of::<Expr>()` is\n96 bytes before and after.\n\nTests: tests/check.rs `bare_return_at_its_keyword` checks the line,\ncolumn and message rustc 1.100 gives for a match arm, a match arm of a\nvalue, an argument, a match arm in a `-> !` fn and in a closure with a\nreturn type (these fail without the fix), and pins the forms that were\nalready right (a statement's `return;`, a block's tail, `let .. else`,\ninside a loop) and a `return` with a value (E0308 at the value).\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T20:09:30+09:00",
+          "tree_id": "5a2f84a7a77b99faa8c524cd45b1f763095110be",
+          "url": "https://github.com/mizchi/zust/commit/a17594d218b0b48e1a82b204e1b638769421f4d2"
+        },
+        "date": 1795691756580,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 82.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 83.871,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 96.552,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.444,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.308,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.967,
             "unit": "%"
           }
         ]
