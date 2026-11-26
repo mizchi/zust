@@ -2007,7 +2007,7 @@ impl Checker {
                     if let Some(g) = &a.guard {
                         // (JS takes the names from the first alternative that matches; Rust tries the next one when
                         // the guard fails: an `|` that binds names has no guard yet)
-                        if has_or(&a.pat) && !crate::own::pat_names(&a.pat).is_empty() {
+                        if crate::ast::has_or(&a.pat) && !crate::own::pat_names(&a.pat).is_empty() {
                             self.err(g.pos, "a guard on an `|` pattern that binds names: write an arm for each alternative");
                         }
                         let gt = self.infer(g, Some(&Ty::Bool));
@@ -2037,7 +2037,7 @@ impl Checker {
                             }
                             if !irrefutable(p) {
                                 self.err(x.pos, "a `let` pattern must always match (use `match`)");
-                            } else if has_or(p) {
+                            } else if crate::ast::has_or(p) {
                                 self.err(x.pos, "an `|` pattern in a `let`: use `match`");
                             }
                             let mut binds = vec![];
@@ -2625,16 +2625,6 @@ impl Checker {
     }
 }
 
-
-/// An `|` somewhere in the pattern
-fn has_or(p: &Pat) -> bool {
-    match p {
-        Pat::Or(_) => true,
-        Pat::Tuple(ps) | Pat::Variant(_, _, ps, _) => ps.iter().any(has_or),
-        Pat::Record(_, fs, _, _) => fs.iter().any(|f| has_or(&f.1)),
-        Pat::Wild | Pat::Bind(_) | Pat::Lit(_) => false,
-    }
-}
 
 fn irrefutable(p: &Pat) -> bool {
     match p {

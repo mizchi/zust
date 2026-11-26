@@ -479,3 +479,13 @@ pub fn desugar_methods(items: &mut [Item], info: &mut crate::check::Info) {
         });
     }
 }
+
+/// An `|` somewhere in the pattern
+pub fn has_or(p: &Pat) -> bool {
+    match p {
+        Pat::Or(_) => true,
+        Pat::Tuple(ps) | Pat::Variant(_, _, ps, _) => ps.iter().any(has_or),
+        Pat::Record(_, fs, _, _) => fs.iter().any(|f| has_or(&f.1)),
+        Pat::Wild | Pat::Bind(_) | Pat::Lit(_) => false,
+    }
+}

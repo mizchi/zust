@@ -21,3 +21,6 @@ export fn js_run() -> String { unit_guard(1); `${reassign()} ${guard_live()}` }
 // (second review) a guard that reads a pattern's binding moves nothing; an argument that reassigns the array
 @wasm export fn guard_bind(n: i32) -> i32 { match Some([n]) { Some(xs) if [xs].len() > 0 => xs.len(), _ => 0 } }
 @wasm export fn recv_reassign(n: i32) -> i32 { let mut xs = [n, 7]; let a = xs.get({ xs = [2]; 1 }).unwrap_or(-1); let b = xs.slice({ xs = [3, 4, 5]; 0 }, 2).len(); a * 10 + b + xs.len() }
+
+// (third review) a guard on an `|` pattern runs once, however many alternatives match
+@wasm export fn guard_once(n: i32) -> i32 { let mut count = 0; match n { 0 | _ if { count = count + 1; count == 2 } => 10, _ => 20 + count } }

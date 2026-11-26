@@ -1067,14 +1067,14 @@ fn review_edges_same_in_js_and_wasm() {
         assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
         outs.push(node(
             &d,
-            "const l = []; globalThis.note = (s) => l.push(s); const m = await import('./review_edges.js'); console.log(JSON.stringify(m.wasm_run()), m.js_run(), JSON.stringify(l), m.guard_bind(1), m.recv_reassign(1));",
+            "const l = []; globalThis.note = (s) => l.push(s); const m = await import('./review_edges.js'); console.log(JSON.stringify(m.wasm_run()), m.js_run(), JSON.stringify(l), m.guard_bind(1), m.recv_reassign(1), m.guard_once(0));",
         ));
         let o = compare_build(&root().join("tests/review_no_option.zsc"), &d, flags);
         assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
         outs.push(node(&d, "const m = await import('./review_no_option.js'); console.log(JSON.stringify(m.reversed([1, 2, 3])));"));
     }
     assert_eq!(outs[0..2], outs[2..4], "wasm and JS differ");
-    assert_eq!(outs[0], "[1,2,1,1,2,105,905,1,8,7,6,0] 10 3 [] 1 74\n");
+    assert_eq!(outs[0], "[1,2,1,1,2,105,905,1,8,7,6,0] 10 3 [] 1 74 21\n");
     assert_eq!(outs[1], "[3,2,1]\n");
     let d = out_dir("review-coverage");
     let src = d.join("wide.zsc");

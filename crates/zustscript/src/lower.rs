@@ -1161,7 +1161,10 @@ impl<'a> Lower<'a> {
                 let mut pre = String::new();
                 let ps = l.pat(p, &st, by_ref, &roots, &mut pre, body.pos)?;
                 // (`pat if guard`: Rust's own guard, with the pattern's names)
+                // (an `|` pattern binds no names under a guard (check.rs); Rust would run the guard once per
+                // alternative that matches, so test the whole pattern first and run the guard once, as JS does)
                 let ps = match guard {
+                    Some(g) if crate::ast::has_or(p) => format!("ref __zs_m if matches!(*__zs_m, {ps}) && ({})", l.expr(g)?),
                     Some(g) => format!("{ps} if {}", l.expr(g)?),
                     None => ps,
                 };
