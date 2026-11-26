@@ -3256,7 +3256,32 @@ impl Cx<'_> {
             let n = r.slots.len().saturating_sub(1);
             sig.params.iter().zip(&r.slots[..n]).any(|(&t, s)| matches!(t, Ty::Ref(_, i) if mentions(self.prog, *i, k, 0)) && s.first() == Some(&crate::types::R_STATIC))
         });
-        by_outlives || by_trait || by_param || bounds.iter().any(|b| b.trim() == "'static")
+        // (or implied by a type of the signature whose struct or enum bounds its parameter by 'static: `fn foo<T>() ->
+        // IfaceToken<T>` with `struct IfaceToken<T: 'static>` (T: 'static holds in the body, in its closures too,
+        // borrowck/nested-closure-with-generic-ice.rs))
+        fn implies(prog: &crate::program::Program, t: Ty, k: u32, depth: u32) -> bool {
+            if depth > 12 {
+                return false;
+            }
+            match t {
+                Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) | Ty::Slice(i) | Ty::Array(i, _) => implies(prog, *i, k, depth + 1),
+                Ty::Struct(s) => {
+                    let b = prog.base_of(s);
+                    let args = &prog.structs[s as usize].args;
+                    // (also within the argument: `St<Option<T>>` and `St<&'a T>` need T: 'static too; not within a fn
+                    // pointer's types (`mentions` does not look there))
+                    let own = prog.adt_regions.get(&b).is_some_and(|ar| {
+                        args.iter().enumerate().any(|(j, &a)| {
+                            mentions(prog, a, k, 0) && prog.structs[b as usize].generics.get(j).is_some_and(|gn| ar.ty_outlives.iter().any(|x| x.0 == *gn && x.1 == crate::types::R_STATIC))
+                        })
+                    });
+                    own || args.iter().any(|&a| implies(prog, a, k, depth + 1))
+                }
+                _ => false,
+            }
+        }
+        let by_implied = !self.prog.adt_regions.is_empty() && sig.params.iter().chain(std::iter::once(&sig.ret)).any(|&t| implies(self.prog, t, k, 0));
+        by_outlives || by_trait || by_param || by_implied || bounds.iter().any(|b| b.trim() == "'static")
     }
 
     /// Program::trait_scopes at this function: the traits of a colliding name in scope where it is (the innermost
@@ -4638,7 +4663,7 @@ fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool
                     ("Rc", _) | ("MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard", false) => true,
                     // (a RefCell's guards share the cell's non-atomic borrow flag: neither Send nor Sync, as in std)
                     ("Ref" | "RefMut", _) => true,
-                    ("Cell" | "RefCell" | "UnsafeCell" | "LazyCell" | "__Rcvr__", true) => true,
+                    ("Cell" | "RefCell" | "UnsafeCell" | "LazyCell" | "OnceCell" | "__Rcvr__", true) => true,
                     ("Mutex", true) => args.iter().any(|&a| send(a, seen)),
                     ("Arc" | "RwLock" | "OnceLock", true) | ("Arc", false) => args.iter().any(|&a| send(a, seen) || sync_(a, seen)),
                     _ => args.iter().any(|&a| auto_trait_fails(prog, a, sync, seen, d + 1)),

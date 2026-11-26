@@ -792,13 +792,21 @@ impl Cx<'_> {
             self.implicit_autoref(e)?;
         }
         // (a returned position: what is borrowed and read in it is returned (Bk::ret_leaves))
-        if !self.bk.ret_leaves.is_empty() && self.bk.ret_leaves.contains(&(e as *const Expr as usize)) {
+        let returned = !self.bk.ret_leaves.is_empty() && self.bk.ret_leaves.contains(&(e as *const Expr as usize));
+        if returned {
             self.bk.in_ret += 1;
-            let r = self.expr_at(e, expected);
-            self.bk.in_ret -= 1;
-            return r;
         }
-        self.expr_at(e, expected)
+        let r = self.expr_at(e, expected);
+        if returned {
+            self.bk.in_ret -= 1;
+        }
+        let r = r?;
+        // (a tuple struct's or an enum's value built by its constructor or named by its variant's path (`St(Some(x))`,
+        // `En::A(x)`, `En::<T>::B`), of a type that bounds a type parameter by 'static: the type is well formed)
+        if self.rg.on && self.inline_depth == 0 && matches!(e, Expr::Path(..) | Expr::Call(..)) {
+            self.rg_ctor_wf(e, r.1);
+        }
+        Ok(r)
     }
 
     fn expr_at(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {

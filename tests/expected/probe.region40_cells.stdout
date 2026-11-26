@@ -1,0 +1,16 @@
+None Ok(())
+Err(6) Some(5)
+x Some("x")
+Some(1) None
+true
+got 1
+true
+drop 2
+2
+Some("s")
+9
+7 4
+3 true 1
+1
+1
+drop 1

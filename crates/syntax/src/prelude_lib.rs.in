@@ -8121,6 +8121,25 @@ impl<T> Rc<T> {
     pub fn ptr_eq(a: &Rc<T>, b: &Rc<T>) -> bool {
         a.p == b.p
     }
+    // (the value, when this is the one Rc: the box is freed without dropping the value)
+    pub fn try_unwrap(this: Rc<T>) -> Result<T, Rc<T>> {
+        let b = this.__bx();
+        if unsafe { (*b).strong } != 1 {
+            return Err(this);
+        }
+        let v = unsafe { (&(*b).val as *const T).read() };
+        unsafe {
+            __exr_free(this.p);
+        }
+        __core_forget(this);
+        Ok(v)
+    }
+    pub fn into_inner(this: Rc<T>) -> Option<T> {
+        match Rc::try_unwrap(this) {
+            Ok(v) => Some(v),
+            Err(_) => None,
+        }
+    }
     pub fn as_ref(&self) -> &T {
         unsafe { &(*self.__bx()).val }
     }
@@ -8215,6 +8234,25 @@ impl<T> Arc<T> {
     }
     pub fn ptr_eq(a: &Arc<T>, b: &Arc<T>) -> bool {
         a.p == b.p
+    }
+    // (the value, when this is the one Arc: the box is freed without dropping the value)
+    pub fn try_unwrap(this: Arc<T>) -> Result<T, Arc<T>> {
+        let b = this.__bx();
+        if unsafe { (*b).strong } != 1 {
+            return Err(this);
+        }
+        let v = unsafe { (&(*b).val as *const T).read() };
+        unsafe {
+            __exr_free(this.p);
+        }
+        __core_forget(this);
+        Ok(v)
+    }
+    pub fn into_inner(this: Arc<T>) -> Option<T> {
+        match Arc::try_unwrap(this) {
+            Ok(v) => Some(v),
+            Err(_) => None,
+        }
     }
     // `&mut T` only while this is the one Arc (CVE-2018-25008 was this check, too weakly synchronized: zustc's
     // threads are green threads on one OS thread, so the count cannot change under it)
@@ -10942,6 +10980,53 @@ impl<T: Debug> Debug for RwLock<T> {
 // `std::sync::OnceLock` (スレッドは 1 本なので、初期化済みかどうかと値だけ)
 pub struct OnceLock<T> {
     val: Option<T>,
+}
+
+// `std::cell::OnceCell`: whether it is set, and the value (OnceLock's, for one thread)
+pub struct OnceCell<T> {
+    val: Option<T>,
+}
+
+impl<T> OnceCell<T> {
+    pub const fn new() -> OnceCell<T> {
+        OnceCell { val: None }
+    }
+    pub fn get(&self) -> Option<&T> {
+        self.val.as_ref()
+    }
+    pub fn get_mut(&mut self) -> Option<&mut T> {
+        self.val.as_mut()
+    }
+    pub fn get_or_init<F: FnOnce() -> T>(&self, f: F) -> &T {
+        if self.val.is_none() {
+            let v = f();
+            // (an initializer that set the cell itself: std's "reentrant init" panic, not the value replaced)
+            if self.val.is_some() {
+                panic!("reentrant init");
+            }
+            let p = &self.val as *const Option<T> as *mut Option<T>;
+            unsafe {
+                p.write(Some(v));
+            }
+        }
+        self.val.as_ref().unwrap()
+    }
+    pub fn set(&self, v: T) -> Result<(), T> {
+        if self.val.is_some() {
+            return Err(v);
+        }
+        let p = &self.val as *const Option<T> as *mut Option<T>;
+        unsafe {
+            p.write(Some(v));
+        }
+        Ok(())
+    }
+    pub fn into_inner(self) -> Option<T> {
+        self.val
+    }
+    pub fn take(&mut self) -> Option<T> {
+        self.val.take()
+    }
 }
 
 /// `std::cell::LazyCell`: the function makes the value on the first deref / `force`

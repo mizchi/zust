@@ -2321,6 +2321,23 @@ impl Inf<'_> {
         None
     }
 
+    /// A method n with `self` of an impl for `Box<dyn tr>` (`impl MyTrait for Box<dyn O>`), where the receiver r is
+    /// such a Box (also behind references)
+    fn boxed_dyn_method(&mut self, r: u32, tr: &'static String, n: &str) -> Option<u32> {
+        let mut x = self.find(r);
+        for _ in 0..8 {
+            match self.shape[x as usize] {
+                Some(Shape::Ref(_, i)) => x = self.find(i),
+                Some(Shape::Bx(_)) => {
+                    let t = Ty::Box(crate::types::intern(Ty::Dyn(tr)));
+                    return self.prog.prim_method(t, n).filter(|&d| self.prog.sigs[d as usize].has_self);
+                }
+                _ => return None,
+            }
+        }
+        None
+    }
+
     fn method_call(&mut self, recv: &Expr, n: &str, tf: &Vec<GArg>, args: &[Expr]) -> u32 {
         // (`s.as_ref()` on a `&str` / `String` (also through references, `&&str` of an `AsRef<str>` instance): `&str`,
         // or `&[u8]` where the bounds in scope ask for `AsRef<[u8]>` alone, as the code generator's as_ref gives)
@@ -2599,6 +2616,20 @@ impl Inf<'_> {
                         }
                     }
                     return self.known_g(ret, &mut pv);
+                }
+            } else if let Some(d) = self.boxed_dyn_method(r, tr, n) {
+                // (none of the object's: a method of an impl for the Box itself, `impl MyTrait for Box<dyn O>` through
+                // `val: &Box<dyn O>`)
+                let sig = &self.prog.sigs[d as usize];
+                let (ps, ret) = (sig.params[1..].to_vec(), sig.ret);
+                for (a, p) in avs.into_iter().zip(ps) {
+                    if !self.prog.has_param(p) {
+                        let k = self.known(p);
+                        self.unify(a, k);
+                    }
+                }
+                if !self.prog.has_param(ret) {
+                    return self.known(ret);
                 }
             }
             return self.var();
