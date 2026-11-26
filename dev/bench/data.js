@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795655082996,
+  "lastUpdate": 1795655085501,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -112593,6 +112593,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 90.537,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "63215b0f865d04f591eb9a145fef6d14b5b6c8e0",
+          "message": "macros: only the builtin's path keeps stringify!'s arguments as text (review of #222) (#225)\n\n* macros: only the builtin's path keeps stringify!'s arguments as text (review of #222)\n\nFrom CodeRabbit's review of #222: a qualified `re::stringify!(..)` or\n`re::std::stringify!(..)` can be another macro, re-exported under that name\n(`pub use core::concat as stringify;`), so the calls in its arguments are\nexpanded as before.\n\n- expand_with: the check looked only at the segment before `stringify`, so\n  `re::std::stringify!` passed as `std::stringify!`. It now also requires\n  that no path segment comes before `std` / `core` (`::std::stringify!`, the\n  absolute form, still counts).\n- expand_reference: find_calls had no check of the qualifier at all, so the\n  two expanders disagreed on `re::stringify!(m!())`. It now applies the same\n  rule.\n\nTest: `stringify_keeps_calls_as_text` in macros.rs, on both expanders (which\nmust agree): `stringify!`, `std::`, `core::` and `::std::` keep `m!()` as\ntext; `re::stringify!`, `re::std::stringify!` and `::re::core::stringify!`\nexpand it.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\n* macros: a label before `::std::stringify!` is no path segment\n\nFrom CodeRabbit's review of #225: in `break 'done ::std::stringify!(m!())`\nthe check took the label `done` for a path segment before `::std`, so both\nexpanders expanded `m!()`. A name right after a `'` is a label or a lifetime:\nexpand_with looks at the byte before the token (its tokens keep only the\nname), expand_reference at the `'` punct proc_macro2 gives.\n\nstringify_keeps_calls_as_text has the case.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T09:59:25+09:00",
+          "tree_id": "54440590b412970a499a0f25094b19fb394d43f2",
+          "url": "https://github.com/mizchi/zust/commit/63215b0f865d04f591eb9a145fef6d14b5b6c8e0"
+        },
+        "date": 1795655085162,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.552,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 77.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 79.412,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 71.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.296,
             "unit": "%"
           }
         ]
