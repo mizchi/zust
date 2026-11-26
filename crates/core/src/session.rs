@@ -9613,18 +9613,25 @@ impl Session {
                 uh.add(u);
                 uh.finish() as u64 | 1 << 63
             };
-            for &g in &a.refs[id] {
-                // (a group none of whose fns the crate sees adds nothing, as no fn of it did before the groups: a
-                // name in the crate that only a consumer's fn has does not change the crate's keys)
-                if let Some(k) = self.group_key(a, g, uk, &|r, h| {
-                    let seen = in_u(a.prog.item_of[r as usize]);
-                    if seen {
-                        h.add(&a.sig_key(r));
-                    }
-                    seen
-                }) {
-                    h.add(&k);
-                }
+            // (a group none of whose fns the crate sees adds nothing, as no fn of it did before the groups: a name in
+            // the crate that only a consumer's fn has does not change the crate's keys. The parts are added in the
+            // order of their values, not of the groups' numbers, which follow where the program first meets each
+            // name: a consumer that names one before the crate does would reorder them)
+            let mut parts: Vec<Key> = a.refs[id]
+                .iter()
+                .filter_map(|&g| {
+                    self.group_key(a, g, uk, &|r, h| {
+                        let seen = in_u(a.prog.item_of[r as usize]);
+                        if seen {
+                            h.add(&a.sig_key(r));
+                        }
+                        seen
+                    })
+                })
+                .collect();
+            parts.sort_unstable();
+            for k in &parts {
+                h.add(k);
             }
             for &st in &a.srefs[id] {
                 let b = a.prog.base_of(st);
