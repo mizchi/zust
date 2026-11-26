@@ -64,10 +64,9 @@ pub struct Analysis {
     pub prog: Program,
     /// Each fn's references to fns: the groups of the names it refers to (Program::ref_groups), sorted
     pub refs: Vec<Vec<u32>>,
-    /// Each group's fns (ascending)
-    pub ref_groups: Vec<Vec<u32>>,
-    /// Each group's part of a cache key, per kind of key (fn_key_r's GroupKeyOf): computed once per analysis
-    pub group_keys: Mutex<FxMap<(u32, u64), Key>>,
+    /// Each group's part of a cache key (Session::group_key), once per analysis: of the keys that keep the prelude's
+    /// fns and of those that do not, by group (0: not yet), and of a closed crate's (by group and universe)
+    pub group_keys: Mutex<(Vec<[Key; 2]>, FxMap<(u32, u64), Key>)>,
     /// 関数ごとの、名前で現れる struct と const / static (キャッシュのキー用)
     pub srefs: Vec<Vec<u32>>,
     pub crefs: Vec<Vec<u32>>,
@@ -446,7 +445,7 @@ const CHECK_SALT: Key = 0x5eed_c4ec_0000_0000_0000_0000_0000_0001;
 impl Analysis {
     /// The fns fn id refers to (the fns of the names it refers to), ascending and once each
     pub fn ref_fns(&self, id: usize) -> Vec<u32> {
-        let mut v: Vec<u32> = self.refs[id].iter().flat_map(|&g| self.ref_groups[g as usize].iter().copied()).collect();
+        let mut v: Vec<u32> = self.refs[id].iter().flat_map(|&g| self.prog.ref_groups[g as usize].iter().copied()).collect();
         v.sort_unstable();
         v.dedup();
         v
@@ -2467,16 +2466,14 @@ impl Session {
         let mut srefs = Vec::with_capacity(prog.item_of.len());
         let mut crefs = Vec::with_capacity(prog.item_of.len());
         let names = prog.ref_names();
-        let (group_of, ref_groups) = prog.ref_groups();
         for ii in &prog.item_of {
-            let (f, st, c) = ii.map(|ii| prog.refs_in(&src, &items[ii as usize], Some(&names), &group_of)).unwrap_or_default();
+            let (f, st, c) = ii.map(|ii| prog.refs_in(&src, &items[ii as usize], Some(&names))).unwrap_or_default();
             refs.push(f);
             srefs.push(st);
             crefs.push(c);
         }
-        drop(group_of);
         tm.lap("refs", String::new());
-        let mut a = Analysis { late_err, iface_fp, src, items, prog, refs, ref_groups, group_keys: Mutex::new(FxMap::default()), srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()), assoc_keys: (0, vec![]) };
+        let mut a = Analysis { late_err, iface_fp, src, items, prog, refs, group_keys: Mutex::new((vec![], FxMap::default())), srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()), assoc_keys: (0, vec![]) };
         a.assoc_keys = a.assoc_keys();
         if self.opts.opt && std::env::var_os("ZUSTC_NO_INLINE").is_none() {
             a.inl = inline_bodies(&a);
@@ -9617,11 +9614,17 @@ impl Session {
                 uh.finish() as u64 | 1 << 63
             };
             for &g in &a.refs[id] {
-                h.add(&self.group_key(a, g, uk, &|r, h| {
-                    if in_u(a.prog.item_of[r as usize]) {
+                // (a group none of whose fns the crate sees adds nothing, as no fn of it did before the groups: a
+                // name in the crate that only a consumer's fn has does not change the crate's keys)
+                if let Some(k) = self.group_key(a, g, uk, &|r, h| {
+                    let seen = in_u(a.prog.item_of[r as usize]);
+                    if seen {
                         h.add(&a.sig_key(r));
                     }
-                }));
+                    seen
+                }) {
+                    h.add(&k);
+                }
             }
             for &st in &a.srefs[id] {
                 let b = a.prog.base_of(st);
@@ -9689,9 +9692,9 @@ impl Session {
             h.add(&a.prog.names[id]);
         }
         h.add(&a.sig_key(id as u32));
-        let each = |r: u32, h: &mut KeyHasher| {
+        let each = |r: u32, h: &mut KeyHasher| -> bool {
             if closed && a.prog.item_of[r as usize].is_some_and(|ri| (ri as usize) < pf) {
-                return;
+                return false;
             }
             h.add(&a.sig_key(r));
             // (展開しうるユーザの関数は、本体と行も効く)
@@ -9715,9 +9718,12 @@ impl Session {
                     }
                 }
             }
+            true
         };
         for &g in &a.refs[id] {
-            h.add(&self.group_key(a, g, closed as u64, &each));
+            if let Some(k) = self.group_key(a, g, closed as u64, &each) {
+                h.add(&k);
+            }
         }
         for &st in &a.srefs[id] {
             if closed && !a.prog.is_prelude_ty(Ty::Struct(st)) {
@@ -9739,21 +9745,37 @@ impl Session {
         h.finish()
     }
 
-    /// A group's part of a fn's cache key (fn_key_r): what `each` adds of each of its fns, in their order. The same for
-    /// every fn that refers to the group, so it is made once per analysis and `kind` (which fns `each` keeps: 0 or 1 for
-    /// a key that keeps the prelude's or not, a universe's hash with the top bit for a closed crate's)
-    fn group_key(&self, a: &Analysis, g: u32, kind: u64, each: &dyn Fn(u32, &mut KeyHasher)) -> Key {
-        if let Some(&k) = a.group_keys.lock().unwrap().get(&(g, kind)) {
-            return k;
+    /// A group's part of a fn's cache key (fn_key_r): what `each` adds of each of its fns, in their order, or None when
+    /// it adds nothing of any (each says whether it added). The same for every fn that refers to the group, so it is
+    /// made once per analysis and `kind` (which fns `each` keeps: 0 or 1 for a key that keeps the prelude's or not, a
+    /// universe's hash with the top bit for a closed crate's)
+    fn group_key(&self, a: &Analysis, g: u32, kind: u64, each: &dyn Fn(u32, &mut KeyHasher) -> bool) -> Option<Key> {
+        // (0: not made yet; a made key is never 0, see below)
+        let got = {
+            let ks = a.group_keys.lock().unwrap();
+            if kind < 2 { ks.0.get(g as usize).map_or(0, |k| k[kind as usize]) } else { ks.1.get(&(g, kind)).copied().unwrap_or(0) }
+        };
+        if got != 0 {
+            return (got != 1).then_some(got);
         }
         // (made outside the lock: each takes the sig keys' own)
         let mut h = KeyHasher::new();
-        for &r in &a.ref_groups[g as usize] {
-            each(r, &mut h);
+        let mut any = false;
+        for &r in &a.prog.ref_groups[g as usize] {
+            any |= each(r, &mut h);
         }
-        let k = h.finish();
-        a.group_keys.lock().unwrap().insert((g, kind), k);
-        k
+        // (kept as 1 when nothing was added, and as a key that is neither 0 nor 1 otherwise)
+        let k = if any { h.finish().max(2) } else { 1 };
+        let mut ks = a.group_keys.lock().unwrap();
+        if kind < 2 {
+            if ks.0.is_empty() {
+                ks.0.resize(a.prog.ref_groups.len(), [0; 2]);
+            }
+            ks.0[g as usize][kind as usize] = k;
+        } else {
+            ks.1.insert((g, kind), k);
+        }
+        any.then_some(k)
     }
 
     /// 関数かインスタンスのキー (インスタンスは元の関数のキー + 型引数)

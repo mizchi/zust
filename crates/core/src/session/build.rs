@@ -135,7 +135,7 @@ impl Session {
 
     /// Makes the .o of an analyzed program (looks up the cache; if missing, compiles and puts it in the cache)
     fn compile_object(&mut self, a: &Analysis, rep: &mut BuildReport, tm: Option<&mut Timer>) -> R<Vec<u8>> {
-        let mut live = a.prog.reachable(&a.refs, &a.ref_groups);
+        let mut live = a.prog.reachable(&a.refs);
         // (a function only a static points to (`static F: fn() = f;`) is compiled too)
         for c in &a.prog.consts {
             if c.stat.is_some() && c.ty_has_fn() {
