@@ -235,6 +235,10 @@ pub struct Checker {
     /// the answers of `uncovered` in one match, by its types and its rows (the patterns' addresses): `true | false`
     /// in many fields gives the same remaining rows on both sides
     cover_memo: std::cell::RefCell<HashMap<(Vec<Ty>, Vec<Vec<usize>>), bool>>,
+    json_memo: std::cell::RefCell<HashMap<Ty, bool>>,
+    /// the keys of written `Map` / `Set` types, with the bounds where they are written: checked once every enum's
+    /// variants are known
+    key_checks: Vec<(Pos, Ty, HashMap<String, String>)>,
     eq_low: std::cell::Cell<usize>,
     eq_pending: std::cell::RefCell<(Vec<Ty>, HashMap<Ty, usize>)>,
     bound_checks: Vec<(Pos, Ty, String)>,
@@ -421,6 +425,8 @@ impl Checker {
             tys: vec![],
             eq_memo: Default::default(),
             cover_memo: Default::default(),
+            json_memo: Default::default(),
+            key_checks: vec![],
             eq_low: std::cell::Cell::new(usize::MAX),
             eq_pending: Default::default(),
             bound_checks: vec![],
@@ -639,11 +645,8 @@ impl Checker {
                             // (the built-in collections, unless the file names a type so. The key is checked with the
                             // bounds of the function the type is written in)
                             arity(self, if n == "Map" { 2 } else { 1 });
-                            if let Some(k) = args.first()
-                                && !self.key_type(k)
-                            {
-                                let s = self.show(k);
-                                self.err(*pos, format!("a Map's key or a Set's element is an integer, a String, a bool or an enum without data, not {s}{}", if let Ty::Param(p) = k { format!(": add the bound `{p}: Hash`") } else { String::new() }));
+                            if let Some(k) = args.first() {
+                                self.key_checks.push((*pos, k.clone(), self.bounds.clone()));
                             }
                             return Ty::Named(n.clone(), args);
                         } else if let Some((_, _, vs)) = PRELUDE.iter().find(|p| p.0 == n) {
@@ -872,6 +875,16 @@ impl Checker {
                 self.unify(body_pos(body, *pos), &got, &ret);
                 self.finish_fn();
             }
+        }
+        // (every enum's variants are known now, whatever the order of the items)
+        for (pos, k, bounds) in std::mem::take(&mut self.key_checks) {
+            let saved = std::mem::replace(&mut self.bounds, bounds);
+            if !self.key_type(&k) {
+                let s = self.show(&k);
+                let hint = if let Ty::Param(p) = &k { format!(": add the bound `{p}: Hash`") } else { String::new() };
+                self.err(pos, format!("a Map's key or a Set's element is an integer, a String, a bool or an enum without data, not {s}{hint}"));
+            }
+            self.bounds = saved;
         }
     }
 
@@ -1108,7 +1121,21 @@ impl Checker {
     }
 
     /// A type `json_encode` / `json_decode` can convert (see js.rs `json_fn`)
+    /// (an answer per type within one check: the check is a conjunction, so an answer that assumed an outer type
+    /// on `seen` holds whenever the whole answer is true. A type shared by many fields is checked once)
     fn jsonable(&self, t: &Ty, seen: &mut Vec<Ty>) -> bool {
+        if seen.is_empty() {
+            self.json_memo.borrow_mut().clear();
+        }
+        if let Some(&r) = self.json_memo.borrow().get(t) {
+            return r;
+        }
+        let r = self.jsonable_inner(t, seen);
+        self.json_memo.borrow_mut().insert(t.clone(), r);
+        r
+    }
+
+    fn jsonable_inner(&self, t: &Ty, seen: &mut Vec<Ty>) -> bool {
         match t {
             Ty::I32 | Ty::U32 | Ty::F32 | Ty::F64 | Ty::Str | Ty::Bool => true,
             Ty::Array(e) => self.jsonable(e, seen),
@@ -1973,6 +2000,11 @@ impl Checker {
                     self.check_pat(&a.pat, &st, a.body.pos, &mut binds);
                     self.scopes.push(binds.into_iter().collect());
                     if let Some(g) = &a.guard {
+                        // (JS takes the names from the first alternative that matches; Rust tries the next one when
+                        // the guard fails: an `|` that binds names has no guard yet)
+                        if has_or(&a.pat) && !crate::own::pat_names(&a.pat).is_empty() {
+                            self.err(g.pos, "a guard on an `|` pattern that binds names: write an arm for each alternative");
+                        }
                         let gt = self.infer(g, Some(&Ty::Bool));
                         self.unify(g.pos, &gt, &Ty::Bool);
                     }

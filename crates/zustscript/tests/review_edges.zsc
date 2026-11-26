@@ -18,3 +18,6 @@ fn guard_live() -> i32 {
 @wasm export fn wasm_run() -> Array<i32> { sorted().concat([owned_str(15), owned_str(25), order(Some(1)), order(None)]).concat(user_e0()).concat([param_r([4, 5], 1), empty_slice()]) }
 export fn js_run() -> String { unit_guard(1); `${reassign()} ${guard_live()}` }
 
+// (second review) a guard that reads a pattern's binding moves nothing; an argument that reassigns the array
+@wasm export fn guard_bind(n: i32) -> i32 { match Some([n]) { Some(xs) if [xs].len() > 0 => xs.len(), _ => 0 } }
+@wasm export fn recv_reassign(n: i32) -> i32 { let mut xs = [n, 7]; let a = xs.get({ xs = [2]; 1 }).unwrap_or(-1); let b = xs.slice({ xs = [3, 4, 5]; 0 }, 2).len(); a * 10 + b + xs.len() }

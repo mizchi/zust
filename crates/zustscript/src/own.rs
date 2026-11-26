@@ -501,7 +501,12 @@ impl Lv<'_> {
                     self.expr(&a.body, &mut l);
                     if let Some(g) = &a.guard {
                         l.extend(acc.iter().copied());
+                        // (a guard runs before the arm is taken: Rust does not let it move what the pattern binds)
+                        let binds: Vec<usize> = pat_names(&a.pat).into_iter().filter_map(|n| self.r.binds.get(&(a.body.id, n)).copied()).collect();
+                        let n = self.frozen.len();
+                        self.frozen.extend(binds);
                         self.expr(g, &mut l);
+                        self.frozen.truncate(n);
                     }
                     self.kill_pat(&a.pat, a.body.id, &mut l);
                     acc.extend(l);

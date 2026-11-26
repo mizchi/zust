@@ -1065,14 +1065,14 @@ fn review_edges_same_in_js_and_wasm() {
         assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
         outs.push(node(
             &d,
-            "const l = []; globalThis.note = (s) => l.push(s); const m = await import('./review_edges.js'); console.log(JSON.stringify(m.wasm_run()), m.js_run(), JSON.stringify(l));",
+            "const l = []; globalThis.note = (s) => l.push(s); const m = await import('./review_edges.js'); console.log(JSON.stringify(m.wasm_run()), m.js_run(), JSON.stringify(l), m.guard_bind(1), m.recv_reassign(1));",
         ));
         let o = compare_build(&root().join("tests/review_no_option.zsc"), &d, flags);
         assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
         outs.push(node(&d, "const m = await import('./review_no_option.js'); console.log(JSON.stringify(m.reversed([1, 2, 3])));"));
     }
     assert_eq!(outs[0..2], outs[2..4], "wasm and JS differ");
-    assert_eq!(outs[0], "[1,2,1,1,2,105,905,1,8,7,6,0] 10 3 []\n");
+    assert_eq!(outs[0], "[1,2,1,1,2,105,905,1,8,7,6,0] 10 3 [] 1 74\n");
     assert_eq!(outs[1], "[3,2,1]\n");
     let d = out_dir("review-coverage");
     let src = d.join("wide.zsc");
@@ -1091,11 +1091,22 @@ fn review_edges_same_in_js_and_wasm() {
 fn json_proto_and_inline_primitive() {
     let d = out_dir("json-proto");
     let src = d.join("p.zsc");
-    std::fs::write(&src, "type R = { __proto__: i32 }\nexport fn d(s: String) -> String { let r: Result<R, String> = json_decode(s); match r { Ok(v) => json_encode(v), Err(m) => m } }\nexport fn prim(s: String) -> String { let r: Result<i32, String> = json_decode(s); match r { Ok(v) => v.to_string(), Err(m) => m } }\n").unwrap();
+    // (and a parameter named `JSON` does not hide JS's; a type shared by many fields is checked once: D28 reaches D0
+    // 2^28 ways)
+    let mut deep: Vec<String> = vec!["type D0 = { value: i32 }".into()];
+    deep.extend((1..=28).map(|i| format!("type D{i} = {{ left: Option<D{}>, right: Option<D{}> }}", i - 1, i - 1)));
+    std::fs::write(
+        &src,
+        format!(
+            "type R = {{ __proto__: i32 }}\nexport fn d(s: String) -> String {{ let r: Result<R, String> = json_decode(s); match r {{ Ok(v) => json_encode(v), Err(m) => m }} }}\nexport fn prim(s: String) -> String {{ let r: Result<i32, String> = json_decode(s); match r {{ Ok(v) => v.to_string(), Err(m) => m }} }}\nexport fn encode(JSON: i32) -> String {{ json_encode(JSON) }}\n{}\nfn deep(s: String) -> bool {{ let r: Result<D28, String> = json_decode(s); r.is_ok() }}\n",
+            deep.join("\n")
+        ),
+    )
+    .unwrap();
     let o = zsc(&src, &d, &["--inline-runtime"]);
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    let out = node(&d, "const m = await import('./p.js'); console.log(m.d('{\"__proto__\":7}'), '|', m.prim('\"x\"'), '|', m.prim('42'));");
-    assert_eq!(out, "{\"__proto__\":7} | expected an i32 at $, found \"x\" | 42\n");
+    let out = node(&d, "const m = await import('./p.js'); console.log(m.d('{\"__proto__\":7}'), '|', m.prim('\"x\"'), '|', m.prim('42'), '|', m.encode(5));");
+    assert_eq!(out, "{\"__proto__\":7} | expected an i32 at $, found \"x\" | 42 | 5\n");
 }
 
 /// tests/js_values.zsc: extern types (properties, methods, a setter, a constructor, a module's), `null` from JS as

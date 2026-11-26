@@ -339,7 +339,7 @@ impl<'a> Js<'a> {
                 _ => {}
             }
         }
-        for t in ["Math", "String", "Number", "BigInt", "Array", "Object", "Float64Array", "Float32Array", "Int32Array", "console"] {
+        for t in ["Math", "String", "Number", "BigInt", "Array", "Object", "Float64Array", "Float32Array", "Int32Array", "console", "JSON", "Map", "Set", "RangeError"] {
             self.module_names.insert(t.to_string());
         }
         let mut bodies: HashMap<&String, &Item> = HashMap::new();

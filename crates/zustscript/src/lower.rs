@@ -1995,16 +1995,18 @@ impl<'a> Lower<'a> {
                 match m {
                     // (by index: a slice index is the same in every Rust)
                     "get" => {
+                        let head = self.receiver_ref(r, recv, &rf, &rt, args);
                         let i = self.expr(&args[0])?;
                         let x = if self.copy(&el) { "__zs_r[__zs_i]" } else { "__zs_r[__zs_i].clone()" };
-                        val(format!("{{ let __zs_r = &{recv}; let __zs_i = ({i}) as usize; let __zs_o: {oty} = if __zs_i < __zs_r.len() {{ {opt}::Some({x}) }} else {{ {opt}::None }}; __zs_o }}"))
+                        val(format!("{{ {head} let __zs_i = ({i}) as usize; let __zs_o: {oty} = if __zs_i < __zs_r.len() {{ {opt}::Some({x}) }} else {{ {opt}::None }}; __zs_o }}"))
                     }
                     "first" | "last" => val(some(format!("{recv}.{m}(){cloned}"))),
                     "is_empty" => val(format!("{recv}.is_empty()")),
                     "slice" => {
                         self.str_helpers.insert("zs_range");
+                        let head = self.receiver_ref(r, recv, &rf, &rt, args);
                         let (a, b) = (self.expr(&args[0])?, self.expr(&args[1])?);
-                        val(format!("{{ let __zs_r = &{recv}; let (__zs_a, __zs_b) = zs_range(__zs_r.len() as i32, {a}, {b}); __zs_r[__zs_a..__zs_b].to_vec() }}"))
+                        val(format!("{{ {head} let (__zs_a, __zs_b) = zs_range(__zs_r.len() as i32, {a}, {b}); __zs_r[__zs_a..__zs_b].to_vec() }}"))
                     }
                     "reverse" | "sort" | "sort_by" => {
                         let v = self.owned(recv, &rf, &rt);
@@ -2050,6 +2052,22 @@ impl<'a> Lower<'a> {
             }
             _ => not_in_subset(pos, "this method (strings are not in it)"),
         }
+    }
+
+    /// `let __zs_r = &recv;`, the array an index or a slice reads: a value of it taken first when an argument assigns
+    /// what it reads (`xs.get({ xs = [2]; 0 })` reads the array before the assignment, and holds no borrow across it)
+    fn receiver_ref(&mut self, r: &Expr, recv: String, rf: &Form, rt: &Ty, args: &[Expr]) -> String {
+        if args.iter().any(|a| self.live.assigns_in.contains(&a.id)) {
+            let (mut reads, mut assigns) = (HashSet::new(), HashSet::new());
+            own::names(r, &mut reads, &mut HashSet::new());
+            for a in args {
+                own::names(a, &mut HashSet::new(), &mut assigns);
+            }
+            if reads.iter().any(|n| assigns.contains(n)) {
+                return format!("let __zs_rv = {}; let __zs_r = &__zs_rv;", self.owned(recv, rf, rt));
+            }
+        }
+        format!("let __zs_r = &{recv};")
     }
 
     /// The Rust type of the prelude's `Option` of `t`, marked used (its definition is written once), with its type

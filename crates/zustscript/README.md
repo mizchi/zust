@@ -433,7 +433,7 @@ fn quadrant(p: Point) -> i32 {
 fn greet(u: User) -> String { let User { name, .. } = u; name }
 ```
 
-- `A | B` は入れ子にも書ける(`Some(Circle(_) | Square(_))`)。どの選択肢も同じ名前を同じ型で束縛する
+- `A | B` は入れ子にも書ける(`Some(Circle(_) | Square(_))`)。どの選択肢も同じ名前を同じ型で束縛する。名前を束縛する `|` にはガードを付けられない(腕を分ける)
 - ガード `pat if cond =>` は、パターンの名前を使える(`?` も書ける)。ガードのある腕は網羅性の検査では数えない
 - レコードのパターン `Point { x, y: py, .. }` は `match` / `if let` / `let` に書ける。書かないフィールドがあれば `..` で終える。`let` には `|` を書けない(`match` で書く)
 - JS
