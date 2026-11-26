@@ -5773,6 +5773,15 @@ impl Program {
         }
     }
 
+    /// t is std's `Rc` / `Arc` of a trait object (`Rc<dyn Send>`), whose unsizing zustc does not do
+    pub fn std_rc_of_dyn(&self, t: Ty) -> bool {
+        let Ty::Struct(sid) = t else { return false };
+        let base = self.base_of(sid) as usize;
+        matches!(self.structs[base].name.as_str(), "Rc" | "Arc")
+            && matches!(self.structs[sid as usize].args.first(), Some(Ty::Dyn(_)))
+            && self.struct_item.get(base).is_some_and(|&ii| ii >= self.prelude_from)
+    }
+
     /// t is a type whose impls of the program's implements does not see: a Box, an array or a slice, or one with a
     /// trait object in it (`dyn T2` and `dyn T2 + 'static` are told apart by their text here, where rustc sees one
     /// type with two lifetimes). A bound on one is not checked: a no would be a false error

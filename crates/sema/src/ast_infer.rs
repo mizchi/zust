@@ -961,6 +961,8 @@ impl Inf<'_> {
             match st {
                 Stmt::Let(pat, ann_ty, init, _, ..) => {
                     let ann = ann_ty.as_ref().and_then(|t| self.parse_ty(t));
+                    // (`let _: Rc<dyn Send> = Rc::new(x);`: the unsizing zustc does not do, set aside as typeck does)
+                    let ann = ann.filter(|&t| !(matches!(pat, Pat::Wild) && self.prog.std_rc_of_dyn(t)));
                     let v = match init {
                         Some(init) => self.expr(init),
                         None => self.var(),

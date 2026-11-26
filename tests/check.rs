@@ -3686,3 +3686,19 @@ fn a_raw_identifier_s_name_an_imported_lowercase_variant_and_self_as_a_construct
     let src = "struct W(u8);\ntype T = W;\nimpl T {\n    fn f(o: Option<u8>) -> Option<Self> {\n        o.map(Self)\n    }\n}\nfn main() {\n    let _ = W::f(None);\n}\n";
     assert!(errs(src).is_empty(), "{:?}", errs(src));
 }
+
+#[test]
+fn a_trait_object_of_auto_traits_alone() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (`dyn Send` / `dyn Sync + 'static` / `dyn Unpin` as a type anywhere, not only behind a pointer)
+    let src = "struct Wrap(dyn Sync + 'static);\ntrait Foo {}\nimpl Foo for dyn Send {}\ntype Z = dyn Unpin;\nfn f(_: &Wrap, _: &Z) {}\nfn main() {}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+    // (`let _: Rc<dyn Send> = Rc::new(x);`: dropped at once, with the value's own type)
+    let src = "use std::rc::Rc;\nstruct S;\nfn main() {\n    let _: Rc<dyn Send> = Rc::new(S);\n}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+    // (a `dyn` with no trait at all stays an error)
+    assert!(!errs("type Z = dyn 'static;\nfn main() {}\n").is_empty());
+}

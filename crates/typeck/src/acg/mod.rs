@@ -2541,6 +2541,9 @@ impl Cx<'_> {
                     // (a type zustc cannot read yet (`[(); foo()]`, `dyn Send`, `std::num::NonZero<u64>`) is not checked;
                     // a name of none of the program's is an error)
                     let ann = match ann_ty.as_ref().map(|t| (t, self.parse_ty(t))) {
+                        // (`let _: Rc<dyn Send> = Rc::new(x);`: the unsizing of a std pointer other than Box, which zustc
+                        // does not do; the value is dropped at once, the same with its own type)
+                        Some((_, Ok(a))) if self.prog.std_rc_of_dyn(a) => None,
                         Some((_, Ok(a))) => Some(a),
                         Some((t, Err(e))) if e.contains("cannot find type") && !names_std_path(t) => return Err(e),
                         // (and a Sized error, whatever the initializer: `let _: Vec<str> = loop {};`)

@@ -267,13 +267,12 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
                     _ => return Err("only one trait is supported in `dyn`".to_string()),
                 }
             }
-            match tr {
-                Some(s) => TySyn::Dyn(s),
-                // (an auto trait alone is read right behind a pointer only, see auto_dyn)
-                None => {
-                    let _ = auto;
-                    return Err("`dyn` needs a trait".to_string());
-                }
+            match (tr, auto) {
+                (Some(s), _) => TySyn::Dyn(s),
+                // (an auto trait alone is the object's trait elsewhere too: `struct Wrap(dyn Sync)`, `impl Foo for dyn
+                // Send`, `type Z = dyn Unpin;`)
+                (None, Some(a)) => TySyn::Dyn(a),
+                (None, None) => return Err("`dyn` needs a trait".to_string()),
             }
         }
         // Lifetimes do not affect codegen, so they are erased

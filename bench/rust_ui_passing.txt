@@ -1301,7 +1301,10 @@ run-pass	cast/owned-struct-to-trait-cast-6318.rs
 check-pass	cast/ptr-ptr-to-ptr-ptr-different-regions.rs
 compile-fail	cast/ptr-to-ptr-different-regions.rs
 compile-fail	cast/ptr-to-ptr-indirect-different-regions.rs
+compile-fail	cast/ptr-to-ptr-principalless.rs
+check-pass	cast/ptr-to-ptr-unsized-adt-tail-with-static-region.rs
 check-pass	cast/ptr-to-trait-obj-add-super-auto.rs
+check-pass	cast/ptr-to-trait-obj-ok.rs
 build-pass	cast/raw-pointer-from-str-comparison.rs
 compile-fail	cast/raw-ptr-to-dyn-fn-raw-ptr.rs
 run-pass	cast/supported-cast.rs
@@ -1546,6 +1549,7 @@ run-pass	codegen/box-str-drop-glue.rs
 build-pass	codegen/codegen-binder-not-ignored-in-generic-fn.rs
 run-pass	codegen/correctly-monomorphize-generic-drop-impl.rs
 run-pass	codegen/dont-miscompile-enums.rs
+run-pass	codegen/dont-roundup-dst-prefix-size-to-alignment.rs
 run-pass	codegen/issue-101585-128bit-repeat.rs
 run-pass	codegen/issue-16602-1.rs
 run-pass	codegen/issue-16602-2.rs
@@ -1671,6 +1675,7 @@ compile-fail	coherence/skip-reporting-if-references-err.rs
 check-pass	coherence/super-traits/super-trait-knowable-1.rs
 check-pass	coherence/super-traits/super-trait-knowable-2.rs
 check-pass	coherence/super-traits/super-trait-knowable-3.rs
+check-pass	coherence/trait-implementation-coherence-check-57162.rs
 compile-fail	collections/btreemap/btreemap-index-mut-2.rs
 compile-fail	collections/btreemap/btreemap-index-mut.rs
 check-pass	collections/btreemap/btreemap_into_iterator_lifetime.rs
@@ -2396,6 +2401,7 @@ run-pass	drop/issue-2734.rs
 run-pass	drop/issue-2735-2.rs
 run-pass	drop/issue-2735-3.rs
 run-pass	drop/issue-2735.rs
+build-pass	drop/issue-35546.rs
 run-pass	drop/issue-90752-raw-ptr-shenanigans.rs
 run-pass	drop/issue-979.rs
 check-pass	drop/lint-if-let-rescope-false-positives.rs
@@ -2996,6 +3002,7 @@ compile-fail	feature-gates/feature-gate-unboxed-closures-method-calls.rs
 compile-fail	feature-gates/feature-gate-unboxed-closures-ufcs-calls.rs
 check-pass	feature-gates/feature-gate-unqualified-local-imports.rs
 compile-fail	feature-gates/feature-gate-unsized_locals.rs
+compile-fail	feature-gates/feature-gate-unsized_tuple_coercion.rs
 compile-fail	feature-gates/feature-gate-with_negative_coherence.rs
 compile-fail	feature-gates/feature-gate-x86_amx_intrinsics.rs
 compile-fail	feature-gates/feature-gate-xop_target_feature.rs
@@ -3982,6 +3989,7 @@ compile-fail	layout/failed-to-get-layout-for-type-error-ice-92979.rs
 compile-fail	layout/ice-non-last-unsized-field-issue-121473.rs
 compile-fail	layout/invalid-unsized-in-always-sized-tail.rs
 run-pass	layout/issue-112048-unsizing-field-order.rs
+run-pass	layout/issue-112048-unsizing-niche.rs
 compile-fail	layout/issue-unsized-tail-restatic-ice-122488.rs
 compile-fail	layout/malformed-unsized-type-in-union.rs
 run-pass	layout/opt-repr-i32-min.rs
@@ -8215,6 +8223,7 @@ run-pass	traits/issue-23003.rs
 run-pass	traits/issue-23825.rs
 check-pass	traits/issue-2611-3.rs
 compile-fail	traits/issue-32963.rs
+compile-fail	traits/issue-33140.rs
 check-pass	traits/issue-33187.rs
 compile-fail	traits/issue-35869.rs
 run-pass	traits/issue-3683.rs
@@ -8309,6 +8318,7 @@ compile-fail	traits/param-without-lifetime-constraint.rs
 run-pass	traits/parameterized-with-bounds.rs
 compile-fail	traits/partialeq-ref-mismatch-diagnostic.rs
 check-pass	traits/polymorphic-trait-creation-7673.rs
+run-pass	traits/principal-less-objects.rs
 compile-fail	traits/projection-no-progress-cycle-issue-159750.rs
 compile-fail	traits/question-mark-span-144304.rs
 compile-fail	traits/rc-not-send.rs
@@ -8376,6 +8386,7 @@ check-pass	traits/use-before-def.rs
 run-pass	traits/virtual-call-parameter-handling.rs
 compile-fail	traits/vtable-res-trait-param.rs
 compile-fail	traits/wf-object/no-duplicates.rs
+check-pass	traits/wf-object/reverse-order.rs
 check-pass	traits/where-clause-on-self-assoc-type.rs
 run-pass	traits/where-clause-vs-impl.rs
 run-pass	traits/with-bounds-default.rs
@@ -8443,6 +8454,7 @@ check-pass	type-alias-impl-trait/multiple_definitions.rs
 check-pass	type-alias-impl-trait/nested-rpit-with-lifetimes.rs
 check-pass	type-alias-impl-trait/wf-check-rpit-lifetimes.rs
 check-pass	type-alias/issue-14933.rs
+check-pass	type-alias/issue-37515.rs
 compile-fail	type-alias/issue-62364-self-ty-arg.rs
 compile-fail	type-alias/missing-associated-type-in-trait-object-22434.rs
 run-pass	type-alias/static-method-type-alias-11047.rs
