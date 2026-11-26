@@ -899,7 +899,7 @@ impl Session {
         let src0 = if self.ctx.map.inputs.is_empty() {
             let cfg = self.opts.cfg_with(&self.opts.features);
             let mut ext = vec![];
-            let configured = crate::cfg::strip_noting(src0, &cfg, &mut None, &mut ext);
+            let configured = crate::cfg::strip_configured(src0, &cfg, &mut ext);
             if cfg_err.is_none() {
                 cfg_err = crate::cfg::fn_qualifier_order(src0).or_else(|| malformed_cfg(src0, configured.as_deref(), &cfg));
             }
