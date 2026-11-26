@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795673243069,
+  "lastUpdate": 1795673813301,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -58670,6 +58670,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 37.984,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "181a2c28f9ea69e7854cdd41190d3ac17e3df08e",
+          "message": "zurgo check: every crate's errors at once, not only the first (#216)\n\n`zurgo check` prepares the crates as `zurgo build` does (build scripts and proc macros run), then type checks each one in dependency order with Session::check and prints all its errors, one `file:line:col: message` line each, instead of compiling it. A crate's errors do not stop the crates that depend on it. A crate that cannot be prepared (unreadable or unexpandable source, a failing build script, a proc-macro crate that cannot be read or does not build, or, without the proc-macro server, one that uses a stub's macro) has that error, the crates that use it are reported as not checked, and the others are checked. No objects or fingerprints are written. A build stops as before.\n\nOn wasm-bindgen 0.2.130 for wasm32: 63 errors in one run (~11 s), where a build shows one. KPIs within ±0.6%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9hDiRLf4kwKxcyPQ7u",
+          "timestamp": "2026-11-26T15:01:52+09:00",
+          "tree_id": "97d18e5d771017bfacc0fd1eacd805d4914d5ccf",
+          "url": "https://github.com/mizchi/zust/commit/181a2c28f9ea69e7854cdd41190d3ac17e3df08e"
+        },
+        "date": 1795673811919,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 152.359,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.774,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 21.931,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 47.054,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.277,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 133.06,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 800.195,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 635.05,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.77,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 77.536,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 215.627,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.312,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 630.539,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3938.878,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 58.754,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 101.173,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 45.666,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 59.848,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 97.667,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 172.928,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 40.566,
             "unit": "ms"
           }
         ]
