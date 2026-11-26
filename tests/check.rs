@@ -3391,3 +3391,29 @@ fn a_parse_error_in_a_macro_expansion_is_at_the_token_of_the_rule() {
     // (other characters than ASCII in the rules)
     assert_eq!(at("macro_rules! m {\n    () => {{\n        let \u{e9} = 5 \"\";\n    }}\n}\nfn main() {\n    m!();\n}\n").map(|p| p.0), Some(3));
 }
+
+#[test]
+fn patterns_of_another_type_than_the_value() {
+    // (rustc's E0308 for each, at the pattern's line)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let line = |src: &str| first(src).map(|x| x.0);
+    // (a reference's pattern on a value that is not one: a let, a parameter, one through a reference)
+    assert_eq!(line("fn main() {\n    let &_a = 5u32;\n}\n"), Some(2));
+    assert_eq!(line("#[derive(Clone, Copy)]\nstruct Foo {}\nfn foo(&_a: Foo) {}\nfn main() {}\n"), Some(3));
+    assert_eq!(line("fn agh(&&_a: &u32) {}\nfn main() {}\n"), Some(1));
+    assert_eq!(first("fn main() {\n    let &a = &5u32;\n    let _b: u32 = a;\n}\n"), None);
+    // (a unit struct's name is that struct, also in a closure and as a field's shorthand; a braced struct's is not)
+    assert_eq!(line("struct Test;\nfn main() {\n    || {\n        let Test = 1;\n    };\n}\n"), Some(4));
+    assert_eq!(line("#[allow(non_camel_case_types)]\nstruct foo;\nstruct Thing { foo: String }\nfn f(t: Thing) {\n    let Thing { foo } = t;\n}\nfn main() {}\n"), Some(5));
+    assert_eq!(first("struct Foo {}\nfn main() {\n    let Foo = 1;\n    let _x: i32 = Foo;\n}\n"), None);
+    assert_eq!(first("struct Unit;\nfn main() {\n    let Unit = Unit;\n}\n"), None);
+    // (a string or byte string takes no reference off: `&&str`, `&mut [u8; N]`)
+    assert_eq!(line("fn main() {\n    let s: &'static str = \"abc\";\n    match &s {\n        \"abc\" => {}\n        _ => {}\n    }\n}\n"), Some(4));
+    assert_eq!(line("fn main() {\n    let mut v = [97u8, 10u8];\n    match &mut v {\n        b\"a\\n\" => {}\n        _ => {}\n    }\n}\n"), Some(4));
+    assert_eq!(first("fn main() {\n    let v: Vec<&str> = vec![\"a\"];\n    for x in &v {\n        match *x {\n            \"a\" => {}\n            _ => {}\n        }\n    }\n    let s: &[u8] = b\"ab\";\n    match s {\n        b\"ab\" => {}\n        _ => {}\n    }\n}\n"), None);
+    // (the scrutinee's type is inferred from the literal without taking its reference off: `[u8; 4]`)
+    assert_eq!(first("fn load<L>() -> Option<L> {\n    todo!()\n}\nfn main() {\n    while let Some(tag) = load() {\n        match &tag {\n            b\"NAME\" => {}\n            _ => {}\n        }\n    }\n}\n"), None);
+}

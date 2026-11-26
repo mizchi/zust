@@ -3327,6 +3327,8 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             }
             if union {
                 sm.unions.push(sn.clone());
+            } else if matches!(fields, Fields::Unit) {
+                sm.unit = true;
             }
             for r in layout_reprs(&item.attrs)? {
                 sm.reprs.push((sn.clone(), r));

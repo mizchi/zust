@@ -826,7 +826,11 @@ impl Inf<'_> {
                 }
             }
             Pat::Lit(e) => {
-                let (v, _) = self.auto_deref(v, mode);
+                // (a string or byte string, a literal of a reference's type: rustc takes no reference off for it, so
+                // `match &tag { b"NAME" => .. }` makes tag a `[u8; 4]`. Only a reference to a reference is taken off, as
+                // the type check reports it)
+                let refd = matches!(&**e, Expr::Lit(t, _) if t.starts_with(['"', 'r']) || t.starts_with("b\"") || t.starts_with("br"));
+                let (v, _) = if refd { self.deref_refs_to_ref(v, mode) } else { self.auto_deref(v, mode) };
                 let e = match &**e {
                     Expr::Lit(t, _) => self.lit_var(t),
                     e => self.expr(e),

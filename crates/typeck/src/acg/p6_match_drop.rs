@@ -1318,6 +1318,11 @@ impl Cx<'_> {
             Pat::Lit(l) if lit_kind(l, |x| matches!(x, Lit::ByteStr(_))) => {
                 let Expr::Lit(text, _) = &**l else { unreachable!() };
                 let Some(Lit::ByteStr(bs)) = lit::lit(text) else { unreachable!() };
+                // (the program's: a literal of a reference's type takes no reference off (rustc's match ergonomics), so a
+                // `&&[u8]` or a `&mut [u8; N]` is another type (E0308))
+                if self.user_code && !matches!(p.ty(), Ty::Ref(false, Ty::Slice(Ty::U8) | Ty::Array(Ty::U8, _))) {
+                    return err(SP, format!("mismatched types: expected `{}`, found `&[u8; {}]`", self.prog.tn(p.ty()), bs.len()));
+                }
                 let mut p = p;
                 // (&&[u8] などは 1 段ずつ外し、&[u8] / &[u8; N] で止める)
                 while let Ty::Ref(_, i) = p.ty() {
@@ -1348,6 +1353,10 @@ impl Cx<'_> {
             Pat::Lit(l) if lit_kind(l, |x| matches!(x, Lit::Str(_))) => {
                 let Expr::Lit(text, _) = &**l else { unreachable!() };
                 let sref = Ty::Ref(false, intern(Ty::Str));
+                // (the program's: no reference is taken off a `&&str` (E0308), as for a byte string)
+                if self.user_code && matches!(p.ty(), Ty::Ref(_, Ty::Ref(..))) {
+                    return err(SP, format!("mismatched types: expected `{}`, found `&str`", self.prog.tn(p.ty())));
+                }
                 let mut p = p;
                 while let Ty::Ref(_, i) = p.ty() {
                     if p.ty() == sref || *i == Ty::Str {
@@ -1573,6 +1582,11 @@ impl Cx<'_> {
     }
 
     /// n names the unit struct t is (no fields, no variants)
+    /// Whether n names a unit struct of the program (`struct S;`, not generic)
+    pub(crate) fn unit_struct_named(&self, n: &str) -> bool {
+        !self.prog.unit_structs.is_empty() && self.prog.unit_structs.contains(n) && self.prog.struct_index.get(n).is_some_and(|&sid| self.prog.structs[sid as usize].generics.is_empty())
+    }
+
     pub(crate) fn unit_struct_pat(&self, n: &str, t: Ty) -> bool {
         let Ty::Struct(sid) = t else { return false };
         let sd = &self.prog.structs[self.prog.base_of(sid) as usize];
@@ -1606,6 +1620,11 @@ impl Cx<'_> {
                     && self.lookup(n).is_none() =>
             {
                 Ok(())
+            }
+            // (the name of a unit struct is that struct, not a new name, for a value of another type too: `let Test = 1;`,
+            // `let Thing { foo } = t;` with a `struct foo;` (E0308))
+            Pat::Ident(false, false, n, None) if self.user_code && self.unit_struct_named(n) => {
+                err(SP, format!("mismatched types: expected `{}`, found `{n}`", self.prog.tn(p.ty())))
             }
             Pat::Ident(by_ref, mutable, name, subpat) => {
                 // (`x @ sub`: sub binds first, and what it binds is checked against x below (at_conflict))
@@ -1699,6 +1718,12 @@ impl Cx<'_> {
                 Ok(())
             }
             Pat::Ref(pm, inner) => {
+                // (`let &x = 5u32;`, `fn f(&a: Foo)`: a reference's pattern on a value that is not one (E0308), as
+                // pat_test says for a refutable one)
+                let t = p.ty();
+                if matches!(t, Ty::Struct(_) | Ty::Array(..) | Ty::Unit | Ty::Bool | Ty::Char | Ty::F32 | Ty::F64) || t.is_int() {
+                    return err(SP, format!("mismatched types: expected `{}`, found `&_`", self.prog.tn(t)));
+                }
                 let (q, _) = self.pat_deref_once(p);
                 let saved = self.bk_pat_proj(borrowck::ref_deref(*pm));
                 let rs = (self.rg.pat.clone(), self.rg.pat_ref);

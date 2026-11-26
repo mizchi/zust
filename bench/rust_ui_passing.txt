@@ -4970,6 +4970,7 @@ compile-fail	mismatched_types/issue-1362.rs
 compile-fail	mismatched_types/issue-1448-2.rs
 compile-fail	mismatched_types/issue-19109.rs
 compile-fail	mismatched_types/issue-38371-unfixable.rs
+compile-fail	mismatched_types/issue-38371.rs
 compile-fail	mismatched_types/issue-47706.rs
 compile-fail	mismatched_types/issue-74918-missing-lifetime.rs
 compile-fail	mismatched_types/issue-75361-mismatched-impl.rs
@@ -6278,6 +6279,7 @@ compile-fail	pattern/bindings-after-at/pat-at-same-name-both.rs
 run-pass	pattern/bindings-after-at/slice-patterns.rs
 compile-fail	pattern/by-move-pattern-binding.rs
 check-pass	pattern/byte-string-inference.rs
+compile-fail	pattern/byte-string-mutability-mismatch.rs
 check-pass	pattern/check-struct-pat-fields-stability-issue-138319.rs
 run-pass	pattern/const-pattern-str-match-lifetime.rs
 compile-fail	pattern/constructor-type-mismatch.rs
@@ -7055,6 +7057,7 @@ run-pass	rfcs/rfc-2005-default-binding-mode/for-ok.rs
 compile-fail	rfcs/rfc-2005-default-binding-mode/for.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/general.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/lit-ok.rs
+compile-fail	rfcs/rfc-2005-default-binding-mode/lit.rs
 compile-fail	rfcs/rfc-2005-default-binding-mode/no-double-error.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/range.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/ref-region.rs
@@ -7259,6 +7262,7 @@ run-pass	self/ufcs-explicit-self.rs
 run-pass	self/ufcs-self-method-in-method-body.rs
 run-pass	self/uniq-self-in-mut-slot.rs
 check-pass	shadowed/primitive-type-shadowing.rs
+compile-fail	shadowed/shadow-unit-struct-in-closure.rs
 compile-fail	shadowed/shadowed-lifetime.rs
 compile-fail	shadowed/shadowed-trait-methods.rs
 compile-fail	shadowed/shadowed-use-visibility.rs
@@ -7621,6 +7625,7 @@ compile-fail	suggestions/case-difference-suggestions.rs
 compile-fail	suggestions/chain-method-call-mutation-in-place.rs
 compile-fail	suggestions/clone-on-unconstrained-borrowed-type-param.rs
 compile-fail	suggestions/closure-arg-trailing-semicolon.rs
+compile-fail	suggestions/const-in-struct-pat.rs
 compile-fail	suggestions/const-no-type.rs
 compile-fail	suggestions/const-pat-non-exaustive-let-new-var.rs
 compile-fail	suggestions/constrain-suggest-ice.rs

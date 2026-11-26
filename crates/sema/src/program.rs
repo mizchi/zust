@@ -503,6 +503,8 @@ pub struct Program {
     pub blanket_traits: HashSet<String>,
     /// The structs that are unions
     pub unions: HashSet<String>,
+    /// The program's unit structs (`struct S;`; not the prelude's): `let S = 1;` is a pattern of S, not a new name
+    pub unit_structs: HashSet<String>,
     /// The tag type of enums with `#[repr(u8)]` and the like
     pub reprs: HashMap<String, Ty>,
     /// `#[repr(packed(N))]` structs / unions: their fields aligned to at most N
@@ -1422,6 +1424,7 @@ impl Program {
             blanket_selfs: Default::default(),
             blanket_traits: Default::default(),
             unions: Default::default(),
+            unit_structs: Default::default(),
             reprs: Default::default(),
             packed: Default::default(),
             min_align: Default::default(),
@@ -1485,6 +1488,7 @@ impl Program {
             .iter()
             .flat_map(|sm| sm.structs.iter().map(|x| x.0.as_str()).chain(sm.enums.iter().map(|x| x.0.as_str())))
             .collect();
+        p.unit_structs.extend(sums[..user.min(sums.len())].iter().filter(|sm| sm.unit).filter_map(|sm| sm.structs.first().map(|x| x.0.clone())));
         for sm in sums {
             p.unions.extend(sm.unions.iter().cloned());
             for (n, ps, b) in &sm.const_fns {

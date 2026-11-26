@@ -1345,6 +1345,21 @@ impl Solver<'_> {
         }
     }
 
+    /// As auto_deref, but only through a reference to a reference: it stops at the last reference (`&&str` -> `&str`,
+    /// `&?T` stays)
+    pub fn deref_refs_to_ref(&mut self, mut v: u32, mut mode: Option<bool>) -> (u32, Option<bool>) {
+        loop {
+            let r = self.find(v);
+            let Some(Shape::Ref(m, i)) = self.shape[r as usize] else { return (v, mode) };
+            let ri = self.find(i);
+            if !matches!(self.shape[ri as usize], Some(Shape::Ref(..))) {
+                return (v, mode);
+            }
+            v = i;
+            mode = Some(if mode == Some(false) { false } else { m });
+        }
+    }
+
     pub fn bind_name(&mut self, name: String, v: u32, mode: Option<bool>) {
         let v = match mode {
             Some(m) => self.with(Shape::Ref(m, v)),
