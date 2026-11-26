@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795679408112,
+  "lastUpdate": 1795679410575,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -138514,6 +138514,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/eba656622a70939f18bafe75b435167be5c2bf7c"
         },
         "date": 1795678992949,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.69,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1915,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.88,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1557,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 72.95,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5388,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "90844eba2006a5bf2abe1202ee5b734bc5e2d40f",
+          "message": "Merge pull request #232 from mizchi/claude/gracious-brahmagupta-16jxdl\n\nzustscript: return / loop, the standard library, Map / Set, JSON, Eq / Ord, patterns, impl",
+          "timestamp": "2026-11-26T16:38:22+09:00",
+          "tree_id": "7fb720adcd11b7733d49f31a36d7564d413714ba",
+          "url": "https://github.com/mizchi/zust/commit/90844eba2006a5bf2abe1202ee5b734bc5e2d40f"
+        },
+        "date": 1795679410220,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
