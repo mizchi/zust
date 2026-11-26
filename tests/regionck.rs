@@ -5504,9 +5504,9 @@ fn part37_impl_where_clauses_through_the_header() {
     // (an impl's method's where clause against the trait's, read through the impl header's trait arguments, each
     // checked with rustc 1.97: the trait's `T: 'a` is the impl's `U: 'a`, so `V: 'a` is stricter (E0276 at the bound,
     // 5:23, compare-method/region-unrelated.rs), as is `'a: 'b` that nothing gives (5:24, region-extra.rs). What the
-    // trait's and the impl's headers give, what follows from the trait's outlives, and what a signature's or the
-    // header's type implies (`x: &'a T`, `for &'a u8`) are accepted; so are a `'static` the trait's signature implies
-    // by its type (`W<'static, T>`, `&'static T` beside `[u8; 1]`))
+    // trait's and the impl's headers give, what follows from the trait's outlives, and what a signature's type
+    // implies (`x: &'a T`) are accepted; so are a `'static` the trait's signature implies by its type (`W<'static, T>`,
+    // `&'static T` beside `[u8; 1]`))
     errors_at(r#"trait Master<'a, T, U> { fn foo() where T: 'a; }
 impl<'a, U, V> Master<'a, U, V> for () { fn foo() where U: 'a {} }
 trait Tr2<'a, 'b: 'a> { fn foo(); }
@@ -5642,4 +5642,50 @@ struct D<'a>(&'a i32);
 impl<'a, 'b> Leak<'a> for D<'b> { fn leak() where Self: 'a {} }
 fn main() {}
 "#, &[], "ep1");
+}
+
+#[test]
+fn part37_review_impl_where_clauses() {
+    // (#221's review, each checked with rustc 1.97. Accepted: a trait's method whose array type holds a `;`, a method
+    // named `f` with its own parameter, an impl's `where` on its own line, nested references (`&'b &'a u8` gives
+    // `'a: 'b`), what a signature's type gives through `Self`, a defaulted trait argument left out, and `&F` where the
+    // bound is on F)
+    errors_at(r#"trait Tr<'a, T> { fn run(_: [u8; 1]) where T: 'a; }
+impl<'a, T> Tr<'a, T> for () { fn run(_: [u8; 1]) where T: 'a {} }
+trait Tf<'a> { fn f<T>() where T: 'a; }
+impl<'a> Tf<'a> for () { fn f<U>() where U: 'a {} }
+trait Tw<'a> { fn f() where Self: 'a; }
+struct W<T>(T);
+impl<'a, T> Tw<'a> for W<T>
+where T: Copy {
+    fn f() where W<T>: 'a {}
+}
+trait Tn<'a, 'b> { fn run(_: &'b &'a u8); }
+impl<'a, 'b> Tn<'a, 'b> for () { fn run(_: &'b &'a u8) where 'a: 'b {} }
+trait Ts<'a> { fn foo(x: &'a Self); }
+impl<'a, T> Ts<'a> for W<T> { fn foo(x: &'a W<T>) where T: 'a {} }
+trait Td<'a, T = ()> { fn run() where T: 'a; }
+impl<'a, U> Td<'a> for W<U> { fn run() where (): 'a {} }
+fn inspect<F: FnMut()>(_: &F) {}
+fn main() {
+    let mut n = 0;
+    let c = || n += 1;
+    inspect(&c);
+}
+"#, &[], "rw1");
+    // (stricter: the impl header's types give nothing here (`for &'a T`, `Tr<'a, &'a T>`), two parts of a tuple give
+    // no order of their lifetimes, a trait's method's bound of its own parameter is not the impl's of that name, and a
+    // defaulted argument left out is the default; at the failing predicate's bound, on the line an impl in a fn body
+    // is written on)
+    let e = "impl has stricter requirements than trait";
+    errors_at("trait Tr8<'a> { fn foo(); }\nimpl<'a, T> Tr8<'a> for &'a T { fn foo() where T: 'a {} }\nfn main() {}\n", &[(2, e)], "rw2");
+    errors_at("trait Tr<'a, X> { fn foo(); }\nimpl<'a, T> Tr<'a, &'a T> for () { fn foo() where T: 'a {} }\nfn main() {}\n", &[(2, e)], "rw3");
+    errors_at("trait Tr<'a, 'b> { fn run(_: (&'a u8, &'b u8)); }\nimpl<'a, 'b> Tr<'a, 'b> for () { fn run(_: (&'a u8, &'b u8)) where 'a: 'b {} }\nfn main() {}\n", &[(2, e)], "rw4");
+    errors_at("struct W<U>(U);\ntrait Tr<'a> { fn run<U>() where U: 'a; }\nimpl<'a, U> Tr<'a> for W<U> { fn run<V>() where V: 'a, U: 'a {} }\nfn main() {}\n", &[(3, e)], "rw5");
+    errors_at("struct W<U>(U);\ntrait Tr<'a, T = ()> { fn run(); }\nimpl<'a, U> Tr<'a> for W<U> { fn run() where U: 'a {} }\nfn main() {}\n", &[(3, e)], "rw6");
+    errors_at("trait Tr<'a, T> { fn f() where T: 'a; }\nimpl<'a, T, U> Tr<'a, T> for (U,) {\n    fn f() where T: 'a,\n        U: 'a {}\n}\nfn main() {}\n", &[(4, e)], "rw7");
+    errors_at("fn main() {\n    trait Tr<'a, T> { fn f() where T: 'a; }\n    impl<'a, T, U> Tr<'a, T> for (U,) {\n        fn f() where U: 'a {}\n    }\n}\n", &[(4, e)], "rw8");
+    // (`&c` where the parameter is `&F` and F: Fn: c, which mutates what it captures, is only an FnMut (E0525 at the
+    // closure, 4:13))
+    errors_at("fn inspect<F: Fn()>(_: &F) {}\nfn main() {\n    let mut n = 0;\n    let c = || n += 1;\n    inspect(&c);\n}\n", &[(4, "expected a closure that implements the `Fn` trait")], "rw9");
 }

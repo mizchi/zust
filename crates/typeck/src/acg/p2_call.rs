@@ -3397,7 +3397,8 @@ impl Cx<'_> {
             }
             // (a closure passed by name where a bound wants `Fn` / `FnMut`: one that mutates its captures is only `FnMut`,
             // one that moves them out only `FnOnce` (E0525, at the closure). Passed by reference, `&c` is an `Fn..` only
-            // where c is an `Fn`, `&mut c` only where c is an `FnMut`)
+            // where c is an `Fn`, `&mut c` only where c is an `FnMut`. Not where the parameter's type is the reference,
+            // `_: &F`: F is the closure's type there)
             let by_ref = match strip_paren(a) {
                 Expr::Ref(m, inner) if matches!(strip_paren(inner), Expr::Path(None, _)) => Some((*m, &**inner)),
                 _ => None,
@@ -3407,6 +3408,7 @@ impl Cx<'_> {
                 (_, Some((_, inner))) => Some(inner),
                 _ => None,
             };
+            let by_ref = by_ref.filter(|_| !matches!(pt, Ty::Ref(..)));
             if let (Some(x), Some(a)) = (&fbt, named) {
                 let want = x.2.trim_start();
                 let is_fn_bound = ["Fn", "FnMut", "FnOnce"].iter().any(|k| want.strip_prefix(k).is_some_and(|r| r.trim_start().starts_with('(')));
