@@ -1,6 +1,7 @@
 //! Whether the locations in panic messages (`panicked at <file>:<line>:<col>:`) are the same as rustc's.
-//! Builds tests/panic_loc/cases.rs with rustc and with zustc (the session, minclif) and compares the cases for arguments 0 to 6
-//! (out-of-range indexing (Vec / array), overflow, unwrap, assert!, division by 0, expect inside a format macro's arguments).
+//! Builds tests/panic_loc/cases.rs with rustc and with zustc (the session, minclif) and compares the cases for arguments 0 to 7
+//! (out-of-range indexing (Vec / array), overflow, unwrap, assert!, division by 0, isqrt of a negative number, expect inside
+//! a format macro's arguments).
 #![cfg(feature = "acg")]
 
 fn location(stderr: &[u8]) -> Option<String> {
@@ -64,7 +65,7 @@ fn panic_locations_like_rustc() {
     let d = dir.join("d");
     zustc::session::build(&src, &d, false, None).unwrap();
     let mut bad = vec![];
-    for k in 0..7 {
+    for k in 0..8 {
         let a = std::process::Command::new(&r).arg(k.to_string()).output().unwrap();
         let b = std::process::Command::new(&d).arg(k.to_string()).output().unwrap();
         let (la, lb) = (location(&a.stderr), location(&b.stderr));

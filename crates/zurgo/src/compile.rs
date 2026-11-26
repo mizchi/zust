@@ -222,8 +222,10 @@ fn plan_keeping(g: &Graph, o: &BuildOpts, mut errs: Option<&mut Vec<(String, Str
             // (two proc-macro packages of one library name: one stub cannot stand for both)
             if let Some(&other) = lib_of.get(&lib.name) {
                 return Err(format!(
-                    "two packages give the library `{}`: `{} v{}` and `{} v{}`. Two versions of one crate are not supported yet (mizchi/zust#28)",
-                    lib.name, g.pkgs[other].m.name, g.pkgs[other].m.version, pk.name, pk.version
+                    "two packages give the library `{}`: `{}` and `{}`. Two versions of one crate are not supported yet (mizchi/zust#28)",
+                    lib.name,
+                    g.pkgs[other].display(),
+                    g.pkgs[p].display()
                 ));
             }
             // (a check: one whose root cannot be read, or that does not build, is its crate's error; it is not a stub
@@ -301,8 +303,10 @@ fn plan_keeping(g: &Graph, o: &BuildOpts, mut errs: Option<&mut Vec<(String, Str
         let Some(lib) = &pk.m.lib else { continue };
         if let Some(&other) = lib_of.get(&lib.name) {
             return Err(format!(
-                "two packages give the library `{}`: `{} v{}` and `{} v{}`. Two versions of one crate are not supported yet (mizchi/zust#28)",
-                lib.name, g.pkgs[other].m.name, g.pkgs[other].m.version, pk.m.name, pk.m.version
+                "two packages give the library `{}`: `{}` and `{}`. Two versions of one crate are not supported yet (mizchi/zust#28)",
+                lib.name,
+                g.pkgs[other].display(),
+                pk.display()
             ));
         }
         lib_of.insert(lib.name.clone(), n.0);

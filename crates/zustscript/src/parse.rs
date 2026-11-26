@@ -62,10 +62,10 @@ impl Parser {
         *self.src.get(self.i + k).unwrap_or(&'\0')
     }
 
-    fn skip_ws(&mut self) {
+    fn skip_ws(&mut self) -> PResult<()> {
         loop {
             if self.i >= self.src.len() {
-                return;
+                return Ok(());
             }
             let c = self.at(0);
             if c.is_whitespace() {
@@ -75,21 +75,28 @@ impl Parser {
                     self.bump();
                 }
             } else if c == '/' && self.at(1) == '*' {
-                while self.i < self.src.len() && !(self.at(0) == '*' && self.at(1) == '/') {
-                    self.bump();
-                }
-                if self.i < self.src.len() {
-                    self.bump();
+                let start = self.here();
+                self.bump();
+                self.bump();
+                loop {
+                    if self.i < self.src.len() {
+                        return Err((start, "unterminated block comment".into()));
+                    }
+                    if self.at(0) == '*' && self.at(1) == '/' {
+                        self.bump();
+                        self.bump();
+                        break;
+                    }
                     self.bump();
                 }
             } else {
-                return;
+                return Ok(());
             }
         }
     }
 
     fn lex(&mut self) -> PResult<Tok> {
-        self.skip_ws();
+        self.skip_ws()?;
         let pos = self.here();
         let start = self.i;
         if self.i >= self.src.len() {
@@ -569,7 +576,7 @@ impl Parser {
     fn raw_braces(&mut self) -> PResult<String> {
         let pos = self.peek()?.pos;
         self.unpeek();
-        self.skip_ws();
+        self.skip_ws()?;
         let start = self.i;
         if self.at(0) != '{' {
             return Err((pos, "expected `{`".into()));
@@ -581,23 +588,43 @@ impl Parser {
             }
             let c = self.at(0);
             if c == '"' {
+                let lit = self.here();
                 self.bump();
-                while self.i < self.src.len() && self.at(0) != '"' {
-                    if self.bump() == '\\' {
-                        self.bump();
+                loop {
+                    if self.i >= self.src.len() {
+                        return Err((lit, "unterminated string".into()));
+                    }
+                    match self.bump() {
+                        '"' => break,
+                        '\\' => {
+                            if self.i >= self.src.len() {
+                                return Err((lit, "unterminated string".into()));
+                            }
+                            self.bump();
+                        }
+                        _ => {}
                     }
                 }
-                self.bump();
                 continue;
             }
             if c == '\'' {
                 // a char literal ('x', '\n'); otherwise a lifetime
                 if self.at(1) == '\\' {
-                    self.bump();
-                    while self.i < self.src.len() && self.at(0) != '\'' {
-                        self.bump();
+                    let lit = self.here();
+                    self.bump(); // '
+                    self.bump(); // \
+                    if self.i >= self.src.len() {
+                        return Err((lit, "unterminated character literal".into()));
                     }
-                    self.bump();
+                    self.bump(); // the escaped char, so '\'' works
+                    loop {
+                        if self.i >= self.src.len() {
+                            return Err((lit, "unterminated character literal".into()));
+                        }
+                        if self.bump() == '\'' {
+                            break;
+                        }
+                    }
                     continue;
                 }
                 if self.at(2) == '\'' {
@@ -608,7 +635,7 @@ impl Parser {
                 }
             }
             if c == '/' && (self.at(1) == '/' || self.at(1) == '*') {
-                self.skip_ws();
+                self.skip_ws()?;
                 continue;
             }
             self.bump();

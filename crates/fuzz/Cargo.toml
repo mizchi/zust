@@ -1,0 +1,14 @@
+[package]
+name = "zust-fuzz"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Mutation-based fuzzing of zustc's front end and checker (std only): panics, hangs and crashes, and the fast macro expander against the reference one"
+publish = false
+
+[[bin]]
+name = "zust-fuzz"
+path = "src/main.rs"
+
+[dependencies]
+zust-core = { path = "../core", default-features = false }

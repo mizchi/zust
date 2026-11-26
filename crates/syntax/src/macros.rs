@@ -1928,11 +1928,20 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
                 Some(j) => i = j,
                 None => break,
             }
-            // (the builtin's: `stringify!`, `std::stringify!`, not a library's macro of that name, `re::stringify!`)
-            if tk(i) == b"stringify" && pm_scope.is_some() && (!(i >= 2 && sym(i - 1, b':') && sym(i - 2, b':')) || (i >= 3 && matches!(tk(i - 3), b"std" | b"core"))) {
+            // (the builtin's: `stringify!`, `std::stringify!`, not a library's macro of that name, `re::stringify!`, nor
+            // a `macro_rules! stringify` of the crate's own)
+            if tk(i) == b"stringify"
+                && !macros.contains_key("stringify")
+                && (!(i >= 2 && sym(i - 1, b':') && sym(i - 2, b':')) || (i >= 3 && matches!(tk(i - 3), b"std" | b"core")))
+            {
                 inert_until = inert_until.max(close[i + 2]);
             }
             let mut rules = macros.get(std::str::from_utf8(tk(i)).unwrap_or(""));
+            // (in `stringify!(..)`: a `macro_rules!` call is kept as written, as rustc does: `stringify!(m!())` is
+            // "m!()")
+            if i < inert_until {
+                rules = None;
+            }
             // (a proc macro's function-like call: `name!(..)`, `path::name!(..)`, a name no `macro_rules!` has. A path
             // from a proc-macro crate's name, or a library's that re-exports its macro (`pm::answer!()`,
             // `re::answer!()`), is that crate's even beside a `macro_rules! answer`)
@@ -2386,7 +2395,12 @@ fn find_calls(
             }
         }
         // (中にマクロの名前が無い括弧は辿らない: 括弧ごとに中身を写すと、深く入れ子になったソースで遅い)
-        if let TokenTree::Group(g) = &toks[i] {
+        // (nor the arguments of the builtin `stringify!(..)`: they are its text, not calls, as in expand_with)
+        let inert = i >= 2
+            && matches!(&toks[i - 2], TokenTree::Ident(x) if x == "stringify")
+            && matches!(&toks[i - 1], TokenTree::Punct(p) if p.as_char() == '!')
+            && !macros.contains_key("stringify");
+        if let (TokenTree::Group(g), false) = (&toks[i], inert) {
             let r = g.span().byte_range();
             let inner = if r.start <= r.end && r.end <= text.len() { &text[r.start..r.end] } else { "" };
             if inner.is_empty() || macros.keys().any(|m| inner.contains(m.as_str())) {

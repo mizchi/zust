@@ -5,14 +5,14 @@ use crate::acg::clif::MemFlagsData;
 use crate::parse::{Block as PBlock, Expr, GArg, Pat, Path, Stmt, TokKind, tokenize};
 use crate::types::{Ty, intern};
 
-/// 無名データ / static / vtable のシンボルの名前空間 (codegen.rs と同じ番号)
+/// Symbol namespaces of anonymous data / statics / vtables (the same numbers as codegen.rs)
 pub const NS_DATA: u32 = 1;
 pub const NS_STATIC: u32 = 2;
 pub const NS_VTABLE: u32 = 3;
 
-// --- マクロのトークンのテキスト (syn の ToTokens の代わり) -----------------------
+// --- Text of macro tokens (in place of syn's ToTokens) -----------------------
 
-/// `( .. )` / `[ .. ]` / `{ .. }` の中身
+/// The contents of `( .. )` / `[ .. ]` / `{ .. }`
 fn strip_delims(g: &str) -> Option<&str> {
     let t = g.trim();
     let first = t.chars().next()?;
@@ -23,7 +23,7 @@ fn strip_delims(g: &str) -> Option<&str> {
     Some(&t[1..t.len() - 1])
 }
 
-/// トップレベルの記号 sep で分ける (括弧・文字列の中は分けない)
+/// Splits on the top-level symbol sep (not inside brackets or strings)
 fn split_top(s: &str, sep: &str) -> Option<Vec<String>> {
     let toks = tokenize(s).ok()?;
     let mut parts = Vec::new();
@@ -44,7 +44,7 @@ fn split_top(s: &str, sep: &str) -> Option<Vec<String>> {
     Some(parts)
 }
 
-/// マクロの引数のテキスト (トップレベルの `,` で分けたもの。空の最後の要素は除く)
+/// The texts of a macro's arguments (split on top-level `,`; an empty last element is dropped)
 /// The text of `stringify!(tokens)` / `concat!("a", 1, 'c', true, stringify!(x))`, unquoted
 pub(crate) fn lit_macro_text(name: &str, g: &str) -> Result<String, String> {
     if name == "stringify" {
@@ -98,7 +98,7 @@ fn macro_arg_texts(g: &str) -> Vec<String> {
     v
 }
 
-/// ソースのテキストを proc_macro2 の Display と同じ空け方で表示する (parse.rs の tokens_text と同じ)
+/// Prints source text with the same spacing as proc_macro2's Display (the same as parse.rs's tokens_text)
 fn tokens_text(src: &str) -> String {
     let Ok(toks) = tokenize(src) else { return src.trim().to_string() };
     let mut s = String::new();
@@ -142,7 +142,7 @@ fn space_between(toks: &[crate::parse::Tok], k: usize, src: &str) -> bool {
     true
 }
 
-/// 文字列リテラルの式ならその中身
+/// The contents, if the expression is a string literal
 fn str_lit(e: &Expr) -> Option<String> {
     match e {
         Expr::Lit(t, _) => match lit::lit(t) {
@@ -157,11 +157,11 @@ fn let_stmt(name: &str, init: Expr) -> Stmt {
     Stmt::Let(Pat::Ident(false, false, name.to_string(), None), None, Some(init), None, Default::default())
 }
 
-/// hoist_index_bases の走査 (関数の中に置くと zustc の入れ子のアイテムの持ち上げが impl を扱えないので外に置く)
+/// The walk of hoist_index_bases (outside the function: zustc's hoisting of nested items cannot handle an impl)
 struct HoistScan {
-    /// 現れた添字の鎖: (根の名前, 受け手の式の列 (`x`, `x[i]`, ..), 代入の左辺か)
+    /// Index chains seen: (root name, receiver expressions (`x`, `x[i]`, ..), whether on an assignment's left side)
     chains: Vec<(String, Vec<Expr>, bool)>,
-    /// 鎖でない形で現れた名前 (メソッドの受け手・&mut・値として・マクロの中・束縛)
+    /// Names seen in a form other than a chain (method receiver, &mut, as a value, inside a macro, binding)
     other: HashSet<String>,
     assigned: HashSet<String>,
     bail: bool,
@@ -196,9 +196,9 @@ impl HoistScan {
             Expr::Index(_, ix, _) if !matches!(&**ix, Expr::Range(..)) => {
                 let mut c = vec![];
                 if hoist_chain(e, &mut c) {
-                    c.pop(); // (いちばん外の添字は要素そのもの: 受け手は手前まで)
+                    c.pop(); // (the outermost index is the element itself: the receivers stop before it)
                     self.chains.push((hoist_root(e).unwrap(), c, false));
-                    // 添字の式の中も見る
+                    // Look inside the index expressions too
                     let mut x = e;
                     while let Expr::Index(b, ix, _) = x {
                         self.visit_expr(ix);
@@ -226,7 +226,7 @@ impl HoistScan {
             _ => self.walk(e),
         }
     }
-    /// 子の式とパターンを見る (syn::visit::visit_expr の代わり)
+    /// Visits the child expressions and patterns (in place of syn::visit::visit_expr)
     fn walk(&mut self, e: &Expr) {
         match e {
             Expr::Let(p, x) => {
@@ -311,7 +311,7 @@ impl HoistScan {
         }
     }
     fn visit_macro(&mut self, g: &str) {
-        // (マクロの引数の名前は全部「鎖でない」とみなす)
+        // (every name in a macro's arguments counts as "not a chain")
         if let Ok(toks) = tokenize(g) {
             for t in toks {
                 if t.kind == TokKind::Ident {
@@ -341,7 +341,7 @@ impl HoistScan {
 }
 
 impl Cx<'_> {
-    // --- for ループ ------------------------------------------------------
+    // --- for loops ------------------------------------------------------
 
     /// `for pat in &x { .. }` / `for pat in &mut x { .. }`: x is borrowed until the loop ends (a hidden local holds
     /// the loan; it is read when the loop is left)
@@ -545,9 +545,9 @@ impl Cx<'_> {
                 }
             }
         }
-        // (ラベルは syn の ident と同じく先頭の `'` を外した形で持つ)
+        // (the label is kept without its leading `'`, as syn's ident is)
         self.pending_label = label.as_ref().map(|l| l.trim_start_matches('\'').to_string());
-        // 外側からアダプタ (`.rev()` / `.enumerate()` / `.iter()` ...) を剥がす
+        // Peel the adapters (`.rev()` / `.enumerate()` / `.iter()` ...) from the outside
         let mut e: &Expr = fexpr;
         let mut adapters = vec![];
         loop {
@@ -563,7 +563,7 @@ impl Cx<'_> {
             }
         }
         adapters.reverse();
-        // (`for x in v[1..].iter()`: 範囲の添字は参照にする (メソッド呼び出しの自動参照))
+        // (`for x in v[1..].iter()`: a range index becomes a reference (the autoref of a method call))
         if let Expr::Index(_, ix, _) = e {
             if matches!(&**ix, Expr::Range(..)) && !adapters.is_empty() {
                 e = self.keep_expr(Expr::Ref(false, Box::new(e.clone())));
@@ -574,7 +574,7 @@ impl Cx<'_> {
         if let Expr::Range(..) = e {
             return self.for_range(f, e, rev, enumerate);
         }
-        // 配列・スライス・Vec でなければ Iterator: `while let Some(pat) = it.next() { .. }`
+        // Not an array, slice or Vec: an Iterator, `while let Some(pat) = it.next() { .. }`
         let base_ty = self.peek(match e {
             Expr::Ref(_, x) => x,
             e => e,
@@ -602,21 +602,21 @@ impl Cx<'_> {
             },
             _ => false,
         };
-        // (型が分からないメソッド・関数呼び出し (`s.split(' ')` など) もイテレータとみなす)
+        // (a method or function call of unknown type (`s.split(' ')` and so on) counts as an iterator too)
         let iterator = match bt {
             Some(Ty::Struct(sid)) => self.vec_fields(sid).is_none() && !guard_seq,
             None => matches!(e, Expr::MethodCall(..) | Expr::Call(..)),
             _ => false,
         };
         if iterator {
-            // `for (k, v) in &map`: next がなければ iter() / iter_mut() / into_iter() を通す
+            // `for (k, v) in &map`: without a next, go through iter() / iter_mut() / into_iter()
             let struct_has_next = |cx: &Self, t: Option<Ty>| match t {
                 Some(Ty::Struct(s)) => cx.prog.method(s, "next").is_some(),
                 _ => true,
             };
-            // (`m.iter_mut()` は剥がした後の m ではなく、式全体の型で見る)
+            // (`m.iter_mut()` is judged by the type of the whole expression, not by the peeled m)
             let has_next = struct_has_next(self, bt) || matches!(strip_paren(fexpr), Expr::MethodCall(..)) && struct_has_next(self, self.peek(fexpr));
-            // (ユーザの `impl IntoIterator for &Coll` / `for Coll`)
+            // (the user's `impl IntoIterator for &Coll` / `for Coll`)
             let user_into = match bt {
                 Some(Ty::Struct(s)) => {
                     let by_ref = matches!(strip_paren(fexpr), Expr::Ref(..));
@@ -676,12 +676,12 @@ impl Cx<'_> {
             r?;
             return Ok((None, Ty::Unit));
         }
-        // 配列 / スライスを添字で回す
+        // Loop over an array / slice by index
         let (by_ref, base_e): (Option<bool>, &Expr) = match e {
             Expr::Ref(m, x) => (Some(*m), x),
             _ => (None, e),
         };
-        // `&a[lo..hi]` は部分スライス (参照ごと評価する)
+        // `&a[lo..hi]` is a subslice (evaluated with its reference)
         let sub = matches!(base_e, Expr::Index(_, ix, _) if matches!(&**ix, Expr::Range(..)));
         // (a number, `bool` or `char` is no iterator: `for _ in *x` of `x: &mut i32`, E0277 at the expression)
         if let Some(t) = self.peek(e).filter(|t| t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char)) {
@@ -714,8 +714,8 @@ impl Cx<'_> {
                 self.own_temp(ptr, at);
             }
         }
-        // 値で回す (`for x in arr`): 要素は x にムーブするので、配列は drop しない。
-        // Vec なら長さを 0 にしておき、バッファの解放だけを Vec の drop に任せる
+        // By value (`for x in arr`): the elements move into x, so the array is not dropped.
+        // A Vec gets length 0 here, so its drop only frees the buffer
         // (`v.iter().copied()` / `.cloned()`: the elements are copied out of a borrow, v stays as it is)
         let borrowed = adapters.iter().any(|a| a == "iter" || a == "iter_mut");
         if mode.is_none() && !borrowed {
@@ -771,7 +771,7 @@ impl Cx<'_> {
             }
             None => self.read(Place::Mem(addr, 0, elem)),
         };
-        // (`for (i, x) in v.iter().enumerate()`: 組を作らずに i と x をそれぞれ束縛する)
+        // (`for (i, x) in v.iter().enumerate()`: binds i and x separately, without building a pair)
         let tuple_pat = matches!(&**fpat, Pat::Tuple(t) if t.len() == 2);
         let (val, vt) = if enumerate && tuple_pat {
             self.pending_pair = Some((idx, val, vt));
@@ -793,7 +793,7 @@ impl Cx<'_> {
         Ok((None, Ty::Unit))
     }
 
-    /// enumerate 用の (usize, T) を一時領域に作る
+    /// Builds the (usize, T) for enumerate in a temporary
     pub(crate) fn make_pair(&mut self, idx: Value, v: Option<Value>, t: Ty) -> R<V> {
         let base = self.prog.tuple_base(2);
         let inst = self.prog.instantiate(base, vec![Ty::Usize, t])?;
@@ -805,7 +805,7 @@ impl Cx<'_> {
         Ok((Some(a), tt))
     }
 
-    /// ループ本体: パターンに値を束縛して本体を実行し、step (continue 先) へ
+    /// Loop body: binds the value to the pattern, runs the body, and goes to step (the continue target)
     /// E0005: the pattern of a `for` must cover the element type (`for Some(x) in xs` does not)
     pub(crate) fn for_pat_check(&self, p: &Pat, t: Ty) -> R<()> {
         if self.user_code && !super::plainly_irrefutable(p) {
@@ -893,7 +893,7 @@ impl Cx<'_> {
             label: self.pending_label.take(),
             val: None,
             is_block: false,
-            // パターンの束縛のスコープも break で drop する
+            // break drops the scope of the pattern's bindings too
             depth: self.scopes.len() - 1,
             temps: self.temps.len(),
             no_value: Some("for"),
@@ -926,7 +926,7 @@ impl Cx<'_> {
             };
             return Err(self.at(expr_start(rg), format!("`{r}<{el}>` is not an iterator (E0277)")));
         };
-        // `for i in 0..`: 型の最大値までの閉区間 (事実上終わらない)
+        // `for i in 0..`: an inclusive range up to the type's maximum (it never ends in practice)
         if end.is_none() && rev {
             return err(SP, "cannot reverse an unbounded range");
         }
@@ -948,12 +948,12 @@ impl Cx<'_> {
         let ct = clif_ty(lt).unwrap();
         let lt_cc = if s { IntCC::SignedLessThan } else { IntCC::UnsignedLessThan };
         let le_cc = if s { IntCC::SignedLessThanOrEqual } else { IntCC::UnsignedLessThanOrEqual };
-        // (`for k in 0..3`: 下限が 0 以上・上限が定数なら、k はその上限より小さい)
+        // (`for k in 0..3`: with a lower bound >= 0 and a constant upper bound, k is below that bound)
         self.pending_bound = match (self.iconst_of(lo), self.iconst_of(hi)) {
             (Some(l), Some(h)) if l >= 0 && h >= 0 => Some(h as u64 + inclusive as u64),
             _ => None,
         };
-        // -O: 回数が定数で小さい (4 回まで) ループは展開する (`for k in 0..3`: k が定数になり、添字がアドレスの定数に畳まれる)
+        // -O: unrolls a loop of a small constant count (up to 4) (`for k in 0..3`: k is constant, indexes fold)
         if self.prog.opt && !enumerate {
             if let (Some(l), Some(h)) = (self.iconst_of(lo), self.iconst_of(hi)) {
                 let h = h + inclusive as i64;
@@ -979,7 +979,7 @@ impl Cx<'_> {
             }
         }
         let i = self.b.declare_var(ct);
-        // (enumerate の番号。enumerate でなければ数えない)
+        // (the enumerate counter; not counted without enumerate)
         let n = self.b.declare_var(types::I64);
         let z = self.b.ins().iconst(types::I64, 0);
         self.b.def_var(n, z);
@@ -987,9 +987,9 @@ impl Cx<'_> {
         let body = self.b.create_block();
         let step = self.b.create_block();
         let exit = self.b.create_block();
-        // 空かどうか
+        // Whether it is empty
         let nonempty = self.b.ins().icmp(if inclusive { le_cc } else { lt_cc }, lo, hi);
-        // 現在値: 前向きなら lo から、逆向きなら最後の要素から
+        // Current value: from lo going forward, from the last element going backward
         let first = if !rev {
             lo
         } else if inclusive {
@@ -1000,7 +1000,7 @@ impl Cx<'_> {
         self.b.def_var(i, first);
         self.b.ins().brif(nonempty, head, &[], exit, &[]);
         self.b.switch_to_block(head);
-        // -O: ループの中で変わらない添字の受け手の先頭と長さを、ループの前で読んでおく
+        // -O: reads the start and length of index receivers the loop does not change, before the loop
         let nh = self.hoisted.len();
         if self.prog.opt {
             self.hoist_index_bases(fbody, Some(fpat), None)?;
@@ -1027,7 +1027,7 @@ impl Cx<'_> {
             let nn = self.b.ins().iadd_imm_s(nv, 1);
             self.b.def_var(n, nn);
         }
-        // 最後の要素を処理したら抜ける (lo..=MAX でも溢れない)
+        // Leave after the last element is processed (no overflow even for lo..=MAX)
         let last = if !rev {
             if inclusive { hi } else { self.b.ins().iadd_imm_s(hi, -1) }
         } else {
@@ -1045,11 +1045,11 @@ impl Cx<'_> {
         Ok((None, Ty::Unit))
     }
 
-    /// ループの本体 body で、添字の受け手 `x` / `x[i]` (x はローカルの Vec、i は本体で変わらない変数) が
-    /// ループの中で変わらないなら、その先頭と長さをここ (ループの前) で読み、indexable がそれを使う。
-    /// 変わらない: 本体の中で x が `x[..]..` の形 (読むか、要素がスカラーの代入) でしか現れず、
-    /// x や i を束縛し直さず、x を含むマクロもクロージャもない。`x[i]` の i の検査は本体の中で (前で比べた値で) 行う
-    /// (hoisted の鍵は受け手の式の Debug の文字列 `format!("{e:?}")`)
+    /// In the loop's body, an index receiver `x` / `x[i]` (x a local Vec, i a variable the body does not change)
+    /// that does not change in the loop has its start and length read here (before the loop), for indexable to use.
+    /// Not changing: in the body, x appears only as `x[..]..` (a read, or a scalar element assignment), x and i
+    /// are not rebound, no macro or closure holds x. The body checks i of `x[i]` (with the comparison made before)
+    /// (the key in hoisted is the Debug string of the receiver expression, `format!("{e:?}")`)
     pub(crate) fn hoist_index_bases(&mut self, body: &PBlock, pat: Option<&Pat>, cond: Option<&Expr>) -> R<()> {
         let mut sc = HoistScan { chains: vec![], other: Default::default(), assigned: Default::default(), bail: false };
         sc.visit_block(body);
@@ -1062,14 +1062,14 @@ impl Cx<'_> {
         if sc.bail {
             return Ok(());
         }
-        // 代入の左辺の要素はスカラーでなければならない (行 `c[i] = vec![]` は受け手を変える)
+        // An assigned element must be a scalar (assigning a row, `c[i] = vec![]`, changes the receiver)
         let mut bad: HashSet<String> = sc.other.clone();
         for (r, c, is_assign) in &sc.chains {
             if *is_assign {
                 let full = c.last().map(|b| format!("{b:?}"));
                 let _ = full;
-                // (左辺の型: 受け手の要素の型)
-                // (根の型から添字の数だけ要素の型をたどる)
+                // (the left side's type: the receiver's element type)
+                // (follows element types from the root's type, once per index)
                 let elem_of = |this: &Self, t: Ty| -> Option<Ty> {
                     match this.strip_refs(t) {
                         Ty::Struct(sid) => this.vec_fields(sid).map(|f| f.2),
@@ -1092,8 +1092,8 @@ impl Cx<'_> {
             if bad.contains(&r) {
                 continue;
             }
-            // 根はループの前からあるローカルの Vec
-            // (`&Vec` / `&mut Vec` の引数も: 本体で変えるならメソッド呼び出しか代入として現れる)
+            // The root is a local Vec that exists before the loop
+            // (a `&Vec` / `&mut Vec` argument too: if the body changes it, that shows as a method call or an assignment)
             let Some((_, rt)) = self.lookup(&r) else { continue };
             let Ty::Struct(rsid) = self.strip_refs(rt) else { continue };
             if self.vec_fields(rsid).is_none() {
@@ -1110,7 +1110,7 @@ impl Cx<'_> {
                     done.insert(key);
                     continue;
                 }
-                // `x[i]`: i はループの前からある、本体で代入も束縛し直しもされない変数
+                // `x[i]`: i is a variable from before the loop, which the body neither assigns nor rebinds
                 let Expr::Index(_, ix, _) = b else { break };
                 let Expr::Path(_, ip) = &**ix else { break };
                 let Some(iname) = ident_of(ip).map(|i| i.to_string()) else { break };
@@ -1123,7 +1123,7 @@ impl Cx<'_> {
                 let Some((po, lo, ee)) = self.vec_fields(esid) else { break };
                 let (iv, it) = self.expr(ix, Some(Ty::Usize))?;
                 let (Some(iv), Ty::Usize) = (iv, it) else { break };
-                // (範囲外なら読まない: 読む場所をダミーの領域にして、本体の中の検査で panic する)
+                // (out of range: no read; the read goes to a dummy area, and the check in the body panics)
                 let ok = self.b.ins().icmp(IntCC::UnsignedLessThan, iv, pl);
                 let at = self.elem_addr(pb, iv, pe);
                 let dummy = self.temp(pe);
@@ -1137,20 +1137,28 @@ impl Cx<'_> {
         Ok(())
     }
 
-    // --- panic / マクロ / `?` ---------------------------------------------
+    // --- panic / macros / `?` ---------------------------------------------
 
-    /// cond が立っていれば、算術の検査の panic (kind: 0 足し算 1 引き算 2 掛け算 3 0 除算 4 0 の剰余
-    /// 5 (未使用) 6 符号反転 7 左シフト 8 右シフト 9 割り算のあふれ 10 剰余のあふれ)
+    /// Panics if cond is set, for an arithmetic check (kind: 0 add, 1 sub, 2 mul, 3 div by zero, 4 rem by zero,
+    /// 5 (unused), 6 negation, 7 shift left, 8 shift right, 9 division overflow, 10 remainder overflow)
     pub(crate) fn ovf_panic(&mut self, cond: Value, kind: u8, span: Sp) {
-        let _ = (kind, span);
-        // std のプログラム: 条件つき trap (main が登録したハンドラが panic として 101 で終わらせる)。
-        // 分岐とブロックを増やさないので、検査のコンパイルの重さは命令 1 つ分
+        self.cond_panic(cond, kind, span, None);
+    }
+
+    /// A panic with std's message for a check that is not an overflow (`(-4i32).isqrt()`), at span when cond holds
+    pub(crate) fn msg_panic(&mut self, cond: Value, msg: &str, span: Sp) {
+        self.cond_panic(cond, 12, span, Some(msg.to_string()));
+    }
+
+    fn cond_panic(&mut self, cond: Value, kind: u8, span: Sp, msg: Option<String>) {
+        // A std program: a conditional trap (the handler main registers ends it as a panic, with 101).
+        // It adds no branch or block, so a check costs one instruction to compile
         if self.prog.panic_handler.is_none() {
-            let code = self.trap_site(kind, span, None);
+            let code = self.trap_site(kind, span, msg);
             self.b.ins().trapnz(cond, code);
             return;
         }
-        // (`#[panic_handler]` があればそれを呼ぶ)
+        // (with a `#[panic_handler]`, call it)
         let cont = self.b.create_block();
         let pb = self.b.create_block();
         self.b.set_cold_block(pb);
@@ -1160,10 +1168,10 @@ impl Cx<'_> {
         self.b.switch_to_block(cont);
     }
 
-    /// panic の trap のコードを 1 つ取り、場所 (種類・行・列) とメッセージを覚える (表は .o に置き、
-    /// main が登録したハンドラが発生したアドレスで引く)。数が多すぎれば場所なしのコード 4
-    /// span の (ファイルの中の行, 1 始まりの列)
-    /// (今は Span がない (Sp = 0) ので、行は 0 (+ line_base)・列は 0 (+ 1) として計算する)
+    /// Takes one panic trap code and records the place (kind, line, column) and message (the table goes in the .o,
+    /// and the handler main registers looks it up by the faulting address). With too many, code 4, with no place
+    /// (line in the file, 1-based column) of a span
+    /// (there is no Span now (Sp = 0), so the line is computed as 0 (+ line_base) and the column as 0 (+ 1))
     pub(crate) fn loc(&mut self, span: Sp) -> (u32, u32) {
         self.loc_used = true;
         (span.line + self.line_base, span.col + 1)
@@ -1177,7 +1185,7 @@ impl Cx<'_> {
         let info = if self.caller_loc {
             (kind as u32) << 27
         } else {
-            // (行の上位ビットのクレートの印は trap の表には入れない: .o を書くときに行をずらす)
+            // (the crate mark in the line's high bits is not in the trap table: lines are shifted when the .o is written)
             let (l, c) = self.loc(span);
             let l = l & 0xFFFFF;
             ((kind as u32) << 27) | (l.min(0xFFFF) << 11) | c.min(0x7FF)
@@ -1199,12 +1207,12 @@ impl Cx<'_> {
         TrapCode::unwrap_user(TRAP_SITE_BASE + k as u8)
     }
 
-    /// 値が整数の定数ならその値 (`x % 4` の 0 除算の検査を省く)
+    /// The value, if it is an integer constant (to skip the division-by-zero check of `x % 4`)
     pub(crate) fn iconst_of(&self, v: Value) -> Option<i64> {
         self.b.iconst_value(v)
     }
 
-    /// panic する: `#[panic_handler]` があればそれを呼び (戻らない)、なければ trap する
+    /// Panics: calls the `#[panic_handler]` if there is one (it does not return), and traps otherwise
     pub(crate) fn panic_call(&mut self) -> V {
         if let Some(h) = self.prog.panic_handler {
             let sig = self.prog.sigs[h as usize].clone();
@@ -1220,7 +1228,7 @@ impl Cx<'_> {
         self.dead()
     }
 
-    /// `vec![a, b, c]` / `vec![x; n]`: Vec::with_capacity と push に展開する
+    /// `vec![a, b, c]` / `vec![x; n]`: expands to Vec::with_capacity and push
     pub(crate) fn vec_macro(&mut self, p: &Path, g: &str, expected: Option<Ty>) -> R<V> {
         let span = SP;
         let mut elem = match expected {
@@ -1235,7 +1243,7 @@ impl Cx<'_> {
             let (nv, nt) = self.expr(n, Some(Ty::Usize))?;
             self.same(SP, nt, Ty::Usize)?;
             let nv = nv.unwrap();
-            // (drop の要る要素は clone して並べる: `Vec::new()` + `resize(n, x)`)
+            // (elements that need drop are cloned into place: `Vec::new()` + `resize(n, x)`)
             if self.needs_drop(xt) {
                 let Some(xv) = xv else { return Ok((None, Ty::Never)) };
                 if !self.prog.index.contains_key("Vec::resize") {
@@ -1249,12 +1257,12 @@ impl Cx<'_> {
             }
             let (v, vt) = self.call_named("Vec::with_capacity", vec![xt], &[(nv, Ty::Usize)], span)?;
             let v = v.unwrap();
-            // 確保した領域に直接書いて、最後に長さを n にする (push の呼び出しと容量の検査をしない)
+            // Writes straight into the allocation and sets the length to n at the end (no push calls, no capacity checks)
             if let (Some(xv), Ty::Struct(vsid)) = (xv, vt) {
                 if let Some((po, lo, _)) = self.vec_fields(vsid) {
                     let (es, _) = self.prog.size_align(xt);
                     let p = self.b.ins().load(PTR, mf(), v, po as i32);
-                    // (1 byte の要素 (`vec![true; n]` / `vec![0u8; n]`) は memset)
+                    // (1-byte elements (`vec![true; n]` / `vec![0u8; n]`) use memset)
                     if es == 1 && clif_ty(xt) == Some(types::I8) && self.prog.index.contains_key("__exr_memset") {
                         let c = self.b.ins().uextend(types::I32, xv);
                         self.call_named("__exr_memset", vec![], &[(p, Ty::Ptr(true, intern(Ty::U8))), (c, Ty::I32), (nv, Ty::Usize)], span)?;
@@ -1392,14 +1400,14 @@ impl Cx<'_> {
         }
     }
 
-    /// 対応しているマクロ: panic! / unreachable! / todo! / unimplemented! / assert! / assert_eq! /
-    /// assert_ne! (と debug_ 版) / matches!。メッセージの書式化はしない
+    /// Supported macros: panic! / unreachable! / todo! / unimplemented! / assert! / assert_eq! /
+    /// assert_ne! (and the debug_ forms) / matches!. Messages are not formatted
     pub(crate) fn macro_(&mut self, p: &Path, g: &str, expected: Option<Ty>) -> R<V> {
         let name = p.segs.last().map(|s| s.name.clone()).unwrap_or_default();
         match name.as_str() {
             "vec" => self.vec_macro(p, g, expected),
             "format" | "print" | "println" | "eprint" | "eprintln" | "write" | "writeln" => self.fmt_macro(p, g, &name),
-            // `dbg!(e)`: `[file:line:col] e = {:#?}` を stderr に出して e を返す
+            // `dbg!(e)`: prints `[file:line:col] e = {:#?}` to stderr and returns e
             "dbg" => {
                 let args = self.macro_args(p, g)?;
                 let (sl, sc) = self.loc(self.mstart);
@@ -1435,7 +1443,7 @@ impl Cx<'_> {
             }
             "panic" | "unreachable" | "todo" | "unimplemented" => {
                 if self.prog.panic_handler.is_none() {
-                    // メッセージ: 文字列だけならそのまま、書式つきなら書式化してから prelude の関数で panic する
+                    // Message: a plain string as it is; with a format, formatted first; then panics through a prelude function
                     let args = self.macro_args(p, g).unwrap_or_default();
                     let head = match name.as_str() {
                         "unreachable" => "internal error: entered unreachable code",
@@ -1447,7 +1455,7 @@ impl Cx<'_> {
                         Some(s) if args.len() == 1 && !s.contains('{') => Some(s),
                         _ => None,
                     };
-                    // (書式化の部品がない (書式化を使わない) プログラムでは、書式の文字列の固定の部分だけを出す)
+                    // (a program without the formatting parts (using no formatting) prints only the format string's fixed part)
                     let lit = if lit.is_none() && !self.prog.index.contains_key("__exr_panic_fmt") {
                         match args.first().and_then(str_lit) {
                             Some(v) => {
@@ -1516,10 +1524,10 @@ impl Cx<'_> {
                 if args.len() < 2 {
                     return err(SP, format!("{name}! needs two arguments"));
                 }
-                // `a == b` / `a != b` として比べる (構造的な比較・手書きの eq・String と &str も)
+                // Compare as `a == b` / `a != b` (structural comparison, a hand-written eq, String and &str too)
                 let (a, b) = (&args[0], &args[1]);
                 let paren = |x: &Expr| Expr::Paren(Box::new(x.clone()));
-                // 書式化が使えれば、rustc と同じく left / right の値 ({:?}) も出す (a と b は 1 回だけ評価する)
+                // With formatting available, also prints the left / right values ({:?}) as rustc does (a, b evaluated once)
                 if self.prog.panic_handler.is_none() && self.prog.index.contains_key("__exr_panic_fmt") {
                     let op = if name.ends_with("_eq") { "==" } else { "!=" };
                     let (l, c) = if self.caller_loc { (0u32, 0u32) } else { self.loc(self.mstart) };
@@ -1536,7 +1544,7 @@ impl Cx<'_> {
                     let Expr::Block(_, _, fail) = crate::parse::parse_expr(&fail_src)? else {
                         return err(SP, "internal: cannot build the assert_eq! message");
                     };
-                    // (左が数のリテラルで右がそうでなければ、右を先に評価して左の型を右から決める (`assert_eq!(2, n)`))
+                    // (a number literal only on the left: the right goes first and gives the left its type (`assert_eq!(2, n)`))
                     let num_lit = |e: &Expr| matches!(e, Expr::Lit(t, _) if matches!(lit::lit(t), Some(Lit::Int(_) | Lit::Float(_))));
                     let lets = if num_lit(a) && !num_lit(b) {
                         vec![let_stmt("__exr_r", Expr::Ref(false, Box::new(paren(b)))), let_stmt("__exr_l", Expr::Ref(false, Box::new(paren(a))))]
@@ -1561,13 +1569,13 @@ impl Cx<'_> {
             }
             "matches" => {
                 let (e, pat, guard) = crate::ast_closure::matches_parts(g, self.mbase).ok_or("matches!: cannot parse `(expr, pattern)`")?;
-                // (型推論が読んだ同じ式があればそれを使う: 型の記録をアドレスで引ける)
+                // (use the same expression type inference read, if there is one: its type records are looked up by address)
                 let e: &Expr = match self.macro_args_of(g) {
                     Some(v) if !v.is_empty() => v[0],
                     _ => self.keep_expr(e),
                 };
                 let guard: Option<&Expr> = guard.map(|g| self.keep_expr(g));
-                // (parse し直した式: 型推論の記録は位置で引く)
+                // (a reparsed expression: type inference records are looked up by position)
                 self.in_fmt_args += 1;
                 let sc = self.scrutinee(e);
                 self.in_fmt_args -= 1;
@@ -1579,7 +1587,7 @@ impl Cx<'_> {
                 let res = self.b.append_block_param(merge, types::I8);
                 self.pat_test(&pat, place, no)?;
                 self.scopes.push(vec![]);
-                // (束縛は guard でしか使わない: match 対象からムーブしたことにせず、束縛も drop しない (対象の一時値が drop する))
+                // (the bindings only serve the guard: no move out of the scrutinee and no drop (its temporary drops))
                 let n_owned = self.owned.len();
                 self.pat_bind(&pat, place, BindMode::Move)?;
                 self.owned.truncate(n_owned);
@@ -1734,15 +1742,15 @@ impl Cx<'_> {
         }
     }
 
-    /// 添字の検査: 範囲外なら `index out of bounds: the len is L but the index is I` で panic する。
-    /// 値をメッセージに入れるので trap でなく分岐して prelude の関数を呼ぶ (呼ぶブロックは関数で 1 つを共有し、
-    /// 長さ・添字・場所はブロック引数で渡す)
+    /// Index check: out of range, panics with `index out of bounds: the len is L but the index is I`.
+    /// The values go in the message, so it branches to a prelude function, no trap (one calling block per function
+    /// is shared, and takes the length, index and place as block arguments)
     pub(crate) fn index_check(&mut self, ok: Value, len: Value, i: Value, span: Sp) {
         if self.prog.panic_handler.is_some() || !self.prog.index.contains_key("__exr_panic_index") {
             self.panic_unless_at(ok, 12, span, Some("index out of bounds".into()));
             return;
         }
-        // (同じブロックの中で、同じ添字と長さの検査はもう通っている)
+        // (the same index and length check has already passed in the same block)
         let key = match self.iconst_of(len) {
             Some(n) => LenKey::Const(n),
             None => LenKey::Val(len),
@@ -1754,7 +1762,7 @@ impl Cx<'_> {
         if self.checked.1.contains(&(i, key)) {
             return;
         }
-        // -O: 場所ごとに冷たいブロックを作り、場所の定数はそこで作る (熱い道で定数をレジスタに置かない)
+        // -O: a cold block per place, which makes the place constants (the hot path keeps no constants in registers)
         if self.prog.opt {
             let pb = self.b.create_block();
             self.b.set_cold_block(pb);
@@ -1801,7 +1809,7 @@ impl Cx<'_> {
         self.checked.1.push((i, key));
     }
 
-    /// cond が偽なら panic する (kind と msg は std のプログラムでの panic のメッセージ)
+    /// Panics if cond is false (kind and msg are the panic message in a std program)
     pub(crate) fn panic_unless_at(&mut self, cond: Value, kind: u8, span: Sp, msg: Option<String>) {
         if self.prog.panic_handler.is_none() {
             let code = self.trap_site(kind, span, msg);
@@ -1811,7 +1819,7 @@ impl Cx<'_> {
         self.panic_unless(cond);
     }
 
-    /// cond が偽なら panic する
+    /// Panics if cond is false
     pub(crate) fn panic_unless(&mut self, cond: Value) {
         let ok = self.b.create_block();
         let bad = self.b.create_block();
@@ -1829,13 +1837,13 @@ impl Cx<'_> {
         self.b.ins().store(mf(), tv, a, 0);
     }
 
-    /// `e?`: Option なら None、Result なら Err(e) をそのまま return する
+    /// `e?`: returns None for an Option, Err(e) for a Result, as it is
     pub(crate) fn try_(&mut self, t: &Expr) -> R<V> {
         let Expr::Try(texpr) = t else { unreachable!() };
         let Some(place) = self.scrutinee(texpr)? else {
             return Ok((None, Ty::Never));
         };
-        // `?` は中身 (Ok / Some の値か、Err の値) をムーブするので、一時値 (や変数) はもう drop しない
+        // `?` moves the contents out (Ok / Some value or Err value), so the temporary (or variable) is no longer dropped
         let sflag = self.last_scrut;
         self.release(texpr, sflag)?;
         let (place, _) = self.pat_deref(place, BindMode::Move);
@@ -1864,7 +1872,7 @@ impl Cx<'_> {
             Some(v) => self.b.ins().jump(cont, &[v]),
             None => self.b.ins().jump(cont, &[]),
         };
-        // 失敗側: 関数の戻り値型の None / Err を作って return
+        // Failure side: build the None / Err of the function's return type and return
         self.b.switch_to_block(fail);
         let ret = self.ret;
         let rinst = match ret {
@@ -1881,7 +1889,7 @@ impl Cx<'_> {
             let (_, rety, reoff) = self.prog.structs[rinst as usize].variants[r_err].fields[0];
             let fp = self.field_place(place, ety, eoff)?;
             let (ev, _) = self.read(fp);
-            // エラーの型が違えば `From::from` で変換する (`impl From<ParseIntError> for AppError`)
+            // A different error type is converted with `From::from` (`impl From<ParseIntError> for AppError`)
             let ev = if ety != rety {
                 let conv = match rety {
                     Ty::Struct(rs) => self.prog.method(rs, "from").filter(|&id| {
@@ -1893,7 +1901,7 @@ impl Cx<'_> {
                 let dyn_err = matches!(rety, Ty::Struct(rs) if self.prog.structs[rs as usize].name == "__DynError");
                 match (conv, ev) {
                     (Some(id), Some(v)) => self.call_fn_vals(id, &[(v, ety)], SP)?.0,
-                    // `Box<dyn Error>` へは表示の文字列にして入れる
+                    // Into a `Box<dyn Error>`: as the display string
                     (None, Some(v)) if dyn_err => self.call_named("__exr_dyn_error", vec![ety], &[(v, ety)], SP)?.0,
                     _ => {
                         self.same(SP, ety, rety)?;
@@ -1912,7 +1920,7 @@ impl Cx<'_> {
         Ok((param, oty))
     }
 
-    /// コンパイラが直接扱う関数: `size_of::<T>()` / `align_of::<T>()` / `ptr::null::<T>()` / `null_mut`
+    /// Functions the compiler handles itself: `size_of::<T>()` / `align_of::<T>()` / `ptr::null::<T>()` / `null_mut`
     pub(crate) fn intrinsic_call(&mut self, c: &Expr, expected: Option<Ty>) -> R<Option<V>> {
         let Expr::Call(func, cargs) = c else {
             return Ok(None);
@@ -1959,12 +1967,12 @@ impl Cx<'_> {
             }
         }
         let n = p.segs.len();
-        // `Box::leak(b)`: Box の指す先をそのまま `&'static mut T` に (解放しない)
+        // `Box::leak(b)`: the Box's pointee as it is, as a `&'static mut T` (not freed)
         if name == "leak" && n >= 2 && p.segs[n - 2].name == "Box" && cargs.len() == 1 {
             let (v, t) = self.expr(&cargs[0], None)?;
             let Some(v) = v else { return Ok(Some((None, Ty::Never))) };
             if let Ty::Box(i) = t {
-                // (引数の値は一時値として持たれていないので、drop されない)
+                // (the argument's value is not held as a temporary, so it is not dropped)
                 return Ok(Some((Some(v), Ty::Ref(true, i))));
             }
             return err(SP, "`Box::leak` needs a Box");
@@ -2043,12 +2051,12 @@ impl Cx<'_> {
                 return self.expr(ne, expected).map(Some);
             }
         }
-        // `Box::new(x)`: ヒープに置いて、所有する `&mut T` として返す (解放はしない)
+        // `Box::new(x)`: puts x on the heap and returns it as an owning `&mut T` (never freed)
         if name == "new" && n >= 2 && p.segs[n - 2].name == "Box" && !self.prog.struct_index.contains_key("Box") {
             if cargs.len() != 1 {
                 return err(SP, "`Box::new` takes 1 argument");
             }
-            // `Box::new(MyErr(..))` を `Box<dyn Error>` として: 表示の文字列にする
+            // `Box::new(MyErr(..))` as a `Box<dyn Error>`: becomes the display string
             if let Some(Ty::Struct(sid)) = expected {
                 if self.prog.structs[sid as usize].name == "__DynError" {
                     let (v, t) = self.expr(&cargs[0], None)?;
@@ -2090,13 +2098,13 @@ impl Cx<'_> {
             self.rg_box(c, &cargs[0], t);
             return Ok(Some((Some(ptr), Ty::Box(intern(t)))));
         }
-        // prelude の Chars が使う u32 → char (検査しない)
+        // u32 → char for the prelude's Chars (unchecked)
         if name == "__exr_char_from_u32" {
             let (v, t) = self.expr(&cargs[0], Some(Ty::U32))?;
             self.same(SP, t, Ty::U32)?;
             return Ok(Some((v, Ty::Char)));
         }
-        // `__exr_tag_of(&e)` (prelude の mem::discriminant が使う): enum の tag (enum でなければ 0)
+        // `__exr_tag_of(&e)` (used by the prelude's mem::discriminant): the enum's tag (0 if not an enum)
         if name == "__exr_tag_of" && cargs.len() == 1 {
             let (v, t) = self.expr(&cargs[0], None)?;
             let v = match (v, t) {
@@ -2116,7 +2124,7 @@ impl Cx<'_> {
             };
             return Ok(Some((Some(v), Ty::U64)));
         }
-        // `core::slice::from_raw_parts(p, n)` / `_mut` と `core::str::from_utf8_unchecked(b)`
+        // `core::slice::from_raw_parts(p, n)` / `_mut` and `core::str::from_utf8_unchecked(b)`
         // (not `Vec::from_raw_parts(ptr, len, cap)` / `String::from_raw_parts`: the prelude's)
         let owner = p.segs.len() >= 2 && matches!(p.segs[p.segs.len() - 2].name.as_str(), "Vec" | "String");
         if matches!(name.as_str(), "from_raw_parts" | "from_raw_parts_mut" | "from_utf8_unchecked") && !owner && !(p.segs.len() == 1 && self.prog.index.contains_key(&name)) {
@@ -2143,7 +2151,7 @@ impl Cx<'_> {
         if !matches!(name.as_str(), "size_of" | "align_of" | "null" | "null_mut" | "needs_drop" | "__exr_int_kind" | "zeroed") {
             return Ok(None);
         }
-        // ユーザが同名の関数を定義していればそちら
+        // If the user defined a function of the same name, that one
         if p.segs.len() == 1 && self.prog.index.contains_key(&name) {
             return Ok(None);
         }
@@ -2170,7 +2178,7 @@ impl Cx<'_> {
                 let v = if name == "size_of" { sz } else { al };
                 (Some(self.b.ins().iconst(types::I64, v as i64)), Ty::Usize)
             }
-            // `__exr_int_kind::<T>()`: 0 = 整数でない、1 = 符号なし、2 = 符号つき (prelude の基数ソートが使う)
+            // `__exr_int_kind::<T>()`: 0 = not an integer, 1 = unsigned, 2 = signed (used by the prelude's radix sort)
             "__exr_int_kind" => {
                 let Some(t) = targ else {
                     return err(SP, "`__exr_int_kind` needs a type");
@@ -2178,7 +2186,7 @@ impl Cx<'_> {
                 let v = if t.is_int() && t.bits() <= 64 { 1 + t.signed() as i64 } else { 0 };
                 (Some(self.b.ins().iconst(types::I8, v)), Ty::U8)
             }
-            // `core::mem::zeroed::<T>()` (型は turbofish か期待型): 0 で埋めた値
+            // `core::mem::zeroed::<T>()` (the type from the turbofish or the expected type): a value filled with 0
             "zeroed" => {
                 // (`mem::zeroed` is unsafe: a zeroed `&T` or `Box<T>` is a null one, whatever the module is called
                 // (`use std::mem as m; m::zeroed()`). Only `MaybeUninit::zeroed` is safe)
@@ -2219,7 +2227,7 @@ impl Cx<'_> {
                     (v, t)
                 }
             }
-            // `core::mem::needs_drop::<T>()`: drop の glue が要る型か (定数。`Vec<u8>` の truncate で要素ごとの drop を省く)
+            // `core::mem::needs_drop::<T>()`: whether T needs drop glue (a constant; `Vec<u8>`'s truncate skips drops)
             "needs_drop" => {
                 let Some(t) = targ else {
                     return err(SP, "`needs_drop` needs a type: `needs_drop::<T>()`");
@@ -2238,7 +2246,7 @@ impl Cx<'_> {
         }))
     }
 
-    /// 1 セグメントのパスがローカル変数でなく enum のバリアント (`None` など) か
+    /// Whether a one-segment path is an enum variant (`None` and so on), not a local variable
     pub(crate) fn is_variant_path(&self, p: &Path) -> bool {
         if let Some(id) = ident_of(p) {
             if self.lookup(id).is_some() {
@@ -2248,7 +2256,7 @@ impl Cx<'_> {
         self.prog.variant_by_p(&PPath::of(p), self.self_sid).is_some()
     }
 
-    /// パターンのパスのバリアントを、match 対象の型 t (インスタンス) に合わせて引く
+    /// Looks up the variant of a pattern's path, matched to the scrutinee's type t (an instance)
     pub(crate) fn variant_on(&self, p: &Path, t: Ty) -> Option<(u32, usize)> {
         let (sid, vi) = self.prog.variant_by_p(&PPath::of(p), self.self_sid)?;
         // (`A::V(_)` with `type A = E<u8>;`: a variant of that instance only, not of an `E<u16>`)
@@ -2278,8 +2286,8 @@ impl Cx<'_> {
         }
     }
 
-    /// 変数でもバリアントでもないパス: `u32::MAX` などの関連定数、`core::ptr::null()` 以外のパス
-    /// 値として使われた関数のパス (`apply(double, 3)` の `double`、`S::f`) ならその関数
+    /// Non-variable, non-variant paths: an associated const like `u32::MAX`, a path other than `core::ptr::null()`
+    /// If it is the path of a function used as a value (`double` of `apply(double, 3)`, `S::f`), that function
     pub(crate) fn fn_item(&self, e: &Expr) -> Option<u32> {
         let Expr::Path(qself, p) = e else { return None };
         if qself.is_some() {
@@ -2302,7 +2310,7 @@ impl Cx<'_> {
         (s.has_body || s.is_extern).then_some(id)
     }
 
-    /// 関数アイテムを関数ポインタの値にする。ジェネリックなら turbofish か期待型 (`fn(i64) -> i64`) で型引数を決める
+    /// Fn item to fn pointer value. Generic: type arguments from the turbofish or expected type (`fn(i64) -> i64`)
     pub(crate) fn fn_value(&mut self, e: &Expr, id: u32, expected: Option<Ty>) -> R<V> {
         let Expr::Path(_, p) = e else { unreachable!() };
         let sig0 = self.prog.sigs[id as usize].clone();
@@ -2386,7 +2394,7 @@ impl Cx<'_> {
         if p.global && p.segs.first().is_some_and(|s| s.name == "crate") {
             return err(SP, "global paths cannot start with `crate` (E0433)");
         }
-        // `<u64 as Integer>::MAX_STR_LEN`: impl の関連 const `u64::MAX_STR_LEN`
+        // `<u64 as Integer>::MAX_STR_LEN`: the impl's associated const `u64::MAX_STR_LEN`
         if let (Some(q), Some(last)) = (q, p.segs.last()) {
             if let Ok(t) = self.parse_ty(q) {
                 let mut tn = if t == Ty::Unit { "#tuple0".to_string() } else { self.prog.tn(t) };
@@ -2452,7 +2460,7 @@ impl Cx<'_> {
             return self.prim_module_path(p, _expected);
         }
         let segs: Vec<String> = p.segs.iter().map(|s| s.name.clone()).collect();
-        // `f64::MAX` / `f64::consts::PI` / `std::f64::consts::E` など
+        // `f64::MAX` / `f64::consts::PI` / `std::f64::consts::E` and so on
         let fl = segs.iter().position(|s| s == "f64" || s == "f32");
         if let Some(i) = fl {
             let t = if segs[i] == "f32" { Ty::F32 } else { Ty::F64 };
@@ -2514,12 +2522,12 @@ impl Cx<'_> {
                 }
             }
         }
-        // `m::S` / `crate::m::S` (モジュールの中の static): the static itself, by its index (a local of the same name must not answer)
+        // `m::S` / `crate::m::S` (a module's static): the static itself, by its index (a local of the same name must not answer)
         if self.static_of(e).is_some() {
             let p = self.place(e)?;
             return Ok(self.read(p));
         }
-        // `core::...::NAME` (const / static) は最後のセグメントで
+        // `core::...::NAME` (const / static) by its last segment
         if segs.len() >= 2 && matches!(segs[0].as_str(), "core" | "crate" | "self") {
             let e: &Expr = self.keep_expr(path_expr(&p.segs.last().unwrap().name));
             return self.expr(e, _expected);
@@ -2589,7 +2597,7 @@ impl Cx<'_> {
         err(SP, "cannot find value (unsupported path)")
     }
 
-    /// `m::S` / `crate::m::S` がモジュールの中の static なら、モジュールを外したパス
+    /// If `m::S` / `crate::m::S` is a static in a module, the path without the modules
     pub(crate) fn static_path(&self, e: &Expr) -> Option<Expr> {
         let Expr::Path(qself, p) = e else { return None };
         if qself.is_some() || p.segs.len() < 2 {
@@ -2608,15 +2616,15 @@ impl Cx<'_> {
         self.prog.const_index.get(ident_of(&q)?).copied()
     }
 
-    /// `strip_mods_p` の結果を自前の構文木のパスに戻す (後ろのセグメントをそのまま使う)
+    /// Turns the result of `strip_mods_p` back into a path of our own syntax tree (the trailing segments as they are)
     fn strip_mods_path(&self, p: &Path) -> Option<Path> {
         let q = self.prog.strip_mods_p(&PPath::of(p))?;
         let k = p.segs.len() - q.segs.len();
         Some(Path { global: false, segs: p.segs[k..].to_vec(), pos: Default::default() })
     }
 
-    /// 1 セグメントのパスが (ローカル変数でない) const なら、その index
-    /// `N` (const ジェネリクス) の値。ローカル変数が同じ名前なら変数
+    /// If a one-segment path is a const (not a local variable), its index
+    /// The value of `N` (const generics). A local variable of the same name is the variable
     pub(crate) fn const_generic(&self, e: &Expr) -> Option<u32> {
         let Expr::Path(_, p) = e else { return None };
         let id = ident_of(p)?;
@@ -2638,14 +2646,14 @@ impl Cx<'_> {
 
     pub(crate) fn const_of(&self, e: &Expr) -> Option<u32> {
         let Expr::Path(qself, p) = e else { return None };
-        // (速い判定: 複数セグメントのパスで、最後の名前の const がなければ const ではない)
+        // (fast check: a multi-segment path whose last name has no const is not a const)
         if p.segs.len() >= 2 {
             let last = &p.segs.last()?.name;
             if !self.prog.const_by_last.contains_key(last) && !self.prog.const_index.contains_key(last) {
                 return None;
             }
         }
-        // `geometry::UNIT` / `crate::m::N`: モジュールの部分を外して引く
+        // `geometry::UNIT` / `crate::m::N`: look up without the module part
         if qself.is_none() && p.segs.len() >= 2 {
             if let Some(q) = self.strip_mods_path(p) {
                 let qe = Expr::Path(None, q);
@@ -2659,7 +2667,7 @@ impl Cx<'_> {
 
     pub(crate) fn const_of_inner(&self, e: &Expr) -> Option<u32> {
         let Expr::Path(qself, p) = e else { return None };
-        // 関連定数 `S::N` / `Self::N` / `T::N` (T は型引数) / trait の既定値 `Tr::N`
+        // Associated constants `S::N` / `Self::N` / `T::N` (T a type parameter) / a trait's default `Tr::N`
         if qself.is_none() && p.segs.len() == 2 {
             let (a, n) = (p.segs[0].name.clone(), p.segs[1].name.clone());
             let ty = if a == "Self" {
@@ -2683,7 +2691,7 @@ impl Cx<'_> {
             if let Some(&ci) = ty.and_then(|t| crate::program::vector_names(t).iter().filter(|v| !self.prog.struct_index.contains_key(**v)).find_map(|v| self.prog.const_index.get(&format!("{v}::{n}")))) {
                 return Some(ci);
             }
-            // trait の既定値: 型が実装している trait の `Tr::N`
+            // Trait default: `Tr::N` of a trait the type implements
             if let Some(Ty::Struct(sid)) = ty {
                 let b = self.prog.base_of(sid);
                 for (s2, tr) in &self.prog.impls {
@@ -2704,7 +2712,7 @@ impl Cx<'_> {
         self.prog.consts[ci as usize].stat.is_none().then_some(ci)
     }
 
-    /// 無名データ / static のシンボルのアドレス
+    /// The address of an anonymous data / static symbol
     pub(crate) fn symbol_addr(&mut self, ns: u32, index: u32) -> Value {
         match ns {
             NS_DATA => self.data_sym(index),
@@ -2714,7 +2722,7 @@ impl Cx<'_> {
         }
     }
 
-    /// 無名データを足してそのアドレスを返す (同じ内容は同じデータ)
+    /// Adds anonymous data and returns its address (the same contents give the same data)
     pub(crate) fn data_addr(&mut self, bytes: Vec<u8>) -> Value {
         let k = match self.datas.iter().position(|d| *d == bytes) {
             Some(k) => k,
