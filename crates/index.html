@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zust crate support</title>
+<meta name="description" content="Which of crates.io's most used crates zustc builds, by category, the errors left in each, and what to fix first.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="zust">
+<meta property="og:url" content="https://mizchi.github.io/zust/crates/">
+<meta property="og:title" content="zust crate support">
+<meta property="og:description" content="Which of crates.io's most used crates zustc builds, by category, the errors left in each, and what to fix first.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="../style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+  .filters { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 13px; }
+  .filters label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); min-width: 0; max-width: 100%; }
+  .filters select, .filters input { font: 13px var(--sans); color: var(--fg); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 8px; min-width: 0; max-width: 100%; }
+  .filters select { width: 15em; }
+  .filters input { width: 12em; }
+  .filters select:focus-visible, .filters input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .st { display: inline-flex; align-items: center; gap: 6px; }
+  .st i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+  .table td.err { white-space: normal; text-align: left; min-width: 320px; max-width: 560px; font-family: var(--mono); font-size: 12px;
+    color: var(--muted); overflow-wrap: anywhere; }
+  .table td.short { white-space: normal; min-width: 120px; max-width: 220px; text-align: left; }
+  .count { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="bar-in">
+    <a class="brand" href="../"><span>z</span>ust</a>
+    <button class="menu" id="menu" type="button" aria-controls="side" aria-expanded="false">Menu</button>
+  </div>
+</header>
+<div class="scrim" id="scrim" hidden></div>
+<div class="shell">
+  <aside class="side" id="side" aria-label="Site">
+    <a class="brand" href="../"><span>z</span>ust</a>
+    <nav class="pages" aria-label="Pages">
+      <a href="../">About</a>
+      <a href="../dashboard/">Retrospective</a>
+      <a href="../crates/" aria-current="page">Crate support</a>
+      <a class="ext" href="../dev/bench/">Benchmarks</a>
+      <a class="ext" href="https://github.com/mizchi/zust">GitHub</a>
+    </nav>
+    <nav class="toc" aria-label="On this page">
+      <p class="label">On this page</p>
+      <a href="#tiles">Summary</a>
+      <a href="#categories">By category</a>
+      <a href="#history">Over time</a>
+      <a href="#fix">What to fix first</a>
+      <a href="#kinds">Errors by kind</a>
+      <a href="#gaps">Graphs and names</a>
+      <a href="#all">All crates</a>
+      <a href="#method">How it is measured</a>
+    </nav>
+  </aside>
+  <div class="content">
+
+<main class="wrap stack">
+  <section class="head">
+    <p class="eyebrow">Crate support</p>
+    <h1>Which crates zustc builds</h1>
+    <p class="lede" id="lede">Loading the data…</p>
+    <p class="note">The top crates of crates.io by recent downloads, and a few more (tokio with all its features, embassy),
+      each one the only dependency of a probe library with its default features, built by zurgo for x86_64 Linux.
+      Measured <span id="asof">—</span>. The same tables are in
+      <a href="https://github.com/mizchi/zust/blob/main/CRATES_SUPPORT.md">CRATES_SUPPORT.md</a>.</p>
+  </section>
+
+  <section class="tiles" id="tiles" aria-label="Summary"></section>
+
+  <section class="sec" id="categories">
+    <h2>Status by category</h2>
+    <p class="note">One bar per category, one segment per status (a crate's status is the first that applies: zurgo cannot
+      plan its graph, its own code has errors, a dependency's code has errors, the build fails, it builds). Crates of one
+      kind tend to stop zustc in the same places. Point at a segment for its crates.</p>
+    <div class="legend" id="st-legend"></div>
+    <div class="chart" id="c-cat"></div>
+  </section>
+
+  <section class="sec" id="history">
+    <h2>Over time</h2>
+    <p class="note">One point per survey on main (cratebench/survey/history.tsv). A new crate list, or new versions in
+      Cargo.lock, moves the numbers too: the list's date is in crates.tsv.</p>
+    <div class="pair">
+      <figure><figcaption>Crates that build</figcaption><div class="chart" id="c-hb"></div></figure>
+      <figure><figcaption>Errors zustc reports in the probes' graphs</figcaption><div class="chart" id="c-he"></div></figure>
+    </div>
+  </section>
+
+  <section class="sec" id="fix">
+    <h2>What to fix first</h2>
+    <p class="note">Packages with errors, ordered by the downloads of the surveyed crates that only they keep from
+      checking (<em>alone</em>: no other package of the crate's graph has errors), then by how many surveyed crates need
+      them. The error count is what zustc reports now: a lower bound, since zustc stops reading a crate at a syntax or
+      macro error and checks each function only up to its first error.</p>
+    <div class="tablewrap"><table class="table" id="t-fix">
+      <thead><tr><th class="l">Package</th><th>Errors</th><th>Lines</th><th class="l">Alone</th><th>Needed by</th><th class="l">First error</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+
+  <section class="sec" id="kinds">
+    <h2>Errors by kind</h2>
+    <p class="note">Each error's text without its place, names and numbers. A kind found in many packages is one gap of
+      zustc's; the bar is the number of packages that have it.</p>
+    <div class="chart tall" id="c-kind"></div>
+    <details class="fold">
+      <summary>The same, as a table (each kind's full text and an example)</summary>
+      <div class="tablewrap"><table class="table" id="t-kind">
+        <thead><tr><th class="l">Kind</th><th>Packages</th><th>Errors</th><th class="l">Example</th></tr></thead><tbody></tbody>
+      </table></div>
+    </details>
+  </section>
+
+  <section class="sec" id="gaps">
+    <h2>Graphs zurgo cannot plan, names zustc cannot find</h2>
+    <p class="note">Left: zurgo's own gaps, before zustc reads anything; each stops every crate whose graph has it. Right:
+      the names zustc cannot find. <em>std</em>: the crate does not define it, so the prelude lacks it (a small
+      addition each); <em>crate</em>: one of the crate's own items, which zustc lost (name resolution, cfg, a macro's
+      output).</p>
+    <div class="pair">
+      <div class="tablewrap"><table class="table" id="t-graph">
+        <thead><tr><th class="l">Reason</th><th>Crates</th></tr></thead><tbody></tbody>
+      </table></div>
+      <div class="tablewrap"><table class="table" id="t-missing">
+        <thead><tr><th class="l">Name</th><th class="l">Of</th><th>Packages</th></tr></thead><tbody></tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <section class="sec" id="all">
+    <h2>All crates</h2>
+    <div class="filters">
+      <label>Category <select id="f-cat"><option value="">all</option></select></label>
+      <label>Status <select id="f-st"><option value="">all</option></select></label>
+      <label>Name <input id="f-q" type="search" placeholder="serde, tokio…" autocomplete="off"></label>
+      <span class="count" id="f-n"></span>
+    </div>
+    <div class="tablewrap"><table class="table" id="t-all">
+      <thead><tr><th>#</th><th class="l">Crate</th><th class="l">Category</th><th class="l">Status</th><th>Own errors</th><th>Graph</th><th>Lines</th><th class="l">Blocked by</th><th class="l">First error</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+
+  <details class="fold" id="method">
+    <summary>How it is measured</summary>
+    <ul>
+      <li><code>python3 cratebench/survey/survey.py run</code> (cratebench/survey/README.md) writes, for each crate of
+        crates.tsv, a probe package in a temporary directory, with the crate pinned with <code>=</code> and the versions of
+        cratebench/survey/Cargo.lock. cargo fetches the sources from crates.io; nothing is vendored.</li>
+      <li><code>zurgo check</code> gives each crate of the probe's graph its errors; when there are none,
+        <code>zurgo build</code> compiles and links the crate and its dependencies.</li>
+      <li>Proc-macro crates run on the host, where rustc builds them; the crates that use them test them. Crates for other
+        platforms (windows-*, wasm-bindgen, …) are listed, not probed.</li>
+      <li>The category comes from the crate's crates.io categories, corrected by name where they say little
+        (survey.py's BY_NAME); a row of crates.tsv can be changed by hand.</li>
+      <li>CI runs the survey after each push to main that changes the compiler and commits the results; this page is
+        rebuilt from them.</li>
+    </ul>
+  </details>
+</main>
+  </div>
+</div>
+
+<script>
+(() => {
+  const STATUS = [
+    ['builds', 'builds', '--good'], ['build-fail', 'build fails', '--s3'], ['blocked', 'blocked by a dependency', '--s2'],
+    ['errors', 'errors in its own code', '--bad'], ['graph-fail', 'graph not planned', '--s4'],
+    ['timeout', 'timeout', '--muted'], ['fetch-fail', 'not fetched', '--line'], ['survey-error', 'survey error', '--s6'],
+  ];
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const fmt = d3.format(',');
+  const pct = (a, b) => (b ? `${(100 * a / b).toFixed(1)}%` : '—');
+  const clip = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s || '');
+  const el = (tag, props = {}, ...kids) => {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === 'style') e.setAttribute('style', v); else e[k] = v;
+    }
+    for (const k of kids) e.append(k instanceof Node ? k : document.createTextNode(String(k ?? '')));
+    return e;
+  };
+  const stTag = (s) => {
+    const m = STATUS.find((x) => x[0] === s);
+    return el('span', {className: 'st'}, el('i', {style: `background:var(${m ? m[2] : '--muted'})`}), m ? m[1] : s);
+  };
+  const tip = (() => {
+    let t = null;
+    return {
+      show(host, ev, nodes) {
+        if (!t || !host.contains(t)) { t = el('div', {className: 'tip'}); host.append(t); }
+        t.replaceChildren(...nodes);
+        const r = host.getBoundingClientRect();
+        const x = Math.min(ev.clientX - r.left + 12, r.width - 260);
+        t.style.left = `${Math.max(0, x)}px`; t.style.top = `${ev.clientY - r.top + 12}px`; t.hidden = false;
+      },
+      hide() { if (t) t.hidden = true; },
+    };
+  })();
+
+  function summarize(R) {
+    const libs = Object.values(R.crates).filter((c) => c.kind === 'lib');
+    const all = Object.values(R.crates);
+    const dl = d3.sum(libs, (c) => c.downloads) || 1;
+    const by = (s) => libs.filter((c) => c.status === s);
+    const pk = Object.values(R.packages).filter((p) => p.errors && p.errors.length);
+    return {libs, all, dl, by, nErr: d3.sum(pk, (p) => p.errors.length), nPk: pk.length, nAll: Object.keys(R.packages).length};
+  }
+
+  function renderHead(R, S) {
+    const b = S.by('builds');
+    document.getElementById('asof').textContent = `${R.date} on ${R.commit}`;
+    document.getElementById('lede').textContent =
+      `${b.length} of ${S.libs.length} surveyed crates build with zustc (${pct(d3.sum(b, (c) => c.downloads), S.dl)} of their downloads). ` +
+      `zustc reports ${fmt(S.nErr)} errors in ${S.nPk} of the ${S.nAll} packages of their graphs.`;
+    const tiles = [
+      ['Build', `${b.length} / ${S.libs.length}`, pct(b.length, S.libs.length) + ' of the crates'],
+      ['By downloads', pct(d3.sum(b, (c) => c.downloads), S.dl), 'of the surveyed crates’ downloads'],
+      ['Check, then fail to build', fmt(S.by('build-fail').length), 'code generation or linking'],
+      ['Own errors', fmt(S.by('errors').length), 'crates with errors in their code'],
+      ['Blocked', fmt(S.by('blocked').length), 'only a dependency has errors'],
+      ['Errors left', fmt(S.nErr), `in ${S.nPk} packages (a lower bound)`],
+    ];
+    document.getElementById('tiles').replaceChildren(...tiles.map(([l, v, s]) =>
+      el('div', {className: 'tile'}, el('span', {className: 'tl'}, l), el('span', {className: 'big'}, v), el('span', {className: 'sub'}, s))));
+    document.getElementById('st-legend').replaceChildren(...STATUS.map(([, label, v]) =>
+      el('span', {}, el('i', {style: `background:var(${v})`}), label)));
+  }
+
+  function renderCategories(R, S) {
+    const host = document.getElementById('c-cat');
+    host.replaceChildren();
+    const cats = Object.entries(R.categories || {}).map(([k, label]) => ({k, label, cs: S.libs.filter((c) => (c.category || 'other') === k)}))
+      .filter((c) => c.cs.length);
+    const W = host.clientWidth || 600, rowH = 26, left = W < 640 ? Math.min(120, W * 0.34) : Math.min(260, W * 0.42), right = 44;
+    const H = cats.length * rowH + 24;
+    const max = d3.max(cats, (c) => c.cs.length) || 1;
+    const x = d3.scaleLinear().domain([0, max]).range([left, W - right]);
+    const nt = Math.max(1, Math.min(max, Math.floor((W - left) / 70)));
+    const svg = d3.select(host).append('svg').attr('width', W).attr('height', H).attr('role', 'img')
+      .attr('aria-label', 'Crates by category and status');
+    svg.append('g').attr('class', 'grid').attr('transform', `translate(0,${H - 20})`)
+      .call(d3.axisBottom(x).ticks(nt).tickSize(-(H - 20)).tickFormat(''));
+    svg.append('g').attr('class', 'axis').attr('transform', `translate(0,${H - 20})`)
+      .call(d3.axisBottom(x).tickValues(x.ticks(nt).filter(Number.isInteger)).tickFormat(d3.format('d')));
+    cats.forEach((c, i) => {
+      const y = i * rowH + 4;
+      svg.append('text').attr('x', left - 8).attr('y', y + rowH / 2 + 1).attr('text-anchor', 'end').attr('dominant-baseline', 'middle')
+        .text(W < 640 ? c.k.replace(/-/g, ' ') : c.label);
+      let acc = 0;
+      for (const [s, label, v] of STATUS) {
+        const cs = c.cs.filter((d) => d.status === s);
+        if (!cs.length) continue;
+        svg.append('rect').attr('x', x(acc)).attr('y', y + 3).attr('width', Math.max(1, x(acc + cs.length) - x(acc) - 1))
+          .attr('height', rowH - 8).attr('rx', 2).attr('fill', css(v))
+          .on('mousemove', (ev) => tip.show(host, ev, [el('div', {className: 'strong'}, `${c.label}: ${label} (${cs.length})`),
+            el('div', {className: 'mute'}, cs.slice(0, 14).map((d) => d.id).join(', ') + (cs.length > 14 ? ', …' : ''))]))
+          .on('mouseleave', tip.hide);
+        acc += cs.length;
+      }
+      const b = c.cs.filter((d) => d.status === 'builds').length;
+      svg.append('text').attr('x', x(acc) + 6).attr('y', y + rowH / 2 + 1).attr('dominant-baseline', 'middle')
+        .text(`${b}/${c.cs.length}`);
+    });
+  }
+
+  function lineChart(host, rows, key, color) {
+    host.replaceChildren();
+    if (!rows.length) { host.append(el('p', {className: 'note'}, 'No history yet.')); return; }
+    const W = host.clientWidth || 400, H = 220, m = {l: 44, r: 12, t: 10, b: 26};
+    const x = d3.scaleTime().domain(d3.extent(rows, (r) => r.t)).range([m.l, W - m.r]);
+    if (rows.length === 1) x.domain([d3.timeDay.offset(rows[0].t, -1), d3.timeDay.offset(rows[0].t, 1)]);
+    const y = d3.scaleLinear().domain([0, (d3.max(rows, (r) => r[key]) || 1) * 1.1]).nice().range([H - m.b, m.t]);
+    const svg = d3.select(host).append('svg').attr('width', W).attr('height', H);
+    svg.append('g').attr('class', 'grid').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(4).tickSize(-(W - m.l - m.r)).tickFormat(''));
+    svg.append('g').attr('class', 'axis').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(4));
+    svg.append('g').attr('class', 'axis').attr('transform', `translate(0,${H - m.b})`).call(d3.axisBottom(x).ticks(Math.max(2, Math.floor(W / 110))));
+    svg.append('path').datum(rows).attr('fill', 'none').attr('stroke', css(color)).attr('stroke-width', 2)
+      .attr('d', d3.line().x((r) => x(r.t)).y((r) => y(r[key])));
+    svg.selectAll('circle').data(rows).join('circle').attr('cx', (r) => x(r.t)).attr('cy', (r) => y(r[key])).attr('r', 3)
+      .attr('fill', css(color))
+      .on('mousemove', (ev, r) => tip.show(host, ev, [el('div', {className: 'strong'}, fmt(r[key])), el('div', {className: 'mute'}, `${r.date} · ${r.commit}`)]))
+      .on('mouseleave', tip.hide);
+  }
+
+  function renderHistory(H) {
+    lineChart(document.getElementById('c-hb'), H, 'builds', '--good');
+    lineChart(document.getElementById('c-he'), H, 'error_count', '--bad');
+  }
+
+  function renderFix(R) {
+    const tb = document.querySelector('#t-fix tbody');
+    tb.replaceChildren(...(R.priorities || []).slice(0, 30).map((r) => el('tr', {},
+      el('td', {className: 'l mono'}, r.package), el('td', {}, fmt(r.errors)), el('td', {}, fmt(r.lines)),
+      el('td', {className: 'short'}, r.alone.length ? `${r.alone.length}: ${r.alone.slice(0, 6).join(', ')}${r.alone.length > 6 ? ', …' : ''}` : '—'),
+      el('td', {}, fmt(r.needed_by)), el('td', {className: 'err', title: r.first}, clip(r.first, 160)))));
+  }
+
+  function renderKinds(R) {
+    const host = document.getElementById('c-kind');
+    host.replaceChildren();
+    document.querySelector('#t-kind tbody').replaceChildren(...(R.kinds || []).slice(0, 60).map((k) => el('tr', {},
+      el('td', {className: 'err'}, k.kind), el('td', {}, k.packages.length), el('td', {}, k.errors),
+      el('td', {className: 'err'}, k.example))));
+    const ks = (R.kinds || []).slice(0, 18);
+    if (!ks.length) return;
+    const W = host.clientWidth || 600, rowH = 22;
+    const left = Math.min(420, W * 0.6), H = ks.length * rowH + 24;
+    const x = d3.scaleLinear().domain([0, d3.max(ks, (k) => k.packages.length)]).range([left, W - 40]);
+    const svg = d3.select(host).append('svg').attr('width', W).attr('height', H);
+    const maxChars = Math.floor(left / 6.2);
+    ks.forEach((k, i) => {
+      const y = i * rowH + 2;
+      svg.append('text').attr('x', left - 8).attr('y', y + rowH / 2).attr('text-anchor', 'end').attr('dominant-baseline', 'middle')
+        .attr('class', 'lbl').text(k.kind.length > maxChars ? k.kind.slice(0, maxChars - 1) + '…' : k.kind);
+      svg.append('rect').attr('x', left).attr('y', y + 3).attr('width', Math.max(1, x(k.packages.length) - left)).attr('height', rowH - 7)
+        .attr('rx', 2).attr('fill', css('--s5'))
+        .on('mousemove', (ev) => tip.show(host, ev, [el('div', {className: 'strong'}, k.kind),
+          el('div', {}, `${k.packages.length} packages, ${k.errors} errors`), el('div', {className: 'mute'}, k.example.slice(0, 240))]))
+        .on('mouseleave', tip.hide);
+      svg.append('text').attr('x', x(k.packages.length) + 6).attr('y', y + rowH / 2).attr('dominant-baseline', 'middle').text(k.packages.length);
+    });
+  }
+
+  function renderGaps(R) {
+    document.querySelector('#t-graph tbody').replaceChildren(...(R.graph_reasons || []).map((g) => el('tr', {},
+      el('td', {className: 'err', title: g.crates.join(', ')}, g.reason), el('td', {}, g.crates.length))));
+    document.querySelector('#t-missing tbody').replaceChildren(...(R.missing || []).slice(0, 30).map((m) => el('tr', {},
+      el('td', {className: 'l mono'}, m.name), el('td', {className: 'l'}, m.own ? 'crate' : 'std'),
+      el('td', {className: 'short', title: m.packages.join(', ')}, `${m.packages.length}: ${m.packages.slice(0, 3).map((p) => p.split(' ')[0]).join(', ')}${m.packages.length > 3 ? ', …' : ''}`))));
+  }
+
+  let filtersReady = false;
+  function renderAll(R, S) {
+    const fc = document.getElementById('f-cat'), fs = document.getElementById('f-st'), fq = document.getElementById('f-q');
+    if (!filtersReady) {
+      for (const [k, label] of Object.entries(R.categories || {})) fc.append(el('option', {value: k}, label));
+      for (const [s, label] of [...STATUS, ['proc-macro', 'proc-macro (not probed)'], ['other-platform', 'other platform (not probed)']])
+        fs.append(el('option', {value: s}, label));
+      [fc, fs].forEach((e) => e.addEventListener('change', () => renderAll(R, S)));
+      fq.addEventListener('input', () => renderAll(R, S));
+      filtersReady = true;
+    }
+    const q = fq.value.trim().toLowerCase();
+    const rows = S.all.filter((c) => (!fc.value || (c.category || 'other') === fc.value) &&
+      (!fs.value || (c.kind === 'lib' ? c.status : c.kind) === fs.value) && (!q || c.id.toLowerCase().includes(q)))
+      .sort((a, b) => a.rank - b.rank);
+    document.getElementById('f-n').textContent = `${rows.length} crates`;
+    document.querySelector('#t-all tbody').replaceChildren(...rows.map((c) => el('tr', {},
+      el('td', {}, c.rank),
+      el('td', {className: 'l mono'}, `${c.id} ${c.version}`),
+      el('td', {className: 'short'}, (c.category || 'other').replace(/-/g, ' ')),
+      el('td', {className: 'l'}, c.kind === 'lib' ? stTag(c.status) : (c.kind === 'proc-macro' ? 'proc-macro' : 'other platform'),
+        c.tests ? ` · tests: ${c.tests}` : ''),
+      el('td', {}, c.errors || ''), el('td', {}, c.graph ? fmt(c.graph) : ''), el('td', {}, c.lines ? fmt(c.lines) : ''),
+      el('td', {className: 'short'}, (c.blocked_by || []).slice(0, 3).join(', ') + ((c.blocked_by || []).length > 3 ? ', …' : '')),
+      el('td', {className: 'err', title: c.first_error || ''}, clip(c.first_error, 160)))));
+  }
+
+  const parseHistory = (text) => {
+    const lines = text.split('\n').filter((l) => l.trim());
+    const head = lines.find((l) => l.startsWith('#'));
+    if (!head) return [];
+    const cols = head.slice(1).trim().split('\t');
+    return lines.filter((l) => !l.startsWith('#')).map((l) => {
+      const v = l.split('\t'), r = Object.fromEntries(cols.map((c, i) => [c, v[i]]));
+      for (const c of cols) if (c !== 'date' && c !== 'commit') r[c] = +r[c];
+      r.t = new Date(r.date.replace(' UTC', 'Z').replace(' ', 'T'));
+      return r;
+    }).filter((r) => !isNaN(r.t));
+  };
+
+  let R = null, H = [];
+  function render() {
+    if (!R) return;
+    const S = summarize(R);
+    renderHead(R, S); renderCategories(R, S); renderHistory(H); renderFix(R); renderKinds(R); renderGaps(R); renderAll(R, S);
+  }
+  Promise.all([
+    fetch('data/results.json').then((r) => { if (!r.ok) throw new Error(`results.json: ${r.status}`); return r.json(); }),
+    fetch('data/history.tsv').then((r) => (r.ok ? r.text() : '')).catch(() => ''),
+  ]).then(([res, hist]) => { R = res; H = parseHistory(hist); render(); document.body.dataset.ready = '1'; })
+    .catch((e) => { document.getElementById('lede').textContent = `The data did not load (${e.message}).`; });
+  let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(render, 150); });
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);
+})();
+</script>
+<script src="../nav.js"></script>
+</body>
+</html>
