@@ -1,0 +1,2 @@
+// expect: `uniq` is exported with the bound `T: Eq`
+export fn uniq<T: Eq>(xs: Array<T>) -> Array<T> { xs }

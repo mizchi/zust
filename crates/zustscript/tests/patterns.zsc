@@ -1,0 +1,33 @@
+// tests/examples.rs patterns_same_in_js_and_wasm: or-patterns (also nested, binding a name), guards, record patterns,
+// lowered to Rust and run as wasm, and run as JS
+enum Shape { Circle(f64), Square(f64), Rect(f64, f64), Dot }
+type Point = { x: i32, y: i32 }
+type Seg = { a: Point, b: Point, label: String }
+enum Tok { Num(i32), Plus, Minus, Star, Slash, End }
+
+@wasm fn kind(t: Tok) -> i32 { match t { Plus | Minus => 1, Star | Slash => 2, Num(n) if n < 0 => -1, Num(0) => 0, Num(_) => 3, End => 9 } }
+@wasm fn side(s: Shape) -> f64 { match s { Circle(r) | Square(r) => r, Rect(w, h) if w > h => w, Rect(_, h) => h, Dot => 0.0 } }
+@wasm fn quadrant(p: Point) -> i32 {
+  match p {
+    Point { x: 0, y: 0 } => 0,
+    Point { x, y } if x > 0 && y > 0 => 1,
+    Point { x, .. } if x < 0 => 2,
+    Point { y, .. } if y < 0 => 3,
+    _ => 4,
+  }
+}
+@wasm fn digit(n: i32) -> i32 { match n { 0 | 1 | 2 => 1, 3 | 4 if n == 3 => 2, _ => 3 } }
+@wasm fn nested(o: Option<Shape>) -> i32 { match o { Some(Circle(_) | Square(_)) => 1, Some(Rect(_, _)) => 2, Some(Dot) | None => 0 } }
+@wasm fn seg_len(s: Seg) -> i32 {
+  match s {
+    Seg { a: Point { x: ax, y: ay }, b: Point { x: bx, y: by }, .. } => (bx - ax) * (bx - ax) + (by - ay) * (by - ay),
+  }
+}
+@wasm export fn run() -> Array<f64> {
+  let ks = [kind(Plus), kind(Slash), kind(Num(-3)), kind(Num(0)), kind(Num(7)), kind(End)];
+  let ss = [side(Circle(2.0)), side(Square(3.0)), side(Rect(5.0, 4.0)), side(Rect(1.0, 4.0)), side(Dot)];
+  let qs = [quadrant(Point { x: 0, y: 0 }), quadrant(Point { x: 1, y: 2 }), quadrant(Point { x: -1, y: 5 }), quadrant(Point { x: 3, y: -1 }), quadrant(Point { x: 0, y: 5 })];
+  let ds = [digit(1), digit(3), digit(4), digit(9)];
+  let ns = [nested(Some(Square(1.0))), nested(Some(Rect(1.0, 2.0))), nested(None), nested(Some(Dot))];
+  ks.map((k) => k as f64).concat(ss).concat(qs.map((q) => q as f64)).concat(ds.map((d) => d as f64)).concat(ns.map((n) => n as f64)).push(seg_len(Seg { a: Point { x: 1, y: 1 }, b: Point { x: 4, y: 5 }, label: "s" }) as f64)
+}

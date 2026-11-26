@@ -1,0 +1,2 @@
+// expect: a Map's key or a Set's element is an integer, a String, a bool or an enum without data, not f64
+fn f() -> i32 { let m: Map<f64, i32> = Map::new(); m.len() }

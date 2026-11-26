@@ -4293,6 +4293,15 @@ impl Cx<'_> {
                 return Err(self.at(p.pos, "explicit use of destructor method (E0040)".to_string()));
             }
         }
+        // (`std::clone::Clone::clone(&x)`, `std::fmt::Write::write_str(&mut s, ..)`: the call its last two segments
+        // make, `Clone::clone(&x)`, as the type inference reads it (#153))
+        if let Expr::Path(None, p) = &**func {
+            if let Some(k) = self.prog.std_trait_path_skip(p) {
+                let tail = Expr::Path(None, crate::parse::Path { global: false, segs: p.segs[k..].to_vec(), pos: p.pos });
+                let ne: &Expr = self.keep_expr(Expr::Call(Box::new(tail), cargs.clone()));
+                return self.expr(ne, expected);
+            }
+        }
         // (`f1(x)` after `let f1 = f;` (f generic): `f(x)`)
         if let (false, Expr::Path(None, p)) = (self.fn_aliases.is_empty(), strip_paren(func)) {
             if let Some(&(_, target)) = ident_of(p).and_then(|n| self.fn_aliases.iter().rev().find(|a| a.0 == n)) {

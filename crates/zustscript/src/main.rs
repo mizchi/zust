@@ -91,7 +91,7 @@ fn main() {
     // `import { .. } from "./lib.zsc"`: the types and functions of other modules; `import type`: the records of TS files
     let base = input.parent().map(|p| p.to_path_buf()).unwrap_or_default();
     let key = std::fs::canonicalize(&input).unwrap_or(input.clone());
-    let items = match zscimport::expand(items, &base, &mut vec![key]).and_then(|items| tsimport::expand(items, &base)) {
+    let mut items = match zscimport::expand(items, &base, &mut vec![key]).and_then(|items| tsimport::expand(items, &base)) {
         Ok(i) => ast::with_prelude(i),
         Err(errs) => {
             for e in &errs {
@@ -122,7 +122,9 @@ fn main() {
     let mut warns = ck.warnings.clone();
     warns.sort_by_key(|e| (e.0.line, e.0.col));
     report_warnings(&file, &src, &warns);
-    let info = ck.info;
+    let mut info = ck.info;
+    // (a method call is a call of its `impl`'s function from here on)
+    ast::desugar_methods(&mut items, &mut info);
     if emit_rust {
         let rust = lower::rust_module(&items, &info).unwrap_or_else(|mut errors| {
             errors.sort_by_key(|(pos, _)| (pos.line, pos.col));

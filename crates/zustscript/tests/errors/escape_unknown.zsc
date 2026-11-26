@@ -1,0 +1,2 @@
+// expect: unknown escape `\q`
+fn f() -> String { "a\qb" }

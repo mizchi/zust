@@ -1536,7 +1536,7 @@ pub fn has_bindings(p: &Pat) -> bool {
         Pat::Ident(_, _, n, None) if n == "None" => false,
         Pat::Ident(..) => true,
         Pat::Ref(_, x) => has_bindings(x),
-        Pat::Or(cs) => cs.iter().any(has_bindings),
+        Pat::Or(cs, _) => cs.iter().any(has_bindings),
         Pat::TupleStruct(_, es) | Pat::Tuple(es) | Pat::Slice(es) => es.iter().any(has_bindings),
         Pat::Struct(_, fs, _) => fs.iter().any(|f| has_bindings(&f.1)),
         _ => false,
@@ -3782,7 +3782,7 @@ pub(crate) fn plainly_irrefutable(p: &Pat) -> bool {
 pub(crate) fn pat_binds_any(p: &Pat) -> bool {
     match p {
         Pat::Ident(..) => true,
-        Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Slice(ps) | Pat::Or(ps) => ps.iter().any(pat_binds_any),
+        Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Slice(ps) | Pat::Or(ps, _) => ps.iter().any(pat_binds_any),
         Pat::Struct(_, fs, _) => fs.iter().any(|(_, q)| pat_binds_any(q)),
         Pat::Ref(_, q) => pat_binds_any(q),
         _ => false,
@@ -3792,7 +3792,7 @@ pub(crate) fn pat_binds_any(p: &Pat) -> bool {
 pub(crate) fn pat_binds_ref_mut(p: &Pat) -> bool {
     match p {
         Pat::Ident(r, m, _, sub) => (*r && *m) || sub.as_deref().is_some_and(pat_binds_ref_mut),
-        Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Or(ps) | Pat::Slice(ps) => ps.iter().any(pat_binds_ref_mut),
+        Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Or(ps, _) | Pat::Slice(ps) => ps.iter().any(pat_binds_ref_mut),
         Pat::Struct(_, fs, _) => fs.iter().any(|f| pat_binds_ref_mut(&f.1)),
         Pat::Ref(_, x) => pat_binds_ref_mut(x),
         _ => false,

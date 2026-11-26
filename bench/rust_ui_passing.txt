@@ -4981,6 +4981,7 @@ run-pass	mir/simplify-branch-same.rs
 compile-fail	mir/static-by-value-slice.rs
 compile-fail	mir/static-by-value-str.rs
 compile-fail	mismatched_types/E0053.rs
+compile-fail	mismatched_types/E0409.rs
 compile-fail	mismatched_types/abridged.rs
 compile-fail	mismatched_types/array-arg-expected-usize.rs
 compile-fail	mismatched_types/array-len-is-closure.rs
@@ -5495,6 +5496,8 @@ compile-fail	on-unimplemented/suggest_tuple_wrap_root_obligation.rs
 compile-fail	or-patterns/already-bound-name.rs
 run-pass	or-patterns/basic-switch.rs
 run-pass	or-patterns/basic-switchint.rs
+compile-fail	or-patterns/binding-typo-2.rs
+compile-fail	or-patterns/binding-typo.rs
 run-pass	or-patterns/bindings-runpass-1.rs
 run-pass	or-patterns/bindings-runpass-2.rs
 check-pass	or-patterns/consistent-bindings.rs
@@ -6395,6 +6398,8 @@ compile-fail	pattern/move-ref-patterns/pattern-ref-bindings-reassignment.rs
 compile-fail	pattern/multiple-bindings-on-var.rs
 compile-fail	pattern/mut-pattern-of-immutable-borrow.rs
 compile-fail	pattern/no-patterns-in-args.rs
+compile-fail	pattern/or-pattern-binding-mismatch.rs
+compile-fail	pattern/or-pattern-mismatched-variable-and-variant.rs
 compile-fail	pattern/pat-struct-field-expr-has-type.rs
 compile-fail	pattern/pat-tuple-overfield.rs
 compile-fail	pattern/pat-tuple-underfield.rs
@@ -7007,6 +7012,7 @@ compile-fail	resolve/resolve-conflict-type-vs-import.rs
 compile-fail	resolve/resolve-dont-hint-macro.rs
 compile-fail	resolve/resolve-hint-macro.rs
 compile-fail	resolve/resolve-inconsistent-binding-mode.rs
+compile-fail	resolve/resolve-inconsistent-names.rs
 run-pass	resolve/resolve-issue-2428.rs
 compile-fail	resolve/resolve-primitive-fallback.rs
 run-pass	resolve/resolve-pseudo-shadowing.rs

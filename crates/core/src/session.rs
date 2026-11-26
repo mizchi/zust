@@ -2084,6 +2084,21 @@ impl Session {
                 let lower_enum = || prog.struct_index.get(&rest[start..end]).is_some_and(|&id| prog.structs[id as usize].is_enum);
                 if start < end && (b[start].is_ascii_uppercase() || lower_enum()) {
                     prog.use_prefixes.push(rest[start..end].to_string());
+                    // (the variants it brings of a lowercase enum: a glob, a list (not one renamed by `as`), or one)
+                    if !b[start].is_ascii_uppercase() {
+                        let after = rest[end + 2..].trim_start();
+                        let enum_name = rest[start..end].to_string();
+                        let names: Vec<String> = if after.starts_with('*') {
+                            vec!["*".into()]
+                        } else if let Some(list) = after.strip_prefix('{').and_then(|l| l.split('}').next()) {
+                            list.split(',').map(str::trim).filter(|x| !x.is_empty() && !x.contains(' ')).map(String::from).collect()
+                        } else {
+                            after.split(|c: char| !(c.is_alphanumeric() || c == '_')).next().filter(|x| !x.is_empty()).map(String::from).into_iter().collect()
+                        };
+                        for nm in names {
+                            prog.use_lower.push((enum_name.clone(), nm));
+                        }
+                    }
                 }
                 k = end + 2;
             }
@@ -12193,11 +12208,14 @@ fn unknown_impl_type(prog: &Program, src: &str, src0: &str, items: &[SrcItem], u
         while k < toks.len() && !sym(k, b'{') && tk(k) != "where" {
             let n = tk(k);
             let named = toks[k].0 == 0 && n.starts_with(|c: char| c.is_ascii_uppercase());
+            // (a name after `'` is a lifetime (`for<'A> fn(&'A ())`); one before `:` is a path segment (`Foo::`), a
+            // fn pointer's parameter name (`fn(Arg: u8)`) or an associated type's bound)
             let skip = !named
+                || (toks[k].1 > 0 && tb[toks[k].1 - 1] == b'\'')
                 || Some(k) == trait_at
                 || n == "Self"
                 || params.contains(&n)
-                || (sym(k + 1, b':') && sym(k + 2, b':'))
+                || sym(k + 1, b':')
                 || (k >= 2 && sym(k - 1, b':') && sym(k - 2, b':'))
                 || sym(k + 1, b'!')
                 || sym(k + 1, b'=')
@@ -12479,48 +12497,53 @@ fn macro_body_at(src: &str, line: usize, col: usize, t: &str) -> Option<(usize, 
     None
 }
 
-/// When (line, col) of src is a macro call (`name!(..)`), the place of the name n as a word in its arguments
+/// When (line, col) of src is a macro call (`name!(..)`), the place of the name n in its arguments. Read by tokens, so
+/// a delimiter or the name inside a literal or a comment does not count. None when the program's definition of the
+/// macro writes n itself (`($unused:ident) => { x }`): the name may come from its body, and stays at the call
 #[cold]
 #[inline(never)]
 fn macro_arg_at(src: &str, line: usize, col: usize, n: &str) -> Option<(usize, usize)> {
     let ls = if line <= 1 { 0 } else { src.match_indices('\n').nth(line - 2)?.0 + 1 };
     let at = ls + col.checked_sub(1)?;
     let b = src.as_bytes();
-    let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
-    let mut k = at;
-    while k < b.len() && id(b[k]) {
-        k += 1;
-    }
-    if k == at || b.get(k) != Some(&b'!') {
-        return None;
-    }
-    k += 1;
-    while k < b.len() && b[k].is_ascii_whitespace() {
-        k += 1;
-    }
-    let (open, close) = match b.get(k)? {
-        b'(' => (b'(', b')'),
-        b'[' => (b'[', b']'),
-        b'{' => (b'{', b'}'),
-        _ => return None,
-    };
-    let mut d = 0i32;
-    let mut e = k;
-    while e < b.len() {
-        if b[e] == open {
-            d += 1;
-        } else if b[e] == close {
-            d -= 1;
-            if d == 0 {
-                break;
+    let toks = crate::lexer::tokenize(b);
+    let tk = |k: usize| toks.get(k).map_or("", |t| &src[t.1..t.2]);
+    let sym = |k: usize, c: u8| toks.get(k).is_some_and(|t| t.0 == 1 && t.2 == t.1 + 1 && b[t.1] == c);
+    // (the group that opens at token k: the index of its closing token)
+    let group = |k: usize| {
+        let (open, close) = match toks.get(k).filter(|t| t.0 == 1).map(|t| b[t.1])? {
+            b'(' => (b'(', b')'),
+            b'[' => (b'[', b']'),
+            b'{' => (b'{', b'}'),
+            _ => return None,
+        };
+        let mut d = 0i32;
+        for e in k..toks.len() {
+            if sym(e, open) {
+                d += 1;
+            } else if sym(e, close) {
+                d -= 1;
+                if d == 0 {
+                    return Some(e);
+                }
             }
         }
-        e += 1;
+        None
+    };
+    let c = toks.iter().position(|t| t.1 == at && t.0 == 0)?;
+    if !sym(c + 1, b'!') {
+        return None;
     }
-    let args = src.get(k + 1..e)?;
-    let ab = args.as_bytes();
-    let i = args.match_indices(n).map(|(i, _)| i).find(|&i| (i == 0 || !id(ab[i - 1])) && ab.get(i + n.len()).is_none_or(|&c| !id(c)))?;
-    let off = k + 1 + i;
+    let e = group(c + 2)?;
+    let name = tk(c);
+    if let Some(j) = (0..toks.len()).find(|&j| tk(j) == "macro_rules" && sym(j + 1, b'!') && tk(j + 2) == name) {
+        let end = group(j + 3)?;
+        if (j + 4..end).any(|q| toks[q].0 == 0 && tk(q) == n && !sym(q - 1, b'$')) {
+            return None;
+        }
+    }
+    let q = (c + 3..e).find(|&q| toks[q].0 == 0 && tk(q) == n)?;
+    let off = toks[q].1;
     Some((src[..off].matches('\n').count() + 1, off - src[..off].rfind('\n').map_or(0, |p| p + 1) + 1))
 }
 

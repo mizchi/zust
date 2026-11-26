@@ -8,7 +8,7 @@ tests/ui directories named in the comment next to the number:
 
 Both count only the tests `bench/rust_ui.py` can ask zustc to handle (no nightly features, auxiliary crates, special
 flags or targets other than Linux x86-64), so 100% does not mean every test of a directory passes. They were measured
-<!-- measured -->2026-11-26, 25356af<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
+<!-- measured -->2026-11-26, 2736337<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
 `scripts/update_readme.py` writes them here). The totals for each kind of test are in the
 [README](README.md#coverage-of-rustcs-test-suite), the subset of the language in prose is in
 [docs/language.md](docs/language.md), and the [reports](docs/reports/) explain each step.
@@ -33,9 +33,9 @@ same run.
 | `for` / `while` / `loop`, labels | <!-- ui:for-loop-while,loops,label -->96.7% (58 / 60) | <!-- cf:for-loop-while,loops,label -->88.6% (39 / 44) | |
 | enums, `#[repr(u8)]`, auto-sized tags | <!-- ui:enum,enum-discriminant -->88.1% (37 / 42) | <!-- cf:enum,enum-discriminant -->72.7% (24 / 33) | niche layouts: `Option<&T>` and nested `Option`s take a tag of their own ([issue-32498](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/generics/issue-32498.rs), [enum-layout-optimization](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/structs-enums/enum-layout-optimization.rs)) |
 | `cfg` | <!-- ui:cfg -->94.1% (16 / 17) | <!-- cf:cfg -->71.4% (10 / 14) | |
-| bindings, patterns, slice patterns, or-patterns (also with guards) | <!-- ui:binding,pattern,or-patterns -->94.1% (174 / 185) | <!-- cf:binding,pattern,or-patterns -->74.2% (147 / 198) | |
+| bindings, patterns, slice patterns, or-patterns (also with guards) | <!-- ui:binding,pattern,or-patterns -->94.1% (174 / 185) | <!-- cf:binding,pattern,or-patterns -->76.3% (151 / 198) | |
 | `match` | <!-- ui:match -->87.8% (36 / 41) | <!-- cf:match -->80.0% (36 / 45) | |
-| name resolution | <!-- ui:resolve -->91.4% (32 / 35) | <!-- cf:resolve -->79.3% (149 / 188) | a `::name` path in edition 2018 is a crate's even beside a module of that name (`mod std` and `use ::std::io`) ([uniform-paths/basic](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/uniform-paths/basic.rs)) |
+| name resolution | <!-- ui:resolve -->91.4% (32 / 35) | <!-- cf:resolve -->79.8% (150 / 188) | a `::name` path in edition 2018 is a crate's even beside a module of that name (`mod std` and `use ::std::io`) ([uniform-paths/basic](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/uniform-paths/basic.rs)) |
 | imports, `use` | <!-- ui:imports -->92.0% (81 / 88) | <!-- cf:imports -->67.5% (85 / 126) | |
 | statics: ints, floats, raw pointers, fn pointers, `const fn` calls | <!-- ui:statics -->95.0% (19 / 20) | <!-- cf:statics -->66.7% (12 / 18) | |
 | structs, `..base` (field by field) | <!-- ui:structs,structs-enums -->91.0% (81 / 89) | <!-- cf:structs,structs-enums -->95.4% (62 / 65) | |
@@ -220,11 +220,11 @@ at no annotated line. Each reason links to some of the tests.
 |---|---|---:|---|
 | fail | accepted: no error reported | 49 | [async-await-let-else.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/async-await/async-await-let-else.rs), [async-borrowck-escaping-block-error.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/async-await/async-borrowck-escaping-block-error.rs), [async-closures/cast-as-infer-self-borrows.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/async-await/async-closures/cast-as-infer-self-borrows.rs) |
 | check | cannot infer the `…` return type of `…` | 2 | [issue-64130-4-async-move.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/async-await/issue-64130-4-async-move.rs), [issues/issue-64477-2.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/async-await/issues/issue-64477-2.rs) |
+| check | the trait bound `…` is not satisfied (for `…`) | 2 | [async-closures/moro-example.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/async-await/async-closures/moro-example.rs), [async-closures/validate-synthetic-body.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/async-await/async-closures/validate-synthetic-body.rs) |
 | fail, wrong line | cannot infer the `…` return type of `…` | 2 | [issue-70935-complex-spans.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/async-await/issue-70935-complex-spans.rs), [unnecessary-await.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/async-await/unnecessary-await.rs) |
 | fail, wrong line | cannot infer the return type of this closure; annotate it (`…`) | 2 | [issue-72442.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/async-await/issue-72442.rs), [missing-return-in-async-block.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/async-await/missing-return-in-async-block.rs) |
 | build | cannot infer the type of this closure parameter; add a type annotation | 1 | [async-closures/signature-deduction.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/async-await/async-closures/signature-deduction.rs) |
-| build | in `…`: `…` cannot be used as a hash key | 1 | [await-sequence.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/async-await/await-sequence.rs) |
-| | 23 other reasons | 23 | |
+| | 22 other reasons | 22 | |
 
 </details>
 
@@ -284,20 +284,6 @@ at no annotated line. Each reason links to some of the tests.
 
 </details>
 
-<details><summary><code>pattern</code>: 49 failing (pass tests 60 / 66 · compile-fail 127 / 170)</summary>
-
-| kind | reason | tests | examples |
-|---|---|---:|---|
-| fail | accepted: no error reported | 26 | [bindings-after-at/wild-before-at-syntactically-rejected.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/bindings-after-at/wild-before-at-syntactically-rejected.rs), [generic-in-path.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/generic-in-path.rs), [manually-drop-dangling-ref.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/manually-drop-dangling-ref.rs) |
-| fail, wrong line | mismatched types: expected `…`, found `…` | 3 | [issue-92074-macro-ice.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/issue-92074-macro-ice.rs), [usefulness/slice-pattern-const-2.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/usefulness/slice-pattern-const-2.rs), [usefulness/slice-pattern-const.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/usefulness/slice-pattern-const.rs) |
-| run | mismatched types: expected `…`, found `…` | 3 | [issue-22546.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/issue-22546.rs), [move-ref-patterns/move-ref-patterns-dynamic-semantics.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/move-ref-patterns/move-ref-patterns-dynamic-semantics.rs), [usefulness/issue-30240-rpass.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/usefulness/issue-30240-rpass.rs) |
-| fail, wrong line | N:N: in constant `…`: N:N: type annotations needed for `…` | 2 | [non-structural-match-types-cycle-err.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/non-structural-match-types-cycle-err.rs), [non-structural-match-types.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/non-structural-match-types.rs) |
-| fail, wrong line | unsupported type | 2 | [usefulness/issue-119493-type-error-ice.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/usefulness/issue-119493-type-error-ice.rs), [usefulness/issue-119778-type-error-ice.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/usefulness/issue-119778-type-error-ice.rs) |
-| check | cannot find value (unsupported path) | 1 | [issue-88074-pat-range-type-inference.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/issue-88074-pat-range-type-inference.rs) |
-| | 12 other reasons | 12 | |
-
-</details>
-
 <details><summary><code>imports</code>: 48 failing (pass tests 81 / 88 · compile-fail 85 / 126)</summary>
 
 | kind | reason | tests | examples |
@@ -312,7 +298,21 @@ at no annotated line. Each reason links to some of the tests.
 
 </details>
 
-<details><summary><code>resolve</code>: 42 failing (pass tests 32 / 35 · compile-fail 149 / 188)</summary>
+<details><summary><code>pattern</code>: 47 failing (pass tests 60 / 66 · compile-fail 129 / 170)</summary>
+
+| kind | reason | tests | examples |
+|---|---|---:|---|
+| fail | accepted: no error reported | 25 | [bindings-after-at/wild-before-at-syntactically-rejected.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/bindings-after-at/wild-before-at-syntactically-rejected.rs), [generic-in-path.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/generic-in-path.rs), [manually-drop-dangling-ref.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/manually-drop-dangling-ref.rs) |
+| fail, wrong line | mismatched types: expected `…`, found `…` | 3 | [issue-92074-macro-ice.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/issue-92074-macro-ice.rs), [usefulness/slice-pattern-const-2.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/usefulness/slice-pattern-const-2.rs), [usefulness/slice-pattern-const.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/usefulness/slice-pattern-const.rs) |
+| run | mismatched types: expected `…`, found `…` | 3 | [issue-22546.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/issue-22546.rs), [move-ref-patterns/move-ref-patterns-dynamic-semantics.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/move-ref-patterns/move-ref-patterns-dynamic-semantics.rs), [usefulness/issue-30240-rpass.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/usefulness/issue-30240-rpass.rs) |
+| fail, wrong line | N:N: in constant `…`: N:N: type annotations needed for `…` | 2 | [non-structural-match-types-cycle-err.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/non-structural-match-types-cycle-err.rs), [non-structural-match-types.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/non-structural-match-types.rs) |
+| fail, wrong line | unsupported type | 2 | [usefulness/issue-119493-type-error-ice.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/usefulness/issue-119493-type-error-ice.rs), [usefulness/issue-119778-type-error-ice.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/usefulness/issue-119778-type-error-ice.rs) |
+| check | cannot find value (unsupported path) | 1 | [issue-88074-pat-range-type-inference.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/pattern/issue-88074-pat-range-type-inference.rs) |
+| | 11 other reasons | 11 | |
+
+</details>
+
+<details><summary><code>resolve</code>: 41 failing (pass tests 32 / 35 · compile-fail 150 / 188)</summary>
 
 | kind | reason | tests | examples |
 |---|---|---:|---|
@@ -320,9 +320,9 @@ at no annotated line. Each reason links to some of the tests.
 | fail, wrong line | unsupported item | 2 | [ice-inconsistent-resolution-149821.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/resolve/ice-inconsistent-resolution-149821.rs), [ice-on-shadowing-std-with-macro.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/resolve/ice-on-shadowing-std-with-macro.rs) |
 | check | type `…` has no fields | 1 | [conflicting-primitive-names.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/resolve/conflicting-primitive-names.rs) |
 | check | unsupported raw pointer method `…` | 1 | [pointer-type-impls-14254.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/resolve/pointer-type-impls-14254.rs) |
-| fail, wrong line | `…` alternatives bind different types | 1 | [resolve-inconsistent-names.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/resolve/resolve-inconsistent-names.rs) |
 | fail, wrong line | `…` takes N type arguments, but N were given | 1 | [disambiguate-identical-names.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/resolve/disambiguate-identical-names.rs) |
-| | 6 other reasons | 6 | |
+| fail, wrong line | conflicting implementations of trait `…` for `…` | 1 | [issue-102946.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/resolve/issue-102946.rs) |
+| | 5 other reasons | 5 | |
 
 </details>
 
@@ -483,7 +483,7 @@ at no annotated line. Each reason links to some of the tests.
 | fail, wrong line | `…` has no implementation for `…` | 1 | [issue-26656.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/span/issue-26656.rs) |
 | fail, wrong line | cannot find type `…` | 1 | [issue-33884.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/span/issue-33884.rs) |
 | fail, wrong line | cannot infer the type of this `…`; annotate it | 1 | [mut-ptr-cant-outlive-ref.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/span/mut-ptr-cant-outlive-ref.rs) |
-| fail, wrong line | impls for references to a type parameter (`…`) are supported only when they define e | 1 | [issue-24805-dropck-trait-has-items.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/span/issue-24805-dropck-trait-has-items.rs) |
+| fail, wrong line | impls for references to a type parameter (`…`) are supported only when they define each default method of the trait, forwarding to T's: `…` is left out | 1 | [issue-24805-dropck-trait-has-items.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/span/issue-24805-dropck-trait-has-items.rs) |
 | | 5 other reasons | 5 | |
 
 </details>
@@ -570,18 +570,6 @@ at no annotated line. Each reason links to some of the tests.
 
 </details>
 
-<details><summary><code>mismatched_types</code>: 18 failing (compile-fail 62 / 80)</summary>
-
-| kind | reason | tests | examples |
-|---|---|---:|---|
-| fail | accepted: no error reported | 10 | [closure-arg-type-mismatch.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/closure-arg-type-mismatch.rs), [collect-method-type-mismatch-66923.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/collect-method-type-mismatch-66923.rs), [const-fn-in-trait.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/const-fn-in-trait.rs) |
-| fail, wrong line | mismatched types: expected `…`, found `…` | 3 | [E0409.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/E0409.rs), [fn-variance-1.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/fn-variance-1.rs), [issue-26480.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/issue-26480.rs) |
-| fail, wrong line | cannot find type `…` | 2 | [type-error-diagnostic-in-complex-return.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/type-error-diagnostic-in-complex-return.rs), [wrap-suggestion-privacy.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/wrap-suggestion-privacy.rs) |
-| fail, wrong line | cannot infer type parameter `…` | 2 | [issue-35030.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/issue-35030.rs), [vec-hashset-type-mismatch.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/vec-hashset-type-mismatch.rs) |
-| fail, wrong line | the name `…` is defined multiple times (E0428) | 1 | [similar_paths.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/similar_paths.rs) |
-
-</details>
-
 <details><summary><code>trait-bounds</code>: 18 failing (pass tests 4 / 4 · compile-fail 15 / 33)</summary>
 
 | kind | reason | tests | examples |
@@ -602,6 +590,18 @@ at no annotated line. Each reason links to some of the tests.
 | run | cannot find value (unsupported path) | 1 | [derive-hash-on-unit-struct.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/derives/derive-hash-on-unit-struct.rs) |
 | run | in `…`: `…` cannot be compared with `…` | 1 | [eq-ord/deriving-eq-ord-boxed-slice.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/derives/eq-ord/deriving-eq-ord-boxed-slice.rs) |
 | | 1 other reasons | 1 | |
+
+</details>
+
+<details><summary><code>mismatched_types</code>: 17 failing (compile-fail 63 / 80)</summary>
+
+| kind | reason | tests | examples |
+|---|---|---:|---|
+| fail | accepted: no error reported | 10 | [closure-arg-type-mismatch.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/closure-arg-type-mismatch.rs), [collect-method-type-mismatch-66923.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/collect-method-type-mismatch-66923.rs), [const-fn-in-trait.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/const-fn-in-trait.rs) |
+| fail, wrong line | cannot find type `…` | 2 | [type-error-diagnostic-in-complex-return.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/type-error-diagnostic-in-complex-return.rs), [wrap-suggestion-privacy.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/wrap-suggestion-privacy.rs) |
+| fail, wrong line | cannot infer type parameter `…` | 2 | [issue-35030.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/issue-35030.rs), [vec-hashset-type-mismatch.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/vec-hashset-type-mismatch.rs) |
+| fail, wrong line | mismatched types: expected `…`, found `…` | 2 | [fn-variance-1.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/fn-variance-1.rs), [issue-26480.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/issue-26480.rs) |
+| fail, wrong line | the name `…` is defined multiple times (E0428) | 1 | [similar_paths.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/mismatched_types/similar_paths.rs) |
 
 </details>
 
@@ -884,7 +884,7 @@ at no annotated line. Each reason links to some of the tests.
 | fail | accepted: no error reported | 3 | [issue-30355.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/unsized/issue-30355.rs), [return-unsized-from-trait-method.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/unsized/return-unsized-from-trait-method.rs), [trait-method-unsized-self-param.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/unsized/trait-method-unsized-self-param.rs) |
 | check | mismatched types: expected `…`, found `…` | 2 | [issue-40231-1.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/unsized/issue-40231-1.rs), [issue-75899-but-gats.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/unsized/issue-75899-but-gats.rs) |
 | check | cannot infer type parameter `…` | 1 | [issue-40231-2.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/unsized/issue-40231-2.rs) |
-| fail, wrong line | mismatched types: expected `…`, found `Box<or::{closure#N}<&dyn Fn(& 'a Something) -> Res | 1 | [issue-91801.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/unsized/issue-91801.rs) |
+| fail, wrong line | mismatched types: expected `…`, found `Box<or::{closure#N}<&dyn Fn(& 'a Something) -> Result <() ,() >, &dyn Fn(& 'a Something) -> Result <() ,() >, Result<(), | 1 | [issue-91801.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/unsized/issue-91801.rs) |
 | run | cannot find value (unsupported path) | 1 | [nonnull-unsized-slice.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/unsized/nonnull-unsized-slice.rs) |
 | run | cannot transmute between types of different sizes, or dependently-sized types (E0512): `…` (N bits) to `…` (N bits) | 1 | [issue-23649-1.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/unsized/issue-23649-1.rs) |
 | | 1 other reasons | 1 | |
@@ -984,20 +984,8 @@ at no annotated line. Each reason links to some of the tests.
 | fail | accepted: no error reported | 4 | [object-lifetime-default-ambiguous.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/object-lifetime/object-lifetime-default-ambiguous.rs), [object-lifetime-default-gat-binding-item-bounds.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/object-lifetime/object-lifetime-default-gat-binding-item-bounds.rs), [object-lifetime-default-gat-binding.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/object-lifetime/object-lifetime-default-gat-binding.rs) |
 | fail, wrong line | `…` cannot be called through `…` (it uses `…` or generics) | 2 | [object-lifetime-default-assoc-ty-binding-item-bounds-non-static.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/object-lifetime/object-lifetime-default-assoc-ty-binding-item-bounds-non-static.rs), [object-lifetime-default-assoc-ty-binding-item-bounds.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/object-lifetime/object-lifetime-default-assoc-ty-binding-item-bounds.rs) |
 | check | `…` cannot be called through `…` (it uses `…` or generics) | 1 | [object-lifetime-default-assoc-ty-binding-item-bounds-static.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/object-lifetime/object-lifetime-default-assoc-ty-binding-item-bounds-static.rs) |
-| check | mismatched types: expected `…`, found `Box<dyn Outer < 'r , dyn Inne | 1 | [object-lifetime-default-trait-ref.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/object-lifetime/object-lifetime-default-trait-ref.rs) |
+| check | mismatched types: expected `…`, found `…` | 1 | [object-lifetime-default-trait-ref.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/object-lifetime/object-lifetime-default-trait-ref.rs) |
 | check | this variant is not a struct-like variant | 1 | [object-lifetime-default-enum-variant.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/object-lifetime/object-lifetime-default-enum-variant.rs) |
-
-</details>
-
-<details><summary><code>or-patterns</code>: 9 failing (pass tests 22 / 24 · compile-fail 11 / 18)</summary>
-
-| kind | reason | tests | examples |
-|---|---|---:|---|
-| fail | accepted: no error reported | 5 | [binding-typo-2.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/or-patterns/binding-typo-2.rs), [binding-typo.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/or-patterns/binding-typo.rs), [fn-param-wrap-parens.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/or-patterns/fn-param-wrap-parens.rs) |
-| check | array length must be a literal or a const | 1 | [const-fn.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/or-patterns/const-fn.rs) |
-| fail, wrong line | cannot find value `…` | 1 | [nested-undelimited-precedence.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/or-patterns/nested-undelimited-precedence.rs) |
-| fail, wrong line | expected identifier, found keyword `…` (found `…`) | 1 | [issue-64879-trailing-before-guard.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/or-patterns/issue-64879-trailing-before-guard.rs) |
-| run | cannot find value `…` | 1 | [macro-pat.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/or-patterns/macro-pat.rs) |
 
 </details>
 
@@ -1174,6 +1162,18 @@ at no annotated line. Each reason links to some of the tests.
 
 </details>
 
+<details><summary><code>or-patterns</code>: 7 failing (pass tests 22 / 24 · compile-fail 13 / 18)</summary>
+
+| kind | reason | tests | examples |
+|---|---|---:|---|
+| fail | accepted: no error reported | 3 | [fn-param-wrap-parens.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/or-patterns/fn-param-wrap-parens.rs), [or-patterns-syntactic-fail-2018.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/or-patterns/or-patterns-syntactic-fail-2018.rs), [remove-leading-vert.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/or-patterns/remove-leading-vert.rs) |
+| check | array length must be a literal or a const | 1 | [const-fn.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/or-patterns/const-fn.rs) |
+| fail, wrong line | cannot find value `…` | 1 | [nested-undelimited-precedence.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/or-patterns/nested-undelimited-precedence.rs) |
+| fail, wrong line | expected identifier, found keyword `…` (found `…`) | 1 | [issue-64879-trailing-before-guard.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/or-patterns/issue-64879-trailing-before-guard.rs) |
+| run | cannot find value `…` | 1 | [macro-pat.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/or-patterns/macro-pat.rs) |
+
+</details>
+
 <details><summary><code>range</code>: 7 failing (pass tests 4 / 6 · compile-fail 11 / 16)</summary>
 
 | kind | reason | tests | examples |
@@ -1337,7 +1337,7 @@ at no annotated line. Each reason links to some of the tests.
 |---|---|---:|---|
 | fail | accepted: no error reported | 3 | [fn-item-type-note-late-bound-145558.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/fn/fn-item-type-note-late-bound-145558.rs), [param-mismatch-no-names.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/fn/param-mismatch-no-names.rs), [param-mismatch-trait-fn.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/fn/param-mismatch-trait-fn.rs) |
 | check | unsupported impl self type | 1 | [implied-bounds-impl-header-projections.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/fn/implied-bounds-impl-header-projections.rs) |
-| run | run: panicked: assertion `…` failed: addr: 0x19ac22a0 | 1 | [dyn-fn-alignment.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/fn/dyn-fn-alignment.rs) |
+| run | run: panicked: assertion `…` failed: addr: 0x115c52a0 | 1 | [dyn-fn-alignment.rs](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/fn/dyn-fn-alignment.rs) |
 
 </details>
 

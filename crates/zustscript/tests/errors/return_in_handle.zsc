@@ -1,0 +1,4 @@
+// expect: `return` cannot be used inside `handle` yet
+enum Log { Say(String) -> () }
+fn g() -> i32 { perform Say("x"); 1 }
+fn f() -> i32 { handle { if true { return 3; } g() } { Say(s), k => k(()) } }

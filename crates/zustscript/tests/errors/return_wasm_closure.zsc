@@ -1,0 +1,2 @@
+// expect: `return` in a closure is not supported by Rust lowering
+@wasm export fn f(xs: Array<i32>) -> Array<i32> { xs.map((x) => { if x > 0 { return 0; } x }) }

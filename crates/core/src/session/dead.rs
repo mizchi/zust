@@ -731,7 +731,7 @@ fn pattern_paths(region: &str) -> Option<(FxSet<(u32, u32)>, FxMap<String, usize
                 }
             }
             Pat::Ref(_, sub) => pat(sub, out),
-            Pat::Tuple(ps) | Pat::Slice(ps) | Pat::Or(ps) => ps.iter().for_each(|p| pat(p, out)),
+            Pat::Tuple(ps) | Pat::Slice(ps) | Pat::Or(ps, _) => ps.iter().for_each(|p| pat(p, out)),
             _ => {}
         }
     }

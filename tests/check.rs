@@ -377,6 +377,19 @@ fn dead_code_fields_variants_members_aliases() {
     assert_eq!(first(ok), None);
 }
 
+#[test]
+fn a_doc_comment_a_crate_file_ends_in() {
+    // (rustc 1.100: the same error for a crate built from its files, at the file's comment)
+    let dir = std::env::temp_dir().join(format!("zust-doc-at-end-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("main.rs");
+    std::fs::write(&f, "fn main() {}\n/// hi\n").unwrap();
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_zustc")).arg("check").arg(&f).output().unwrap();
+    let err = String::from_utf8_lossy(&o.stderr).into_owned();
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(err.contains(":2:1: expected item after doc comment"), "{err}");
+}
+
 /// `#![deny(unreachable_code)]` inside expressions: an argument after one that diverges, a call whose last argument
 /// diverges, an operation whose operand diverges, and the statement after a `match` on an empty enum or an
 /// `if`/`else` whose branches both diverge; not the right of `||`, which may not run
@@ -2999,6 +3012,19 @@ fn items_of_one_name_in_two_blocks_of_a_fn() {
 }
 
 #[test]
+fn std_trait_path_beside_a_program_trait_of_its_name() {
+    // (from #153's review: `std::string::ToString::to_string(&42u8)` names std's trait, and rustc prints 42. Read as
+    // its last two segments it was the program's own `trait ToString`, which printed "local". zustc leaves such a std
+    // path unread, an error, rather than calling the other trait; the unqualified `ToString::to_string` is the
+    // program's, as in rustc)
+    let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
+    let src = "trait ToString {\n    fn to_string(&self) -> String;\n}\nimpl ToString for u8 {\n    fn to_string(&self) -> String {\n        \"local\".into()\n    }\n}\nfn main() {\n    println!(\"{}\", std::string::ToString::to_string(&42u8));\n    println!(\"{}\", ToString::to_string(&42u8));\n}\n";
+    let d = s.check(src);
+    assert_eq!(d.first().map(|d| (d.line, d.col, d.msg.clone())), Some((10, 20, "cannot find value (unsupported path)".to_string())));
+    assert_eq!(d.len(), 1, "{:?}", d.iter().map(|d| &d.msg).collect::<Vec<_>>());
+}
+
+#[test]
 fn literals_and_comments_a_file_ends_in() {
     // (rustc 1.100's lexer errors at the literal's or the comment's start, before the delimiters it leaves open)
     let first = |src: &str| {
@@ -3177,6 +3203,9 @@ fn macro_matchers_with_no_fragment_no_repetition_operator_or_an_empty_repetition
     assert_eq!(first("macro_rules! m {\n    ($()*) => {};\n}\nfn main() {}\n"), e(2, 7, "repetition matches empty token tree"));
     assert_eq!(first("macro_rules! m {\n    ($($v:vis)*) => {};\n}\nfn main() {}\n"), e(2, 7, "repetition matches empty token tree"));
     assert_eq!(first("macro_rules! m {\n    ($($a:ident),* $crate) => {};\n    ($($x:tt);* ) => {};\n}\nfn main() {}\n"), None);
+    // (a nested repetition separated by `::` can match nothing too; one that must match a token is fine)
+    assert_eq!(first("macro_rules! m { ($($($i:ident)::*)*) => {} }\nfn main() {}\n"), e(1, 20, "repetition matches empty token tree"));
+    assert_eq!(first("macro_rules! m { ($($($i:ident)::+)*) => {} }\nfn main() {}\n"), None);
 }
 
 #[test]
@@ -3193,6 +3222,11 @@ fn a_doc_comment_the_source_ends_in() {
     assert_eq!(first("fn main() {}\n/** a */\n"), e(2, 1));
     assert_eq!(first("fn main() {}\n//// four slashes are a plain comment\n"), None);
     assert_eq!(first("fn main() {}\n/// hi\nfn f() {}\n"), None);
+    // (a plain block comment after the doc is whitespace; a `/**` inside a line comment or a block comment opens no doc)
+    assert_eq!(first("fn main() {}\n/// hi\n/* plain */\n"), e(2, 1));
+    assert_eq!(first("fn main() {} // /** text */\n"), None);
+    assert_eq!(first("fn main() {}\n/* outer /** nested */ */\n"), None);
+    assert_eq!(first("fn main() {}\nconst S: &str = \"/// in a string\";\n"), None);
     // (the doc comment of a `macro_rules!` the source ends in, which the expansion takes out of the text: cfg-if's)
     assert_eq!(first("fn main() {}\n/// The macro.\n#[macro_export]\nmacro_rules! m { () => {} }\n"), None);
 }
@@ -3209,6 +3243,9 @@ fn types_that_nothing_declares_in_impl_headers_and_type_aliases() {
     assert_eq!(at("struct Core<T>(T);\nimpl Core<XXX> {\n    pub fn spawn(self) {}\n}\nfn main() {}\n"), Some(2));
     assert_eq!(at("type Foo = Bar;\nfn check(f: impl FnOnce(Foo), val: Foo) {\n    f(val);\n}\nfn main() {}\n"), Some(1));
     assert_eq!(first("struct A;\nimpl A<B> {}\nfn main() {}\n"), Some((2, "cannot find type `B` in this scope (E0412)".to_string())));
+    // (not a lifetime of a higher-ranked binder, or a fn pointer's parameter name)
+    assert_eq!(first("trait Tr {}\nimpl<F> Tr for (F, for<'A> fn(&'A ())) {}\nfn main() {}\n"), None);
+    assert_eq!(first("trait Local {}\nimpl Local for fn(Arg: u8) {}\nfn main() {}\n"), None);
     // (not a const generic argument's const, std's types and traits, an impl's own parameters, or `->` in a bound)
     let ok = "struct V<const N: usize>;\nconst L: usize = 2;\ntrait Tr {}\nimpl Tr for V<L> {}\nimpl<T> Tr for Box<T> {}\n\
               impl<'a, F: Fn(&'a i32) -> &'a i32> Tr for Option<F> {}\nimpl<'a, A> Tr for &'a (dyn for<'x> Fn(&'x A) + 'a) {}\nfn main() {}\n";
@@ -3221,6 +3258,12 @@ fn a_name_a_macro_argument_writes_is_reported_at_the_argument() {
     let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let d = s.check("macro_rules! foo {\n    ($id: ident) => {\n        $id\n    }\n}\nfn main() {\n    foo!(\n        x\n    );\n}\n");
     assert_eq!(d.first().map(|d| (d.line, d.col)), Some((8, 9)), "{d:?}");
+    // (by tokens: a `)` in a string argument closes nothing)
+    let d = s.check("macro_rules! m { ($s:literal, $id:ident) => { $id } }\nfn main() {\n    m!(\")\",\n        x\n    );\n}\n");
+    assert_eq!(d.first().map(|d| (d.line, d.col)), Some((4, 9)), "{d:?}");
+    // (a name the definition writes itself may come from its body: it stays at the call)
+    let d = s.check("macro_rules! m {\n    ($unused:ident) => { x };\n}\nfn main() {\n    m!(\n        x\n    );\n}\n");
+    assert_eq!(d.first().map(|d| (d.line, d.col)), Some((5, 5)), "{d:?}");
 }
 
 #[test]
@@ -3631,9 +3674,9 @@ fn an_or_pattern_whose_alternatives_bind_differently_is_reported_at_the_alternat
         let mut s = Session::new(Options { jobs: 1, ..Options::default() });
         s.check(src).into_iter().map(|d| (d.line, d.msg)).collect::<Vec<_>>()
     };
-    // (at the arm's pattern, not the `match`)
+    // (at the arm's pattern, not the `match`: rustc's E0408 there)
     let e = errs("fn main() {\n    let x = Some(1);\n    match x {\n        Some(y) | None => {}\n    }\n}\n");
-    assert!(e.iter().any(|(l, m)| *l == 4 && m.contains("`|` alternatives bind different types")), "{e:?}");
+    assert!(e.iter().any(|(l, m)| *l == 4 && m.contains("is not bound in all patterns (E0408)")), "{e:?}");
 }
 
 #[test]
@@ -3740,4 +3783,59 @@ fn a_path_from_the_crate_root_names_the_root_s_item_beside_a_module_s_own() {
     // (`::outer::dyn::dyn` from a macro in another module, a path from the root that a module name starts)
     let src = "mod outer {\n    pub mod inner {\n        pub struct S;\n    }\n}\nmod user {\n    pub fn make() -> ::outer::inner::S {\n        ::outer::inner::S\n    }\n}\nfn main() {\n    let _ = user::make();\n}\n";
     assert!(errs(src).is_empty(), "{:?}", errs(src));
+}
+
+/// #174: E0408, an or-pattern whose alternatives do not all bind a name, at the first alternative that does not (each
+/// expected line, column and message is rustc 1.100's on the same source); a name of a unit variant or a constant
+/// binds nothing
+#[test]
+fn or_pattern_missing_bindings() {
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let e = |line: usize, col: usize, n: &str| Some((line, col, format!("variable `{n}` is not bound in all patterns (E0408)")));
+    let src = "enum E { A(u8), B(u8, u8) }\nfn main() {\n    match E::A(1) {\n        E::A(x) | E::B(_, _) => println!(\"{x}\"),\n    }\n}\n";
+    assert_eq!(first(src), e(4, 19, "x"), "issue");
+    // (a variable of that name outside is not what the alternative binds)
+    let src = "enum E { A(u8), B(u16) }\nfn main() {\n    let x = 7u8;\n    match E::B(1) {\n        E::A(x) | E::B(_) => println!(\"{x}\"),\n    }\n}\n";
+    assert_eq!(first(src), e(5, 19, "x"), "outer_variable");
+    // (several alternatives lack it: the first of them)
+    let src = "enum E { A(u8), B(u8), C }\nfn main() {\n    let e = E::A(1);\n    match e {\n        E::C | E::A(x) | E::B(_) => { let _ = x; }\n        _ => {}\n    }\n}\n";
+    assert_eq!(first(src), e(5, 9, "x"), "first_lacking");
+    let src = "enum E { A(u8, u8), B(u8) }\nfn main() {\n    let e = E::A(1, 2);\n    let (E::A(a, b) | E::B(a)) = e;\n    let _ = (a, b);\n}\n";
+    assert_eq!(first(src), e(4, 23, "b"), "let");
+    let src = "enum E<T> { A(T, T), B(T) }\nuse E::*;\nconst X: E<u8> = B(0);\nfn main() {\n    let (_ | B(a)) = X;\n    let _ = a;\n}\n";
+    assert_eq!(first(src), e(5, 10, "a"), "wild_first");
+    let src = "fn main() {\n    let o: Option<u8> = Some(1);\n    if let Some(x) | None = o {\n        let _ = x;\n    }\n}\n";
+    assert_eq!(first(src), e(3, 22, "x"), "if_let");
+    // (nested in a pattern; of two names, the one the first alternative lacks)
+    let src = "fn main() {\n    let v = Some((1u8, 2u8));\n    while let Some((x, _) | (_, y)) = v {\n        let _ = (x, y);\n        break;\n    }\n}\n";
+    assert_eq!(first(src), e(3, 20, "y"), "while_let");
+    let src = "fn main() {\n    for (a, _) | (_, b) in [(1u8, 2u8)] {\n        let _ = (a, b);\n    }\n}\n";
+    assert_eq!(first(src), e(2, 9, "b"), "for");
+    // (an or-pattern inside an alternative is checked first)
+    let src = "enum E<T> { A(T, T), B(T) }\nuse E::*;\nconst Y: E<E<u8>> = B(B(0));\nfn main() {\n    let (A(A(..) | B(a), _) | B(A(a, _) | B(a))) = Y;\n    let _ = a;\n}\n";
+    assert_eq!(first(src), e(5, 12, "a"), "nested");
+    // (an arm with a guard; a constant is no binding)
+    let src = "const C: u8 = 3;\nfn main() {\n    let v = (1u8, 2u8);\n    match v {\n        (C, x) | (x, C) => { let _ = x; }\n        (a, _) | (_, a) if a > 0 => { let _ = a; }\n        _ => {}\n    }\n    match v {\n        (x, y) | (y, _) if x > 0 => { let _ = (x, y); }\n        _ => {}\n    }\n}\n";
+    assert_eq!(first(src), e(10, 18, "x"), "guard");
+    let ok = "enum E { A(u8), B(u8), C }\nconst K: u8 = 1;\nstruct U;\nfn main() {\n    let e = E::A(1);\n    match e {\n        E::B(x) | E::A(x) => { let _ = x; }\n        E::C => {}\n    }\n    match (e, 1u8) {\n        (E::A(K), _) | (E::C, _) => {}\n        (E::B(n), _) | (_, n) => { let _ = n; }\n    }\n    match (Some(U), 2u8) {\n        (None, v) | (Some(U), v) => { let _ = v; }\n    }\n    for (a, _) | (_, a) in [(1u8, 2u8)] {\n        let _ = a;\n    }\n}\n";
+    assert_eq!(first(ok), None, "same_names");
+    // (the same names of different types: E0308, at the alternative (rustc: at its binding, 4:24))
+    let src = "enum E { A(u8), B(u16) }\nfn main() {\n    match E::A(1) {\n        E::A(x) | E::B(x) => { let _ = x; }\n    }\n}\n";
+    assert_eq!(first(src), Some((4, 19, "mismatched types: expected `u8`, found `u16`".to_string())), "types");
+}
+
+#[test]
+fn a_use_of_a_lowercase_enum_brings_only_the_variants_it_names_and_or_bindings_of_two_modes() {
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    // (`use bar::foo::{alpha, charlie};` does not bring beta: `alpha | beta` binds beta in one alternative (E0408))
+    let src = "mod bar {\n    #[allow(non_camel_case_types)]\n    pub enum foo {\n        alpha,\n        beta,\n        charlie,\n    }\n}\nfn main() {\n    use bar::foo::{alpha, charlie};\n    match alpha {\n        alpha | beta => {}\n        charlie => {}\n    }\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.2)), Some((12, "variable `beta` is not bound in all patterns (E0408)".to_string())));
+    // (`ref y` in one alternative and `y` in the other: the alternative's mismatch (rustc's E0308 at 5:22), not one
+    // inference finds at the scrutinee's literal)
+    let src = "fn main() {\n    let x = (0, 2);\n\n    match x {\n        (0, ref y) | (y, 0) => {}\n        _ => (),\n    }\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.1)), Some((5, 22)));
 }

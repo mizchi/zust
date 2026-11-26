@@ -479,6 +479,9 @@ pub struct Program {
     /// The names a `use` of the program's has a path through (`E` of `use E::*;` / `use m::E::{A, B};`): an enum of
     /// one of these names may have its variants in scope, so a binding of a variant's name may be the variant
     pub use_prefixes: Vec<String>,
+    /// The variants `use`s of the program's bring from a lowercase enum: (the enum, the variant's name, or `*` for a
+    /// glob): `use color::{red, green};` brings red and green, not color's other variants
+    pub use_lower: Vec<(String, String)>,
     /// The crate enables `fn_traits` (`#![feature(fn_traits)]`): a call of a closure's `call` / `call_mut` /
     /// `call_once` is allowed
     pub fn_traits: bool,
@@ -1387,6 +1390,7 @@ impl Program {
             deny_unused_mut: false,
             allow_overflowing_literals: false,
             use_prefixes: Vec::new(),
+            use_lower: vec![],
             fn_traits: false,
             allow_implicit_autorefs: false,
             deny_trivial_casts: (false, false),
@@ -7557,6 +7561,15 @@ pub fn ty_code(t: Ty) -> u8 {
 }
 
 /// A path segment (name, and whether it has `<..>` / `(..)` args): lookups convert syn and own-tree paths to it
+
+/// std's traits that the lowering takes in a path call without a declaration of theirs (`Clone::clone(&x)`,
+/// `Add::add(a, b)`, `Ord::cmp(&a, &b)`): the same names its two-segment `Trait::method(x, ..)` rule knows
+pub const STD_PATH_TRAITS: &[&str] = &[
+    "Clone", "ToString", "Add", "Sub", "Mul", "Div", "Rem", "Neg", "Not", "BitAnd", "BitOr", "BitXor", "Shl", "Shr", "PartialEq",
+    "PartialOrd", "Ord", "Eq", "Iterator", "IntoIterator", "Into", "AsRef", "AsMut", "Hash", "Deref", "DerefMut", "Borrow",
+    "ToOwned", "AddAssign", "SubAssign", "MulAssign", "DivAssign", "Index", "Fn", "FnMut", "FnOnce", "Debug", "Display",
+];
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PSeg {
     pub name: String,
@@ -7593,6 +7606,29 @@ impl PPath {
 // --- Looking up struct / enum variants / fns by path (front.rs's syn version calls these) ---
 impl Program {
     /// The path without its leading module part (`crate::` / `self::` / `super::` / a lowercase module name)
+    /// `std::fmt::Write::write_str` / `core::clone::Clone::clone`: a path through std's modules to a fn of a trait, which
+    /// its last two segments `Trait::m` name as a two-segment path does (#153). The trait is one the program knows (the
+    /// prelude's) or one of std's the lowering takes without a declaration (STD_PATH_TRAITS). strip_mods_p
+    /// leaves std paths alone, so that `std::mem::swap` is not a `swap` of the program's: here the segment before the
+    /// fn must be such a trait. The number of leading segments to leave out
+    pub fn std_trait_path_skip(&self, p: &crate::parse::Path) -> Option<usize> {
+        let n = p.segs.len();
+        // (most paths stop here: one or two segments, or not std's)
+        if n < 4 || !matches!(p.segs[0].name.as_str(), "std" | "core" | "alloc") {
+            return None;
+        }
+        let plain = |s: &crate::parse::Seg| s.args.is_empty() && s.fn_args.is_none();
+        // (`std` / `core` / `alloc`, then modules, then the trait: no generic arguments before the fn's own)
+        if !plain(&p.segs[0]) || !p.segs[1..n - 2].iter().all(|s| plain(s) && s.name.starts_with(|c: char| c.is_ascii_lowercase())) {
+            return None;
+        }
+        let tr = &p.segs[n - 2];
+        // (not a name the program declares a trait of: `Trait::m` would be the program's trait, where the std path names
+        // std's (`std::string::ToString::to_string` beside a program's `trait ToString`). That call stays unread)
+        let known = self.traits.contains_key(&tr.name) || STD_PATH_TRAITS.contains(&tr.name.as_str());
+        (plain(tr) && known && !self.user_traits.contains(&tr.name)).then_some(n - 2)
+    }
+
     pub fn strip_mods_p(&self, p: &PPath) -> Option<PPath> {
         let mut k = 0;
         let n = p.segs.len();
@@ -7661,7 +7697,8 @@ impl Program {
                 _ if !self.use_prefixes.is_empty() => {
                     let v = self.variant_names.get(n).copied().flatten()?;
                     let user = self.struct_item.get(v.0 as usize).is_some_and(|&ii| ii < self.prelude_from);
-                    let used = self.use_prefixes.iter().any(|u| *u == self.structs[v.0 as usize].name);
+                    let en = &self.structs[v.0 as usize].name;
+                    let used = self.use_lower.iter().any(|(e, m)| e == en && (m == "*" || m == n));
                     let other = self.index.contains_key(n) || self.const_index.contains_key(n) || self.struct_index.contains_key(n);
                     return (user && used && !other).then_some(v);
                 }

@@ -110,6 +110,21 @@ pub fn macro_def_err(src: &str) -> Option<String> {
             let kleene = |k: usize| sym(k, b'*') || sym(k, b'+') || sym(k, b'?');
             let tx = |k: usize| if k < toks.len() { &b[toks[k].1..toks[k].2] } else { &b[0..0] };
             let kind_at = |k: usize| k + 1 < toks.len() && sym(k, b':') && toks[k + 1].0 == 0;
+            // (the operator of the repetition whose group closes at e: right after it, after a one-token separator, or
+            // after `::`. A delimiter is no separator: in `($($b:tt))*` the `)` closes the outer group, and the `*` is
+            // not the repetition's)
+            let delim = |k: usize| [b'(', b')', b'[', b']', b'{', b'}'].iter().any(|&c| sym(k, c));
+            let op_at = |e: usize| {
+                if kleene(e + 1) {
+                    Some(e + 1)
+                } else if kleene(e + 2) && !delim(e + 1) {
+                    Some(e + 2)
+                } else if sym(e + 1, b':') && sym(e + 2, b':') && kleene(e + 3) {
+                    Some(e + 3)
+                } else {
+                    None
+                }
+            };
             let empty_inner = |mut k: usize, to: usize| {
                 while k < to {
                     if sym(k, b'$') && k + 1 < toks.len() && toks[k + 1].0 == 0 && kind_at(k + 2) && tx(k + 3) == b"vis" {
@@ -119,8 +134,7 @@ pub fn macro_def_err(src: &str) -> Option<String> {
                     if !(sym(k, b'$') && open(k + 1)) {
                         return false;
                     }
-                    let e = close[k + 1];
-                    let o = if kleene(e + 1) { e + 1 } else { e + 2 };
+                    let Some(o) = op_at(close[k + 1]) else { return false };
                     if !(sym(o, b'*') || sym(o, b'?')) {
                         return false;
                     }
@@ -145,19 +159,8 @@ pub fn macro_def_err(src: &str) -> Option<String> {
                     }
                 } else if sym(q + 1, b'(') && open(q + 1) {
                     let e = close[q + 1];
-                    // (a delimiter is no separator: in `($($b:tt))*` the `)` closes the outer group, and the `*` is
-                    // not the repetition's)
-                    let delim = |k: usize| [b'(', b')', b'[', b']', b'{', b'}'].iter().any(|&c| sym(k, c));
-                    let o = if kleene(e + 1) {
-                        e + 1
-                    } else if kleene(e + 2) && !delim(e + 1) {
-                        e + 2
-                    } else if sym(e + 1, b':') && sym(e + 2, b':') && kleene(e + 3) {
-                        e + 3
-                    } else {
-                        // (at the `(` of `$(`, as rustc)
-                        return err(q + 1, "expected one of: `*`, `+`, or `?`");
-                    };
+                    // (at the `(` of `$(`, as rustc)
+                    let Some(o) = op_at(e) else { return err(q + 1, "expected one of: `*`, `+`, or `?`") };
                     if o == e + 1 && empty_inner(q + 2, e) {
                         return err(q + 1, "repetition matches empty token tree");
                     }
