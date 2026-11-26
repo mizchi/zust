@@ -5868,3 +5868,45 @@ fn main() {}
 "#, &[], "rv10");
     errors_at("trait Obj {}\ntrait Ext { fn e(&self) -> u8 { 1 } }\nimpl Ext for dyn Obj + 'static {}\nfn f<'a>(x: &'a (dyn Obj + 'a)) -> u8 { x.e() }\nfn main() {}\n", &[(4, "lifetime may not live long enough")], "rv11");
 }
+
+#[test]
+fn part39_dyn_error_is_deferred_lets_closures_as_fn_pointers_trait_results() {
+    // (each checked with rustc 1.97. `<dyn Error + 'static>::is` asks for a `'static` object (E0521 for rustc), and
+    // accepts one)
+    errors_at("use std::error::Error;\nfn err_is<T: Error + 'static>(err: &dyn Error) -> bool {\n    err.is::<T>()\n}\n#[derive(Debug)]\nstruct A;\nimpl std::fmt::Display for A { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, \"A\") } }\nimpl Error for A {}\nfn ok(e: &(dyn Error + 'static)) -> bool { e.is::<A>() }\nfn main() {}\n", &[(3, "lifetime may not live long enough")], "p1");
+    // (a `let` assigned later through an overloaded deref: its type is the target's, and the borrow of `b` escapes
+    // its block (E0597))
+    errors_at(r#"use std::cell::RefCell;
+fn main() {
+    let m = RefCell::new(0);
+    let p;
+    {
+        let b = m.borrow();
+        p = &*b;
+    }
+    let _ = *p;
+}
+"#, &[(7, "does not live long enough")], "p2");
+    // (a closure held as `fn(_, _) -> _`: its parameters from how the pointer is used, and its value, the second
+    // parameter, flows into its result: returned as `fn(&'a u32, &'b u32) -> &'a u32`, `'b: 'a` (3:5))
+    errors_at("fn bar<'a, 'b>() -> fn(&'a u32, &'b u32) -> &'a u32 {\n    let g: fn(_, _) -> _ = |_x, y| y;\n    g\n}\nfn main() {}\n", &[(3, "lifetime may not live long enough")], "p3");
+    errors_at(r#"fn bar<'a, 'b>() -> fn(&'a u32, &'b u32) -> &'a u32 {
+    let g: fn(_, _) -> _ = |x, _y| x;
+    g
+}
+fn baz<'a>() -> fn(&'a u32, &'a u32) -> &'a u32 {
+    let g: fn(_, _) -> _ = |_x, y| y;
+    g
+}
+fn quux<'a, 'b: 'a>() -> fn(&'a u32, &'b u32) -> &'a u32 {
+    let g: fn(_, _) -> _ = |_x, y| y;
+    g
+}
+fn main() {}
+"#, &[], "p4");
+    // (a trait method's elided result is the receiver's borrow: through the vtable (a local Box's returned, E0515),
+    // and a default through `impl Ext for dyn Tr {}` returned as `&'static` (4:50))
+    errors_at("trait Tr { fn get(&self) -> &u8; }\nfn f() -> &'static u8 { let b: Box<dyn Tr> = Box::new(S(1)); b.get() }\nstruct S(u8); impl Tr for S { fn get(&self) -> &u8 { &self.0 } }\nfn main() {}\n", &[(2, "E0515")], "p5");
+    errors_at("trait Tr {}\ntrait Ext { fn get(&self) -> &u8 { &0 } }\nimpl Ext for dyn Tr {}\nfn leak(x: &(dyn Tr + 'static)) -> &'static u8 { x.get() }\nfn main() {}\n", &[(4, "lifetime may not live long enough")], "p6");
+    errors_at("trait Tr { fn get(&self) -> &u8; }\nfn h(t: &dyn Tr) -> &u8 { t.get() }\nfn k(t: &(dyn Tr + 'static)) -> &'static u8 { t.get() }\nfn main() {}\n", &[(3, "lifetime may not live long enough")], "p7");
+}
