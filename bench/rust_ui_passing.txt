@@ -1392,6 +1392,7 @@ run-pass	closures/2229_closure_analysis/optimization/edge_case_run_pass.rs
 run-pass	closures/2229_closure_analysis/run_pass/box.rs
 run-pass	closures/2229_closure_analysis/run_pass/by_value.rs
 run-pass	closures/2229_closure_analysis/run_pass/capture-disjoint-field-struct.rs
+check-pass	closures/2229_closure_analysis/run_pass/capture_with_wildcard_match.rs
 check-pass	closures/2229_closure_analysis/run_pass/destructure-pattern-closure-within-closure.rs
 check-pass	closures/2229_closure_analysis/run_pass/destructure_patterns.rs
 run-pass	closures/2229_closure_analysis/run_pass/disjoint-capture-in-same-closure.rs

@@ -867,6 +867,42 @@ pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
     out
 }
 
+/// The mark in need of a path `Vec::from` (no prelude item has the name)
+const VEC_FROM: &str = "#Vec::from";
+
+/// Whether the identifier at `a` (a `from`) ends a path `Vec::from` or `Vec::<T>::from` (white space around `::` too)
+fn vec_path_before(b: &[u8], a: usize) -> bool {
+    let ws = |mut i: usize| {
+        while i > 0 && b[i - 1].is_ascii_whitespace() {
+            i -= 1;
+        }
+        i
+    };
+    let colons = |i: usize| (i >= 2 && &b[i - 2..i] == b"::").then(|| i - 2);
+    let Some(mut i) = colons(ws(a)) else { return false };
+    i = ws(i);
+    // (a turbofish: back to its `<`)
+    if i > 0 && b[i - 1] == b'>' {
+        let mut d = 0;
+        while i > 0 {
+            i -= 1;
+            match b[i] {
+                b'>' => d += 1,
+                b'<' => {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(j) = colons(ws(i)).filter(|_| d == 0) else { return false };
+        i = ws(j);
+    }
+    i >= 3 && &b[i - 3..i] == b"Vec" && !(i > 3 && (b[i - 4].is_ascii_alphanumeric() || b[i - 4] == b'_'))
+}
+
 /// Whether the source has a path `Box::from` in any spelling the parser takes: spaces around `::`, a turbofish
 /// (`Box::<[u8]>::from`). Comments are not told apart (a match there only selects a few names more)
 fn box_from_path(src: &str) -> bool {
@@ -1192,6 +1228,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                 if *n == "clamp" && !method_call_at(bytes, a as usize, b as usize) {
                     continue;
                 }
+                // (`Vec::from(..)`: a mark, VEC_FROM)
+                if *n == "from" && vec_path_before(bytes, a as usize) && !names.contains(&VEC_FROM) {
+                    names.push(VEC_FROM);
+                }
                 if !names.contains(n) {
                     names.push(n);
                 }
@@ -1282,6 +1322,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     // (`Box::from(s)` of a slice is `s.to_vec().into_boxed_slice()`)
     if sc.has("Box") && box_from_path(sc.src) {
         need.extend(["to_vec", "__exr_slice_to_vec", "Vec", "into_boxed_slice"]);
+    }
+    // (`Vec::from(x)` / `x.into()` into a Vec: an array's elements pushed, a copy of a slice, a str's bytes)
+    if need.contains(VEC_FROM) || need.contains("Vec") && need.contains("into") {
+        need.extend(["Vec", "with_capacity", "push", "to_vec", "__exr_slice_to_vec", "as_bytes", "into_bytes"]);
     }
     if sc.has("Cow") {
         need.extend(["Cow", "__CowStr", "Deref", "deref", "into_owned", "to_vec", "__exr_slice_to_vec", "Vec", "String"]);

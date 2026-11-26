@@ -3839,3 +3839,20 @@ fn a_use_of_a_lowercase_enum_brings_only_the_variants_it_names_and_or_bindings_o
     let src = "fn main() {\n    let x = (0, 2);\n\n    match x {\n        (0, ref y) | (y, 0) => {}\n        _ => (),\n    }\n}\n";
     assert_eq!(first(src).map(|x| (x.0, x.1)), Some((5, 22)));
 }
+
+#[test]
+fn vec_from_and_into_a_vec_by_std_s_from_impls() {
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    // (an array, literal or not, a `&[T]` / `&[T; N]` / `&mut [T]`, a `&str`, a String, a Vec; `.into()` the same)
+    let src = "fn main() {\n    let a = [String::new()];\n    let s = [1u8, 2];\n    let mut m = [3, 4];\n    let _v: Vec<u32> = Vec::from([1, 2]);\n    let _ = Vec::from(a);\n    let _ = Vec::from(&s[..]);\n    let _ = Vec::from(&s);\n    let _ = Vec::from(&mut m[..]);\n    let _ = Vec::from(\"ab\");\n    let _ = Vec::from(String::new());\n    let _ = Vec::from(vec![1]);\n    let _: Vec<u8> = \"ab\".into();\n    let _: Vec<u16> = [1, 2].into();\n}\n";
+    assert_eq!(first(src), None);
+    // (E0277: `[foo]` is an array of foo's fn item type, so `Vec::from` of it is no `Vec<fn()>`; `vec![foo]` and an
+    // unannotated `Vec::from([foo])` are)
+    let src = "fn foo() {}\nfn main() {\n    let _: Vec<fn()> = vec![foo];\n    let _ = Vec::from([foo]);\n    let _: Vec<fn()> = Vec::from([foo as fn()]);\n    let _: Vec<fn()> = Vec::from([foo]);\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.1)), Some((6, 24)));
+    let src = "fn foo() {}\nfn main() {\n    let _v: Vec<(&str, fn())> = Vec::from([(\"foo\", foo)]);\n}\n";
+    assert_eq!(first(src).map(|x| x.0), Some(3));
+}

@@ -1019,6 +1019,13 @@ impl Cx<'_> {
                             let args: [&Expr; 1] = [recv];
                             return self.call_fn(id, None, &args, None, Some(Ty::Struct(sid)), SP);
                         }
+                        // (into a Vec: `Vec::from(x)`, by std's impls for x's type)
+                        if self.prog.structs[self.prog.base_of(sid) as usize].name == "Vec" && !self.prog.index.contains_key("Vec::from") {
+                            let written = if self.ann_init == e as *const Expr as usize { target } else { None };
+                            if let Some(ne) = self.vec_from(SP, recv, written)? {
+                                return self.expr(ne, target);
+                            }
+                        }
                     }
                     Some(t) if t.is_int() || t.is_float() => {
                         // (a value of a type of the program's, `impl From<J> for f64`: that `from`; a number's is the

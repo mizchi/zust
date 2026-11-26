@@ -1259,6 +1259,28 @@ impl Inf<'_> {
         }
     }
 
+    /// The type of `Vec::from(x)` (see `call`)
+    #[cold]
+    #[inline(never)]
+    fn vec_from(&mut self, x: &Expr) -> u32 {
+        let vb = self.prog.struct_index["Vec"];
+        let a = self.expr(x);
+        let el = match self.elem_of(a) {
+            Some(e) => e,
+            None => {
+                let d = self.deref_expr(a);
+                let r = self.find(d);
+                let bytes = match self.shape[r as usize] {
+                    Some(Shape::Known(Ty::Str)) => true,
+                    Some(Shape::Known(Ty::Struct(sid))) => self.prog.structs[sid as usize].base.is_none() && self.prog.structs[sid as usize].name == "String",
+                    _ => false,
+                };
+                if bytes { self.known(Ty::U8) } else { self.var() }
+            }
+        };
+        self.adt(vb, vec![el])
+    }
+
     /// `i32::pow(2, 10)` / `Trait::m(&x, a)` / `Ord::cmp(&a, &b)` / `HashMap::from([..])` などをメソッド呼び出しなどに
     /// 書き換えたもの (front.rs の prim_method_call と同じ規則)
     fn prim_method_call(&self, f: &Expr, args: &[Expr]) -> Option<Expr> {
@@ -1956,6 +1978,13 @@ impl Inf<'_> {
                 let vv = self.adt(vb, vec![el]);
                 let callee = self.fn_by(p);
                 return self.apply(callee, vec![vv], 0);
+            }
+        }
+        // `Vec::from(x)`: a Vec of x's elements (an array's or a slice's, through references, or a Vec's), or of u8s
+        // (a `&str` / a String), as the code generator rewrites it
+        if let (Expr::Path(None, p), [x]) = (f, args) {
+            if p.segs.len() == 2 && p.segs[0].name == "Vec" && p.segs[1].name == "from" && self.prog.struct_index.contains_key("Vec") && self.fn_by(p).is_none() {
+                return self.vec_from(x);
             }
         }
         // (`mem::size_of::<T>()` / `align_of` / `size_of_val(&x)`: usize, the code generator's intrinsics, so a literal

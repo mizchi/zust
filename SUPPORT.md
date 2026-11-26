@@ -94,7 +94,8 @@ The prelude has `Option`/`Result`, `Vec`, `String`, `HashMap`/`HashSet`, `BTreeM
 deref), `std::task` (`Poll`, `Context`, `Waker::noop`) and the `Future` trait for futures implemented and polled by
 hand, `UnsafeCell`, `PhantomData`, atomics, `mpsc`, `mem::*`, `ptr::{read, write, drop_in_place, null}`,
 `iter::{repeat, once, empty, repeat_with, successors}`, `reverse` / `fill` / `rotate_left` / `rotate_right` on arrays
-and slices, formatting, stdin/stdout/fs/env/process basics.
+and slices, `Vec::from` / `.into()` of an array, a slice, a `&str` or a String (not yet of a `Box<[T]>`, a `VecDeque`
+or a `BinaryHeap`), formatting, stdin/stdout/fs/env/process basics.
 
 ## What is next
 

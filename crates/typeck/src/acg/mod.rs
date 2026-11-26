@@ -528,6 +528,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         rel_parts: None,
         index_owns: false,
         scrut_mut: false,
+        ann_init: 0,
         part_vars: vec![],
         known_var: vec![],
         owned: vec![],
@@ -1283,6 +1284,9 @@ pub struct Cx<'p> {
     pub index_owns: bool,
     /// The next scrutinee is placed mutable: a pattern binds by `ref mut` (scrut_place)
     pub scrut_mut: bool,
+    /// The initializer of the `let` with a type annotation being typed, by address (0 if none): the type it is
+    /// expected to have is written, not what inference found
+    pub ann_init: usize,
     /// The variants (offset in the local, enum, variant) of the split under way (split_moved)
     pub part_vars: Vec<(i32, u32, usize)>,
     /// Locals (their drop flags) that a match left known to be one variant (enum, variant): every arm that went on
@@ -2615,7 +2619,10 @@ impl Cx<'_> {
                             Some(a) if matches!(strip_paren(init), Expr::Array(_) | Expr::Repeat(..)) => Some(a).filter(|&a| !has_hole(self.prog, a)),
                             _ => full,
                         };
-                        let (mut v, mut t) = self.expr(init, exp)?;
+                        let ai0 = std::mem::replace(&mut self.ann_init, if ann_ty.is_some() { init as *const Expr as usize } else { 0 });
+                        let r = self.expr(init, exp);
+                        self.ann_init = ai0;
+                        let (mut v, mut t) = r?;
                         if t == Ty::Never {
                             diverged = true;
                             // (the annotation's type is well formed all the same: `let _: &'a S<'b> = loop {};`)
@@ -2800,7 +2807,9 @@ impl Cx<'_> {
                     let ml0 = std::mem::replace(&mut self.bk.macro_let, name.starts_with("__exr_"));
                     let plain = if ann_ty.is_none() && self.bk_on() { borrowck::value_tail(init) as *const Expr as usize } else { 0 };
                     let plain0 = std::mem::replace(&mut self.bk.plain_init, plain);
+                    let ai0 = std::mem::replace(&mut self.ann_init, if ann_ty.is_some() { init as *const Expr as usize } else { 0 });
                     let r = self.expr(init, ann.or(hint));
+                    self.ann_init = ai0;
                     self.bk.plain_init = plain0;
                     // (`let b: &mut T = a;` / `let b: &T = s.f;` with a place of a `&mut T`: a coercion site, b reborrows
                     // what it points to (rustc's `&mut *a` / `&*s.f`), not a copy or a move of it: a use of `*a` while b
