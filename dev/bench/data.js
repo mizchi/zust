@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795727999170,
+  "lastUpdate": 1795728454285,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -61691,6 +61691,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 40.902,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "898af8a0ae829a7b60ab5f9e5031671a4142b8a4",
+          "message": "zurgo: renamed dependencies (#249) (#269)\n\nzurgo refused every graph in which a package renames a dependency (`common = { package = \"crypto-common\" }`). That stopped 15 of the surveyed top crates before zustc read anything. A renamed dependency now works as rustc's `--extern alias=lib.rlib` does: the dependent sees the library under the new name in all its modules, and the library keeps its own name elsewhere.\n\n- CrateSpec::aliases (alias, library), filled by zurgo's deps_of for lib, bin, test and build-script crates. The workspace file writes them as `extern=ALIAS=NAME`.\n- Module flattening treats `crate:alias=name` entries like rustc's extern prelude:\n  - the module's own items and modules first, by type namespace only (a fn of that name does not hide the alias);\n  - then the alias;\n  - `::alias::..`, `pub use alias;` and `extern crate x as y;` also work.\n  - An absolute path in a library never sees a bin's aliases.\n- Proc macros:\n  - a renamed proc-macro dependency's macros resolve through its alias;\n  - a renamed library's re-exports resolve under its alias, rewritten once from the libraries' own routes;\n  - a library's own name that the dependent gives to another dependency is that dependency's.\n- Each crate's fingerprint includes its aliases.\n\nTests:\n- tests/workspace.rs runs against rustc --extern.\n- crates/zurgo/tests/zurgo.rs runs against cargo. It covers features through the new name, `dep:`, a bin's and a dev-dependency's renames, renamed proc macros, re-exports through renamed libraries, and names swapped between dependencies.\n\nSurvey: graph-fail goes from 20 to 5 of 273. The 5 left are two versions of one crate (#28).\n\nFixes #249\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T06:22:13+09:00",
+          "tree_id": "a6777e2e8fb6dbda183e188329aa90fd5c7a782c",
+          "url": "https://github.com/mizchi/zust/commit/898af8a0ae829a7b60ab5f9e5031671a4142b8a4"
+        },
+        "date": 1795728453966,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 128.582,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.699,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 18.674,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 41.925,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.715,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.548,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 129.533,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 797.009,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 582.767,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.691,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 71.481,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 189.167,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.977,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.548,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 611.805,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3927.361,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.463,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 90.118,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 42.49,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 52.807,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 92.935,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 146.763,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 38.264,
             "unit": "ms"
           }
         ]
