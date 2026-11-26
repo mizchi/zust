@@ -15,7 +15,7 @@
 (wildcard) @variable.builtin
 
 [
-  "type" "enum" "fn" "extern" "import" "from" "wasm" "let" "mut" "if" "else" "match" "while" "for" "in"
+  "type" "enum" "fn" "extern" "import" "from" "wasm" "let" "mut" "if" "else" "match" "while" "loop" "for" "in" "impl"
   "as" "perform" "handle" "return" "async" "await"
 ] @keyword
 (visibility) @keyword
@@ -70,3 +70,5 @@
 (jsx_fragment ["<" "/" ">"] @tag.delimiter)
 
 (identifier) @variable
+
+(self_parameter) @variable.builtin

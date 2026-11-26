@@ -813,7 +813,7 @@ impl Inf<'_> {
                 };
                 self.pat(p, i, None);
             }
-            Pat::Or(cs) => {
+            Pat::Or(cs, _) => {
                 for c in cs {
                     self.pat(c, v, mode);
                 }
@@ -1843,6 +1843,19 @@ impl Inf<'_> {
     }
 
     fn call(&mut self, f: &Expr, args: &[Expr]) -> u32 {
+        // (`std::clone::Clone::clone(&x)`, `std::fmt::Write::write_str(&mut s, ..)`: as the call its last two segments
+        // make, `Clone::clone(&x)` (#153))
+        if let Expr::Path(None, p) = f {
+            if let Some(k) = self.prog.std_trait_path_skip(p) {
+                let tail = Expr::Path(None, crate::parse::Path { global: false, segs: p.segs[k..].to_vec(), pos: p.pos });
+                // (kept to the end of the inference: the call records its callee's address, read after it)
+                let ki = self.keep.len();
+                self.keep.push(vec![tail]);
+                let f: *const Expr = &self.keep[ki][0];
+                // SAFETY: keep の要素は推論の終わりまで動かさない (外側の Vec が伸びても内側の要素は動かない)
+                return self.call(unsafe { &*f }, args);
+            }
+        }
         // `HashMap::from([(1, 2), ..])`: 配列を Vec<要素> として `from(Vec)` を呼ぶ (syn 版は `vec![..]` に書き換える)
         if let (Expr::Path(None, p), [Expr::Array(es)]) = (f, args) {
             if p.segs.len() == 2

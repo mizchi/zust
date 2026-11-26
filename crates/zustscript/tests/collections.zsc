@@ -1,0 +1,48 @@
+// tests/examples.rs collections_same_in_js_and_wasm: generic functions bounded by Eq / Ord, and Map / Set (insertion
+// order, a key set again keeps its place), lowered to Rust and run as wasm, and run as JS
+type P = { name: String, age: i32 }
+@wasm fn dedupe<T: Eq>(xs: Array<T>) -> Array<T> {
+  let mut out: Array<T> = [];
+  for x in xs { if !out.includes(x) { out = out.push(x); } }
+  out
+}
+@wasm fn count<T: Eq>(xs: Array<T>, x: T) -> i32 { xs.filter((y) => y == x).len() }
+@wasm fn max_of<T: Ord>(xs: Array<T>, d: T) -> T {
+  let mut m = d;
+  for x in xs { if x > m { m = x; } }
+  m
+}
+@wasm export fn generic() -> Array<i32> {
+  let ps = [P { name: "a", age: 1 }, P { name: "b", age: 2 }, P { name: "a", age: 1 }];
+  [dedupe([3, 1, 3, 2, 1]).len(), dedupe(ps).len(), count(["x", "y", "x"], "x"), count([Red, Green, Red], Green), max_of([3, 9, 2], 0), max_of(["pear", "apple", "😀", "\u{ff61}"], "").len(), dedupe([[1], [2], [1]]).len()]
+}
+
+enum Color { Red, Green, Blue }
+@wasm fn counts(ws: Array<String>) -> Map<String, i32> {
+  let mut m: Map<String, i32> = Map::new();
+  for w in ws { if !w.is_empty() { m = m.insert(w, m.get(w).unwrap_or(0) + 1); } }
+  m
+}
+@wasm export fn words(s: String) -> Array<String> {
+  let m = counts(s.split(" "));
+  m.keys().map((k) => k + "=" + m.get(k).unwrap_or(0).to_string())
+}
+@wasm export fn persistent() -> Array<i32> {
+  let mut a: Map<i32, String> = Map::new();
+  a = a.insert(1, "one");
+  a = a.insert(2, "two");
+  let b = a.insert(3, "three").remove(1);
+  let s = Set::from([Red, Green, Red]);
+  let t = s.remove(Red).insert(Blue);
+  [a.len(), b.len(), if a.contains_key(1) { 1 } else { 0 }, if b.contains_key(1) { 1 } else { 0 }, b.get(3).unwrap_or("-").len(), s.len(), t.len(), if t.contains(Red) { 1 } else { 0 }, if t.contains(Blue) { 1 } else { 0 }].concat(b.keys()).concat(t.values().map((c) => match c { Red => 0, Green => 1, Blue => 2 }))
+}
+@wasm export fn order() -> Array<String> {
+  let mut m: Map<String, i32> = Map::new();
+  m = m.insert("b", 1);
+  m = m.insert("a", 2);
+  m = m.insert("b", 3);
+  m = m.remove("a");
+  m = m.insert("a", 4);
+  m.keys().concat(m.values().map((v) => v.to_string()))
+}
+@wasm export fn ids(xs: Array<i64>) -> i32 { let mut s: Set<i64> = Set::new(); for x in xs { s = s.insert(x); } s.len() }

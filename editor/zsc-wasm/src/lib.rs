@@ -87,7 +87,7 @@ fn compile(src: &str) -> Result<(String, String, Vec<Diag>), Vec<Diag>> {
             .map(|e| (e.pos, if e.file.is_some() { e.msg } else { format!("{} (the playground has one file: no modules or TS files to import)", e.msg) }))
             .collect::<Vec<_>>()
     })?;
-    let items = ast::with_prelude(items);
+    let mut items = ast::with_prelude(items);
     let errors = check::js_target_errors(&items);
     if !errors.is_empty() { return Err(errors); }
     let mut ck = check::Checker::new();
@@ -106,7 +106,9 @@ fn compile(src: &str) -> Result<(String, String, Vec<Diag>), Vec<Diag>> {
         }
     }
     let warns = sorted(warns);
-    let info = ck.info;
+    let mut info = ck.info;
+    // (a method call is a call of its `impl`'s function from here on)
+    ast::desugar_methods(&mut items, &mut info);
     let mut j = js::Js::new(&info, "react/jsx-runtime");
     j.shared_runtime = false;
     let body = j.items(&items);

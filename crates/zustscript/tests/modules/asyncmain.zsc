@@ -1,0 +1,18 @@
+// an imported async fn awaited; matches whose nested patterns cover every value; `\u{..}` escapes
+import { doubled } from "./asynclib.zsc";
+
+enum Slot { Filled(Option<i32>), Empty }
+
+fn slot(s: Slot) -> i32 { match s { Filled(Some(n)) => n, Filled(None) => -1, Empty => 0 } }
+fn both(a: Option<i32>, b: Option<i32>) -> i32 { match (a, b) { (Some(x), Some(y)) => x + y, (None, _) => -1, (_, None) => -2 } }
+// (a recursive type: the check does not walk into the fields no pattern looks at)
+enum Ex { Lit(i32), Neg(Ex), Add(Ex, Ex) }
+fn simp(e: Ex) -> i32 { match e { Neg(Lit(n)) => -n, Neg(x) => 0 - simp(x), Lit(n) => n, Add(a, b) => simp(a) + simp(b) } }
+fn flags(a: bool, b: bool) -> String { match (a, b) { (true, true) => "tt", (true, false) => "tf", (false, _) => "f_" } }
+
+export async fn run() -> Result<String, String> {
+  let a = (await doubled(3))?;
+  let b = match await doubled(0) { Ok(n) => n.to_string(), Err(m) => m };
+  let c = [slot(Filled(Some(4))), slot(Filled(None)), slot(Empty), both(Some(1), Some(2)), both(None, Some(1)), both(Some(1), None), simp(Add(Neg(Lit(2)), Neg(Neg(Lit(5)))))];
+  Ok(`${a} ${b} ${c.map((n) => n.to_string()).join(",")} ${flags(true, false)}${flags(false, true)} \u{1F600}\u{e9}`)
+}

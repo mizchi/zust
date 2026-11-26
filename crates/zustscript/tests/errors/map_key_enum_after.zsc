@@ -1,0 +1,3 @@
+// expect: a Map's key or a Set's element is an integer, a String, a bool or an enum without data, not Key
+fn has(m: Map<Key, i32>, k: Key) -> bool { m.contains_key(k) }
+enum Key { Item(i32) }

@@ -1,0 +1,2 @@
+// expect: `abs` is a method of i32 and i64, not u32
+fn magnitude() -> u32 { (1).abs() }

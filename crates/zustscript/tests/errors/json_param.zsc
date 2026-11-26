@@ -1,0 +1,2 @@
+// expect: Map and Set of them, not T
+fn enc<T>(x: T) -> String { json_encode(x) }

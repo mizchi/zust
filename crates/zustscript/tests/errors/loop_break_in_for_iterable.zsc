@@ -1,0 +1,2 @@
+// expect: type mismatch: expected i32, found ()
+fn f(stop: bool) -> i32 { loop { for x in if stop { break; } else { [1] } { } } }

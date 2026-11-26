@@ -1,0 +1,3 @@
+// expect: each pattern of an `|` binds the same names
+enum E { A(i32), B(i32) }
+fn f(e: E) -> i32 { match e { A(x) | B(_) => 1 } }

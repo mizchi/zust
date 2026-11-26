@@ -257,7 +257,7 @@ impl Cx<'_> {
                     _ => return Err(Unknown),
                 }
             }
-            Pat::Or(v) => {
+            Pat::Or(v, _) => {
                 let mut out = vec![];
                 for q in v {
                     out.push(self.norm(q, t0, depth + 1)?);

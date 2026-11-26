@@ -1,0 +1,3 @@
+// expect: non-exhaustive match: `Filled` not covered
+enum Slot { Filled(Option<i32>), Empty }
+fn slot(s: Slot) -> i32 { match s { Filled(Some(n)) => n, Empty => 0 } }

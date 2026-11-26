@@ -1,0 +1,3 @@
+// expect: `Set` is the built-in collection: name this type otherwise
+extern type Set<T> = "Array" { length: i32 }
+export fn count(xs: Set<i32>) -> i32 { xs.length }
