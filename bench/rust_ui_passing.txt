@@ -1721,6 +1721,7 @@ check-pass	const-generics/array-impls/alloc-traits-impls-length-32.rs
 check-pass	const-generics/array-impls/alloc-traits-impls-length-33.rs
 check-pass	const-generics/array-impls/core-traits-impls-length-32.rs
 check-pass	const-generics/array-impls/core-traits-impls-length-33.rs
+run-pass	const-generics/array-wrapper-struct-ctor.rs
 compile-fail	const-generics/associated-const-bindings/const-bound-to-assoc-ty-99828.rs
 compile-fail	const-generics/associated-const-bindings/issue-105330.rs
 compile-fail	const-generics/associated-const-bindings/mismatched-types-with-generic-in-ace-no-feature-gate.rs
@@ -1745,6 +1746,7 @@ check-pass	const-generics/const-param-in-async.rs
 compile-fail	const-generics/const-param-type-depends-on-type-param-ungated.rs
 check-pass	const-generics/const_eval_unchecked_doesnt_fire_patterns.rs
 compile-fail	const-generics/default-ty-closure.rs
+run-pass	const-generics/defaults/complex-unord-param.rs
 compile-fail	const-generics/defaults/const-param-default-body-param-env-ice.rs
 compile-fail	const-generics/defaults/default-on-impl.rs
 compile-fail	const-generics/defaults/doesnt_infer.rs

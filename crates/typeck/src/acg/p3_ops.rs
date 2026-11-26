@@ -1558,7 +1558,17 @@ impl Cx<'_> {
         } else {
             match expected {
                 // (an unsized instance (`Wrap<[u8]>`) is no value's type: the fields decide, and the value is coerced)
-                Some(Ty::Struct(e)) if self.prog.base_of(e) == self.prog.base_of(base) && !self.prog.has_param(Ty::Struct(e)) && !Ty::Struct(e).is_dst_struct() => Some(e),
+                // (nor the generic definition itself, which inference gives when it found no arguments
+                // (`S { f: Box::new(F) }` with `f: Box<dyn X<T>>`), when the fields' types name the parameters; a unit
+                // variant's (`Register::<0>::Field1`) has none)
+                Some(Ty::Struct(e))
+                    if self.prog.base_of(e) == self.prog.base_of(base)
+                        && (self.prog.structs[e as usize].base.is_some() || fields_of(self, e).iter().all(|f| !self.prog.has_param(f.1)))
+                        && !self.prog.has_param(Ty::Struct(e))
+                        && !Ty::Struct(e).is_dst_struct() =>
+                {
+                    Some(e)
+                }
                 _ => None,
             }
         };

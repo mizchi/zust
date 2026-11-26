@@ -3908,6 +3908,12 @@ fn a_transmute_of_fn_pointers_that_pass_differently_and_a_constant_array_s_len()
     assert_eq!(first(src).map(|x| (x.0, x.2.contains("is not supported"))), Some((10, true)));
     let src = "fn f(x: u32) -> u32 {\n    x\n}\nfn main() {\n    let _g: fn(i32) -> i32 = unsafe { std::mem::transmute(f as fn(u32) -> u32) };\n}\n";
     assert_eq!(first(src), None);
+    // (a struct literal whose type arguments nothing gives: an error, not the generic definition's fields (a double
+    // free at run time); with no field that names them, the definition stands)
+    let src = "trait X<T> {}\nstruct S<T> {\n    f: Box<dyn X<T>>,\n}\nstruct F;\nimpl X<isize> for F {}\nfn main() {\n    let _ = S { f: Box::new(F) };\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.2)), Some((8, "type annotations needed for `S<..>`".to_string())));
+    let src = "enum Register<const N: u16> {\n    A = 40,\n    B,\n}\nfn main() {\n    let _b = Register::<0>::B as u16;\n    let _a = Register::<1>::A as u16;\n}\n";
+    assert_eq!(first(src), None);
     // (a constant array's length from its type: a 32 MiB array is not built on the stack for it)
     let src = "const DATA: [u8; 32 * 1024 * 1024] = [42; 32 * 1024 * 1024];\nfn main() {\n    assert_eq!(DATA.len(), 32 << 20);\n    assert!(!DATA.is_empty());\n}\n";
     assert_eq!(first(src), None);
