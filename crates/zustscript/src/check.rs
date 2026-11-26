@@ -688,12 +688,16 @@ impl Checker {
         // types first (records and enums may refer to each other)
         for it in items {
             // (`Promise` is the built-in type of `async` / `await`: no record or enum takes its name)
+            // (`Map` / `Set` are the built-in collections, in every output: an extern type of another JS class named so
+            // would be `ReadonlyMap` / `ReadonlySet` in the .d.ts)
+            if let Item::Record { name, pos, .. } | Item::Enum { name, pos, .. } | Item::ExternType { name, pos, .. } = it
+                && (name == "Map" || name == "Set")
+            {
+                self.err(*pos, format!("`{name}` is the built-in collection: name this type otherwise"));
+            }
             if let Item::Record { name, pos, .. } | Item::Enum { name, pos, .. } = it {
                 if name == "Promise" {
                     self.err(*pos, "`Promise` is the built-in type of `async` / `await`: name this type otherwise");
-                }
-                if name == "Map" || name == "Set" {
-                    self.err(*pos, format!("`{name}` is the built-in collection: name this type otherwise"));
                 }
             }
             // (`Option` / `Result` are the prelude's: a file written before the prelude may declare them the same way)

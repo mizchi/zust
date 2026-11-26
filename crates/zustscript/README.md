@@ -501,7 +501,7 @@ fn words(s: String) -> Map<String, i32> {
 - 配列と同じく不変: `insert` / `remove` は新しい値を返す。ほかから見えないローカル変数なら、その場で変える(`m = m.insert(k, f(m.get(k)))` の形も)
 - 順序は JS の Map / Set と同じ挿入順(既にあるキーを入れ直しても位置は変わらない)。JS では JS の `Map` / `Set` そのもので、`.d.ts` は `ReadonlyMap` / `ReadonlySet`
 - `@wasm` では、挿入順の配列と `HashMap` の索引を持つ型(`ZsMap` / `ZsSet`)。JS と同じ結果になる(`tests/collections.zsc`)。`Map::from` と `entries()`(タプル)、境界を越えることはまだできない
-- `==` では比べられない。`Map` / `Set` という名前の型は宣言できない(組み込みの名前)。`Map::new` などは呼び出す形でだけ書ける(値として渡すならクロージャで包む。`json_encode` / `range` も同じ)
+- `==` では比べられない。`Map` / `Set` という名前の型は宣言できない(`extern type` も。組み込みの名前)。`Map::new` などは呼び出す形でだけ書ける(値として渡すならクロージャで包む。`json_encode` / `range` も同じ)
 
 ### JSON: `json_decode` / `json_encode`
 
