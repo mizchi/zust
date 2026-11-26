@@ -1,0 +1,3 @@
+// expect: `g` is instantiated at ever larger types
+@wasm fn g<T>(x: T, n: i32) -> i32 { if n == 0 { 0 } else { g([x], n - 1) } }
+@wasm export fn f() -> i32 { g(1, 3) }

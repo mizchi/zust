@@ -1,0 +1,73 @@
+// tests/examples.rs control_same_in_js_and_wasm: `return` and `loop`, lowered to Rust and run as wasm, and run as JS
+@wasm fn sign(x: i32) -> i32 {
+  if x < 0 { return -1; }
+  if x == 0 { return 0; }
+  1
+}
+@wasm fn first_even(xs: Array<i32>) -> Option<i32> {
+  for x in xs {
+    if x % 2 == 0 { return Some(x); }
+  }
+  None
+}
+@wasm fn collatz(n: i32) -> i32 {
+  let mut k = n;
+  let mut steps = 0;
+  loop {
+    if k == 1 { break; }
+    k = if k % 2 == 0 { k / 2 } else { 3 * k + 1 };
+    steps += 1;
+  }
+  steps
+}
+@wasm fn find_pos(xs: Array<i32>, v: i32) -> i32 {
+  let mut i = 0;
+  loop {
+    if i >= xs.len() { return -1; }
+    if xs[i] == v { return i; }
+    i += 1;
+  }
+}
+@wasm fn val(o: Option<i32>) -> i32 {
+  let n = match o { Some(n) => n, None => return -100 };
+  n * 2
+}
+@wasm fn arg_order(a: bool) -> i32 {
+  let s = sign(if a { 5 } else { return 99 });
+  s + 1
+}
+@wasm fn nested_loops() -> i32 {
+  let mut total = 0;
+  for i in range(0, 5) {
+    let mut j = 0;
+    loop {
+      if j > i { break; }
+      if i * j == 6 { return total; }
+      total += j;
+      j += 1;
+    }
+  }
+  total
+}
+@wasm fn returns_block(x: i32) -> i32 {
+  if x > 0 { return { let y = x * 2; y + 1 }; }
+  0
+}
+type Pt = { x: i32, label: String }
+@wasm fn pick(ps: Array<Pt>, x: i32) -> Pt {
+  for p in ps { if p.x == x { return p; } }
+  Pt { x: -1, label: "none" }
+}
+@wasm fn labels(ps: Array<Pt>) -> Array<String> {
+  let mut out: Array<String> = [];
+  let mut i = 0;
+  loop {
+    if i >= ps.len() { return out; }
+    out = out.push(ps[i].label);
+    i += 1;
+  }
+}
+@wasm export fn run() -> Array<i32> {
+  let ps = [Pt { x: 1, label: "a" }, Pt { x: 2, label: "b" }];
+  [sign(-5), sign(0), sign(7), match first_even([1, 3, 4, 6]) { Some(n) => n, None => -1 }, collatz(6), find_pos([4, 5, 6], 6), find_pos([4], 9), val(Some(3)), val(None), nested_loops(), returns_block(3), arg_order(true), arg_order(false), pick(ps, 2).label.len(), pick(ps, 9).x, labels(ps).len()]
+}

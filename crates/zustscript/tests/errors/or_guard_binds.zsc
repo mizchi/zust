@@ -1,0 +1,2 @@
+// expect: a guard on an `|` pattern that binds names
+fn f(p: (i32, i32)) -> i32 { match p { (x, _) | (_, x) if x == 2 => x, _ => 0 } }

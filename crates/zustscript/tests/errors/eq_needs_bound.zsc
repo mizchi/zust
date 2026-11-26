@@ -1,0 +1,2 @@
+// expect: add the bound `T: Eq`
+fn same<T>(x: T, y: T) -> bool { x == y }

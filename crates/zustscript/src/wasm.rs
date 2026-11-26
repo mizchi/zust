@@ -70,10 +70,10 @@ fn wire_impl(w: &WS, out: &mut String) {
     match w {
         WS::Rec(rt, fs) => {
             let puts: Vec<String> = fs.iter().map(|(f, _)| format!("        zustscript_helper::Wire::put(&self.{}, out);", crate::lower::local(f))).collect();
-            let gets: Vec<String> = fs.iter().map(|(f, _)| format!("{}: zustscript_helper::Wire::get(r)", crate::lower::local(f))).collect();
+            let gets: Vec<String> = fs.iter().map(|(f, _)| format!("{}: zustscript_helper::Wire::decode(r)", crate::lower::local(f))).collect();
             let _ = writeln!(
                 out,
-                "impl zustscript_helper::Wire for {rt} {{\n    fn put(&self, out: &mut Vec<u8>) {{\n{}\n    }}\n    fn get(r: &mut zustscript_helper::Reader) -> {rt} {{\n        {} {{ {} }}\n    }}\n}}\n",
+                "impl zustscript_helper::Wire for {rt} {{\n    fn put(&self, out: &mut Vec<u8>) {{\n{}\n    }}\n    fn decode(r: &mut zustscript_helper::Reader) -> {rt} {{\n        {} {{ {} }}\n    }}\n}}\n",
                 puts.join("\n"),
                 base(rt),
                 gets.join(", ")
@@ -92,12 +92,12 @@ fn wire_impl(w: &WS, out: &mut String) {
                     let _ = writeln!(puts, "                zustscript_helper::Wire::put({x}, out);");
                 }
                 puts.push_str("            }\n");
-                let build = if fs.is_empty() { format!("{b}::{v}") } else { format!("{b}::{v}({})", vec!["zustscript_helper::Wire::get(r)"; fs.len()].join(", ")) };
+                let build = if fs.is_empty() { format!("{b}::{v}") } else { format!("{b}::{v}({})", vec!["zustscript_helper::Wire::decode(r)"; fs.len()].join(", ")) };
                 let _ = writeln!(gets, "            {k} => {build},");
             }
             let _ = writeln!(
                 out,
-                "impl zustscript_helper::Wire for {rt} {{\n    fn put(&self, out: &mut Vec<u8>) {{\n        match self {{\n{puts}        }}\n    }}\n    fn get(r: &mut zustscript_helper::Reader) -> {rt} {{\n        match <u32 as zustscript_helper::Wire>::get(r) {{\n{gets}            _ => panic!(\"zustscript: not a variant\"),\n        }}\n    }}\n}}\n"
+                "impl zustscript_helper::Wire for {rt} {{\n    fn put(&self, out: &mut Vec<u8>) {{\n        match self {{\n{puts}        }}\n    }}\n    fn decode(r: &mut zustscript_helper::Reader) -> {rt} {{\n        match <u32 as zustscript_helper::Wire>::decode(r) {{\n{gets}            _ => panic!(\"zustscript: not a variant\"),\n        }}\n    }}\n}}\n"
             );
         }
         _ => {}
@@ -478,6 +478,11 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
     head.push_str("const $enc = new TextEncoder();\nconst $dec = new TextDecoder();\n");
     head.push_str("// JS functions handed to wasm, by id (borrowed ones leave when the call returns, owned ones when Rust drops them)\nexport const $cbs = new Map();\nlet $cbNext = 1;\nconst $cbAdd = (f) => {\n  const id = $cbNext++;\n  $cbs.set(id, f);\n  return id;\n};\n");
     head.push_str("const $lines = {};\n");
+    if raw.contains("zs_host_to_f64") {
+        // (the JS layer's own reader, under a name of the glue's: the module may define `$to_f64` too)
+        head.push_str(&crate::js::helper_code("$to_f64").replace("$to_f64", "$glue_to_f64"));
+        head.push('\n');
+    }
     head.push_str("function $wToArray(v) {\n  const r = new Array(v.length);\n  for (let i = 0; i < v.length; i++) r[i] = v[i];\n  return r;\n}\n");
     head.push_str("const $env = {\n  __zsc_cb_drop: (id) => void $cbs.delete(id),\n");
     for (k, a, r, _) in &cb_decls {
@@ -496,8 +501,12 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
         let _ = writeln!(head, "  __zsc_cb_{k}: (id{}) => {body},", ps.iter().map(|p| format!(", {p}")).collect::<String>());
     }
     head.push_str(
-        "  // (what zustc's runtime imports: a panic prints to stderr and aborts)\n  write: (fd, p, n) => {\n    // (line-buffered: a panic message comes in pieces)\n    $lines[fd] = ($lines[fd] || \"\") + $dec.decode(new Uint8Array($w.memory.buffer, Number(p), Number(n)));\n    const k = $lines[fd].lastIndexOf(\"\\n\");\n    if (k >= 0) {\n      (fd === 2 ? console.error : console.log)($lines[fd].slice(0, k));\n      $lines[fd] = $lines[fd].slice(k + 1);\n    }\n    return n;\n  },\n  abort: () => {\n    throw new Error(\"zustscript: the wasm layer panicked\");\n  },\n  exit: (c) => {\n    throw new Error(\"zustscript: the wasm layer exited with \" + c);\n  },\n  fflush: () => 0,\n  sigaction: () => 0,\n};\n",
+        "  // (what zustc's runtime imports: a panic prints to stderr and aborts)\n  write: (fd, p, n) => {\n    // (line-buffered: a panic message comes in pieces)\n    $lines[fd] = ($lines[fd] || \"\") + $dec.decode(new Uint8Array($w.memory.buffer, Number(p), Number(n)));\n    const k = $lines[fd].lastIndexOf(\"\\n\");\n    if (k >= 0) {\n      (fd === 2 ? console.error : console.log)($lines[fd].slice(0, k));\n      $lines[fd] = $lines[fd].slice(k + 1);\n    }\n    return n;\n  },\n  abort: () => {\n    throw new Error(\"zustscript: the wasm layer panicked\");\n  },\n  exit: (c) => {\n    throw new Error(\"zustscript: the wasm layer exited with \" + c);\n  },\n  fflush: () => 0,\n  sigaction: () => 0,\n  // (a float read as the JS layer reads it: `to_f64`)\n  zs_host_to_f64: (p, n, out) => {\n    const r = $glue_to_f64($dec.decode(new Uint8Array($w.memory.buffer, Number(p), Number(n))));\n    if (r.TAG !== \"Some\") return 0;\n    new DataView($w.memory.buffer).setFloat64(Number(out), r._0, true);\n    return 1;\n  },\n};\n",
     );
+    // (the libm functions zustc's runtime imports for `powf`, `sin`, ..: JS's Math, so the results are the JS layer's to
+    // the bit. An f32 one (`sinf`) is the f64 one rounded, as the JS layer's `Math.fround(Math.sin(x))` is)
+    head.push_str("const $libm = { pow: Math.pow, exp: Math.exp, log: Math.log, log10: Math.log10, log2: Math.log2, sin: Math.sin, cos: Math.cos, tan: Math.tan, asin: Math.asin, acos: Math.acos, atan: Math.atan, atan2: Math.atan2, sinh: Math.sinh, cosh: Math.cosh, tanh: Math.tanh, cbrt: Math.cbrt, hypot: Math.hypot, expm1: Math.expm1, log1p: Math.log1p, fmod: (a, b) => a % b };\n");
+    head.push_str("for (const i of WebAssembly.Module.imports($mod)) {\n  if (i.name in $env) continue;\n  const f = Object.hasOwn($libm, i.name) ? $libm[i.name] : i.name.endsWith(\"f\") && Object.hasOwn($libm, i.name.slice(0, -1)) ? $libm[i.name.slice(0, -1)] : undefined;\n  if (f !== undefined) $env[i.name] = i.name in $libm ? f : (...a) => Math.fround(f(...a));\n}\n");
     head.push_str("for (const i of WebAssembly.Module.imports($mod)) {\n  if (!(i.name in $env)) $env[i.name] = () => {\n    throw new Error(\"zustscript: the wasm layer called \" + i.name + \", which this host does not provide\");\n  };\n}\n");
     head.push_str("const $w = (await WebAssembly.instantiate($mod, { env: $env })).exports;\n");
     let _ = writeln!(head, "const $outSlots = {out_slots};");

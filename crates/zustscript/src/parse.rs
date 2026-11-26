@@ -28,6 +28,8 @@ pub struct Parser {
     col: u32,
     peeked: Option<Tok>,
     next_id: Id,
+    /// in an `impl Point<T> { .. }`: the type `Self` names (and its name, for `Self { .. }` / `Self::f()`)
+    self_ty: Option<(String, TyS)>,
 }
 
 pub type PResult<X> = Result<X, (Pos, String)>;
@@ -39,11 +41,41 @@ const PUNCTS: &[&str] = &[
 
 impl Parser {
     pub fn new(src: &str) -> Parser {
-        Parser { src: src.chars().collect(), i: 0, line: 1, col: 0, peeked: None, next_id: 0 }
+        Parser { src: src.chars().collect(), i: 0, line: 1, col: 0, peeked: None, next_id: 0, self_ty: None }
     }
 
     fn here(&self) -> Pos {
         Pos { line: self.line, col: self.col }
+    }
+
+    /// After a `\\` in a string: the character it stands for (`\\n`, `\\u{1F600}`, a quote, ...)
+    fn escape(&mut self) -> PResult<char> {
+        let pos = self.here();
+        Ok(match self.bump() {
+            'n' => '\n',
+            't' => '\t',
+            'r' => '\r',
+            '0' => '\0',
+            'u' => {
+                if self.i >= self.src.len() || self.bump() != '{' {
+                    return Err((pos, "expected `\\u{..}` with hex digits".into()));
+                }
+                let mut hex = String::new();
+                while self.i < self.src.len() && self.src[self.i] != '}' && hex.len() <= 6 {
+                    hex.push(self.bump());
+                }
+                if self.i >= self.src.len() || hex.is_empty() || hex.len() > 6 {
+                    return Err((pos, "expected `\\u{..}` with 1 to 6 hex digits".into()));
+                }
+                self.bump();
+                match u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
+                    Some(c) => c,
+                    None => return Err((pos, format!("`\\u{{{hex}}}` is not a Unicode scalar value"))),
+                }
+            }
+            o @ ('\\' | '"' | '\'' | '`' | '$' | '{' | '}') => o,
+            o => return Err((pos, format!("unknown escape `\\{o}`"))),
+        })
     }
 
     fn bump(&mut self) -> char {
@@ -156,14 +188,8 @@ impl Parser {
                         if self.i >= self.src.len() {
                             return Err((pos, "unterminated string".into()));
                         }
-                        let e = self.bump();
-                        s.push(match e {
-                            'n' => '\n',
-                            't' => '\t',
-                            'r' => '\r',
-                            '0' => '\0',
-                            o => o,
-                        })
+                        let c = self.escape()?;
+                        s.push(c)
                     }
                     o => s.push(o),
                 }
@@ -250,9 +276,57 @@ impl Parser {
     pub fn file(&mut self) -> PResult<Vec<Item>> {
         let mut items = vec![];
         while self.peek()?.t != T::Eof {
-            items.push(self.item()?);
+            if self.is_kw("impl")? {
+                items.extend(self.impl_block()?);
+            } else {
+                items.push(self.item()?);
+            }
         }
         Ok(items)
+    }
+
+    /// `impl<T> Stack<T> { fn push(self, x: T) -> Stack<T> { .. } fn new() -> Self { .. } }`: each function is the
+    /// top-level `Stack$push` (with the impl's generic parameters first); one whose first parameter is `self` is
+    /// called as a method, `s.push(x)`, the others as `Stack::new()`
+    fn impl_block(&mut self) -> PResult<Vec<Item>> {
+        let ipos = self.next()?.pos;
+        let (generics, bounds) = self.generics_bounds()?;
+        let (name, npos) = self.ident()?;
+        let mut args = vec![];
+        if self.eat("<")? {
+            while !self.eat(">")? {
+                args.push(self.ty()?);
+                self.eat(",")?;
+            }
+        }
+        if args.is_empty() && !generics.is_empty() {
+            args = generics.iter().map(|g| TyS::Name(g.clone(), vec![], npos)).collect();
+        }
+        self.expect("{")?;
+        let saved = self.self_ty.replace((name.clone(), TyS::Name(name.clone(), args, npos)));
+        let mut out = vec![];
+        while !self.eat("}")? {
+            let it = self.item()?;
+            match it {
+                Item::Fn { name: m, public, pos, .. } if public => {
+                    self.self_ty = saved;
+                    return Err((pos, format!("`{m}` in an `impl` cannot be exported yet: export a function that calls it")));
+                }
+                Item::Fn { name: m, public, wasm, simd, relaxed, is_async, generics: g, bounds: b, args, ret, body, pos } => {
+                    let mut gs = generics.clone();
+                    gs.extend(g);
+                    let mut bs = bounds.clone();
+                    bs.extend(b);
+                    out.push(Item::Fn { name: format!("{name}${m}"), public, wasm, simd, relaxed, is_async, generics: gs, bounds: bs, args, ret, body, pos });
+                }
+                _ => {
+                    self.self_ty = saved;
+                    return Err((ipos, "an `impl` holds functions only".into()));
+                }
+            }
+        }
+        self.self_ty = saved;
+        Ok(out)
     }
 
     fn generics(&mut self) -> PResult<Vec<String>> {
@@ -358,7 +432,16 @@ impl Parser {
                 self.expect("(")?;
                 let mut args = vec![];
                 while !self.eat(")")? {
-                    let (a, _) = self.ident()?;
+                    let (a, apos) = self.ident()?;
+                    // (`self`: the impl's type, first)
+                    if a == "self" && args.is_empty() && !self.is(":")? {
+                        let Some((_, t)) = self.self_ty.clone() else {
+                            return Err((apos, "`self` is a parameter of a function in an `impl`".into()));
+                        };
+                        args.push((a, t));
+                        self.eat(",")?;
+                        continue;
+                    }
                     self.expect(":")?;
                     args.push((a, self.ty()?));
                     self.eat(",")?;
@@ -674,6 +757,11 @@ impl Parser {
             return Ok(TyS::Fn(ts, Box::new(r)));
         }
         let (n, pos) = self.ident()?;
+        if n == "Self"
+            && let Some((_, t)) = &self.self_ty
+        {
+            return Ok(t.clone());
+        }
         let mut args = vec![];
         if self.eat("<")? {
             while !self.eat(">")? {
@@ -742,7 +830,7 @@ impl Parser {
                 self.next()?;
                 tail = Some(Box::new(e));
                 break;
-            } else if matches!(e.kind, EK::If(..) | EK::Match(..) | EK::Block(..) | EK::While(..) | EK::For(..)) {
+            } else if matches!(e.kind, EK::If(..) | EK::Match(..) | EK::Block(..) | EK::While(..) | EK::For(..) | EK::Loop(..)) {
                 stmts.push(Stmt::Expr(e));
             } else {
                 let t = self.peek()?.clone();
@@ -752,7 +840,28 @@ impl Parser {
         Ok(self.mk(pos, EK::Block(stmts, tail)))
     }
 
+    /// `Self` in an `impl`: the type's name (`Self { x }`, `Self::new()`, a `Self { .. }` pattern)
+    fn self_name(&self, n: String) -> String {
+        match &self.self_ty {
+            Some((name, _)) if n == "Self" => name.clone(),
+            _ => n,
+        }
+    }
+
+    /// A pattern, or several separated by `|`
     fn pat(&mut self) -> PResult<Pat> {
+        let first = self.pat_one()?;
+        if !self.is("|")? {
+            return Ok(first);
+        }
+        let mut alts = vec![first];
+        while self.eat("|")? {
+            alts.push(self.pat_one()?);
+        }
+        Ok(Pat::Or(alts))
+    }
+
+    fn pat_one(&mut self) -> PResult<Pat> {
         let t = self.next()?;
         Ok(match t.t {
             T::P("(") => {
@@ -774,10 +883,30 @@ impl Parser {
             T::Ident(n) if n == "_" => Pat::Wild,
             T::Ident(n) if n == "true" || n == "false" => Pat::Lit(Lit::Bool(n == "true")),
             T::Ident(n) => {
+                let n = self.self_name(n);
                 let (en, vn) = if self.eat("::")? { (Some(n), self.ident()?.0) } else { (None, n) };
                 let upper = vn.chars().next().is_some_and(|c| c.is_uppercase());
                 if !upper && en.is_none() {
                     return Ok(Pat::Bind(vn));
+                }
+                // `Point { x, y: py, .. }`: a record's fields
+                if en.is_none() && self.eat("{")? {
+                    let (mut fs, mut rest) = (vec![], false);
+                    while !self.eat("}")? {
+                        if self.eat("..")? {
+                            rest = true;
+                            self.expect("}")?;
+                            break;
+                        }
+                        let (f, _) = self.ident()?;
+                        let p = if self.eat(":")? { self.pat()? } else { Pat::Bind(f.clone()) };
+                        fs.push((f, p));
+                        if !self.eat(",")? {
+                            self.expect("}")?;
+                            break;
+                        }
+                    }
+                    return Ok(Pat::Record(vn, fs, rest, t.pos));
                 }
                 let mut subs = vec![];
                 if self.eat("(")? {
@@ -1016,7 +1145,7 @@ impl Parser {
                     let at = th.pos;
                     self.mk(at, EK::Block(vec![], None))
                 };
-                self.mk(pos, EK::Match(Box::new(s), vec![(p, th), (Pat::Wild, el)]))
+                self.mk(pos, EK::Match(Box::new(s), vec![Arm::new(p, th), Arm::new(Pat::Wild, el)]))
             }
             T::Ident(k) if k == "if" => {
                 let c = self.expr(true)?;
@@ -1043,6 +1172,16 @@ impl Parser {
                 let it = self.expr(true)?;
                 let body = self.block()?;
                 self.mk(pos, EK::For(x, Box::new(it), Box::new(body)))
+            }
+            T::Ident(k) if k == "loop" && self.is("{")? => {
+                let body = self.block()?;
+                self.mk(pos, EK::Loop(Box::new(body)))
+            }
+            T::Ident(k) if k == "return" => {
+                // (no value before what ends an expression: `return;`, `{ return }`, `Err(e) => return,`)
+                let bare = matches!(self.peek()?.t, T::P(";" | "}" | "," | ")" | "]"));
+                let x = if bare { None } else { Some(Box::new(self.expr(false)?)) };
+                self.mk(pos, EK::Return(x))
             }
             T::Ident(k) if k == "break" => self.mk(pos, EK::Break),
             T::Ident(k) if k == "continue" => self.mk(pos, EK::Continue),
@@ -1082,10 +1221,16 @@ impl Parser {
                 self.expect("{")?;
                 let mut arms = vec![];
                 while !self.eat("}")? {
-                    let p = self.pat()?;
+                    let pat = self.pat()?;
+                    let guard = if self.is_kw("if")? {
+                        self.next()?;
+                        Some(self.expr(true)?)
+                    } else {
+                        None
+                    };
                     self.expect("=>")?;
                     let body = self.expr(false)?;
-                    arms.push((p, body));
+                    arms.push(Arm { pat, guard, body });
                     if !self.eat(",")? {
                         self.expect("}")?;
                         break;
@@ -1094,6 +1239,7 @@ impl Parser {
                 self.mk(pos, EK::Match(Box::new(s), arms))
             }
             T::Ident(n) => {
+                let n = self.self_name(n);
                 if self.eat("::")? {
                     let (v, _) = self.ident()?;
                     return Ok(self.mk(pos, EK::Path(n, v)));
@@ -1151,14 +1297,8 @@ impl Parser {
                     if self.i >= self.src.len() {
                         return Err((pos, "unterminated template string".into()));
                     }
-                    let e = self.bump();
-                    parts.last_mut().unwrap().push(match e {
-                        'n' => '\n',
-                        't' => '\t',
-                        'r' => '\r',
-                        '0' => '\0',
-                        o => o,
-                    })
+                    let c = self.escape()?;
+                    parts.last_mut().unwrap().push(c)
                 }
                 o => parts.last_mut().unwrap().push(o),
             }
