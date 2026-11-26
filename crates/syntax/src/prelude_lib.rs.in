@@ -10914,7 +10914,7 @@ impl<T> Mutex<T> {
     pub const fn new(v: T) -> Mutex<T> {
         Mutex { val: v, locked: false }
     }
-    pub fn lock(&self) -> Result<MutexGuard<T>, ()> {
+    pub fn lock(&self) -> Result<MutexGuard<T>, PoisonError<MutexGuard<T>>> {
         let m = &self.locked as *const bool as *mut bool;
         __exr_green_wait(|| unsafe { !*m });
         unsafe {
@@ -10922,10 +10922,24 @@ impl<T> Mutex<T> {
         }
         Ok(MutexGuard { p: &self.val as *const T as *mut T, m: m })
     }
-    pub fn into_inner(self) -> Result<T, ()> {
+    // (WouldBlock while a guard is out: the green threads switch only at a wait)
+    pub fn try_lock(&self) -> Result<MutexGuard<T>, TryLockError<MutexGuard<T>>> {
+        let m = &self.locked as *const bool as *mut bool;
+        if unsafe { *m } {
+            return Err(TryLockError::WouldBlock);
+        }
+        unsafe {
+            *m = true;
+        }
+        Ok(MutexGuard { p: &self.val as *const T as *mut T, m: m })
+    }
+    pub fn is_poisoned(&self) -> bool {
+        false
+    }
+    pub fn into_inner(self) -> Result<T, PoisonError<T>> {
         Ok(self.val)
     }
-    pub fn get_mut(&mut self) -> Result<&mut T, ()> {
+    pub fn get_mut(&mut self) -> Result<&mut T, PoisonError<&mut T>> {
         Ok(&mut self.val)
     }
 }
@@ -10960,6 +10974,58 @@ impl<T> Drop for MutexGuard<T> {
     }
 }
 
+/// `std::sync::PoisonError`: a lock whose holder panicked (never here: a panic stops the process), with the guard
+pub struct PoisonError<T> {
+    __pe_guard: T,
+}
+impl<T> PoisonError<T> {
+    pub fn new(guard: T) -> PoisonError<T> {
+        PoisonError { __pe_guard: guard }
+    }
+    pub fn into_inner(self) -> T {
+        self.__pe_guard
+    }
+    pub fn get_ref(&self) -> &T {
+        &self.__pe_guard
+    }
+    pub fn get_mut(&mut self) -> &mut T {
+        &mut self.__pe_guard
+    }
+}
+impl<T> Debug for PoisonError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.pad("PoisonError { .. }")
+    }
+}
+impl<T> Display for PoisonError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.pad("poisoned lock: another task failed inside")
+    }
+}
+/// `std::sync::TryLockError`
+pub enum TryLockError<T> {
+    Poisoned(PoisonError<T>),
+    WouldBlock,
+}
+impl<T> Debug for TryLockError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        match self {
+            TryLockError::Poisoned(_) => f.pad("Poisoned(..)"),
+            TryLockError::WouldBlock => f.pad("WouldBlock"),
+        }
+    }
+}
+impl<T> Display for TryLockError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        match self {
+            TryLockError::Poisoned(_) => f.pad("poisoned lock: another task failed inside"),
+            TryLockError::WouldBlock => f.pad("try_lock failed because the operation would block"),
+        }
+    }
+}
+pub type LockResult<G> = Result<G, PoisonError<G>>;
+pub type TryLockResult<G> = Result<G, TryLockError<G>>;
+
 // `std::sync::Condvar` (green threads: a wait lets the mutex go, waits for a notify, and takes the mutex again; when no
 // other thread can run, it returns, a spurious wakeup, which std allows)
 pub struct Condvar {
@@ -10976,7 +11042,7 @@ impl Condvar {
     pub const fn new() -> Condvar {
         Condvar { __cv_seq: 0 }
     }
-    pub fn wait<T>(&self, guard: MutexGuard<T>) -> Result<MutexGuard<T>, ()> {
+    pub fn wait<T>(&self, guard: MutexGuard<T>) -> Result<MutexGuard<T>, PoisonError<MutexGuard<T>>> {
         let m = guard.m;
         let p = guard.p;
         __core_forget(guard);
@@ -10993,16 +11059,18 @@ impl Condvar {
         }
         Ok(MutexGuard { p: p, m: m })
     }
-    pub fn wait_while<T, F: FnMut(&mut T) -> bool>(&self, guard: MutexGuard<T>, mut cond: F) -> Result<MutexGuard<T>, ()> {
+    pub fn wait_while<T, F: FnMut(&mut T) -> bool>(&self, guard: MutexGuard<T>, mut cond: F) -> Result<MutexGuard<T>, PoisonError<MutexGuard<T>>> {
         let mut g = guard;
         while cond(unsafe { &mut *g.p }) {
             g = self.wait(g)?;
         }
         Ok(g)
     }
-    pub fn wait_timeout<T>(&self, guard: MutexGuard<T>, _dur: Duration) -> Result<(MutexGuard<T>, WaitTimeoutResult), ()> {
-        let g = self.wait(guard)?;
-        Ok((g, WaitTimeoutResult(false)))
+    pub fn wait_timeout<T>(&self, guard: MutexGuard<T>, _dur: Duration) -> Result<(MutexGuard<T>, WaitTimeoutResult), PoisonError<(MutexGuard<T>, WaitTimeoutResult)>> {
+        match self.wait(guard) {
+            Ok(g) => Ok((g, WaitTimeoutResult(false))),
+            Err(e) => Err(PoisonError::new((e.into_inner(), WaitTimeoutResult(false)))),
+        }
     }
     pub fn notify_one(&self) {
         let seq = &self.__cv_seq as *const u64 as *mut u64;
@@ -11038,7 +11106,7 @@ impl<T> RwLock<T> {
     pub const fn new(v: T) -> RwLock<T> {
         RwLock { val: v, readers: 0, writer: false }
     }
-    pub fn read(&self) -> Result<RwLockReadGuard<T>, ()> {
+    pub fn read(&self) -> Result<RwLockReadGuard<T>, PoisonError<RwLockReadGuard<T>>> {
         let w = &self.writer as *const bool;
         // (no other thread to wait for, and a writer holds it: std's would deadlock)
         if !__exr_green_wait(|| unsafe { !*w }) {
@@ -11050,7 +11118,7 @@ impl<T> RwLock<T> {
         }
         Ok(RwLockReadGuard { p: &self.val as *const T, l: r })
     }
-    pub fn write(&self) -> Result<RwLockWriteGuard<T>, ()> {
+    pub fn write(&self) -> Result<RwLockWriteGuard<T>, PoisonError<RwLockWriteGuard<T>>> {
         let w = &self.writer as *const bool as *mut bool;
         let r = &self.readers as *const usize;
         if !__exr_green_wait(|| unsafe { !*w && *r == 0 }) {
@@ -11061,10 +11129,33 @@ impl<T> RwLock<T> {
         }
         Ok(RwLockWriteGuard { p: &self.val as *const T as *mut T, w: w })
     }
-    pub fn into_inner(self) -> Result<T, ()> {
+    pub fn try_read(&self) -> Result<RwLockReadGuard<T>, TryLockError<RwLockReadGuard<T>>> {
+        if self.writer {
+            return Err(TryLockError::WouldBlock);
+        }
+        let r = &self.readers as *const usize as *mut usize;
+        unsafe {
+            *r += 1;
+        }
+        Ok(RwLockReadGuard { p: &self.val as *const T, l: r })
+    }
+    pub fn try_write(&self) -> Result<RwLockWriteGuard<T>, TryLockError<RwLockWriteGuard<T>>> {
+        if self.writer || self.readers != 0 {
+            return Err(TryLockError::WouldBlock);
+        }
+        let w = &self.writer as *const bool as *mut bool;
+        unsafe {
+            *w = true;
+        }
+        Ok(RwLockWriteGuard { p: &self.val as *const T as *mut T, w: w })
+    }
+    pub fn is_poisoned(&self) -> bool {
+        false
+    }
+    pub fn into_inner(self) -> Result<T, PoisonError<T>> {
         Ok(self.val)
     }
-    pub fn get_mut(&mut self) -> Result<&mut T, ()> {
+    pub fn get_mut(&mut self) -> Result<&mut T, PoisonError<&mut T>> {
         Ok(&mut self.val)
     }
 }
