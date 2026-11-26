@@ -12454,7 +12454,7 @@ impl Session {
         let mut done: FxSet<u32> = FxSet::default();
         // 前回の check の記録: 宣言の指紋が同じなら、本体のアイテムが変わっていない関数は検査済み (キーも読み戻しも要らない)。
         // 要求していたインスタンスは名前で辿り、本体が変わったものだけを要求し直す
-        let old = match self.chk.take() {
+        let mut old = match self.chk.take() {
             Some(m) if m.fp == a.iface_fp && m.lint == lint_bits(&a.prog) && check_only && std::env::var_os("ZUSTC_NO_CHECK_MEMO").is_none() => Some(m),
             _ => None,
         };
@@ -12501,12 +12501,14 @@ impl Session {
                         continue;
                     }
                     // (記録から: 本体が同じなら、要求していたインスタンスを名前で辿る)
-                    if let Some(o) = &old {
-                        if let Some(e) = o.ents.get(&name) {
-                            if e.ok && Some(e.body_hash) == body_hash(&e.body) {
+                    // (an entry taken is moved to the new record, not copied: each is taken once, as `seen` keeps a
+                    // name from being looked up again)
+                    if let Some(o) = &mut old {
+                        if o.ents.get(&name).is_some_and(|e| e.ok && Some(e.body_hash) == body_hash(&e.body)) {
+                            if let Some(e) = o.ents.remove(&name) {
                                 n_memo += 1;
                                 let mut st: Vec<String> = e.children.clone();
-                                memo.ents.insert(name.clone(), e.clone());
+                                memo.ents.insert(name.clone(), e);
                                 while let Some(c) = st.pop() {
                                     if seen.contains(&c) {
                                         continue;
@@ -12515,8 +12517,9 @@ impl Session {
                                     if ce.ok && Some(ce.body_hash) == body_hash(&ce.body) {
                                         seen.insert(c.clone());
                                         n_memo += 1;
+                                        let Some(ce) = o.ents.remove(&c) else { continue };
                                         st.extend(ce.children.iter().cloned());
-                                        memo.ents.insert(c, ce.clone());
+                                        memo.ents.insert(c, ce);
                                     } else {
                                         // (本体が変わったインスタンス: 要求し直して検査する)
                                         let _ = crate::build_cache::decode_blob(&ce.me, &a.prog, &insts);
