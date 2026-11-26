@@ -57,6 +57,8 @@ pub struct Solver<'p> {
     rver: u64,
     /// 呼び出しの引数を推論している深さと、本体の推論を後回しにしたクロージャ (式, 引数, 戻り値)
     pub defer: u32,
+    /// Unifying with a type the program writes (a turbofish): it is the type, whatever the value's arguments say
+    pub written: u32,
     /// 囲んでいるループ / ラベル付きブロック: (ラベル, 値の型, ブロックか, break があったか)
     pub brk: Vec<(Option<String>, u32, bool, bool)>,
     /// 後で解く関連型 (基になる型の変数, 名前, 結果の変数)
@@ -101,6 +103,7 @@ impl<'p> Solver<'p> {
             rcache_ver: 0,
             rver: 0,
             defer: 0,
+            written: 0,
             brk: vec![],
             assoc_later: vec![],
             no_record: 0,
@@ -312,6 +315,9 @@ impl Solver<'_> {
         match (self.shape[a as usize], self.shape[b as usize]) {
             (Some(Shape::Known(Ty::Never)), _) | (_, Some(Shape::Known(Ty::Never))) => {}
             // (出現検査: `f = Box::new(f)` の f を `Box<f>` にはしない (無限の型)。決まらないまま残す)
+            // (an integer literal's type and a float literal's: no one type, `let mut x = 2; x = 5.0;` is a mismatch
+            // at the assignment)
+            (None, None) if (self.int_lit[a as usize] && self.float_lit[b as usize]) || (self.float_lit[a as usize] && self.int_lit[b as usize]) => {}
             (None, _) => {
                 if !self.occurs(a, b, 0) {
                     self.link(a, b)
@@ -448,11 +454,18 @@ impl Solver<'_> {
             }
             // (two instances of one struct that may have an unsized tail, with arguments known to differ
             // (`[&Foo<u8>, &Foo<u64>]` as `[&Foo<dyn Tr>; 2]`, each coerced): not one type, nothing to unify)
-            (Some(Shape::Adt(x, s1, l1)), Some(Shape::Adt(y, s2, l2)))
-                if x == y
-                    && self.prog.unsized_params.contains_key(&x)
-                    && self.adt_vars_of(s1, l1).into_iter().zip(self.adt_vars_of(s2, l2)).any(|(p, q)| self.clash(p, q)) => {}
+            // (or with an argument known to differ, whatever the struct (`let foo = Foo(1u8); takes_foo(foo);` with
+            // `fn takes_foo(_: Foo<i32>)`): the value keeps the type it was made with, and the mismatch is the use's,
+            // where rustc reports it)
             (Some(Shape::Adt(x, s1, l1)), Some(Shape::Adt(y, s2, l2))) if x == y => {
+                // (two instances of one struct that may have an unsized tail, with arguments known to differ
+                // (`[&Foo<u8>, &Foo<u64>]` as `[&Foo<dyn Tr>; 2]`, each coerced): not one type, nothing to unify. Or
+                // of any struct, with an argument certainly another type (`let foo = Foo(1u8); takes_foo(foo);` with
+                // `fn takes_foo(_: Foo<i32>)`): the value keeps the type it was made with, and the mismatch is the
+                // use's, where rustc reports it)
+                if self.adt_args_clash(x, s1, s2, l1.min(l2)) {
+                    return;
+                }
                 // (`S<[T; N]>` passed as `S<[T]>` (a coercion, a struct with an unsized tail): not one type, only
                 // the arguments are unified (an array's element with the slice's))
                 if !self.unsize_pair(a, b) {
@@ -470,6 +483,18 @@ impl Solver<'_> {
             | (Some(Shape::Known(Ty::Struct(i))), Some(Shape::Adt(x, st, l)))
                 if self.prog.base_of(i) == x =>
             {
+                // (an argument already known to be another type (`let foo = Foo(1u8); takes_foo(foo);` with
+                // `fn takes_foo(_: Foo<i32>)`): no one type. The value keeps the type it was made with, and the
+                // mismatch is the use's, where rustc reports it)
+                if !Ty::Struct(i).is_dst_struct() && self.written == 0 {
+                    let prog = self.prog;
+                    for (j, &t) in prog.structs[i as usize].args.iter().enumerate().take(l as usize) {
+                        let r = self.find(self.adt_args[st as usize + j]);
+                        if self.arg_clash((self.shape[r as usize], self.int_lit[r as usize]), (Some(Shape::Known(t)), false)) {
+                            return;
+                        }
+                    }
+                }
                 // 具体型の方を代表にする
                 let (adt_root, known_root) =
                     if matches!(self.shape[a as usize], Some(Shape::Adt(..))) {
@@ -1065,11 +1090,52 @@ impl Solver<'_> {
     /// different structs): what a coercion may join (`&Foo<u8>` and `&Foo<(u16, u32)>`, both to `&Foo<dyn Tr>`)
     fn clash(&mut self, x: u32, y: u32) -> bool {
         let (x, y) = (self.find(x), self.find(y));
-        let scalar = |t: Ty| !matches!(t, Ty::Struct(_) | Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_) | Ty::Array(..) | Ty::Slice(_) | Ty::Assoc(_) | Ty::Param(_) | Ty::Fn(_) | Ty::Dyn(_) | Ty::Never);
         match (self.shape[x as usize], self.shape[y as usize]) {
-            (Some(Shape::Known(a)), Some(Shape::Known(b))) => a != b && (scalar(a) || scalar(b)),
-            (Some(Shape::Known(a)), Some(_)) | (Some(_), Some(Shape::Known(a))) => scalar(a),
+            (Some(Shape::Known(a)), Some(Shape::Known(b))) => a != b && (scalar_ty(a) || scalar_ty(b)),
+            (Some(Shape::Known(a)), Some(_)) | (Some(_), Some(Shape::Known(a))) => scalar_ty(a),
             (Some(Shape::Adt(a, ..)), Some(Shape::Adt(b, ..))) => a != b,
+            _ => false,
+        }
+    }
+
+    /// The arguments s1.. and s2.. (n of them) of two instances of struct x are not one type's: see unify
+    fn adt_args_clash(&mut self, x: u32, s1: u32, s2: u32, n: u32) -> bool {
+        let uns = self.prog.unsized_params.contains_key(&x);
+        if !uns && self.written > 0 {
+            return false;
+        }
+        for j in 0..n {
+            let (p, q) = (self.find(self.adt_args[(s1 + j) as usize]), self.find(self.adt_args[(s2 + j) as usize]));
+            let c = if uns { self.clash(p, q) } else { self.arg_clash((self.shape[p as usize], self.int_lit[p as usize]), (self.shape[q as usize], self.int_lit[q as usize])) };
+            if c {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Two type arguments of one generic type that are certainly not one type: two scalars (`Foo<u8>` and
+    /// `Foo<i32>`), a scalar and a struct, structs of two definitions, an integer literal's and a scalar that is no
+    /// integer or a struct (`Foo<{integer}>` and `Foo<()>`). Not a reference, a box or a pointer and another type:
+    /// inference guesses those (`v.clone()` of a `&Vec<T>` that is not Clone is the reference, `(*p).clone()` of a
+    /// `Box<i32>` the box), and a later use corrects the guess. Each is a representative's shape and whether it is
+    /// an integer literal's
+    fn arg_clash(&self, (x, xi): (Option<Shape>, bool), (y, yi): (Option<Shape>, bool)) -> bool {
+        let scalar = |s: Option<Shape>| matches!(s, Some(Shape::Known(t)) if t != Ty::Never && scalar_ty(t));
+        let is_struct = |s: Option<Shape>| matches!(s, Some(Shape::Known(Ty::Struct(_)) | Shape::Adt(..)));
+        // (an integer literal's type not known yet, and a scalar that is no integer or a struct)
+        let no_int = |s: Option<Shape>| is_struct(s) || matches!(s, Some(Shape::Known(t)) if t != Ty::Never && scalar_ty(t) && !t.is_int());
+        match (x, y) {
+            (None, None) => false,
+            (None, _) => xi && no_int(y),
+            (_, None) => yi && no_int(x),
+            (Some(Shape::Known(a)), Some(Shape::Known(b))) if a == b => false,
+            _ if scalar(x) => scalar(y) || is_struct(y),
+            _ if scalar(y) => is_struct(x),
+            // (structs of two definitions)
+            (Some(Shape::Adt(a, ..)), Some(Shape::Adt(b, ..))) => a != b,
+            (Some(Shape::Adt(a, ..)), Some(Shape::Known(Ty::Struct(i)))) | (Some(Shape::Known(Ty::Struct(i))), Some(Shape::Adt(a, ..))) => self.prog.base_of(i) != a,
+            (Some(Shape::Known(Ty::Struct(i))), Some(Shape::Known(Ty::Struct(j)))) => self.prog.base_of(i) != self.prog.base_of(j),
             _ => false,
         }
     }
@@ -1315,4 +1381,10 @@ pub fn shape_tag(s: &Option<Shape>) -> u8 {
         Some(Shape::Clo(..)) => 7,
         Some(Shape::Bx(_)) => 8,
     }
+}
+
+/// A type that is no other type whatever its parameters (an integer, `bool`, `()`): not a struct, reference, pointer
+/// or other type that a coercion or a type parameter may stand for
+fn scalar_ty(t: Ty) -> bool {
+    !matches!(t, Ty::Struct(_) | Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_) | Ty::Array(..) | Ty::Slice(_) | Ty::Assoc(_) | Ty::Param(_) | Ty::Fn(_) | Ty::Dyn(_) | Ty::Never)
 }

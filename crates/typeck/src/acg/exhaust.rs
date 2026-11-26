@@ -19,6 +19,9 @@ enum N {
     /// integer's in decimal), None for a const's
     Lit(Option<String>),
     Or(Vec<N>),
+    /// a slice pattern of `[T]`: its elements, and with a `..` the elements after it (`[a, .., z]`: [a], Some([z])).
+    /// Boxed, so N stays as small as before (rows of it are copied and grown in every match's check)
+    Slice(Box<(Vec<N>, Option<Vec<N>>)>),
 }
 
 /// Gave up (a pattern or type the check does not model)
@@ -57,7 +60,60 @@ impl Cx<'_> {
             expand_or(r, &mut rs);
         }
         let t = tys[0];
+        // (a slice's column: one per length up to one past the longest fixed one and at least the longest prefix and
+        // suffix of a `..` one; that last length stands for every longer one)
+        if let Ty::Slice(e) = Self::strip_ref(t) {
+            if matches!(q[0], N::Slice(..)) || rs.iter().any(|r| matches!(r[0], N::Slice(..))) {
+                let mut fixed = 0usize;
+                let mut var = 0usize;
+                for h in rs.iter().map(|r| &r[0]).chain(std::iter::once(&q[0])) {
+                    match h {
+                        N::Slice(sl) => match &**sl {
+                            (v, None) => fixed = fixed.max(v.len() + 1),
+                            (a, Some(b)) => var = var.max(a.len() + b.len()),
+                        },
+                        N::Wild => {}
+                        _ => return Err(Unknown),
+                    }
+                }
+                let top = fixed.max(var);
+                let expand = |h: &N, k: usize| -> Option<Vec<N>> {
+                    match h {
+                        N::Wild => Some(vec![N::Wild; k]),
+                        N::Slice(sl) => match &**sl {
+                            (v, None) => (v.len() == k).then(|| v.clone()),
+                            (a, Some(b)) => (a.len() + b.len() <= k).then(|| {
+                                let mut out = a.clone();
+                                out.extend(std::iter::repeat_n(N::Wild, k - a.len() - b.len()));
+                                out.extend_from_slice(b);
+                                out
+                            }),
+                        },
+                        _ => None,
+                    }
+                };
+                for k in 0..=top {
+                    let Some(mut q2) = expand(&q[0], k) else { continue };
+                    q2.extend_from_slice(&q[1..]);
+                    let spec: Vec<Vec<N>> = rs
+                        .iter()
+                        .filter_map(|r| {
+                            let mut x = expand(&r[0], k)?;
+                            x.extend_from_slice(&r[1..]);
+                            Some(x)
+                        })
+                        .collect();
+                    let mut ntys = vec![*e; k];
+                    ntys.extend_from_slice(&tys[1..]);
+                    if self.useful_q(&spec, &q2, &ntys, work)? {
+                        return Ok(true);
+                    }
+                }
+                return Ok(false);
+            }
+        }
         match &q[0] {
+            N::Slice(..) => Err(Unknown),
             N::Or(alts) => {
                 for a in alts {
                     let mut q2 = vec![a.clone()];
@@ -253,7 +309,7 @@ impl Cx<'_> {
                 match (t0, text) {
                     (Ty::Bool, "false") => N::Ctor(0, vec![]),
                     (Ty::Bool, "true") => N::Ctor(1, vec![]),
-                    (t, s) if self.ctors(t).is_none() => N::Lit(Some(lit_value(s))),
+                    (t, s) if self.ctors(t).is_none() => N::Lit(Some(wrap_unsigned(lit_value(s), t))),
                     _ => return Err(Unknown),
                 }
             }
@@ -305,7 +361,20 @@ impl Cx<'_> {
                 let v: Vec<Pat> = v.iter().map(|q| if matches!(q, Pat::Ident(_, _, _, Some(sub)) if matches!(**sub, Pat::Rest)) { Pat::Rest } else { q.clone() }).collect();
                 self.fields_positional(&v, &cs[0].1, 0, depth)?
             }
-            // (ranges, slices, macros: not modelled)
+            // (`[a, b]` / `[x, .., z]` / `[x, rest @ ..]` against a slice: a length, or a least length)
+            Pat::Slice(v) if matches!(t0, Ty::Slice(_)) => {
+                let Ty::Slice(e) = t0 else { return Err(Unknown) };
+                let is_rest = |q: &Pat| matches!(q, Pat::Rest) || matches!(q, Pat::Ident(_, _, _, Some(sub)) if matches!(**sub, Pat::Rest));
+                match v.iter().position(is_rest) {
+                    Some(r) => {
+                        let pre: Vec<N> = v[..r].iter().map(|q| self.norm(q, *e, depth + 1)).collect::<Result<_, _>>()?;
+                        let post: Vec<N> = v[r + 1..].iter().map(|q| self.norm(q, *e, depth + 1)).collect::<Result<_, _>>()?;
+                        N::Slice(Box::new((pre, Some(post))))
+                    }
+                    None => N::Slice(Box::new((v.iter().map(|q| self.norm(q, *e, depth + 1)).collect::<Result<_, _>>()?, None))),
+                }
+            }
+            // (ranges, macros: not modelled)
             _ => return Err(Unknown),
         })
     }
@@ -355,6 +424,10 @@ impl Cx<'_> {
             expand_or(r, &mut rs);
         }
         let t = tys[0];
+        // (slices: the reachability of arms (useful_q) reads them, not the witnesses of E0004)
+        if rs.iter().any(|r| matches!(r[0], N::Slice(..))) {
+            return Err(Unknown);
+        }
         let ctors = self.ctors(t);
         let heads: Vec<usize> = rs.iter().filter_map(|r| if let N::Ctor(c, _) = &r[0] { Some(*c) } else { None }).collect();
         // (constructors that cannot have a value (`V(!)`, an empty enum's) need no arm)
@@ -435,6 +508,19 @@ fn show(name: &str, args: &[String], tuple: bool) -> String {
         return if tuple { "()".into() } else { name.to_string() };
     }
     format!("{name}({})", args.join(", "))
+}
+
+/// an unsigned integer literal's value as the type holds it: `256` of a `u8` is `0`, as rustc compares patterns (a
+/// literal out of the type's range is the overflowing_literals lint, which a crate may allow)
+fn wrap_unsigned(v: String, t: Ty) -> String {
+    let w = t.bits();
+    if !matches!(t, Ty::U8 | Ty::U16 | Ty::U32 | Ty::U64 | Ty::Usize) || w >= 128 {
+        return v;
+    }
+    match v.parse::<u128>() {
+        Ok(n) => (n & ((1u128 << w) - 1)).to_string(),
+        Err(_) => v,
+    }
 }
 
 /// a literal pattern's value for telling literals apart: an integer's in decimal (`0x2a` is `42`), else its text

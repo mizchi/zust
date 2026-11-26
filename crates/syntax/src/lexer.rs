@@ -4320,6 +4320,62 @@ fn in_macro_args(s: &[u8], p: usize) -> bool {
     false
 }
 
+/// An outer doc comment the source ends in, with only whitespace and plain comments after it: rustc's "expected item
+/// after doc comment", at the last doc comment (`///`, not `////`; or a `/** .. */`). Read from the source as written,
+/// after its last token: the expansion takes `macro_rules!` definitions out of the text, which leaves their doc comments last
+pub fn doc_at_end(src: &str) -> Option<String> {
+    // (only a source whose last line holds a comment: the rest end in a token)
+    let t = src.trim_end();
+    let last = &t[t.rfind('\n').map_or(0, |k| k + 1)..];
+    if !last.contains("//") && !t.ends_with("*/") {
+        return None;
+    }
+    // (after the last token there are only whitespace and comments: read them as comments, whole, so a `/**` inside
+    // a line comment or a block comment is not an opener; a plain comment after the doc is whitespace)
+    let s = src.as_bytes();
+    let n = s.len();
+    let mut i = tokenize(s).last().map_or(0, |t| t.2);
+    let mut doc = None;
+    while i < n {
+        if s[i].is_ascii_whitespace() {
+            i += 1;
+        } else if s[i..].starts_with(b"//") {
+            let e = s[i..].iter().position(|&c| c == b'\n').map_or(n, |k| i + k);
+            if s[i..].starts_with(b"///") && !s[i..].starts_with(b"////") {
+                doc = Some(i);
+            }
+            i = e;
+        } else if s[i..].starts_with(b"/*") {
+            let (b, mut d) = (i, 0u32);
+            while i < n {
+                if s[i..].starts_with(b"/*") {
+                    d += 1;
+                    i += 2;
+                } else if s[i..].starts_with(b"*/") {
+                    d -= 1;
+                    i += 2;
+                    if d == 0 {
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            let c = &s[b..i];
+            if c.starts_with(b"/**") && !c.starts_with(b"/***") && c != b"/**/" {
+                doc = Some(b);
+            }
+        } else {
+            return None;
+        }
+    }
+    doc.map(|at| {
+        let l = 1 + src[..at].matches('\n').count();
+        let c = at - src[..at].rfind('\n').map_or(0, |k| k + 1) + 1;
+        format!("{l}:{c}: expected item after doc comment")
+    })
+}
+
 /// E0585: an outer doc comment right before `}` / `;` / `,` (outside a macro's arguments) documents nothing
 #[inline(never)]
 fn dangling_docs(s: &[u8], docs: Vec<(usize, usize)>) -> Result<(), String> {
