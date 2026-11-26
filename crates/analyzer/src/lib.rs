@@ -845,15 +845,24 @@ fn skip_lib(rel: &str) -> bool {
     false
 }
 
-/// (line, UTF-16 column) → byte position
+/// (line, UTF-16 column) → byte position. A line ends at `\n`, `\r\n` or a lone `\r`, as LSP counts them; a column
+/// past the end of its line is the line's end, before its terminator (None: no such line)
 fn offset(text: &str, line: u32, ch: u32) -> Option<usize> {
+    let b = text.as_bytes();
+    // (most texts have no `\r`: their line ends are found with `find`)
+    let cr = text.contains('\r');
     let mut at = 0usize;
     for _ in 0..line {
-        at += text[at..].find('\n')? + 1;
+        if cr {
+            let i = at + b[at..].iter().position(|&c| c == b'\n' || c == b'\r')?;
+            at = if b[i] == b'\r' && b.get(i + 1) == Some(&b'\n') { i + 2 } else { i + 1 };
+        } else {
+            at += text[at..].find('\n')? + 1;
+        }
     }
     let mut col = 0u32;
     for (i, c) in text[at..].char_indices() {
-        if col >= ch || c == '\n' {
+        if col >= ch || c == '\n' || c == '\r' {
             return Some(at + i);
         }
         col += c.len_utf16() as u32;
@@ -1270,4 +1279,30 @@ fn mod_decls(text: &str) -> Vec<(Vec<String>, String, Option<String>)> {
         k += 1;
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::offset;
+
+    /// Lines end at `\n`, `\r\n` and a lone `\r`; a column past a line's end stops before its terminator (all of
+    /// `\r\n`); columns are UTF-16 units
+    #[test]
+    fn offsets_of_positions() {
+        let lf = "fn a() {}\nfn b() {}\n";
+        assert_eq!(offset(lf, 1, 3), Some(13));
+        assert_eq!(offset(lf, 0, 99), Some(9));
+        assert_eq!(offset(lf, 2, 0), Some(lf.len()));
+        assert_eq!(offset(lf, 3, 0), None);
+        let crlf = "fn a() {}\r\nfn b() {}\r\n";
+        assert_eq!(offset(crlf, 1, 3), Some(14));
+        assert_eq!(offset(crlf, 0, 99), Some(9));
+        assert_eq!(offset(crlf, 2, 0), Some(crlf.len()));
+        let cr = "fn a() {}\rfn b() {}";
+        assert_eq!(offset(cr, 1, 3), Some(13));
+        assert_eq!(offset(cr, 0, 99), Some(9));
+        // (`𝄞` is two UTF-16 units and four bytes)
+        let wide = "let s = \"𝄞x\";\r\n";
+        assert_eq!(offset(wide, 0, 11), Some(13));
+    }
 }

@@ -377,6 +377,19 @@ fn dead_code_fields_variants_members_aliases() {
     assert_eq!(first(ok), None);
 }
 
+#[test]
+fn a_doc_comment_a_crate_file_ends_in() {
+    // (rustc 1.100: the same error for a crate built from its files, at the file's comment)
+    let dir = std::env::temp_dir().join(format!("zust-doc-at-end-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("main.rs");
+    std::fs::write(&f, "fn main() {}\n/// hi\n").unwrap();
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_zustc")).arg("check").arg(&f).output().unwrap();
+    let err = String::from_utf8_lossy(&o.stderr).into_owned();
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(err.contains(":2:1: expected item after doc comment"), "{err}");
+}
+
 /// `#![deny(unreachable_code)]` inside expressions: an argument after one that diverges, a call whose last argument
 /// diverges, an operation whose operand diverges, and the statement after a `match` on an empty enum or an
 /// `if`/`else` whose branches both diverge; not the right of `||`, which may not run
@@ -1714,6 +1727,36 @@ fn errors_at_their_statement() {
     assert_eq!(first(&format!("{u}fn f(U {{ a }}: U) -> u8 {{\n    a\n}}\nfn main() {{}}\n")), at(2, "access to union field is unsafe and requires unsafe function or block (E0133)"), "union parameter");
     assert_eq!(first(&format!("{u}fn f(u: U) {{\n    let U {{ a, b }} = u;\n}}\nfn main() {{}}\n")), at(3, "union patterns should have exactly one field"), "two fields");
     assert_eq!(first(&format!("{u}fn f(u: U) {{\n    let U {{ a: _ }} = u;\n    unsafe {{ let U {{ b }} = u; }}\n}}\nfn main() {{}}\n")), None, "wildcard and unsafe");
+}
+
+#[test]
+fn bare_return_at_its_keyword() {
+    // (E0069 at the `return`, also where it has no statement of its own: a match arm, also of a value or in a
+    // closure, an argument (issue #177); the statement forms stay where they were, and a `return` with a value is
+    // blamed at the value. Each expected line, column and message is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e0069 = "`return;` in a function whose return type is not `()` (E0069)";
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    for (src, line, col) in [
+        ("fn c(n: u8) -> u8 {\n    match n {\n        0 => return,\n        k => k,\n    }\n}\nfn main() { c(0); }\n", 3, 14),
+        ("fn c(n: Option<u8>) -> u8 {\n    let x = match n { Some(k) => k, None => return };\n    x\n}\nfn main() { c(None); }\n", 2, 45),
+        ("fn c(n: u8) -> u8 {\n    let _ = Some(return);\n    n\n}\nfn main() { c(0); }\n", 2, 18),
+        ("fn c(n: u8) -> ! {\n    match n {\n        0 => return,\n        _ => loop {},\n    }\n}\nfn main() { c(0); }\n", 3, 14),
+        ("fn c(n: u8) -> u8 {\n    let f = || -> u8 { match n { 0 => return, k => k } };\n    f()\n}\nfn main() { c(0); }\n", 2, 39),
+        // (a statement's own `return`, a block's tail: where they were)
+        ("fn c(b: bool) -> u8 {\n    let x = if b { return } else { 1 };\n    x\n}\nfn main() { c(true); }\n", 2, 20),
+        ("fn c(b: bool) -> u8 {\n    if b { return; }\n    1\n}\nfn main() { c(true); }\n", 2, 12),
+        ("fn c(n: Option<u8>) -> u8 {\n    let Some(k) = n else { return };\n    k\n}\nfn main() { c(None); }\n", 2, 28),
+        ("fn c() -> u8 {\n    loop { if true { return; } }\n}\nfn main() { c(); }\n", 2, 22),
+        ("fn c() -> u8 {\n    let x = 1;\n    return;\n}\nfn main() { c(); }\n", 3, 5),
+    ] {
+        assert_eq!(first(src), at(line, col, e0069), "{src}");
+    }
+    let src = "fn c(n: u8) -> u8 {\n    match n {\n        0 => return \"x\",\n        k => k,\n    }\n}\nfn main() { c(0); }\n";
+    assert_eq!(first(src), at(3, 21, "mismatched types: expected `u8`, found `&str`"), "with a value");
 }
 
 /// An impl is for a type only when the type meets the impl's bounds, its where clauses' too (issue #2): nested goals of
@@ -3112,6 +3155,96 @@ fn extern_statics_in_a_static_value() {
     assert_eq!(first("extern \"C\" {\n    static Q: u32;\n}\npub static B: u32 = *&Q;\nfn main() {}\n").map(|d| d.0), Some(4), "a read through its address");
 }
 
+/// #176: an overflow or a division by zero in a constant is rustc's E0080, with its text, at the operation (its
+/// parentheses included): each constant's, used or not, not only the first one a fn reads; one that reads such a
+/// constant has no error of its own
+#[test]
+fn const_overflow_and_division_by_zero_are_e0080_at_the_operation() {
+    let all = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, edition: 2024, ..Options::default() });
+        s.check(src).into_iter().map(|d| (d.line, d.col, d.msg)).collect::<Vec<_>>()
+    };
+    let e = |l: usize, c: usize, m: &str| (l, c, format!("{m} (E0080)"));
+    let over = |l: usize, c: usize, op: &str| e(l, c, &format!("attempt to compute `{op}`, which would overflow"));
+    // (rustc 1.97's errors and places)
+    assert_eq!(all("const A: u8 = u8::MAX + 1;\nconst B: i32 = 1 / 0;\nfn main() { let _ = (A, B); }\n"), vec![over(1, 15, "u8::MAX + 1_u8"), e(2, 16, "attempt to divide `1_i32` by zero")], "the issue's");
+    let src = "const C: u8 = 200 + 100;\nconst D: i32 = i32::MIN / -1;\nconst E: u32 = 5 % 0;\nconst F: i8 = 0 - 1 - 127 - 1;\nfn main() { let _ = (C, D, E, F); }\n";
+    assert_eq!(all(src), vec![over(1, 15, "200_u8 + 100_u8"), over(2, 16, "i32::MIN / -1_i32"), e(3, 16, "attempt to calculate the remainder of `5_u32` with a divisor of zero"), over(4, 15, "i8::MIN - 1_i8")]);
+    // (unused; MIN and MAX by name, usize's too; u128's MAX; a shift's right operand of its own type; `-`)
+    let src = "const A: u8 = 0 - 255;\nconst B: usize = usize::MAX + 1;\nconst C: u128 = u128::MAX + 1;\nconst D: i16 = -5 / 0;\nconst E: u8 = 1 << 9;\nconst F: u8 = 1u8 << 9u32;\nconst G: i32 = 1 >> 40;\nconst H: i8 = -i8::MIN;\nstatic S: u32 = (1 + 2) * u32::MAX;\nfn main() {}\n";
+    assert_eq!(
+        all(src),
+        vec![
+            over(1, 15, "0_u8 - u8::MAX"),
+            over(2, 18, "usize::MAX + 1_usize"),
+            over(3, 17, "u128::MAX + 1_u128"),
+            e(4, 16, "attempt to divide `-5_i16` by zero"),
+            e(5, 15, "attempt to shift left by `9_i32`, which would overflow"),
+            e(6, 15, "attempt to shift left by `9_u32`, which would overflow"),
+            e(7, 16, "attempt to shift right by `40_i32`, which would overflow"),
+            e(8, 15, "attempt to negate `i8::MIN`, which would overflow"),
+            over(9, 17, "3_u32 * u32::MAX"),
+        ]
+    );
+    // (inside parentheses: at the `(` when they hold just the operation, not a call's; over lines; in a module and a
+    // fn body)
+    let src = "const A: u8 = 1 + (255 + 1);\nconst B: u8 = ((255 + 1));\nconst C: u8 = (255 + 1 + 0);\nconst D: u8 = id(255 + 1);\nconst E: u16 =   3\n    / 0;\nconst fn id(x: u8) -> u8 { x }\nmod m {\n    pub const Z: i32 = 1 / 0;\n}\nfn main() {\n    const V: i16 = i16::MAX * 2;\n}\n";
+    assert_eq!(
+        all(src),
+        vec![over(1, 19, "u8::MAX + 1_u8"), over(2, 15, "u8::MAX + 1_u8"), over(3, 16, "u8::MAX + 1_u8"), over(4, 18, "u8::MAX + 1_u8"), e(5, 18, "attempt to divide `3_u16` by zero"), e(9, 24, "attempt to divide `1_i32` by zero"), over(12, 20, "i16::MAX * 2_i16")]
+    );
+    // (in a const fn: at the call; `<<` keeps the bits, so `-` overflows)
+    let src = "const fn f(x: u8) -> u8 {\n    x + 1\n}\nconst CF: u8 = 1 + f(255);\nconst N: i32 = -(1 << 31);\nconst OK1: u64 = 1 << 40;\nconst OK2: u8 = !(1 << 7);\nconst OK3: u8 = b'z' - b'a' + f(3);\nfn main() {}\n";
+    assert_eq!(all(src), vec![over(4, 20, "u8::MAX + 1_u8"), e(5, 16, "attempt to negate `i32::MIN`, which would overflow")]);
+    // (an initializer with a `;` in a literal or a comment)
+    let src = "const A: u8 = b';' + 255;\nconst B: u8 = 255 /* ; */ + 1;\nconst C: u8 = 255 // ;\n    + 1;\nconst D: u8 = '\\'' as u8 + 255;\nconst E: u8 = b\"a;b\"[1] + 255;\nfn main() {}\n";
+    assert_eq!(all(src), vec![over(1, 15, "59_u8 + u8::MAX"), over(2, 15, "u8::MAX + 1_u8"), over(3, 15, "u8::MAX + 1_u8"), over(5, 15, "39_u8 + u8::MAX"), over(6, 15, "59_u8 + u8::MAX")]);
+    // (in a condition, an index, `&&` / `||`, and an array, a tuple or a struct written in the initializer)
+    let src = "const C: u8 = if 1u8 / 0 == 0 { 1 } else { 2 };\nconst D: u8 = [1u8, 2][(255u8 + 1) as usize];\nconst E: bool = 1u8 / 0 == 0 && true;\nconst F: bool = false || 255u8 + 1 == 0;\nconst G: u8 = [255u8 + 1][0];\nconst H: u8 = (255u8 + 1,).0;\nstruct S { x: u8 }\nconst I: u8 = S { x: 255u8 + 1 }.x;\nfn main() {}\n";
+    let div = |l: usize, c: usize| e(l, c, "attempt to divide `1_u8` by zero");
+    let max1 = |l: usize, c: usize| over(l, c, "u8::MAX + 1_u8");
+    assert_eq!(all(src), vec![div(1, 18), max1(2, 24), div(3, 17), max1(4, 26), max1(5, 16), max1(6, 16), max1(8, 22)]);
+    // (one zustc cannot place is still an error, at its constant's line: through an associated constant (rustc's is
+    // at that constant), from a macro (rustc's is in its body))
+    let src = "struct T;\nimpl T {\n    const W: u8 = 0 - 1;\n}\nconst X: u8 = T::W + 0;\nmacro_rules! k {\n    ($n:ident) => {\n        const $n: u8 = 255 + 1;\n    };\n}\nk!(M);\nfn main() {}\n";
+    let d = all(src);
+    assert_eq!(d.iter().map(|d| d.0).collect::<Vec<_>>(), vec![5, 11], "{d:?}");
+    assert!(d[0].2.ends_with("attempt to compute `0_u8 - 1_u8`, which would overflow (E0080)") && d[1].2.ends_with("attempt to compute `u8::MAX + 1_u8`, which would overflow (E0080)"), "{d:?}");
+    // (not when another constant has the same error placed and this one does not read it: A's and T::W's (at X's
+    // line, zustc's place; rustc's is at W, 4:19))
+    let src = "const A: u8 = 200 + 100;\nstruct T;\nimpl T {\n    const W: u8 = 200 + 100;\n}\nconst X: u8 = T::W + 0;\nfn main() {}\n";
+    assert_eq!(all(src), vec![over(1, 15, "200_u8 + 100_u8"), (6, 1, "in constant `X`: attempt to compute `200_u8 + 100_u8`, which would overflow (E0080)".to_string())]);
+    // (one a macro writes that reads a constant whose error is placed: that one's only)
+    let src = "const Y: u8 = 200 + 100;\nmacro_rules! k {\n    ($n:ident) => {\n        const $n: u8 = Y + 0;\n    };\n}\nk!(X);\nfn main() {}\n";
+    assert_eq!(all(src), vec![over(1, 15, "200_u8 + 100_u8")]);
+    // (through `&`, `==`, `^` / `|` and `!` of an associated constant that fails: at each one's line (zustc's place;
+    // rustc's is at W, 3:19, with a note at each))
+    let src = "struct T;\nimpl T {\n    const W: u8 = 255 + 1;\n}\nconst X: u8 = T::W & 1;\nconst B: bool = T::W == 0;\nconst C: u8 = T::W ^ 1 | 0;\nconst D: u8 = !T::W;\nfn main() {}\n";
+    let at = |l: usize, n: &str| (l, 1, format!("in constant `{n}`: attempt to compute `u8::MAX + 1_u8`, which would overflow (E0080)"));
+    assert_eq!(all(src), vec![at(5, "X"), at(6, "B"), at(7, "C"), at(8, "D")]);
+    // (the declaration, not one in a comment or a string)
+    let src = "// const A: u8 = 1 / 0;\n/* const A: u8 = 1 / 0; */\nconst S: &str = \"const A: u8 = 1 / 0;\";\nconst A: u8 = 255 + 1;\nfn main() {}\n";
+    assert_eq!(all(src), vec![max1(4, 15)]);
+    // (`pow` and `abs`: the operation in core that overflows, at the call)
+    let src = "const P: u8 = 2u8.pow(8);\nconst Q: i8 = i8::MIN.abs();\nconst V: i32 = (3i32.pow(21));\nconst W: u64 = 10u64.pow(20);\nconst X: i16 = (-2i16).pow(15) - 1;\nconst Y: u8 = 3u8.pow(5) + 2u8.pow(7);\nconst OK: u32 = 2u32.pow(31) + 7i8.abs() as u32;\nfn main() {}\n";
+    assert_eq!(
+        all(src),
+        vec![
+            over(1, 15, "16_u8 * 16_u8"),
+            e(2, 15, "attempt to negate `i8::MIN`, which would overflow"),
+            over(3, 16, "243_i32 * 43046721_i32"),
+            over(4, 16, "10000_u64 * 10000000000000000_u64"),
+            over(5, 16, "i16::MIN - 1_i16"),
+            over(6, 15, "243_u8 + 128_u8"),
+        ]
+    );
+    // (a constant that reads one: rustc's error is the one it reads, used or not)
+    let src = "const Y: u8 = 200 + 100;\nconst X: u8 = Y + 0;\nfn main() { let _ = X; }\n";
+    assert_eq!(all(src), vec![over(1, 15, "200_u8 + 100_u8")]);
+    assert_eq!(all("const Y: u8 = 200 + 100;\nconst X: u8 = Y + 0;\nfn main() {}\n"), vec![over(1, 15, "200_u8 + 100_u8")]);
+    assert_eq!(all("const A: u8 = 255;\nconst B: i8 = -128;\nconst C: u32 = !0 >> 1;\nconst D: usize = usize::MAX / 2 + 1;\nfn main() { let _ = (A, B, C, D); }\n"), vec![], "no overflow");
+}
+
 #[test]
 fn macro_parameters_no_matcher_binds() {
     // (rustc 1.100, where the rule is used: at the `$name` in its body; an inner `macro_rules!`'s own `$x` is fine)
@@ -3175,6 +3308,200 @@ fn macro_matchers_rustc_rejects_what_follows_a_fragment_in_and_names_bound_twice
     assert_eq!(first("macro_rules! m {\n    ($a:ident) => {};\n    ($a:path) => {};\n}\nfn main() {}\n", 2021), None);
 }
 
+#[test]
+fn macro_matchers_with_no_fragment_no_repetition_operator_or_an_empty_repetition() {
+    // (rustc 1.100, at its line and column: a `$name` with no fragment specifier, at the `$`; a `$( .. )` with no `*` /
+    // `+` / `?` (a closing delimiter after it is no separator), and a repetition with no separator that can match
+    // nothing, at the `(` of `$(`. `$crate` and a separator before the operator are fine)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    assert_eq!(first("macro_rules! m {\n    ($a) => {};\n}\nfn main() {}\n"), e(2, 6, "missing fragment specifier"));
+    assert_eq!(first("macro_rules! m {\n    (($($b:tt))*) => {};\n}\nfn main() {}\n"), e(2, 8, "expected one of: `*`, `+`, or `?`"));
+    assert_eq!(first("macro_rules! m {\n    ($()*) => {};\n}\nfn main() {}\n"), e(2, 7, "repetition matches empty token tree"));
+    assert_eq!(first("macro_rules! m {\n    ($($v:vis)*) => {};\n}\nfn main() {}\n"), e(2, 7, "repetition matches empty token tree"));
+    assert_eq!(first("macro_rules! m {\n    ($($a:ident),* $crate) => {};\n    ($($x:tt);* ) => {};\n}\nfn main() {}\n"), None);
+    // (a nested repetition separated by `::` can match nothing too; one that must match a token is fine)
+    assert_eq!(first("macro_rules! m { ($($($i:ident)::*)*) => {} }\nfn main() {}\n"), e(1, 20, "repetition matches empty token tree"));
+    assert_eq!(first("macro_rules! m { ($($($i:ident)::+)*) => {} }\nfn main() {}\n"), None);
+}
+
+#[test]
+fn a_doc_comment_the_source_ends_in() {
+    // (rustc 1.100: "expected item after doc comment" at the comment; one before an item documents it)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize| Some((l, c, "expected item after doc comment".to_string()));
+    assert_eq!(first("fn main() {}\n/// hi\n"), e(2, 1));
+    // (the last of several, past plain comments; a block doc comment at its start)
+    assert_eq!(first("fn main() {}\n/// a\n/// b\n// plain\n"), e(3, 1));
+    assert_eq!(first("fn main() {}\n/** a */\n"), e(2, 1));
+    assert_eq!(first("fn main() {}\n//// four slashes are a plain comment\n"), None);
+    assert_eq!(first("fn main() {}\n/// hi\nfn f() {}\n"), None);
+    // (a plain block comment after the doc is whitespace; a `/**` inside a line comment or a block comment opens no doc)
+    assert_eq!(first("fn main() {}\n/// hi\n/* plain */\n"), e(2, 1));
+    assert_eq!(first("fn main() {} // /** text */\n"), None);
+    assert_eq!(first("fn main() {}\n/* outer /** nested */ */\n"), None);
+    assert_eq!(first("fn main() {}\nconst S: &str = \"/// in a string\";\n"), None);
+    // (the doc comment of a `macro_rules!` the source ends in, which the expansion takes out of the text: cfg-if's)
+    assert_eq!(first("fn main() {}\n/// The macro.\n#[macro_export]\nmacro_rules! m { () => {} }\n"), None);
+}
+
+#[test]
+fn types_that_nothing_declares_in_impl_headers_and_type_aliases() {
+    // (rustc 1.100's E0412 "cannot find type `B` in this scope": at the impl header (not a member that uses it), at a
+    // type alias's right-hand side (not the fn that names the alias), and in an impl with no members)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |src: &str| first(src).map(|e| e.0);
+    assert_eq!(at("struct Core<T>(T);\nimpl Core<XXX> {\n    pub fn spawn(self) {}\n}\nfn main() {}\n"), Some(2));
+    assert_eq!(at("type Foo = Bar;\nfn check(f: impl FnOnce(Foo), val: Foo) {\n    f(val);\n}\nfn main() {}\n"), Some(1));
+    assert_eq!(first("struct A;\nimpl A<B> {}\nfn main() {}\n"), Some((2, "cannot find type `B` in this scope (E0412)".to_string())));
+    // (not a lifetime of a higher-ranked binder, or a fn pointer's parameter name)
+    assert_eq!(first("trait Tr {}\nimpl<F> Tr for (F, for<'A> fn(&'A ())) {}\nfn main() {}\n"), None);
+    assert_eq!(first("trait Local {}\nimpl Local for fn(Arg: u8) {}\nfn main() {}\n"), None);
+    // (not a const generic argument's const, std's types and traits, an impl's own parameters, or `->` in a bound)
+    let ok = "struct V<const N: usize>;\nconst L: usize = 2;\ntrait Tr {}\nimpl Tr for V<L> {}\nimpl<T> Tr for Box<T> {}\n\
+              impl<'a, F: Fn(&'a i32) -> &'a i32> Tr for Option<F> {}\nimpl<'a, A> Tr for &'a (dyn for<'x> Fn(&'x A) + 'a) {}\nfn main() {}\n";
+    assert_eq!(first(ok), None);
+}
+
+#[test]
+fn a_name_a_macro_argument_writes_is_reported_at_the_argument() {
+    // (rustc 1.100: "cannot find value `x` in this scope" at the `x` the call passes, not at the call)
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+    let d = s.check("macro_rules! foo {\n    ($id: ident) => {\n        $id\n    }\n}\nfn main() {\n    foo!(\n        x\n    );\n}\n");
+    assert_eq!(d.first().map(|d| (d.line, d.col)), Some((8, 9)), "{d:?}");
+    // (by tokens: a `)` in a string argument closes nothing)
+    let d = s.check("macro_rules! m { ($s:literal, $id:ident) => { $id } }\nfn main() {\n    m!(\")\",\n        x\n    );\n}\n");
+    assert_eq!(d.first().map(|d| (d.line, d.col)), Some((4, 9)), "{d:?}");
+    // (a name the definition writes itself may come from its body: it stays at the call)
+    let d = s.check("macro_rules! m {\n    ($unused:ident) => { x };\n}\nfn main() {\n    m!(\n        x\n    );\n}\n");
+    assert_eq!(d.first().map(|d| (d.line, d.col)), Some((5, 5)), "{d:?}");
+}
+
+#[test]
+fn literal_patterns_wrap_to_the_scrutinee_type() {
+    // (rustc 1.100: with overflowing_literals allowed, `256` and `512` of a `u8` are both 0, so the second arm is
+    // unreachable under deny(unreachable_patterns))
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+    let d = s.check("#![allow(overflowing_literals)]\n#![deny(unreachable_patterns)]\nfn t(v: u8) {\n    match v {\n        256 => {}\n        512 => {}\n        _ => {}\n    }\n}\nfn main() { t(1); }\n");
+    assert_eq!(d.first().map(|d| (d.line, d.msg.as_str())), Some((6, "unreachable pattern")), "{d:?}");
+}
+
+#[test]
+fn no_rules_expected_at_the_furthest_token_a_rule_reaches() {
+    // (rustc 1.100: "no rules expected `!`" at the `//!` a `(#[$m:meta])` rule cannot take, not at the call)
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+    let d = s.check("macro_rules! outer {\n    (#[$outer:meta]) => ()\n}\nouter! {\n    //! Inner\n}\nfn main() {}\n");
+    assert_eq!(d.first().map(|d| (d.line, d.msg.as_str())), Some((5, "no rules expected `!`")), "{d:?}");
+}
+
+#[test]
+fn unreachable_slice_patterns() {
+    // (rustc 1.100 under deny(unreachable_patterns): a slice pattern of `[T]` covered by the arms before it, by length
+    // and elements; `[x, ..]` covers every length from 1 on)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let un = |l: usize| Some((l, "unreachable pattern".to_string()));
+    assert_eq!(first("#![deny(unreachable_patterns)]\nfn f(s: &[bool]) {\n    match s {\n        [true, ..] => {}\n        [true] => {}\n        [..] => {}\n    }\n}\nfn main() { f(&[]); }\n"), un(5));
+    assert_eq!(first("#![deny(unreachable_patterns)]\nfn f(s: &[u8]) {\n    match *s {\n        [] => {}\n        [_, ..] => {}\n        _ => {}\n    }\n}\nfn main() { f(&[]); }\n"), un(6));
+    assert_eq!(first("#![deny(unreachable_patterns)]\nfn f(s: &[u8]) {\n    match s {\n        [1, ..] => {}\n        [.., 2] => {}\n        [_, _] => {}\n        _ => {}\n    }\n}\nfn main() { f(&[]); }\n"), None);
+}
+
+#[test]
+fn a_macro_export_beside_a_reexport_of_std_s_macro() {
+    // (rustc 1.100: `pub use std::panic;` brings the macro `panic!` too, so a `#[macro_export] macro_rules! panic` is
+    // E0255 at the macro; a re-export of a fn or a module of another name is no conflict)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(first("pub use std::panic;\n\n#[macro_export]\nmacro_rules! panic { () => {} }\n\nfn main() {}\n"), Some((4, 1, "the name `panic` is defined multiple times (E0255)".to_string())));
+    assert_eq!(first("pub use std::mem::swap;\n#[macro_export]\nmacro_rules! swap { () => {} }\nfn main() {}\n"), None);
+}
+
+#[test]
+fn use_paths_with_a_lone_colon_or_a_bad_token_in_a_list() {
+    // (rustc 1.100, at its line and column: `use std:fs::File;` is "expected `::`, found `:`" at the `:`, and
+    // `use x::{A. B};` "expected one of `,`, `::`, `as`, or `}`, found `.`" at the `.`)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(first("use std:fs::File;\nfn main() {}\n"), Some((1, 8, "expected `::`, found `:`".to_string())));
+    assert_eq!(first("pub mod x {\n    pub struct A;\n    pub struct B;\n}\nuse x::{A. B};\nfn main() {}\n"), Some((5, 10, "expected one of `,`, `::`, `as`, or `}`, found `.`".to_string())));
+    assert_eq!(first("pub mod x {\n    pub mod y { pub struct A; }\n}\nuse x::{y::A, y::{self}};\nuse std::fmt::{self, Write as _};\nfn main() {}\n"), None);
+}
+
+#[test]
+fn a_binding_mode_shorthand_with_a_pattern_and_a_dollar_bracket_in_a_macro_body() {
+    // (rustc 1.100, at its line and column: `Foo { ref x: ref x }` is "expected `,`" at the `:`; `$[count($i)]` in a
+    // rule's body "expected `(` or `{`, found `[`" at the `[`, used or not)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(first("struct Foo { x: isize }\nfn main() {\n    match (Foo { x: 10 }) {\n        Foo { ref x: ref x } => {},\n    }\n}\n"), Some((4, 20, "expected `,`".to_string())));
+    assert_eq!(first("macro_rules! foo {\n    ( $( $i:ident ),* ) => {\n        $[count($i)]\n    };\n}\nfn main() {}\n"), Some((3, 10, "expected `(` or `{`, found `[`".to_string())));
+    assert_eq!(first("struct Foo { x: isize }\nfn main() {\n    let Foo { ref x } = Foo { x: 1 };\n    let _ = x;\n}\n"), None);
+}
+
+#[test]
+fn a_mismatch_at_the_use_of_a_value_made_with_another_type_argument() {
+    // (rustc 1.100, at its line: `let foo = Foo(1u8); takes_foo(foo);` with `fn takes_foo(_: Foo<i32>)` is at the
+    // call, not at the `let` (the value keeps the type it was made with); so is `Option<u8>` for
+    // `Option<i32>`. A closure's first `return` gives its type: `Foo(())` after `return Foo(0)` is the mismatch)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    assert_eq!(first("struct Foo<T>(T);\nfn takes_foo(_: Foo<i32>) {}\nfn main() {\n    let foo = Foo(1u8);\n    takes_foo(foo);\n}\n"), Some((5, "mismatched types: expected `Foo<i32>`, found `Foo<u8>`".to_string())));
+    assert_eq!(first("fn main() {\n    let some = Some(1u8);\n    let Some(a): Option<i32> = some else { return };\n    let _ = a;\n}\n"), Some((3, "mismatched types: expected `Option<i32>`, found `Option<u8>`".to_string())));
+    // (a turbofish writes the type: the field is the mismatch)
+    assert_eq!(first("struct Foo<T> { value: T }\nfn main() {\n    let f = Foo::<u8> { value: 300u16 };\n    let _ = f.value;\n}\n").map(|x| x.1), Some("mismatched types: expected `u8`, found `u16`".to_string()));
+    assert_eq!(first("struct Foo<T>(T);\nfn main() {\n    let _ = || {\n        if false {\n            return Foo(0);\n        }\n        Foo(())\n    };\n}\n").map(|x| x.0), Some(7));
+    // (an unsuffixed literal takes its type from the use)
+    assert_eq!(first("struct Foo<T>(T);\nfn takes_foo(_: Foo<u8>) {}\nfn main() {\n    let foo = Foo(1);\n    takes_foo(foo);\n}\n"), None);
+}
+
+#[test]
+fn a_method_of_another_instance_only() {
+    // (rustc 1.100: `impl Point<f64> { fn distance(&self) }` has no method for a `Point<i32>`, E0599 at the call)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let src = "struct Point<T> { x: T }\nimpl Point<f64> {\n    fn distance(&self) -> f64 { self.x }\n}\nfn main() {\n    let p = Point { x: 1_i32 };\n    let _ = p.distance();\n}\n";
+    assert_eq!(first(src), Some((7, "no method named `distance` found for struct `Point<i32>` in the current scope (E0599)".to_string())));
+    assert_eq!(first(&src.replace("1_i32", "1.0")), None);
+}
+
+#[test]
+fn where_a_value_that_is_not_the_type_its_place_wants_is() {
+    // (rustc 1.100, at its line: a `match` statement without `;` that is not `()` is its block arm's tail (`foo()`);
+    // `let _: i32 = 'a: loop { break };` the `break`; a function's tail `&mut if c { .. }` the `&`)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| d.line)
+    };
+    assert_eq!(first("fn main() {\n    match 3 {\n        4 => 1,\n        3 => {\n            foo()\n        }\n        _ => 2\n    }\n    let _ = ();\n}\nfn foo() -> i32 { 42 }\n"), Some(5));
+    assert_eq!(first("fn main() {\n    let _: i32 =\n        'a:\n        loop { break };\n}\n"), Some(4));
+    assert_eq!(first("fn main() {}\nfn f() -> bool {\n    &\n    mut\n    if true { true } else { false }\n}\n"), Some(3));
+    // (an `if let` guard's pattern of another type: at the pattern; a float assigned to an integer literal's local: at
+    // the assignment)
+    assert_eq!(first("fn ok() -> Result<Option<bool>, ()> { Ok(Some(true)) }\nfn main() {\n    match ok() {\n        Ok(x) if let Err(_) = x => {},\n        _ => {}\n    }\n}\n"), Some(4));
+    assert_eq!(first("fn main() {\n    let mut x\n        =\n        2;\n    x = 5.0;\n    let _ = x;\n}\n"), Some(5));
+}
+
 /// Review of #180, each checked against rustc: a struct whose tail is a `?Sized` parameter is unsized by value in a
 /// signature (E0277); a program trait whose supertrait is Clone makes a `?Sized` parameter sized; a closure does not
 /// make its parent's `?Sized` parameter sized
@@ -3215,6 +3542,20 @@ fn sized_review_cases() {
     }
 }
 
+#[test]
+fn macro_rules_with_whitespace_before_the_bang() {
+    // (rustc 1.100 accepts `macro_rules ! m { .. }`, also with a line break before the `!`; the lines after it keep
+    // their numbers)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    assert_eq!(first("macro_rules ! m { () => { 1 } }\nfn main() { let _x: i32 = m!(); }\n"), None);
+    assert_eq!(first("macro_rules\n  ! m { () => { 1 } }\nfn main() { let _x: u8 = m!(); let _y: i32 = \"a\"; }\n"), Some((3, "mismatched types: expected `i32`, found `&str`".to_string())));
+    // (a name that only starts with it is no definition)
+    assert_eq!(first("macro_rules! m { () => { 1 } }\nfn main() { let my_macro_rules = 1; let _x = my_macro_rules != m!(); }\n"), None);
+}
+
 /// #174: E0408, an or-pattern whose alternatives do not all bind a name, at the first alternative that does not (each
 /// expected line, column and message is rustc 1.100's on the same source); a name of a unit variant or a constant
 /// binds nothing
@@ -3253,4 +3594,108 @@ fn or_pattern_missing_bindings() {
     // (the same names of different types: E0308, at the alternative (rustc: at its binding, 4:24))
     let src = "enum E { A(u8), B(u16) }\nfn main() {\n    match E::A(1) {\n        E::A(x) | E::B(x) => { let _ = x; }\n    }\n}\n";
     assert_eq!(first(src), Some((4, 19, "mismatched types: expected `u8`, found `u16`".to_string())), "types");
+}
+
+/// unused_parens (#175), at rustc's places: denied by an item's own attribute (the issue's program, each of its five
+/// in turn as the ones before are blanked) or for the crate (also through `unused` and `warnings`), at the other places
+/// it looks at; not where rustc keeps them (a struct literal before a block, `(a + b) * c`, a tuple, `({ 0 } + 1)`,
+/// `if (return 0) {}`, a lazy `let` scrutinee), not without a deny or under an allow, not around what a macro's
+/// expansion put in parentheses
+#[test]
+fn unused_parens_under_deny() {
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let e = |line: usize, col: usize, what: &str| Some((line, col, format!("unnecessary parentheses around {what}")));
+    let mut src = "#[deny(unused_parens)]\nfn f(x: i32) -> i32 {\n    if (x > 3) { return (x); }\n    let y = (x + 1);\n    match (y) { _ => {} }\n    while (false) {}\n    y\n}\nfn main() { println!(\"{}\", f(1)); }\n".to_string();
+    for (line, col, what, from, to) in [
+        (3, 8, "`if` condition", "(x > 3)", " x > 3 "),
+        (3, 25, "`return` value", "(x);", " x ;"),
+        (4, 13, "assigned value", "(x + 1)", " x + 1 "),
+        (5, 11, "`match` scrutinee expression", "(y)", " y "),
+        (6, 11, "`while` condition", "(false)", " false "),
+    ] {
+        assert_eq!(first(&src), e(line, col, what), "{what}");
+        src = src.replace(from, to);
+    }
+    assert_eq!(first(&src), None);
+    let crate_deny = |lint: &str, body: &str| format!("#![deny({lint})]\nstruct S {{ a: i32 }}\nfn f(x: i32, s: S, t: (i32, i32), o: Option<i32>, v: &[i32]) -> i32 {{\n{body}\n}}\nfn main() {{}}\n");
+    for (lint, body, want) in [
+        ("unused", "    if let Some(y) = (o) { return y; }\n    0", e(4, 22, "`let` scrutinee expression")),
+        ("warnings", "    for _ in (0..x) {}\n    0", e(4, 14, "`for` iterator expression")),
+        ("unused_parens", "    let mut n = 0;\n    n += (1);\n    n", e(5, 10, "assigned value")),
+        ("unused_parens", "    let _ = v[(0)];\n    0", e(4, 15, "index expression")),
+        ("unused_parens", "    let _ = Some((1));\n    let _ = x.max((1));\n    0", e(4, 18, "function argument")),
+        ("unused_parens", "    let _ = x.max((1));\n    0", e(4, 19, "method argument")),
+        ("unused_parens", "    let _ = || (1);\n    0", e(4, 16, "closure body")),
+        ("unused_parens", "    match x { _ => (1) }", e(4, 20, "match arm expression")),
+        ("unused_parens", "    loop { break (1); }", e(4, 18, "`break` value")),
+        ("unused_parens", "    let r = (&x);\n    *r", e(4, 13, "assigned value")),
+        ("unused_parens", "    let _ = &s;\n    (t.0)", e(5, 5, "block return value")),
+        // (the arms before the scrutinee, as rustc's lint pass meets them; the outer of two)
+        ("unused_parens", "    match (x) { _ => (1) }", e(4, 22, "match arm expression")),
+        ("unused_parens", "    if ((S { a: 1 }.a == s.a)) {}\n    0", e(4, 8, "`if` condition")),
+        ("unused_parens", "    if (S { a: 1 }.a == s.a) {}\n    match (S { a: 2 }) { _ => {} }\n    let b = (t.0 + 1) * 2;\n    let c = (1, 2);\n    let d = ({ 0 } + 1);\n    if (return 0) {}\n    if let true = (b > 0 && c.0 > d) {}\n    b", None),
+    ] {
+        assert_eq!(first(&crate_deny(lint, body)), want, "{body}");
+    }
+    // (no deny; an allow of the item, of the statement, of the crate, of a module around it)
+    let body = "fn f(x: i32) -> i32 {\n    let y = (x);\n    y\n}\nfn main() { f(1); }\n";
+    assert_eq!(first(body), None);
+    assert_eq!(first(&format!("#![deny(unused_parens)]\n#[allow(unused_parens)]\n{body}")), None);
+    assert_eq!(first(&format!("#![deny(unused_parens)]\n{}", body.replace("    let y", "    #[allow(unused_parens)]\n    let y"))), None);
+    assert_eq!(first(&format!("#![deny(warnings)]\n#![allow(unused_parens)]\n{body}")), None);
+    let module = "#![deny(unused_parens)]\n#[allow(unused_parens)]\nmod m {\n    pub fn f(x: i32) -> i32 {\n        let y = (x);\n        y\n    }\n}\nfn main() { m::f(1); }\n";
+    assert_eq!(first(module), None);
+    assert_eq!(first(&module.replace("#[allow(unused_parens)]\n", "")), e(4, 17, "assigned value"));
+    // (`allow(warnings)` does not undo a deny of the lint)
+    assert_eq!(first(&format!("#![deny(unused_parens)]\n#![allow(warnings)]\n{body}")), e(4, 13, "assigned value"));
+    // (the parentheses of a macro's expansion are not the program's: rustc reports none here)
+    let mac = "#![deny(unused_parens)]\nmacro_rules! pick {\n    ($c:expr) => {\n        if $c { 1 } else { 2 }\n    };\n}\nfn f(x: i32) -> i32 {\n    let y = pick!(x > 1);\n    y\n}\nfn main() { println!(\"{}\", f(1)); }\n";
+    assert_eq!(first(mac), None);
+}
+
+/// unused_parens' levels as rustc 1.97 has them (the review of #244): each by the last attribute naming it, the lint's
+/// own and `warnings` apart (`allow(warnings)` leaves a deny of the lint; `warn(unused_parens)` is an error under
+/// `deny(warnings)`; a crate's later `allow(warnings)` undoes its `deny(warnings)`, a group's forbid lets the lint be
+/// allowed); an item's deny under the crate's allow; no attribute read from a string or a comment; and the levels of a
+/// module, an impl or a trait for what is in it, not for the items beside it. The accepted ones have no error at all
+#[test]
+fn unused_parens_levels() {
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+    let e = |line: usize, col: usize, what: &str| Some((line, col, format!("unnecessary parentheses around {what}")));
+    // (the review's finding each is for: 1 the crate's `warnings`, 2 an item's deny under the crate's allow, 4 strings
+    // and comments, 5 the lint and `warnings` apart, 6 modules, impls and traits)
+    for (finding, src, want) in [
+        (1, "#![deny(warnings)]\n#![allow(warnings)]\nfn main() { let _ = (1); }\n", None),
+        (1, "#![deny(warnings)]\n#![warn(warnings)]\nfn main() { let _ = (1); }\n", None),
+        (1, "#![forbid(warnings)]\n#![allow(warnings)]\nfn main() { let _ = (1); }\n", None),
+        (1, "#![forbid(unused)]\n#![allow(unused_parens)]\nfn main() { let _ = (1); }\n", None),
+        (1, "#![deny(unused_parens)]\n#![deny(warnings)]\n#![allow(warnings)]\nfn main() { let _ = (1); }\n", e(4, 21, "assigned value")),
+        (4, "#[deny(unused_variables)] fn main() { let _ = \"#[deny(unused_parens)]\"; let _ = (1); }\n", None),
+        (4, "#[deny(unused_variables)] fn main() { let _ = r#\"#[deny(unused_parens)]\"#; let _ = (1); }\n", None),
+        (4, "#[deny(unused_variables)] fn main() {\n    // #[deny(unused_parens)]\n    /* #[deny(unused_parens)] */\n    let _ = (1);\n}\n", None),
+        (4, "#![deny(unused_parens)]\nfn main() { let _ = \"#[allow(unused_parens)]\"; let _ = (1); }\n", e(2, 56, "assigned value")),
+        (4, "#![deny(unused_parens)]\nfn main() {\n    // #[allow(unused_parens)]\n    let _ = (1);\n}\n", e(4, 13, "assigned value")),
+        (2, "#![allow(unused_parens)]\n#[deny(unused_parens)]\nfn main() { let _ = (1); }\n", e(3, 21, "assigned value")),
+        (2, "#![allow(unused_parens)]\n#[deny(unused)]\nfn main() { let _ = (1); }\n", e(3, 21, "assigned value")),
+        (2, "#![allow(unused_parens)]\n#[deny(warnings)]\nfn main() { let _ = (1); }\n", None),
+        (5, "#![deny(unused_parens)]\n#[allow(warnings)]\nfn main() { let _ = (1); }\n", e(3, 21, "assigned value")),
+        (5, "#![deny(unused_parens)]\nfn main() {\n    #[allow(warnings)]\n    let _ = (1);\n}\n", e(4, 13, "assigned value")),
+        (5, "#![deny(warnings)]\n#[warn(unused_parens)]\nfn main() { let _ = (1); }\n", e(3, 21, "assigned value")),
+        (5, "#![deny(warnings)]\nfn main() {\n    #[warn(unused_parens)]\n    let _ = (1);\n}\n", e(4, 13, "assigned value")),
+        (5, "#![deny(warnings)]\n#[allow(warnings)]\nfn main() { let _ = (1); }\n", None),
+        (6, "#![deny(unused_parens)]\n#[allow(unused_parens)]\nmod m {\n    pub fn f() { let _ = (1); }\n}\nfn main() { m::f(); let _ = (2); }\n", e(6, 29, "assigned value")),
+        (6, "#![deny(unused_parens)]\nstruct S;\n#[allow(unused_parens)]\nimpl S {\n    fn f() { let _ = (1); }\n}\nfn main() { S::f(); let _ = (2); }\n", e(7, 29, "assigned value")),
+        (6, "#![deny(unused_parens)]\nmod m {\n    #![allow(unused_parens)]\n    pub fn f() { let _ = (1); }\n}\nfn main() { m::f(); let _ = (2); }\n", e(6, 29, "assigned value")),
+        (6, "#![deny(unused_parens)]\nfn g() {\n    #![allow(unused_parens)]\n    let _ = (1);\n}\nfn main() { g(); let _ = (2); }\n", e(6, 26, "assigned value")),
+        (6, "#![deny(warnings)]\n#[allow(warnings)]\nmod m {\n    pub fn f() { let _ = (1); }\n}\nfn main() { m::f(); }\n", None),
+        (6, "#![deny(warnings)]\nstruct S;\n#[allow(warnings)]\nimpl S {\n    fn f() { let _ = (1); }\n}\nfn main() { S::f(); }\n", None),
+        (6, "#![deny(warnings)]\nmod m {\n    #![allow(warnings)]\n    pub fn f() { let _ = (1); }\n}\nfn main() { m::f(); let _ = (2); }\n", e(6, 29, "assigned value")),
+    ] {
+        let d = s.check(src);
+        match want {
+            None => assert!(d.is_empty(), "finding {finding}: {src:?}: {d:?}"),
+            Some(w) => assert_eq!(d.first().map(|d| (d.line, d.col, d.msg.clone())), Some(w), "finding {finding}: {src:?}"),
+        }
+    }
 }

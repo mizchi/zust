@@ -450,7 +450,8 @@ pub enum Expr {
     /// (the last field: where its label is, else where the keyword is)
     Break(Option<String>, Option<Box<Expr>>, Pos),
     Continue(Option<String>, Pos),
-    Return(Option<Box<Expr>>),
+    /// (the last field: where the keyword is)
+    Return(Option<Box<Expr>>, Pos),
     /// (the last field: where the closure starts)
     Closure(bool, Vec<(Pat, Option<Ty>)>, Option<Box<Ty>>, Box<Expr>, Pos),
     Tuple(Vec<Expr>),
@@ -1838,6 +1839,11 @@ impl Parser {
                 let r = self.eat_ident("ref");
                 let m = self.eat_ident("mut");
                 let n = self.decl_ident()?;
+                // (`Foo { ref x: pat }`: a binding mode is the shorthand's, so no `:` follows it, rustc's "expected `,`"
+                // at the `:`)
+                if (r || m) && self.is_punct(":") && !self.punct_at(1, ":") {
+                    return Err(self.err_plain("expected `,`"));
+                }
                 if self.eat_punct(":") {
                     fs.push((field_name(n), self.pat()?));
                 } else {
@@ -2508,9 +2514,10 @@ impl Parser {
                 if self.in_const {
                     return Err(self.err_plain("return statement outside of function body (E0572)"));
                 }
+                let kw = self.pos();
                 self.i += 1;
                 let v = if self.expr_follows() { Some(Box::new(self.expr(ss)?)) } else { None };
-                return Ok(Expr::Return(v));
+                return Ok(Expr::Return(v, kw));
             }
             "break" => {
                 let kw = self.pos();
@@ -2668,6 +2675,11 @@ impl Parser {
                     "while" | "if" => self.peek_is(1, "{"),
                     _ => false,
                 },
+                // (`&mut if c { a } else { b }`: a reference has no position of its own, nor has what it borrows here)
+                Some(t) if t.kind == TokKind::Punct && (t.text == "&" || t.text == "&&") => {
+                    let k = if self.tok(1).is_some_and(|t| t.kind == TokKind::Ident && t.text == "mut") { 2 } else { 1 };
+                    self.tok(k).is_some_and(|t| t.kind == TokKind::Ident && matches!(t.text.as_str(), "if" | "match" | "loop" | "unsafe" | "while" | "for"))
+                }
                 // (`{ .. }`, `[]`, `()`, `(return)(..)`)
                 Some(t) if t.kind == TokKind::Open => {
                     t.text == "{"
@@ -3377,6 +3389,17 @@ impl Parser {
                     if prev_word && t.kind == TokKind::Ident && t.text != "as" && !s.ends_with("as") {
                         return Err(self.err("expected `;`"));
                     }
+                    // (a lone `:` for `::`, `use std:fs::File;`; and in a braced list a token that cannot follow a
+                    // name, `use x::{A. B};`: rustc's messages, at the token)
+                    if t.kind == TokKind::Punct && prev_word {
+                        let pair = t.text == ":" && t.joint && self.punct_at(1, ":");
+                        if t.text == ":" && !pair {
+                            return Err(self.err_plain("expected `::`, found `:`"));
+                        }
+                        if !prefixes.is_empty() && !pair && !matches!(t.text.as_str(), "," | "}" | "{" | "*" | ":") {
+                            return Err(self.err_plain(&format!("expected one of `,`, `::`, `as`, or `}}`, found `{}`", t.text)));
+                        }
+                    }
                     prev_word = word;
                     s.push_str(&t.text);
                     self.i += 1;
@@ -3787,8 +3810,8 @@ impl Counts {
                 self.expr(x);
                 self.block(b);
             }
-            Expr::Break(_, v, _) | Expr::Return(v) => {
-                if matches!(e, Expr::Return(_)) {
+            Expr::Break(_, v, _) | Expr::Return(v, _) => {
+                if matches!(e, Expr::Return(..)) {
                     self.returns += 1;
                 }
                 if let Some(v) = v {

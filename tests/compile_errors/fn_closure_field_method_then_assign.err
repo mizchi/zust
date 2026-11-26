@@ -1,0 +1,1 @@
+22:9: cannot assign to `w`, as it is a captured variable in a `Fn` closure (E0594)

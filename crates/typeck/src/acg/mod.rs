@@ -878,6 +878,8 @@ pub fn value_pos(e: &Expr) -> Sp {
             Some(Stmt::Expr(t, false)) => value_pos(t),
             _ => SP,
         },
+        // (a `loop`'s value is its `break`'s, `let _: i32 = loop { break };`)
+        Expr::Loop(..) => loop_break_pos(e),
         e => expr_start(e),
     }
 }
@@ -885,17 +887,6 @@ pub fn value_pos(e: &Expr) -> Sp {
 /// Where the value of an expression comes from, as rustc blames a mismatch: a `match`'s first arm that does not
 /// diverge (`None => ()` beside `Some(v) => { return v; }`), a block's tail, the expression itself; SP if unknown
 pub fn value_origin(e: &Expr) -> Sp {
-    fn diverges(e: &Expr) -> bool {
-        match e {
-            Expr::Return(_) | Expr::Break(..) | Expr::Continue(..) => true,
-            Expr::Macro(p, _, _) => p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")),
-            Expr::Block(_, _, b) => match b.stmts.last() {
-                Some(Stmt::Expr(x, _)) => diverges(x),
-                _ => false,
-            },
-            _ => false,
-        }
-    }
     match e {
         Expr::Match(_, arms) if !arms.is_empty() => match arms.iter().find(|a| !diverges(&a.body)) {
             Some(a) => match value_origin(&a.body) {
@@ -912,28 +903,70 @@ pub fn value_origin(e: &Expr) -> Sp {
     }
 }
 
-/// A `loop`'s value is its `break`s': where the first one without a value is (not one of a loop or closure inside it)
-pub fn loop_break_pos(e: &Expr) -> Sp {
-    fn in_block(b: &crate::parse::Block) -> Sp {
-        b.stmts.iter().map(|s| match s {
-            Stmt::Expr(x, _) => find(x),
-            _ => SP,
-        }).find(|p| p.line != 0).unwrap_or(SP)
-    }
-    fn find(e: &Expr) -> Sp {
-        match e {
-            Expr::Break(None, None, p) => *p,
-            Expr::Block(_, _, b) => in_block(b),
-            Expr::If(_, b, els) => match in_block(b) {
+/// Where rustc points when a block-like statement without `;` is not `()`: the tail of the first branch that is a
+/// block with a value (rustc checks a branch's block against the `()` its statement must be), SP for the statement
+/// itself (`match 3 { 4 => 1, _ => 2 }`)
+pub fn unit_stmt_pos(e: &Expr) -> Sp {
+    fn tail(b: &crate::parse::Block) -> Sp {
+        match b.stmts.last() {
+            Some(Stmt::Expr(t, false)) if !matches!(t, Expr::Tuple(xs) if xs.is_empty()) && !diverges(t) => match unit_stmt_pos(t) {
                 p if p.line != 0 => p,
-                _ => els.as_deref().map_or(SP, find),
+                _ => expr_start(t),
             },
-            Expr::Match(_, arms) => arms.iter().map(|a| find(&a.body)).find(|p| p.line != 0).unwrap_or(SP),
             _ => SP,
         }
     }
     match e {
-        Expr::Loop(None, b) => in_block(b),
+        Expr::Block(_, _, b) => tail(b),
+        Expr::If(_, b, els) => match tail(b) {
+            p if p.line != 0 => p,
+            _ => els.as_deref().map_or(SP, unit_stmt_pos),
+        },
+        Expr::Match(_, arms) => arms.iter().find_map(|a| match &a.body {
+            Expr::Block(_, _, b) => Some(tail(b)).filter(|p| p.line != 0),
+            _ => None,
+        }).unwrap_or(SP),
+        _ => SP,
+    }
+}
+
+/// A `return` / `break` / `continue` / `panic!`-like macro, or a block whose last statement is one
+fn diverges(e: &Expr) -> bool {
+    match e {
+        Expr::Return(..) | Expr::Break(..) | Expr::Continue(..) => true,
+        Expr::Macro(p, _, _) => p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")),
+        Expr::Block(_, _, b) => match b.stmts.last() {
+            Some(Stmt::Expr(x, _)) => diverges(x),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// A `loop`'s value is its `break`s': where the first one without a value is (not one of a loop or closure inside it;
+/// of a labeled loop, also a `break 'a` to its label)
+pub fn loop_break_pos(e: &Expr) -> Sp {
+    fn in_block(b: &crate::parse::Block, l: Option<&str>) -> Sp {
+        b.stmts.iter().map(|s| match s {
+            Stmt::Expr(x, _) => find(x, l),
+            _ => SP,
+        }).find(|p| p.line != 0).unwrap_or(SP)
+    }
+    fn find(e: &Expr, l: Option<&str>) -> Sp {
+        match e {
+            Expr::Break(None, None, p) => *p,
+            Expr::Break(Some(b), None, p) if Some(b.as_str()) == l => *p,
+            Expr::Block(_, _, b) => in_block(b, l),
+            Expr::If(_, b, els) => match in_block(b, l) {
+                p if p.line != 0 => p,
+                _ => els.as_deref().map_or(SP, |x| find(x, l)),
+            },
+            Expr::Match(_, arms) => arms.iter().map(|a| find(&a.body, l)).find(|p| p.line != 0).unwrap_or(SP),
+            _ => SP,
+        }
+    }
+    match e {
+        Expr::Loop(l, b) => in_block(b, l.as_deref()),
         _ => SP,
     }
 }
@@ -962,7 +995,7 @@ pub fn expr_start(e: &Expr) -> Sp {
         Expr::Closure(.., p) => *p,
         // (no position of their own: that of their first part, usually on the same line)
         Expr::Ref(_, x) | Expr::RawRef(_, x) | Expr::Repeat(x, _) | Expr::Let(_, x) | Expr::Match(x, _) | Expr::If(x, _, _) => expr_start(x),
-        Expr::While(_, x, _) | Expr::For(_, _, x, _) | Expr::Return(Some(x)) | Expr::Break(_, Some(x), _) => expr_start(x),
+        Expr::While(_, x, _) | Expr::For(_, _, x, _) | Expr::Return(Some(x), _) | Expr::Break(_, Some(x), _) => expr_start(x),
         // (`break` / `continue` / `break 'a`: the keyword, or the label when there is one)
         Expr::Break(_, None, p) | Expr::Continue(_, p) => *p,
         Expr::Array(es) | Expr::Tuple(es) => es.first().map_or(SP, expr_start),
@@ -2087,6 +2120,8 @@ impl Cx<'_> {
         let tail = || {
             let n = f.block.stmts.len();
             match f.block.stmts.last() {
+                // (a reference has no position of its own: where its statement starts, at the `&`)
+                Some(Stmt::Expr(Expr::Ref(..) | Expr::RawRef(..), false)) if f.block.spos.get(n - 1).is_some() => f.block.spos.get(n - 1).unwrap_or(SP),
                 Some(Stmt::Expr(e, false)) => match if matches!(e, Expr::Match(..)) { value_origin(e) } else { err_pos(e) } {
                     p if p.line != 0 => p,
                     _ => match loop_break_pos(e) {
@@ -2949,7 +2984,14 @@ impl Cx<'_> {
                         // (a block-like statement, `if .. {}` / `const { 2 }` without `;`, has the type `()`: rustc's
                         // E0308)
                         if !*semi && !matches!(r.1, Ty::Unit | Ty::Never) {
-                            return err(SP, format!("mismatched types: expected `()`, found `{}`", self.prog.tn(r.1).replace('#', "")));
+                            let m = format!("mismatched types: expected `()`, found `{}`", self.prog.tn(r.1).replace('#', ""));
+                            // (where the statement starts, `match`, when no branch's block is to blame)
+                            let at = match unit_stmt_pos(e) {
+                                p if p.line != 0 => p,
+                                _ if matches!(e, Expr::Match(..)) => blk.spos.get(i).unwrap_or(SP),
+                                _ => SP,
+                            };
+                            return Err(self.at(at, m));
                         }
                         // (unused_must_use: a `Result` dropped by its statement)
                         if self.prog.deny_must_use && self.user_code {
@@ -3205,7 +3247,7 @@ impl Cx<'_> {
                     }
                 }
                 let Ty::Struct(sid) = t else { return None };
-                let id = self.prog.method(sid, name).or_else(|| self.prog.default_method(sid, name))?;
+                let id = self.prog.self_method(sid, name).or_else(|| self.prog.self_default_method(sid, name))?;
                 let sig = &self.prog.sigs[id as usize];
                 let mut sol = vec![None; sig.generics.len()];
                 if sig.trait_of.is_some() {

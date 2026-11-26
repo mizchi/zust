@@ -1615,7 +1615,7 @@ impl Cx<'_> {
                 self.b.ins().jump(t, &[]);
                 Ok(self.dead())
             }
-            Expr::Return(value) => {
+            Expr::Return(value, pos) => {
                 let ret = self.ret;
                 let v = match value {
                     Some(e) => {
@@ -1637,9 +1637,10 @@ impl Cx<'_> {
                         v
                     }
                     None => {
-                        // (E0069: `return;` in a fn of another return type, `!` too)
+                        // (E0069: `return;` in a fn of another return type, `!` too; at the keyword, also where it
+                        // has no statement of its own: `0 => return,`)
                         if self.same(SP, Ty::Unit, ret).is_err() {
-                            return err(SP, "`return;` in a function whose return type is not `()` (E0069)");
+                            return Err(self.at(*pos, "`return;` in a function whose return type is not `()` (E0069)".to_string()));
                         }
                         None
                     }
@@ -3070,7 +3071,7 @@ impl Cx<'_> {
             Expr::MethodCall(r, m, ..) => {
                 if owned(r) {
                     let mut_self = match self.bk_rooted_at_pub(strip_paren(r), n) {
-                        Some((_, Some(Ty::Struct(sid)))) => self.prog.method(sid, m).is_some_and(|id| {
+                        Some((_, Some(Ty::Struct(sid)))) => self.prog.self_method_of(sid, m).or_else(|| self.prog.self_default_method(sid, m)).is_some_and(|id| {
                             let sg = &self.prog.sigs[id as usize];
                             sg.has_self && matches!(sg.params.first(), Some(Ty::Ref(true, _)))
                         }),
@@ -3159,8 +3160,9 @@ impl Cx<'_> {
             }
             Expr::MethodCall(r, m, ..) => {
                 if let Some(n) = hit(r) {
-                    let mut_self = match self.lookup(&n) {
-                        Some((_, Ty::Struct(sid))) => self.prog.method(sid, m).is_some_and(|id| {
+                    // (of the receiver's own type, as owned_mutation: `w.0.touch()` is the field's `touch`, not w's)
+                    let mut_self = match self.peek(strip_paren(r)) {
+                        Some(Ty::Struct(sid)) => self.prog.self_method_of(sid, m).or_else(|| self.prog.self_default_method(sid, m)).is_some_and(|id| {
                             let sg = &self.prog.sigs[id as usize];
                             sg.has_self && matches!(sg.params.first(), Some(Ty::Ref(true, _)))
                         }),
@@ -3494,20 +3496,115 @@ impl Cx<'_> {
         self.dyn_call(fat, 0, &ps, r, args, span)
     }
 
+    /// A call through a trait object to a method of an impl for the object (`impl dyn Tr`, `impl X for dyn Tr`, or a
+    /// default of a trait the object implements): id with the pair as its `&self` / `&mut self` (m), whose type st
+    /// is the receiver's object. As a call through the vtable checks it: an unsafe method outside `unsafe` (E0133), a
+    /// `&mut self` method through a shared reference (E0596), the receiver's borrow for the borrow check, its tree for
+    /// the region check. late: the callee requires 'static, so the region check starts here; need_static: the impl
+    /// is for `dyn Tr + 'static`, which the receiver's object must outlive
+    #[allow(clippy::too_many_arguments)]
+    fn dyn_impl_call(&mut self, id: u32, m: bool, st: Ty, mc: &Expr, recv_ty: Option<Ty>, fat: Value, late: bool, need_static: bool, expected: Option<Ty>) -> R<V> {
+        let Expr::MethodCall(recv, _, tf, margs, _) = mc else { return err(SP, "internal: expected a method call") };
+        self.check_unsafe_call(id, super::borrowck::pos(mc))?;
+        if let (Some(rt), true, true) = (recv_ty, self.user_code, m) {
+            if matches!(rt, Ty::Ref(false, _) | Ty::Ptr(false, _)) {
+                return err(SP, "cannot borrow data in a `&` reference as mutable (E0596)".to_string());
+            }
+        }
+        if late && !self.rg.on && self.rg.eligible && self.inline_depth == 0 {
+            self.rg_late_on();
+        }
+        self.rg_dyn_recv(mc, need_static);
+        // (the receiver is borrowed by `&self` / `&mut self`, and a result that borrows from self holds the loan,
+        // as a vtable call's does: `b.get()` of a local `Box<dyn Tr>` returned is E0515)
+        if self.bk_on() {
+            let flows = self.bk_ret_from(id, 0);
+            let ev = self.bk_recv_ev(recv, Ty::Ref(m, intern(Ty::Unit)), flows);
+            self.bk_push(ev);
+        }
+        let args: Vec<&Expr> = margs.iter().collect();
+        let tf = (!tf.is_empty()).then_some(tf.as_slice());
+        // (the type expected of the result: a parameter only it names is solved from it (`let v: u8 = x.make()`))
+        let r = self.call_fn(id, Some((fat, st)), &args, tf, expected, SP);
+        // (the result's tree, for the expression: `b.get()` returned)
+        self.rg_took_call(mc);
+        r
+    }
+
     /// `x.m(..)` (x: `&dyn Trait`)
     /// `recv.m(..)` through the vtable of `dyn tr`. `recv_ty` is the receiver's type as evaluated, when the caller has
     /// it: a `&mut self` method through a shared `&dyn` / `*const dyn` is E0596
     pub(crate) fn dyn_method_call(&mut self, fat: Value, tr: &str, mc: &Expr) -> R<V> {
-        self.dyn_method_call_on(fat, tr, mc, None)
+        self.dyn_method_call_on(fat, tr, mc, None, None)
     }
 
-    pub(crate) fn dyn_method_call_on(&mut self, fat: Value, tr: &str, mc: &Expr, recv_ty: Option<Ty>) -> R<V> {
+    pub(crate) fn dyn_method_call_on(&mut self, fat: Value, tr: &str, mc: &Expr, recv_ty: Option<Ty>, expected: Option<Ty>) -> R<V> {
         let Expr::MethodCall(_, name, _, margs, _) = mc else { return err(SP, "internal: expected a method call") };
+        let tr_full = tr;
         let (trn, targs) = self.dyn_trait_args(tr);
         let binds = if tr.contains('=') { self.dyn_bindings(tr) } else { vec![] };
         let tr = trn.as_str();
         let decls = self.prog.dyn_methods(tr);
-        let Some(idx) = decls.iter().position(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(name.as_str())) else {
+        // (the trait `Tr::m(x)` names: not a method of the object's own trait of the same name)
+        let named = self.explicit_traits.get(&(mc as *const Expr as usize)).cloned();
+        let of_named = |d: u32| named.as_ref().is_none_or(|n| self.prog.names[d as usize].rsplit_once("::").is_some_and(|(t, _)| t == n));
+        let Some(idx) = decls.iter().position(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(name.as_str()) && of_named(d)) else {
+            // (not in the vtable: an inherent method of `impl dyn Tr { .. }`, or one of another trait's impl for the
+            // object, `impl X for dyn Tr`: `__dyn_Tr::m`, called with the pair as its `&self`)
+            let base = tr.rsplit("::").next().unwrap_or(tr);
+            // (`E3::pick(x)` takes only E3's impl's method, not an inherent one of `impl dyn O3` (E3's default then))
+            let of_trait = |t: &str, n: &str| t.split('<').next().unwrap_or(t).trim().rsplit("::").next() == n.rsplit("::").next();
+            let mine = |id: u32| named.as_ref().is_none_or(|n| self.prog.sigs[id as usize].impl_trait.as_deref().is_some_and(|t| of_trait(t, n)));
+            // (of one name in `impl dyn O` and in `impl Ext for dyn O`, the others are overloads: a named trait's
+            // takes its impl's, an unnamed call the inherent one, as rustc's lookup does)
+            let key = format!("__dyn_{base}::{name}");
+            let cands: Vec<u32> = match self.prog.overloads.get(&key) {
+                Some(cs) => cs.clone(),
+                None => self.prog.index.get(&key).copied().into_iter().collect(),
+            };
+            let pick = if named.is_some() {
+                cands.iter().copied().find(|&c| mine(c))
+            } else {
+                cands.iter().copied().find(|&c| self.prog.sigs[c as usize].impl_trait.is_none()).or(cands.first().copied())
+            };
+            if let Some(id) = pick {
+                let s = &self.prog.sigs[id as usize];
+                if let (true, Some(&Ty::Ref(m, _))) = (s.has_self, s.params.first()) {
+                    // (the receiver as the object it is, so the impl's parameters are solved from its arguments:
+                    // `dyn ObjectTrait<u8>` for `impl<T> MyTrait<T> for dyn ObjectTrait<T>`)
+                    let st = Ty::Ref(m, intern(Ty::Dyn(crate::types::intern_str(tr_full))));
+                    let late = s.regions.as_deref().is_some_and(Self::callee_needs_static);
+                    return self.dyn_impl_call(id, m, st, mc, recv_ty, fat, late, false, expected);
+                }
+            }
+            // (a default method of a trait the object implements, `impl MyTrait for dyn Tr {}`: with Self the object.
+            // An impl whose object writes no lifetime is for `dyn Tr + 'static`, which the receiver's must then be)
+            let obj = Ty::Dyn(crate::types::intern_str(tr_full));
+            // (the trait `Tr::m(x)` names, else every trait the object implements with a default of the name: more
+            // than one is ambiguous (E0034), as rustc's method lookup finds)
+            let mut dflts: Vec<(String, u32)> = self
+                .prog
+                .dyn_impl_traits(tr_full)
+                .into_iter()
+                .filter(|t2| named.as_ref().is_none_or(|n| *t2 == n) && self.prog.implements(obj, t2))
+                .filter_map(|t2| {
+                    self.prog.traits.get(t2)?.iter()
+                        .copied()
+                        .find(|&d| {
+                            let s = &self.prog.sigs[d as usize];
+                            s.has_body && s.has_self && matches!(s.params.first(), Some(Ty::Ref(..))) && self.prog.names[d as usize].rsplit("::").next() == Some(name.as_str())
+                        })
+                        .map(|d| (t2.clone(), d))
+                })
+                .collect();
+            if dflts.len() > 1 {
+                return err(SP, "multiple applicable items in scope (E0034)");
+            }
+            if let Some((t2, d)) = dflts.pop() {
+                let Some(&Ty::Ref(m, _)) = self.prog.sigs[d as usize].params.first() else { return err(SP, "internal: a default method's receiver") };
+                let need_static = !self.prog.dyn_impl_writes_lt(&t2, tr_full);
+                return self.dyn_impl_call(d, m, Ty::Ref(m, intern(obj)), mc, recv_ty, fat, need_static, need_static, expected);
+            }
             return err(SP, format!("no method named `{name}` found for `dyn {tr}`"));
         };
         let ds = &self.prog.sigs[decls[idx] as usize];
@@ -4481,6 +4578,27 @@ impl Cx<'_> {
             }
             return self.expr(e, expected);
         }
+        // (`MyTrait::use_self(val)` of a trait's default method, with val a trait object: the method call with the
+        // trait named, so the impl for the object (`impl MyTrait for dyn Obj {}`, for `dyn Obj + 'static`) is the one
+        // called, as in a module, where the path names the default itself)
+        if let (Expr::Path(None, p), Some(first)) = (&**func, cargs.first()) {
+            if p.segs.len() == 2 && !p.global && p.segs[0].args.is_empty() {
+                if let Some(id) = self.prog.fn_by_p(&PPath::of(p), self.self_sid) {
+                    let s = &self.prog.sigs[id as usize];
+                    let tk = self.prog.names[id as usize].rsplit_once("::").map(|(t, _)| t.to_string()).filter(|t| self.prog.traits.contains_key(t));
+                    // (of the receiver's form: a `&self` method takes `&dyn Tr`, not a Box by value (E0308 then))
+                    let obj = matches!((s.params.first(), self.peek(first)), (Some(Ty::Ref(..)), Some(Ty::Ref(_, Ty::Dyn(_)))) | (Some(Ty::Box(_)), Some(Ty::Box(Ty::Dyn(_)))));
+                    if let (Some(tk), true, true, true) = (tk, s.has_self, s.has_body, obj) {
+                        let span = crate::parse::Span { start: p.pos, at: p.pos };
+                        let recv = first.clone();
+                        let m = Expr::MethodCall(Box::new(Expr::Paren(Box::new(recv))), p.segs[1].name.clone(), p.segs[1].args.clone(), cargs[1..].to_vec(), span);
+                        let m = self.keep_expr(m);
+                        self.explicit_traits.insert(m as *const Expr as usize, tk);
+                        return self.expr(m, expected);
+                    }
+                }
+            }
+        }
         // `Trait::method(x, args)` (`Clone::clone(&s)`, `Add::add(a, b)`): the method call `x.method(args)`
         if let (Expr::Path(None, p), Some(first)) = (&**func, cargs.first()) {
             let known = matches!(
@@ -4810,7 +4928,7 @@ fn diverging_tail(e: &Expr) -> bool {
     fn has_unit_return(e: &Expr) -> bool {
         let mut found = false;
         crate::ast_closure::each_child_pub(e, &mut |c| {
-            found |= matches!(c, Expr::Return(None)) || (!matches!(c, Expr::Closure(..)) && has_unit_return(c))
+            found |= matches!(c, Expr::Return(None, _)) || (!matches!(c, Expr::Closure(..)) && has_unit_return(c))
         });
         found
     }
@@ -4826,7 +4944,7 @@ fn diverging_tail(e: &Expr) -> bool {
     }
     match tail(e) {
         Expr::Loop(..) => !has_break(tail(e)),
-        Expr::Return(_) => true,
+        Expr::Return(..) => true,
         Expr::Macro(p, _, _) if p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")) => has_unit_return(e),
         _ => false,
     }

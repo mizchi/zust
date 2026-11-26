@@ -238,3 +238,36 @@ fn macro_use_modules_and_check_lines() {
     assert_eq!(run(&exe, &dir, 0).0, "4\n");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// unused_parens (#175) in a workspace: a library's own `#![deny(unused_parens)]` is followed (rustc: lib.rs:3:13),
+/// and a binary's is not applied to the code of the crates it depends on (rustc builds it: the dependency only warns)
+#[test]
+fn unused_parens_in_a_library_and_not_in_dependencies() {
+    let dir = std::env::temp_dir().join(format!("zustc_ws_parens_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let put = |p: &str, t: &str| std::fs::write(dir.join(p), t).unwrap();
+    put("lib.rs", "#![deny(unused_parens)]\npub fn f() -> i32 {\n    let x = (1);\n    x\n}\n");
+    put("dep.rs", "pub fn g() -> i32 {\n    let x = (2);\n    x\n}\n");
+    put("main.rs", "#![deny(unused_parens)]\nfn main() {\n    println!(\"{}\", dep::g());\n}\n");
+    let spec = |name: &str, lib: bool, deps: &[&str]| zustc::session::CrateSpec {
+        name: name.to_string(),
+        root: dir.join(format!("{name}.rs")),
+        display: format!("{name}.rs"),
+        lib,
+        deps: deps.iter().map(|d| d.to_string()).collect(),
+        features: vec![],
+        exe: (!lib).then(|| name.to_string()),
+        cfgs: vec![],
+        env: vec![],
+        proc_macro: None,
+        test: false,
+    };
+    let out = dir.join("t");
+    let mut s = zustc::session::Session::new(zustc::session::Options::default());
+    let e = s.build_workspace(&[spec("lib", true, &[])], &out).err().unwrap_or_default();
+    assert!(e.contains("lib.rs:3:13: unnecessary parentheses around assigned value"), "{e}");
+    s.build_workspace(&[spec("dep", true, &[]), spec("main", false, &["dep"])], &out).unwrap();
+    assert_eq!(run(&out.join("main"), &dir, 0).0, "2\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}
