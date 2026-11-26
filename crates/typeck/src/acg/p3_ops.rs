@@ -804,6 +804,10 @@ impl Cx<'_> {
             }
         }
         if is_cmp(op) {
+            // (a `*mut T` or a reference compared with a `*const T`: coerced to it, `c_p == m_p`, `c_p == &x`)
+            if !rt.is_fat() && matches!(lt, Ty::Ptr(..)) && super::raw_ptr_coerces(rt, lt) {
+                rt = lt;
+            }
             self.same(SP, rt, lt)?;
             // Aggregate == / !=: a hand-written eq if there is one, else a structural comparison (as derive(PartialEq))
             if matches!(op, "==" | "!=") && lt.is_agg() {

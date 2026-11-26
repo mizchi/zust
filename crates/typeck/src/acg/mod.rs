@@ -2227,6 +2227,11 @@ impl Cx<'_> {
 
     /// `&&T` (`&&&T` ..) を `&T` の場所に渡すときの deref の強制変換
     pub fn deref_coerce(&mut self, mut v: Option<Value>, mut t: Ty, want: Ty) -> (Option<Value>, Ty) {
+        // (a `*mut T` where a `*const T` is expected, a reference where a raw pointer is: the same thin pointer,
+        // `fn f() -> *const T { unsafe { g_mut() } }`)
+        if !t.is_fat() && raw_ptr_coerces(t, want) {
+            return (v, want);
+        }
         while let (Ty::Ref(wm, _), Ty::Ref(om, inner @ Ty::Ref(..)), Some(val)) = (want, t, v) {
             // (a `&mut` is not reached through a shared reference: `&&mut u8` is no `&mut u8`)
             if t == want || t.is_fat() || (wm && !om) {
@@ -3725,6 +3730,16 @@ impl Cx<'_> {
             && !self.prog.has_param(inf)
             && std::mem::discriminant(&inf) == std::mem::discriminant(&a)
             && !matches!((inf, a), (Ty::Struct(x), Ty::Struct(y)) if self.prog.base_of(x) != self.prog.base_of(y))
+    }
+}
+
+/// t coerces to the raw pointer want with no change of its value: `*mut T` to `*const T`, `&T` to `*const T`, `&mut T`
+/// to either
+pub(crate) fn raw_ptr_coerces(t: Ty, want: Ty) -> bool {
+    match (t, want) {
+        (Ty::Ptr(true, i), Ty::Ptr(false, w)) => i == w,
+        (Ty::Ref(m, i), Ty::Ptr(wm, w)) => i == w && (m || !wm),
+        _ => false,
     }
 }
 

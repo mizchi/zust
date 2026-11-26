@@ -3584,3 +3584,19 @@ fn assert_eq_of_two_calls_one_of_a_type_known_in_full() {
     let src = "pub trait K {\n    type V;\n}\npub struct N<T: K>(T, T::V);\nfn foo<T: K<V = Option<U>>, U: Clone>(n: &N<T>) -> Option<U> {\n    n.1.clone()\n}\nimpl K for i32 {\n    type V = Option<u32>;\n}\nfn main() {\n    let n: N<i32> = N(1, Some(22));\n    assert_eq!(foo(&n), Some(22));\n}\n";
     assert!(errs(src).is_empty());
 }
+
+#[test]
+fn raw_pointer_coercions_at_a_tail_and_in_a_comparison() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (a `*mut T` where a `*const T` is expected, at a fn's tail, through blocks; a reference to a raw pointer)
+    let src = "fn m() -> *mut i32 {\n    std::ptr::null_mut()\n}\nfn a() -> *const i32 {\n    m()\n}\nfn b() -> *const i32 {\n    unsafe { m() }\n}\nfn c(x: &i32) -> *const i32 {\n    x\n}\nfn main() {\n    let x = 1;\n    let p: *const i32 = &x;\n    let _ = p == m();\n    let _ = p == &x;\n    let _ = (a(), b(), c(&x));\n}\n";
+    assert!(errs(src).is_empty());
+    // (not the other way: a `*const T` is no `*mut T`, nor a `&T`)
+    let e = errs("fn p() -> *const i32 {\n    std::ptr::null()\n}\nfn a() -> *mut i32 {\n    p()\n}\nfn main() {\n    let _ = a();\n}\n");
+    assert!(e.iter().any(|m| m.contains("mismatched types")), "{e:?}");
+    let e = errs("fn c(x: &i32) -> *mut i32 {\n    x\n}\nfn main() {\n    let _ = c(&1);\n}\n");
+    assert!(e.iter().any(|m| m.contains("mismatched types")), "{e:?}");
+}

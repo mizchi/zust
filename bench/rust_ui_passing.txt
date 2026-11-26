@@ -2127,6 +2127,7 @@ check-pass	consts/min_const_fn/allow_raw_ptr_dereference_const_fn.rs
 check-pass	consts/min_const_fn/cast_fn.rs
 compile-fail	consts/min_const_fn/cmp_fn_pointers.rs
 check-pass	consts/min_const_fn/min_const_fn_dyn.rs
+check-pass	consts/min_const_fn/min_const_fn_unsafe_ok.rs
 compile-fail	consts/min_const_fn/promotion.rs
 compile-fail	consts/missing_assoc_const_type.rs
 compile-fail	consts/missing_assoc_const_type2.rs
@@ -6590,6 +6591,7 @@ compile-fail	range/range_traits-6.rs
 check-pass	range/range_traits-7.rs
 check-pass	raw-ref-op/amp-raw-without-mut-const-is-a-normal-borrow.rs
 compile-fail	raw-ref-op/never-place-isnt-diverging.rs
+run-pass	raw-ref-op/raw-ref-op.rs
 run-pass	reachable/artificial-block.rs
 run-pass	reachable/boolean-negation-in-unreachable-code-7344.rs
 run-pass	reachable/diverging-expressions-unreachable-code.rs
