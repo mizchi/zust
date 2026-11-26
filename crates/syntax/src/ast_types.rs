@@ -1,6 +1,6 @@
-//! 型の構文 (自前の構文木の `parse::Ty`) を `TySyn` にする: front.rs の `parse_tysyn` (syn 版) の移植。
-//! tests/ast_types.rs が全ファイルの型で syn 版と同じ結果になることを確かめる。
-//! 外部クレートに依存しない (src/parse.rs と src/types.rs だけ) ので zustc 自身でもコンパイルできる。
+//! Type syntax (our own tree's `parse::Ty`) to `TySyn`: a port of `parse_tysyn` in front.rs (the syn version).
+//! tests/ast_types.rs checks that it gives the syn version's results for the types in every file.
+//! It depends on no external crate (only src/parse.rs and src/types.rs), so zustc itself can compile it.
 
 use crate::parse::{Bound, Expr, GArg, Path, Stmt, Ty as PTy};
 use crate::types::{ArrLen, Ty, TySyn};
@@ -26,7 +26,7 @@ pub fn ffi_alias(s: &str) -> Option<Ty> {
 }
 
 fn lit_u64(t: &str) -> Option<u64> {
-    // (`_` を除き、接頭辞で基数を決めて、数字の続く分だけ読む: 接尾辞 `usize` などは捨てる)
+    // (drop `_`, take the radix from the prefix, read while digits follow: a suffix such as `usize` is dropped)
     let t: String = t.chars().filter(|&c| c != '_').collect();
     let (radix, body) = if let Some(h) = t.strip_prefix("0x") {
         (16, h)
@@ -41,7 +41,7 @@ fn lit_u64(t: &str) -> Option<u64> {
     u64::from_str_radix(&digits, radix).ok()
 }
 
-/// const ジェネリクスの引数 (`Buf<4>` / `Buf<N>` / `Buf<{ 4 }>`): 長さを持つ配列型 `[(); n]`
+/// A const generic argument (`Buf<4>` / `Buf<N>` / `Buf<{ 4 }>`): an array type `[(); n]` carrying the length
 /// (`Flag<true>`: `true` / `false` in a type's arguments, which the parser reads as a type path, is a const argument:
 /// 1 / 0, as an integer const argument is)
 pub fn bool_arg(t: &PTy) -> Option<TySyn> {
@@ -68,7 +68,7 @@ pub fn const_arg_syn(e: &Expr) -> R<TySyn> {
         Expr::Path(None, p) if single(p).is_some() => {
             Ok(TySyn::Array(Box::new(TySyn::Prim(Ty::Unit)), ArrLen::Const(single(p).unwrap().to_string())))
         }
-        // (整数の定数式 `{ u128::MAX_STR_LEN - 16 }`: 式のテキストを const の名前の代わりに持つ。Program が評価する)
+        // (integer const expression `{ u128::MAX_STR_LEN - 16 }`: its text replaces a const name; Program evaluates it)
         e => match const_expr_text(e) {
             Some(t) => Ok(TySyn::Array(Box::new(TySyn::Prim(Ty::Unit)), ArrLen::Const(t))),
             None => Err("const arguments must be a literal or a name".to_string()),
@@ -76,7 +76,7 @@ pub fn const_arg_syn(e: &Expr) -> R<TySyn> {
     }
 }
 
-/// 整数の定数式のテキスト (リテラル・パス・二項演算・単項の `-`・括弧・引数のないメソッド)。それ以外は None
+/// Text of an integer const expression (literal, path, binary op, unary `-`, parens, no-argument method) or None
 pub(crate) fn const_expr_text(e: &Expr) -> Option<String> {
     Some(match e {
         Expr::Lit(t, _) => t.clone(),
@@ -192,7 +192,7 @@ pub(crate) fn const_expr_text(e: &Expr) -> Option<String> {
     })
 }
 
-/// 1 つの識別子だけのパス
+/// A path that is a single identifier
 fn single(p: &Path) -> Option<&str> {
     if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() && p.segs[0].fn_args.is_none() {
         Some(&p.segs[0].name)
@@ -258,7 +258,7 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
             let mut auto: Option<String> = None;
             for b in bs {
                 match b {
-                    // (`dyn Error + Send + Sync`: 自動 trait は読み飛ばす)
+                    // (`dyn Error + Send + Sync`: auto traits are skipped)
                     Bound::Trait(_, p) if p.segs.last().is_some_and(|s| is_auto_trait(&s.name)) => {
                         auto.get_or_insert_with(|| p.segs.last().map(|s| s.name.clone()).unwrap_or_default());
                     }
@@ -276,7 +276,7 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
                 }
             }
         }
-        // ライフタイムはコード生成に影響しないので消去する
+        // Lifetimes do not affect codegen, so they are erased
         PTy::Ref(_, m, i) => TySyn::Ref(*m, Box::new(auto_dyn(i).map(TySyn::Dyn).map(Ok).unwrap_or_else(|| tysyn(i, self_ty))?)),
         PTy::Ptr(m, i) => TySyn::Ptr(*m, Box::new(auto_dyn(i).map(TySyn::Dyn).map(Ok).unwrap_or_else(|| tysyn(i, self_ty))?)),
         PTy::Slice(i) => TySyn::Slice(Box::new(tysyn(i, self_ty)?)),
@@ -287,7 +287,7 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
                     None => return Err("bad array length".to_string()),
                 },
                 Expr::Path(None, p) if single(p).is_some() => ArrLen::Const(single(p).unwrap().to_string()),
-                // 関連定数 `[u8; Buf::CAP]` / `[u8; Self::CAP]`
+                // Associated consts `[u8; Buf::CAP]` / `[u8; Self::CAP]`
                 Expr::Path(None, p) if !p.global && p.segs.len() == 2 => ArrLen::Const(format!("{}::{}", self_name(&p.segs[0].name, self_ty), p.segs[1].name)),
                 // (`[u8; <Foo as Bar>::SIZE]`: the impl's associated const, `Foo as Bar::SIZE` when an inherent
                 // `Foo::SIZE` took the plain name, else `Foo::SIZE`)
@@ -411,7 +411,7 @@ fn no_args(s: &crate::parse::Seg) -> bool {
 
 fn path_ty(p: &Path, self_ty: Option<&TySyn>) -> R<TySyn> {
     let n = p.segs.len();
-    // `Self::Item` / `I::Item` (大文字で始まる 2 セグメントのパス)
+    // `Self::Item` / `I::Item` (a two-segment path starting with an uppercase letter)
     // (`Self::F<'a>`: a generic associated type with lifetime arguments only is the same type for every lifetime)
     let lifetimes_only = |s: &crate::parse::Seg| s.fn_args.is_none() && s.args.iter().all(|a| matches!(a, GArg::Lifetime(_)));
     if !p.global && n == 2 && no_args(&p.segs[0]) && lifetimes_only(&p.segs[1]) && p.segs[0].name.starts_with(|c: char| c.is_ascii_uppercase()) {
@@ -426,7 +426,7 @@ fn path_ty(p: &Path, self_ty: Option<&TySyn>) -> R<TySyn> {
         return gat_app(base, &p.segs[1], self_ty);
     }
     let last = p.segs.last().ok_or("empty path")?;
-    // `io::Error` / `io::Result<T>` (prelude の IoError)
+    // `io::Error` / `io::Result<T>` (the prelude's IoError)
     if n >= 2 && p.segs[n - 2].name == "io" && (last.name == "Result" || last.name == "Error") {
         let io_err = TySyn::Named("IoError".into());
         if last.name == "Error" {
@@ -470,7 +470,7 @@ fn path_ty(p: &Path, self_ty: Option<&TySyn>) -> R<TySyn> {
             GArg::Ty(t) if s == "Box" && auto_dyn(t).is_some() => generic_args.push(TySyn::Dyn(auto_dyn(t).unwrap())),
             GArg::Ty(t) if bool_arg(t).is_some() => generic_args.push(bool_arg(t).unwrap()),
             GArg::Ty(t) => {
-                // (`Buf<N>`: 型の位置の 1 つの名前は型として読まれる (syn と同じ))
+                // (`Buf<N>`: a lone name in type position is read as a type (as syn does))
                 generic_args.push(tysyn(t, self_ty)?)
             }
             GArg::Lifetime(_) => {}

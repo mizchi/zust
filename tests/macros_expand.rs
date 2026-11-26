@@ -6,6 +6,11 @@ fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
     for e in rd.flatten() {
         let p = e.path();
         if p.is_dir() {
+            // (tests/fuzz holds deliberately broken sources, which the reference cannot tokenize; zust-fuzz's
+            // expand-diff compares the two on what it can)
+            if p.ends_with("tests/fuzz") {
+                continue;
+            }
             rs_files(&p, out);
         } else if p.extension().is_some_and(|x| x == "rs") {
             out.push(p);

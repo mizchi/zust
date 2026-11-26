@@ -70,11 +70,12 @@ pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
         }
         if c == b'/' && src[i..].starts_with("/*") {
             let mut depth = 0;
+            // (by bytes: a byte inside a multi-byte character is no `/*` or `*/`, and a str slice there would panic)
             while i < b.len() {
-                if src[i..].starts_with("/*") {
+                if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
                     depth += 1;
                     i += 2;
-                } else if src[i..].starts_with("*/") {
+                } else if b[i] == b'*' && b.get(i + 1) == Some(&b'/') {
                     depth -= 1;
                     i += 2;
                     if depth == 0 {
@@ -168,6 +169,12 @@ pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
                         i += 1;
                     }
                     i += 1;
+                }
+                // (no closing quote before the end: `b'` or `'\` as the source's last characters)
+                // (no closing quote before the end: `b'` or `'\` as the source's last characters)
+                if i >= b.len() {
+                    let what = if c == b'b' { "unterminated byte constant (E0763)" } else { "unterminated character literal (E0762)" };
+                    return Err(format!("{tline}:{}: {what}", col + 1));
                 }
                 i += 1;
                 i = skip_suffix(src, i);

@@ -131,3 +131,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-25 | [Region (lifetime) checking, part 35: the drop of a type that holds no reference](2026-11-25-07-region-check-35.md) |
 | 2026-11-25 | [Region (lifetime) checking, part 36: `x @ sub` patterns, items in constant initializers, `Fn` parameters boxed as trait objects, lifetime bounds of impl methods](2026-11-25-08-region-check-36.md) |
 | 2026-11-25 | [`Sized`: where only a sized type may be (E0277)](2026-11-25-09-sized.md) |
+| 2026-11-25 | [Region (lifetime) checking, part 37: impl where clauses through the header, closures passed by reference, `mut rest @ ..`](2026-11-25-10-region-check-37.md) |

@@ -792,6 +792,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "zust-fuzz"
+version = "0.1.0"
+dependencies = [
+ "zust-core",
+]
+
+[[package]]
 name = "zust-ide"
 version = "0.1.0"
 dependencies = [

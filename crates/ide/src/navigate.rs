@@ -1232,27 +1232,46 @@ impl FileIndex {
     fn live(&self, k: usize) -> Vec<usize> {
         let Some(f) = self.enclosing_fn(self.toks[k].1 as usize) else { return vec![] };
         // (from the token of the fn name)
-        let mut i = self.toks.partition_point(|t| (t.1 as usize) < f.start);
-        let is_bind = |j: usize| -> bool {
-            let w = self.tok(j);
-            self.ident(j)
-                && w.starts_with(|c: char| c.is_ascii_lowercase() || c == '_')
-                && !matches!(w, "mut" | "ref" | "box" | "in" | "if" | "let" | "true" | "false" | "self" | "_")
-                && !self.after_path(j)
-                && !self.before_path(j)
-                && !self.sym(j + 1, b'(')
-                && !self.sym(j + 1, b'!')
-                && !(j > 0 && self.sym(j - 1, b'.'))
-        };
-        // Live bindings: (name, token, the depth at which it goes away, whether it goes away at a comma, whether it goes away at ;)
-        let mut live: Vec<(usize, i32, u8)> = vec![];
-        // (the ones that become live in the next block: for / if let / while let)
+        let i = self.toks.partition_point(|t| (t.1 as usize) < f.start);
+        // (fn parameters: the `x:` in the `(` .. `)` after the name. They become live in the body's block)
         let mut pend_block: Vec<usize> = vec![];
-        // (the ones that become live at the end of the statement `;`: let)
-        let mut pend_let: Vec<(usize, i32)> = vec![];
-        let mut depth = 0i32;
-        // (fn parameters: the `x:` in the `(` .. `)` after the name)
-        i += 1;
+        let mut i = self.param_binds(i + 1, k, &mut pend_block);
+        // (the body)
+        let mut s = LiveScan { live: vec![], pend_block, pend_let: vec![], depth: 0, stmt_kind: 0, body_seen: false, pat_start: 0, arm_start: i };
+        while i < k {
+            let t = self.toks[i];
+            if t.0 == 1 {
+                i = self.live_sym(i, &mut s);
+            } else if t.0 == 0 {
+                i = self.live_word(i, k, &mut s);
+            }
+            i += 1;
+        }
+        // (if still before the body's `{` (in the fn parameters), the parameters are visible. What is left inside the body is the bindings
+        // of `if let` / `while let` / `for` patterns visible from the next block, so they are not visible yet (the x on the right of `if let Some(x) = (x, ..)` is the outer x))
+        if !s.body_seen {
+            s.live.extend(s.pend_block.iter().map(|&j| (j, s.depth, 0)));
+        }
+        s.live.into_iter().map(|l| l.0).collect()
+    }
+
+    /// Whether token j can be the name of a local binding (a lowercase identifier that is not a keyword, a path segment, a call, a macro or a
+    /// field)
+    fn is_bind(&self, j: usize) -> bool {
+        let w = self.tok(j);
+        self.ident(j)
+            && w.starts_with(|c: char| c.is_ascii_lowercase() || c == '_')
+            && !matches!(w, "mut" | "ref" | "box" | "in" | "if" | "let" | "true" | "false" | "self" | "_")
+            && !self.after_path(j)
+            && !self.before_path(j)
+            && !self.sym(j + 1, b'(')
+            && !self.sym(j + 1, b'!')
+            && !(j > 0 && self.sym(j - 1, b'.'))
+    }
+
+    /// Puts the bindings of the fn parameters into pend (the `x:` in the `(` .. `)` after the generics `<..>`, from token i up to k); the
+    /// token where the parameters end (the `)`)
+    fn param_binds(&self, mut i: usize, k: usize, pend: &mut Vec<usize>) -> usize {
         if self.sym(i, b'<') {
             let mut d = 0;
             while i < k {
@@ -1282,8 +1301,8 @@ impl FileIndex {
                 }
                 if d == 1 && self.sym(i, b':') && !self.sym(i + 1, b':') && !(i > 0 && self.sym(i - 1, b':')) {
                     for j in seg_start..i {
-                        if is_bind(j) {
-                            pend_block.push(j);
+                        if self.is_bind(j) {
+                            pend.push(j);
                         }
                     }
                 }
@@ -1293,177 +1312,172 @@ impl FileIndex {
                 i += 1;
             }
         }
-        // (the body)
-        let mut stmt_kind: u8 = 0; // 1: a let pattern, 2: a for / if let / while let pattern, 3: closure parameters
-        let mut body_seen = false;
-        let mut pat_start = 0usize;
-        let mut arm_start = i;
-        while i < k {
-            let t = self.toks[i];
-            if t.0 == 1 {
-                match self.text.as_bytes()[t.1 as usize] {
-                    b'{' => {
-                        depth += 1;
-                        body_seen = true;
-                        for j in pend_block.drain(..) {
-                            live.push((j, depth, 0));
-                        }
-                        arm_start = i + 1;
-                        if stmt_kind == 2 {
-                            stmt_kind = 0;
-                        }
-                    }
-                    b'(' | b'[' => depth += 1,
-                    b'}' | b')' | b']' => {
-                        depth -= 1;
-                        live.retain(|l| l.1 <= depth);
-                        if self.sym(i, b'}') {
-                            arm_start = i + 1;
-                        }
-                    }
-                    b';' => {
-                        live.retain(|l| !(l.2 == 2 && l.1 == depth));
-                        // (a `let x;` without an initializer)
-                        if stmt_kind == 1 {
-                            for j in pat_start..i {
-                                if is_bind(j) {
-                                    pend_let.push((j, depth));
-                                }
-                            }
-                        }
-                        for (j, d) in pend_let.drain(..) {
-                            live.push((j, d, 0));
-                        }
-                        stmt_kind = 0;
-                        arm_start = i + 1;
-                    }
-                    b',' => {
-                        live.retain(|l| !(l.2 == 1 && l.1 == depth));
-                        arm_start = i + 1;
-                    }
-                    b'=' if self.sym(i + 1, b'>') => {
-                        // A match arm pattern (the x of `T { x: a, .. }` is a field name)
-                        let (pa, pe) = self.arm_pat(i);
-                        for j in pa.max(arm_start.min(pa))..pe {
-                            // (the 2nd m of `(m, 0) | (0, m)` is the same binding as the 1st: to the 1st, as in rust-analyzer)
-                            if is_bind(j) && !self.sym(j + 1, b'{') && !(self.sym(j + 1, b':') && !self.sym(j + 2, b':')) && !(pa..j).any(|q| self.ident(q) && self.tok(q) == self.tok(j)) {
-                                live.push((j, depth, 1));
-                            }
-                        }
-                        i += 1;
-                    }
-                    b'=' if !self.sym(i + 1, b'=') && !(i > 0 && matches!(self.text.as_bytes()[self.toks[i - 1].1 as usize], b'=' | b'!' | b'<' | b'>' | b'+' | b'-' | b'*' | b'/' | b'%' | b'&' | b'|' | b'^')) => {
-                        if stmt_kind == 1 || stmt_kind == 2 {
-                            for j in pat_start..i {
-                                if is_bind(j) {
-                                    if stmt_kind == 1 {
-                                        pend_let.push((j, depth));
-                                    } else {
-                                        pend_block.push(j);
-                                    }
-                                }
-                            }
-                            if stmt_kind == 1 {
-                                stmt_kind = 4; // (the initializer expression after the type annotation)
-                            } else {
-                                stmt_kind = 0;
-                            }
-                        }
-                    }
-                    b':' if stmt_kind == 1 && !self.sym(i + 1, b':') && !(i > 0 && self.sym(i - 1, b':')) => {
-                        // The pattern is everything before the type annotation of `let x: T = ..`
-                        for j in pat_start..i {
-                            if is_bind(j) {
-                                pend_let.push((j, depth));
-                            }
-                        }
-                        stmt_kind = 4;
-                    }
-                    b'|' if stmt_kind != 3 && (i == 0 || !self.sym(i - 1, b'|')) && !self.sym(i + 1, b'|') && self.closure_start(i) => {
-                        stmt_kind = 3;
-                        pat_start = i + 1;
-                    }
-                    b'|' if stmt_kind == 3 => {
-                        for j in pat_start..i {
-                            if is_bind(j) && !(j > 0 && self.sym(j - 1, b':')) {
-                                live.push((j, depth, 2));
-                            }
-                        }
-                        stmt_kind = 0;
-                    }
-                    _ => {}
+        i
+    }
+
+    /// `live`'s step at symbol token i of the body (brackets, `;`, `,`, a match arm's `=>`, a `let`'s `=` / `:`, closure parameters' `|`);
+    /// the token it ends at
+    fn live_sym(&self, mut i: usize, s: &mut LiveScan) -> usize {
+        match self.text.as_bytes()[self.toks[i].1 as usize] {
+            b'{' => {
+                s.depth += 1;
+                s.body_seen = true;
+                for j in s.pend_block.drain(..) {
+                    s.live.push((j, s.depth, 0));
                 }
-            } else if t.0 == 0 {
-                match self.tok(i) {
-                    // A match arm guard `P(x) if x > 0 =>`: the pattern's bindings are visible from the guard
-                    "if" => {
-                        if let Some(arrow) = self.guard_arrow(i) {
-                            let (pa, pe) = self.arm_pat(arrow);
-                            if pe == i {
-                                for j in pa..pe {
-                                    if is_bind(j) && !self.sym(j + 1, b'{') && !(self.sym(j + 1, b':') && !self.sym(j + 2, b':')) {
-                                        live.push((j, depth, 1));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // (`matches!(EXPR, PAT if GUARD)`: the pattern's bindings are visible from the guard (they go away at `)`))
-                    "matches" if self.sym(i + 1, b'!') && self.sym(i + 2, b'(') => {
-                        let mut d = 0i32;
-                        let mut comma = None;
-                        let mut j = i + 3;
-                        while j < k && j < i + 512 {
-                            if self.sym(j, b'(') || self.sym(j, b'[') || self.sym(j, b'{') {
-                                d += 1;
-                            } else if self.sym(j, b')') || self.sym(j, b']') || self.sym(j, b'}') {
-                                if d == 0 {
-                                    break;
-                                }
-                                d -= 1;
-                            } else if d == 0 && self.sym(j, b',') && comma.is_none() {
-                                comma = Some(j);
-                            } else if d == 0 && self.ident(j) && self.tok(j) == "if" {
-                                if let Some(c) = comma {
-                                    for q in c + 1..j {
-                                        if is_bind(q) && !self.sym(q + 1, b'{') && !(self.sym(q + 1, b':') && !self.sym(q + 2, b':')) {
-                                            live.push((q, depth + 1, 0));
-                                        }
-                                    }
-                                }
-                                break;
-                            }
-                            j += 1;
-                        }
-                    }
-                    "let" => {
-                        // (`if let` / `while let` become live in the next block)
-                        let cond = i > 0 && matches!(self.tok(i - 1), "if" | "while");
-                        stmt_kind = if cond { 2 } else { 1 };
-                        pat_start = i + 1;
-                    }
-                    "for" if !self.sym(i + 1, b'<') => {
-                        // `for PAT in`
-                        let mut j = i + 1;
-                        while j < k && self.tok(j) != "in" {
-                            if is_bind(j) {
-                                pend_block.push(j);
-                            }
-                            j += 1;
-                        }
-                        i = j;
-                    }
-                    _ => {}
+                s.arm_start = i + 1;
+                if s.stmt_kind == 2 {
+                    s.stmt_kind = 0;
                 }
             }
-            i += 1;
+            b'(' | b'[' => s.depth += 1,
+            b'}' | b')' | b']' => {
+                s.depth -= 1;
+                s.live.retain(|l| l.1 <= s.depth);
+                if self.sym(i, b'}') {
+                    s.arm_start = i + 1;
+                }
+            }
+            b';' => {
+                s.live.retain(|l| !(l.2 == 2 && l.1 == s.depth));
+                // (a `let x;` without an initializer)
+                if s.stmt_kind == 1 {
+                    for j in s.pat_start..i {
+                        if self.is_bind(j) {
+                            s.pend_let.push((j, s.depth));
+                        }
+                    }
+                }
+                for (j, d) in s.pend_let.drain(..) {
+                    s.live.push((j, d, 0));
+                }
+                s.stmt_kind = 0;
+                s.arm_start = i + 1;
+            }
+            b',' => {
+                s.live.retain(|l| !(l.2 == 1 && l.1 == s.depth));
+                s.arm_start = i + 1;
+            }
+            b'=' if self.sym(i + 1, b'>') => {
+                // A match arm pattern (the x of `T { x: a, .. }` is a field name)
+                let (pa, pe) = self.arm_pat(i);
+                for j in pa.max(s.arm_start.min(pa))..pe {
+                    // (the 2nd m of `(m, 0) | (0, m)` is the same binding as the 1st: to the 1st, as in rust-analyzer)
+                    if self.is_bind(j) && !self.sym(j + 1, b'{') && !(self.sym(j + 1, b':') && !self.sym(j + 2, b':')) && !(pa..j).any(|q| self.ident(q) && self.tok(q) == self.tok(j)) {
+                        s.live.push((j, s.depth, 1));
+                    }
+                }
+                i += 1;
+            }
+            b'=' if !self.sym(i + 1, b'=') && !(i > 0 && matches!(self.text.as_bytes()[self.toks[i - 1].1 as usize], b'=' | b'!' | b'<' | b'>' | b'+' | b'-' | b'*' | b'/' | b'%' | b'&' | b'|' | b'^')) => {
+                if s.stmt_kind == 1 || s.stmt_kind == 2 {
+                    for j in s.pat_start..i {
+                        if self.is_bind(j) {
+                            if s.stmt_kind == 1 {
+                                s.pend_let.push((j, s.depth));
+                            } else {
+                                s.pend_block.push(j);
+                            }
+                        }
+                    }
+                    if s.stmt_kind == 1 {
+                        s.stmt_kind = 4; // (the initializer expression after the type annotation)
+                    } else {
+                        s.stmt_kind = 0;
+                    }
+                }
+            }
+            b':' if s.stmt_kind == 1 && !self.sym(i + 1, b':') && !(i > 0 && self.sym(i - 1, b':')) => {
+                // The pattern is everything before the type annotation of `let x: T = ..`
+                for j in s.pat_start..i {
+                    if self.is_bind(j) {
+                        s.pend_let.push((j, s.depth));
+                    }
+                }
+                s.stmt_kind = 4;
+            }
+            b'|' if s.stmt_kind != 3 && (i == 0 || !self.sym(i - 1, b'|')) && !self.sym(i + 1, b'|') && self.closure_start(i) => {
+                s.stmt_kind = 3;
+                s.pat_start = i + 1;
+            }
+            b'|' if s.stmt_kind == 3 => {
+                for j in s.pat_start..i {
+                    if self.is_bind(j) && !(j > 0 && self.sym(j - 1, b':')) {
+                        s.live.push((j, s.depth, 2));
+                    }
+                }
+                s.stmt_kind = 0;
+            }
+            _ => {}
         }
-        // (if still before the body's `{` (in the fn parameters), the parameters are visible. What is left inside the body is the bindings
-        // of `if let` / `while let` / `for` patterns visible from the next block, so they are not visible yet (the x on the right of `if let Some(x) = (x, ..)` is the outer x))
-        if !body_seen {
-            live.extend(pend_block.iter().map(|&j| (j, depth, 0)));
+        i
+    }
+
+    /// `live`'s step at identifier token i of the body (before k): a match arm guard's `if`, the guard of `matches!`, `let`, `for`; the
+    /// token it ends at
+    fn live_word(&self, mut i: usize, k: usize, s: &mut LiveScan) -> usize {
+        match self.tok(i) {
+            // A match arm guard `P(x) if x > 0 =>`: the pattern's bindings are visible from the guard
+            "if" => {
+                if let Some(arrow) = self.guard_arrow(i) {
+                    let (pa, pe) = self.arm_pat(arrow);
+                    if pe == i {
+                        for j in pa..pe {
+                            if self.is_bind(j) && !self.sym(j + 1, b'{') && !(self.sym(j + 1, b':') && !self.sym(j + 2, b':')) {
+                                s.live.push((j, s.depth, 1));
+                            }
+                        }
+                    }
+                }
+            }
+            // (`matches!(EXPR, PAT if GUARD)`: the pattern's bindings are visible from the guard (they go away at `)`))
+            "matches" if self.sym(i + 1, b'!') && self.sym(i + 2, b'(') => {
+                let mut d = 0i32;
+                let mut comma = None;
+                let mut j = i + 3;
+                while j < k && j < i + 512 {
+                    if self.sym(j, b'(') || self.sym(j, b'[') || self.sym(j, b'{') {
+                        d += 1;
+                    } else if self.sym(j, b')') || self.sym(j, b']') || self.sym(j, b'}') {
+                        if d == 0 {
+                            break;
+                        }
+                        d -= 1;
+                    } else if d == 0 && self.sym(j, b',') && comma.is_none() {
+                        comma = Some(j);
+                    } else if d == 0 && self.ident(j) && self.tok(j) == "if" {
+                        if let Some(c) = comma {
+                            for q in c + 1..j {
+                                if self.is_bind(q) && !self.sym(q + 1, b'{') && !(self.sym(q + 1, b':') && !self.sym(q + 2, b':')) {
+                                    s.live.push((q, s.depth + 1, 0));
+                                }
+                            }
+                        }
+                        break;
+                    }
+                    j += 1;
+                }
+            }
+            "let" => {
+                // (`if let` / `while let` become live in the next block)
+                let cond = i > 0 && matches!(self.tok(i - 1), "if" | "while");
+                s.stmt_kind = if cond { 2 } else { 1 };
+                s.pat_start = i + 1;
+            }
+            "for" if !self.sym(i + 1, b'<') => {
+                // `for PAT in`
+                let mut j = i + 1;
+                while j < k && self.tok(j) != "in" {
+                    if self.is_bind(j) {
+                        s.pend_block.push(j);
+                    }
+                    j += 1;
+                }
+                i = j;
+            }
+            _ => {}
         }
-        live.into_iter().map(|l| l.0).collect()
+        i
     }
 
     /// If `if` (token i) is a match arm guard, the `=` of the `=>` after it (the one before a block `{` or a `;`)
@@ -1556,6 +1570,27 @@ impl FileIndex {
         }
         None
     }
+}
+
+/// What `FileIndex::live` keeps while it walks a fn body
+struct LiveScan {
+    /// Live bindings: (token, the depth at which it goes away, 1: it also goes away at a `,` at that depth (a match arm's) / 2: at a `;`
+    /// (a closure's parameters))
+    live: Vec<(usize, i32, u8)>,
+    /// (the ones that become live in the next block: for / if let / while let, and the fn parameters)
+    pend_block: Vec<usize>,
+    /// (the ones that become live at the end of the statement `;`: let)
+    pend_let: Vec<(usize, i32)>,
+    /// (the depth of brackets)
+    depth: i32,
+    /// 1: a let pattern, 2: a for / if let / while let pattern, 3: closure parameters, 4: past a let pattern (its type / initializer)
+    stmt_kind: u8,
+    /// (whether the body's `{` has been passed)
+    body_seen: bool,
+    /// (where the pattern of the let / if let / closure being read starts)
+    pat_start: usize,
+    /// (where a match arm's pattern can start: after the last `{` / `}` / `;` / `,`)
+    arm_start: usize,
 }
 
 fn loc(file: usize, d: &Def) -> Loc {
@@ -3462,78 +3497,15 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
     if depth > 32 || k >= f.toks.len() {
         return None;
     }
-    let self_ty = |at: usize| -> Option<String> { f.enclosing_fn(at).filter(|d| !d.owner.is_empty()).map(|d| impl_self_full(&d.container).to_string()) };
-    let at = f.toks[k].1 as usize;
     // (a tuple index `x.0`: a number token preceded by `.`)
     if f.toks[k].0 == 1 && f.text.as_bytes()[f.toks[k].1 as usize].is_ascii_digit() && k >= 2 && f.sym(k - 1, b'.') && !(k >= 3 && f.sym(k - 2, b'.')) {
-        let i: usize = f.tok(k).parse().ok()?;
-        let base = expr_type(ws, file, k - 2, depth + 1)?;
-        let base = expand(ws, file, strip_ref(&base)).into_iter().last()?;
-        return match tuple_items(strip_ref(&base)) {
-            Some(v) => v.get(i).cloned(),
-            // (a field of a tuple struct `struct P(A, B)`: from the way the fields are written, kept in the definition)
-            None => {
-                let h = type_head(&base);
-                let d = named(ws, file, &h).into_iter().map(|x| x.1).find(|d| d.kind == SymKind::Struct && d.owner.is_empty() && d.fnret.iter().any(|x| x.0 == 255))?;
-                let inner = &d.fnret.iter().find(|x| x.0 == 255)?.2;
-                let tys = targs(&format!("X<{inner}>"));
-                let t = tys.get(i)?.trim();
-                let t = t.strip_prefix("pub(crate)").or_else(|| t.strip_prefix("pub(super)")).or_else(|| t.strip_prefix("pub ")).unwrap_or(t).trim();
-                let params = &d.params;
-                Some(strip_lifetimes(&if params.is_empty() { t.to_string() } else { subst(t, params, &targs(&base)) }))
-            }
-        };
+        return tuple_index_type(ws, file, k, depth);
     }
     if let Some(t) = literal_type(f, k) {
         return Some(t);
     }
     if f.ident(k) {
-        let r = f.tok(k);
-        if k >= 1 && f.ident(k - 1) && f.tok(k - 1) == "as" {
-            return Some(r.to_string());
-        }
-        // `a.b`: a field
-        if k >= 1 && f.sym(k - 1, b'.') && !(k >= 2 && f.sym(k - 2, b'.')) {
-            let o = expr_type(ws, file, k - 2, depth + 1)?;
-            return member_type(ws, file, &o, r, &[SymKind::Field]);
-        }
-        if r == "self" {
-            return self_ty(at);
-        }
-        if f.after_path(k) {
-            // `Q::CONST` / `Enum::Variant`
-            let q = f.tok(k.checked_sub(3)?).to_string();
-            let q = if q == "Self" { self_ty(at)? } else { q };
-            // (`a::b::P` / `m::CONST`: a unit struct / const under a module. The u32 of `u32::MAX` is a type (not the module's `core::char::MAX`))
-            if q.starts_with(|c: char| c.is_ascii_lowercase()) && !PRIMS.contains(&q.as_str()) {
-                let kr = f.krate;
-                return named(ws, file, r)
-                    .into_iter()
-                    .filter(|(_, d)| d.owner.is_empty() && matches!(d.kind, SymKind::Struct | SymKind::Const | SymKind::Static))
-                    .min_by_key(|(i, d)| (d.module.last().map(|m| m.as_str()) != Some(q.as_str()), ws[*i].krate != kr, ws[*i].lib))
-                    .map(|(_, d)| if d.kind == SymKind::Struct { r.to_string() } else { d.ty.clone() });
-            }
-            return member_type(ws, file, &q, r, &[SymKind::Const, SymKind::Variant]).or(Some(q).filter(|_| r.starts_with(|c: char| c.is_ascii_uppercase())));
-        }
-        if let Some(b) = f.local(k, r) {
-            return binding_type(ws, file, b, depth + 1);
-        }
-        // (`None`: Option)
-        if r == "None" && !f.after_path(k) {
-            return Some("Option<_>".to_string());
-        }
-        // (the value of a unit struct `K`)
-        if r.starts_with(|c: char| c.is_ascii_uppercase()) && named(ws, file, r).iter().any(|(_, d)| d.kind == SymKind::Struct && d.owner.is_empty()) {
-            return Some(r.to_string());
-        }
-        // (const / static)
-        // (if things with the same name are in other files too (`const PRELUDE`), the one in the same file / same crate)
-        let kr = f.krate;
-        return named(ws, file, r)
-            .into_iter()
-            .filter(|(_, d)| d.owner.is_empty() && matches!(d.kind, SymKind::Const | SymKind::Static) && !d.ty.is_empty())
-            .min_by_key(|(i, _)| (*i != file, ws[*i].krate != kr, ws[*i].lib))
-            .map(|(_, d)| d.ty.clone());
+        return name_type(ws, file, k, depth);
     }
     if f.sym(k, b'?') && k >= 1 {
         let t = expr_type(ws, file, k - 1, depth + 1)?;
@@ -3543,297 +3515,450 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
         });
     }
     if f.sym(k, b')') || f.sym(k, b'}') || f.sym(k, b']') {
-        let close = f.text.as_bytes()[f.toks[k].1 as usize];
-        let open = match close {
-            b')' => b'(',
-            b'}' => b'{',
-            _ => b'[',
-        };
-        let mut d = 0;
-        let mut p = k;
-        let mut range = false;
-        loop {
-            if f.sym(p, close) {
-                d += 1;
-            } else if f.sym(p, open) {
-                d -= 1;
-                if d == 0 {
-                    break;
-                }
-            } else if d == 1 && f.sym(p, b'.') && p >= 1 && f.sym(p - 1, b'.') {
-                range = true;
-            }
-            if p == 0 {
-                return None;
-            }
-            p -= 1;
-        }
-        let m = p.checked_sub(1)?;
-        // Macros `vec![..]` / `format!(..)`
-        if f.sym(m, b'!') && m >= 1 && f.ident(m - 1) {
-            return match f.tok(m - 1) {
-                // (`vec![a, b]` / `vec![x; n]`: the type of the first element)
-                "vec" => {
-                    let mut dd = 0;
-                    let mut e0 = None;
-                    for q in p + 1..k {
-                        if f.sym(q, b'(') || f.sym(q, b'[') || f.sym(q, b'{') {
-                            dd += 1;
-                        } else if f.sym(q, b')') || f.sym(q, b']') || f.sym(q, b'}') {
-                            dd -= 1;
-                        } else if dd == 0 && (f.sym(q, b',') || f.sym(q, b';')) {
-                            e0 = Some(q - 1);
-                            break;
-                        }
-                    }
-                    let e0 = e0.unwrap_or(k - 1);
-                    let et = if k > p + 1 { expr_type(ws, file, e0, depth + 1) } else { None };
-                    Some(format!("Vec<{}>", et.unwrap_or_else(|| "_".to_string())))
-                }
-                "format" => Some("String".to_string()),
-                // (a `macro_rules!` of this file with one arm: the type of the last expression of the body block)
-                mname => macro_result_type(ws, file, mname, depth),
-            };
-        }
-        // Turbofish `x.collect::<Vec<_>>()` / `x.parse::<u8>()`
-        if open == b'(' && f.sym(m, b'>') && !(m >= 1 && (f.sym(m - 1, b'=') || f.sym(m - 1, b'-'))) {
-            let mut q = m;
-            let mut dd = 0;
-            while q > 0 {
-                if f.sym(q, b'>') && !f.sym(q - 1, b'-') {
-                    dd += 1;
-                } else if f.sym(q, b'<') {
-                    dd -= 1;
-                    if dd == 0 {
-                        break;
-                    }
-                }
-                q -= 1;
-            }
-            if q >= 4 && f.sym(q - 1, b':') && f.sym(q - 2, b':') && f.ident(q - 3) && f.sym(q - 4, b'.') && q >= 5 {
-                let tb = f.text[f.toks[q + 1].1 as usize..f.toks[m - 1].2 as usize].to_string();
-                let o = expr_type(ws, file, q - 5, depth + 1)?;
-                return method_call_type_at(ws, file, &o, f.tok(q - 3), m + 1, Some(&tb), depth);
-            }
-            // (the turbofish of a fn `serde_json::from_str::<Value>(s)` / `f::<T>(x)`: into the first type parameter of the return type)
-            if q >= 3 && f.sym(q - 1, b':') && f.sym(q - 2, b':') && f.ident(q - 3) {
-                let tb = f.text[f.toks[q + 1].1 as usize..f.toks[m - 1].2 as usize].to_string();
-                let name = f.tok(q - 3);
-                let qm = if q >= 6 && f.after_path(q - 3) { Some(f.tok(q - 6).to_string()) } else { None };
-                let cands: Vec<&Def> = named(ws, file, name).into_iter().map(|x| x.1).filter(|d| d.owner.is_empty() && d.kind == SymKind::Function && !d.ty.is_empty()).collect();
-                let d = cands.iter().find(|d| qm.as_ref().is_some_and(|qm| d.module.last() == Some(qm))).or(cands.first())?;
-                let mut ret = d.ty.clone();
-                if let Some(g) = ret.split(|c: char| !(c.is_alphanumeric() || c == '_')).find(|w| w.len() == 1 && w.starts_with(|c: char| c.is_ascii_uppercase())) {
-                    let g = g.to_string();
-                    ret = subst(&ret, &[g], &[tb]);
-                }
-                return Some(strip_lifetimes(&ret));
-            }
-            return None;
-        }
-        // A parenthesized expression `(e)` and a tuple expression `(a, b)` (when not preceded by something being called (a name, `)`, `]`))
-        if open == b'(' && !(f.ident(m) && !KEYWORDS.contains(&f.tok(m))) && !f.sym(m, b')') && !f.sym(m, b']') && !f.sym(m, b'!') {
-            let mut ends = vec![];
-            let mut dd = 0;
-            for q in p + 1..k {
-                if f.sym(q, b'(') || f.sym(q, b'[') || f.sym(q, b'{') {
-                    dd += 1;
-                } else if f.sym(q, b')') || f.sym(q, b']') || f.sym(q, b'}') {
-                    dd -= 1;
-                } else if dd == 0 && f.sym(q, b',') {
-                    ends.push(q - 1);
-                }
-            }
-            let trailing = ends.last().is_some_and(|&e| e + 2 == k);
-            if !trailing && k > p + 1 {
-                ends.push(k - 1);
-            }
-            if ends.is_empty() {
-                return Some("()".to_string());
-            }
-            if ends.len() == 1 && !trailing {
-                // (a range expression `(a..b)` / `(a..=b)`: Range<T> (T is the type of whichever end is known))
-                if let Some(t) = range_type(ws, file, p + 1, k - 1, depth) {
-                    return Some(t);
-                }
-                return expr_type(ws, file, ends[0], depth + 1);
-            }
-            // (no answer if not a single element type is known. Unknown elements are `_`)
-            let ts: Vec<Option<String>> = ends.iter().map(|&e| expr_type(ws, file, e, depth + 1)).collect();
-            if ts.iter().all(|x| x.is_none()) {
-                return None;
-            }
-            return Some(format!("({})", ts.into_iter().map(|x| x.unwrap_or_else(|| "_".to_string())).collect::<Vec<_>>().join(", ")));
-        }
-        if open == b'[' {
-            // Indexing `a[i]` (when preceded by the end of an expression; also the tuple index in `t.1[0]`)
-            let tuple_idx = f.toks[m].0 == 1 && f.text.as_bytes()[f.toks[m].1 as usize].is_ascii_digit() && m >= 1 && f.sym(m - 1, b'.');
-            if f.ident(m) && (!KEYWORDS.contains(&f.tok(m)) || matches!(f.tok(m), "self" | "Self")) || f.sym(m, b')') || f.sym(m, b']') || tuple_idx {
-                let t = expr_type(ws, file, m, depth + 1)?;
-                // (also the user's types' `impl Index<..> for T { type Output = .. }`)
-                return expand(ws, file, &t).iter().find_map(|t| index_type(t, range).or_else(|| assoc_type(ws, file, strip_ref(t), "Index", "Output")));
-            }
-            // An array expression `[a, b]` / `[x; n]`: `[T; N]` (the element type is the first element's)
-            let mut first_end = None;
-            let mut n = 0;
-            let mut rep: Option<usize> = None;
-            let mut dd = 0;
-            for q in p + 1..k {
-                if f.sym(q, b'(') || f.sym(q, b'[') || f.sym(q, b'{') {
-                    dd += 1;
-                } else if f.sym(q, b')') || f.sym(q, b']') || f.sym(q, b'}') {
-                    dd -= 1;
-                } else if dd == 0 && f.sym(q, b',') {
-                    first_end.get_or_insert(q - 1);
-                    n += 1;
-                } else if dd == 0 && f.sym(q, b';') {
-                    first_end.get_or_insert(q - 1);
-                    rep = Some(q);
-                }
-            }
-            if k == p + 1 {
-                return None;
-            }
-            if !f.sym(k - 1, b',') && rep.is_none() {
-                n += 1;
-            }
-            let e0 = first_end.unwrap_or(k - 1);
-            let et = expr_type(ws, file, e0, depth + 1)?;
-            let len = match rep {
-                Some(q) => f.text[f.toks[q + 1].1 as usize..f.toks[k - 1].2 as usize].trim().to_string(),
-                None => n.to_string(),
-            };
-            return Some(format!("[{et}; {len}]"));
-        }
-        // A match / if / block expression (one that is not a struct expression `T { .. }`): the first of the last expressions of the arms / blocks whose type is known
-        if open == b'{' && !(f.ident(m) && (f.tok(m).starts_with(|c: char| c.is_ascii_uppercase()) || f.tok(m) == "Self")) {
-            let s = block_expr_start(f, p)?;
-            let mut tails = vec![];
-            expr_tails(f, file, s, k, &mut tails);
-            // (types without `_` first (the `Option<Type>` of `clif_ty(..)` rather than the `Option<_>` of `None`))
-            let mut rough = None;
-            for l in tails {
-                let e = f.toks.partition_point(|t| (t.2 as usize) < l.end);
-                if e < k {
-                    if let Some(t) = expr_type(ws, file, e, depth + 1) {
-                        let ts = f.toks.partition_point(|t| (t.1 as usize) < l.start);
-                        let t = with_prefix(f, ts, e, t);
-                        if !t.contains('_') {
-                            return Some(t);
-                        }
-                        rough.get_or_insert(t);
-                    }
-                }
-            }
-            return rough;
-        }
-        if !f.ident(m) {
-            return None;
-        }
-        let name = f.tok(m);
-        if open == b'{' {
-            // A struct expression `T { .. }` (only names starting with an uppercase letter: to tell it from blocks)
-            if name == "Self" {
-                return self_ty(at);
-            }
-            if !name.starts_with(|c: char| c.is_ascii_uppercase()) {
-                return None;
-            }
-            // (a struct with type parameters: the type parameters are decided from the field initializer expressions, `Wrapper { inner: Point::new() }` → Wrapper<Point>)
-            let params = named(ws, file, name).into_iter().map(|x| x.1).find(|d| d.owner.is_empty() && d.kind == SymKind::Struct).map(|d| d.params.clone()).unwrap_or_default();
-            if params.is_empty() {
-                return Some(name.to_string());
-            }
-            let mut args = vec!["_".to_string(); params.len()];
-            let mut j = p + 1;
-            while j < k {
-                if f.ident(j) && (f.sym(j - 1, b'{') || f.sym(j - 1, b',')) && (f.sym(j + 1, b':') && !f.sym(j + 2, b':')) {
-                    // (the end of the EXPR of `field: EXPR`)
-                    let mut e = j + 2;
-                    let mut d = 0;
-                    while e < k {
-                        if f.sym(e, b'(') || f.sym(e, b'[') || f.sym(e, b'{') {
-                            d += 1;
-                        } else if f.sym(e, b')') || f.sym(e, b']') || f.sym(e, b'}') {
-                            d -= 1;
-                        } else if d == 0 && f.sym(e, b',') {
-                            break;
-                        }
-                        e += 1;
-                    }
-                    let field = f.tok(j);
-                    if let Some(fd) = named(ws, file, field).into_iter().map(|x| x.1).find(|d| d.kind == SymKind::Field && d.owner == name) {
-                        if let Some(pi) = params.iter().position(|p| *p == fd.ty) {
-                            if let Some(t) = expr_type(ws, file, e - 1, depth + 1) {
-                                args[pi] = t;
-                            }
-                        }
-                    }
-                    j = e;
-                }
-                j += 1;
-            }
-            return Some(format!("{name}<{}>", args.join(", ")));
-        }
-        if m >= 1 && f.sym(m - 1, b'.') {
-            let o = expr_type(ws, file, m - 2, depth + 1)?;
-            return method_call_type(ws, file, &o, name, m, depth);
-        }
-        if f.after_path(m) && m >= 3 && f.ident(m - 3) {
-            let q = f.tok(m - 3).to_string();
-            let q = if q == "Self" { self_ty(at)? } else { q };
-            // (`a::b::T(..)` / `m::f(..)`: a tuple struct / fn under a module)
-            if q.starts_with(|c: char| c.is_ascii_lowercase()) && q != "self" && q != "super" && q != "crate" {
-                // (if there are several fns with the same name, the one whose module name is the qualifier q: `zustc::macros::expand` is the expand of macros)
-                let cands: Vec<&Def> = named(ws, file, name).into_iter().map(|x| x.1).filter(|d| d.owner.is_empty() && matches!(d.kind, SymKind::Struct | SymKind::Function)).collect();
-                let pick = cands.iter().find(|d| d.module.last() == Some(&q)).or(cands.first());
-                if let Some(t) = pick.map(|d| if d.kind == SymKind::Struct { name.to_string() } else { apply_call_args(ws, file, d.ty.clone(), &d.fnret, m + 1, depth) }).filter(|t| !t.is_empty()) {
-                    return Some(strip_lifetimes(&norm_proj_ws(ws, file, &t)));
-                }
-            }
-            // (an associated fn `Q::f(args)`: the type parameters are decided from the arguments (`Mutex::new(x)` → Mutex<type of x>))
-            if let Some((r, d)) = expand(ws, file, &q).iter().find_map(|t| member_def(ws, file, t, name, &[SymKind::Method, SymKind::Function, SymKind::Variant])) {
-                let r = apply_call_args(ws, file, r, &d.fnret, m + 1, depth);
-                return Some(strip_lifetimes(&norm_proj_ws(ws, file, &r)));
-            }
-            return name.starts_with(|c: char| c.is_ascii_uppercase()).then(|| q.clone());
-        }
-        if name == "Some" {
-            // (`Some(e)`: if the type of e is known, Option<type of e>)
-            let close = close_of(f, m + 1);
-            let inner = expr_end(f, m + 2, false).filter(|&e| e + 1 == close).and_then(|e| expr_type(ws, file, e, depth + 1));
-            return Some(format!("Option<{}>", inner.unwrap_or_else(|| "_".to_string())));
-        }
-        if name == "Ok" || name == "Err" {
-            return Some("Result<_, _>".to_string());
-        }
-        if name.starts_with(|c: char| c.is_ascii_uppercase()) {
-            return Some(name.to_string());
-        }
-        // (a call of a local closure `all()`: that closure's return type)
-        if let Some(b) = f.local(m, name) {
-            if let Some(ty) = binding_type(ws, file, b, depth + 1) {
-                if ty.starts_with("impl Fn") {
-                    return ty.find(") -> ").map(|i| ty[i + 5..].trim().to_string());
-                }
-            }
-            return None;
-        }
-        // (the fn called: the one decided by name resolution (use, same module). There are fns with the same name in other crates too (`run`))
-        if let Some(t) = def_at(ws, file, f.toks[m].1 as usize).first().and_then(|l| ws[l.file].defs.iter().find(|d| d.start == l.start && d.kind == SymKind::Function)).map(|d| d.ty.clone()) {
-            return Some(t).filter(|t| !t.is_empty());
-        }
-        let kr = f.krate;
-        return named(ws, file, name)
-            .into_iter()
-            .filter(|(_, d)| d.owner.is_empty() && d.kind == SymKind::Function && !d.ty.is_empty())
-            .min_by_key(|(i, _)| (*i != file, ws[*i].krate != kr, ws[*i].lib))
-            .map(|(_, d)| d.ty.clone());
+        return bracketed_type(ws, file, k, depth);
     }
     if f.toks[k].0 == 2 && f.text.as_bytes()[f.toks[k].1 as usize] == b'"' {
         return Some("&str".to_string());
     }
     None
+}
+
+/// The self type of the impl whose fn contains byte position at (as written in the impl, with its type parameters: `Wrapper<T>`)
+fn impl_self_at(f: &FileIndex, at: usize) -> Option<String> {
+    f.enclosing_fn(at).filter(|d| !d.owner.is_empty()).map(|d| impl_self_full(&d.container).to_string())
+}
+
+/// The type of a tuple index `x.0` (token k is the number): the element of a tuple type, or the field of a tuple struct (a case of `expr_type`)
+fn tuple_index_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<String> {
+    let f = ws[file];
+    let i: usize = f.tok(k).parse().ok()?;
+    let base = expr_type(ws, file, k - 2, depth + 1)?;
+    let base = expand(ws, file, strip_ref(&base)).into_iter().last()?;
+    match tuple_items(strip_ref(&base)) {
+        Some(v) => v.get(i).cloned(),
+        // (a field of a tuple struct `struct P(A, B)`: from the way the fields are written, kept in the definition)
+        None => {
+            let h = type_head(&base);
+            let d = named(ws, file, &h).into_iter().map(|x| x.1).find(|d| d.kind == SymKind::Struct && d.owner.is_empty() && d.fnret.iter().any(|x| x.0 == 255))?;
+            let inner = &d.fnret.iter().find(|x| x.0 == 255)?.2;
+            let tys = targs(&format!("X<{inner}>"));
+            let t = tys.get(i)?.trim();
+            let t = t.strip_prefix("pub(crate)").or_else(|| t.strip_prefix("pub(super)")).or_else(|| t.strip_prefix("pub ")).unwrap_or(t).trim();
+            let params = &d.params;
+            Some(strip_lifetimes(&if params.is_empty() { t.to_string() } else { subst(t, params, &targs(&base)) }))
+        }
+    }
+}
+
+/// The type of an expression that ends in a name (token k): `x as T`, a field `a.b`, `self`, a path `Q::CONST`, a local, `None`, a unit
+/// struct, a const / static (a case of `expr_type`)
+fn name_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<String> {
+    let f = ws[file];
+    let r = f.tok(k);
+    if k >= 1 && f.ident(k - 1) && f.tok(k - 1) == "as" {
+        return Some(r.to_string());
+    }
+    // `a.b`: a field
+    if k >= 1 && f.sym(k - 1, b'.') && !(k >= 2 && f.sym(k - 2, b'.')) {
+        let o = expr_type(ws, file, k - 2, depth + 1)?;
+        return member_type(ws, file, &o, r, &[SymKind::Field]);
+    }
+    if r == "self" {
+        return impl_self_at(f, f.toks[k].1 as usize);
+    }
+    if f.after_path(k) {
+        // `Q::CONST` / `Enum::Variant`
+        return path_value_type(ws, file, k);
+    }
+    if let Some(b) = f.local(k, r) {
+        return binding_type(ws, file, b, depth + 1);
+    }
+    // (`None`: Option)
+    if r == "None" && !f.after_path(k) {
+        return Some("Option<_>".to_string());
+    }
+    // (the value of a unit struct `K`)
+    if r.starts_with(|c: char| c.is_ascii_uppercase()) && named(ws, file, r).iter().any(|(_, d)| d.kind == SymKind::Struct && d.owner.is_empty()) {
+        return Some(r.to_string());
+    }
+    // (const / static)
+    // (if things with the same name are in other files too (`const PRELUDE`), the one in the same file / same crate)
+    let kr = f.krate;
+    named(ws, file, r)
+        .into_iter()
+        .filter(|(_, d)| d.owner.is_empty() && matches!(d.kind, SymKind::Const | SymKind::Static) && !d.ty.is_empty())
+        .min_by_key(|(i, _)| (*i != file, ws[*i].krate != kr, ws[*i].lib))
+        .map(|(_, d)| d.ty.clone())
+}
+
+/// The type of a path `Q::CONST` / `Enum::Variant` / `m::CONST` (token k is its last name)
+fn path_value_type(ws: &[&FileIndex], file: usize, k: usize) -> Option<String> {
+    let f = ws[file];
+    let r = f.tok(k);
+    let q = f.tok(k.checked_sub(3)?).to_string();
+    let q = if q == "Self" { impl_self_at(f, f.toks[k].1 as usize)? } else { q };
+    // (`a::b::P` / `m::CONST`: a unit struct / const under a module. The u32 of `u32::MAX` is a type (not the module's `core::char::MAX`))
+    if q.starts_with(|c: char| c.is_ascii_lowercase()) && !PRIMS.contains(&q.as_str()) {
+        let kr = f.krate;
+        return named(ws, file, r)
+            .into_iter()
+            .filter(|(_, d)| d.owner.is_empty() && matches!(d.kind, SymKind::Struct | SymKind::Const | SymKind::Static))
+            .min_by_key(|(i, d)| (d.module.last().map(|m| m.as_str()) != Some(q.as_str()), ws[*i].krate != kr, ws[*i].lib))
+            .map(|(_, d)| if d.kind == SymKind::Struct { r.to_string() } else { d.ty.clone() });
+    }
+    member_type(ws, file, &q, r, &[SymKind::Const, SymKind::Variant]).or(Some(q).filter(|_| r.starts_with(|c: char| c.is_ascii_uppercase())))
+}
+
+/// The opening bracket open matching the closing bracket close at token k, and whether `..` is directly inside (a range index `a[1..]`)
+fn open_and_range(f: &FileIndex, k: usize, open: u8, close: u8) -> Option<(usize, bool)> {
+    let mut d = 0;
+    let mut p = k;
+    let mut range = false;
+    loop {
+        if f.sym(p, close) {
+            d += 1;
+        } else if f.sym(p, open) {
+            d -= 1;
+            if d == 0 {
+                break;
+            }
+        } else if d == 1 && f.sym(p, b'.') && p >= 1 && f.sym(p - 1, b'.') {
+            range = true;
+        }
+        if p == 0 {
+            return None;
+        }
+        p -= 1;
+    }
+    Some((p, range))
+}
+
+/// The type of an expression that ends in a closing bracket (token k; p is its opening bracket and m the token before p): a macro call, a
+/// call with a turbofish, `(e)` / a tuple, indexing / an array, a block, a struct expression, a call of a method / path / name (a case of
+/// `expr_type`)
+fn bracketed_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<String> {
+    let f = ws[file];
+    let close = f.text.as_bytes()[f.toks[k].1 as usize];
+    let open = match close {
+        b')' => b'(',
+        b'}' => b'{',
+        _ => b'[',
+    };
+    let (p, range) = open_and_range(f, k, open, close)?;
+    let m = p.checked_sub(1)?;
+    // Macros `vec![..]` / `format!(..)`
+    if f.sym(m, b'!') && m >= 1 && f.ident(m - 1) {
+        return macro_call_type(ws, file, m, p, k, depth);
+    }
+    // Turbofish `x.collect::<Vec<_>>()` / `x.parse::<u8>()`
+    if open == b'(' && f.sym(m, b'>') && !(m >= 1 && (f.sym(m - 1, b'=') || f.sym(m - 1, b'-'))) {
+        return turbofish_call_type(ws, file, m, depth);
+    }
+    // A parenthesized expression `(e)` and a tuple expression `(a, b)` (when not preceded by something being called (a name, `)`, `]`))
+    if open == b'(' && !(f.ident(m) && !KEYWORDS.contains(&f.tok(m))) && !f.sym(m, b')') && !f.sym(m, b']') && !f.sym(m, b'!') {
+        return paren_type(ws, file, p, k, depth);
+    }
+    if open == b'[' {
+        // Indexing `a[i]` (when preceded by the end of an expression; also the tuple index in `t.1[0]`)
+        let tuple_idx = f.toks[m].0 == 1 && f.text.as_bytes()[f.toks[m].1 as usize].is_ascii_digit() && m >= 1 && f.sym(m - 1, b'.');
+        if f.ident(m) && (!KEYWORDS.contains(&f.tok(m)) || matches!(f.tok(m), "self" | "Self")) || f.sym(m, b')') || f.sym(m, b']') || tuple_idx {
+            let t = expr_type(ws, file, m, depth + 1)?;
+            // (also the user's types' `impl Index<..> for T { type Output = .. }`)
+            return expand(ws, file, &t).iter().find_map(|t| index_type(t, range).or_else(|| assoc_type(ws, file, strip_ref(t), "Index", "Output")));
+        }
+        // An array expression `[a, b]` / `[x; n]`
+        return array_type(ws, file, p, k, depth);
+    }
+    // A match / if / block expression (one that is not a struct expression `T { .. }`): the first of the last expressions of the arms / blocks whose type is known
+    if open == b'{' && !(f.ident(m) && (f.tok(m).starts_with(|c: char| c.is_ascii_uppercase()) || f.tok(m) == "Self")) {
+        return block_type(ws, file, p, k, depth);
+    }
+    if !f.ident(m) {
+        return None;
+    }
+    let name = f.tok(m);
+    if open == b'{' {
+        // A struct expression `T { .. }` (only names starting with an uppercase letter: to tell it from blocks)
+        return struct_expr_type(ws, file, m, k, depth);
+    }
+    if m >= 1 && f.sym(m - 1, b'.') {
+        let o = expr_type(ws, file, m - 2, depth + 1)?;
+        return method_call_type(ws, file, &o, name, m, depth);
+    }
+    if f.after_path(m) && m >= 3 && f.ident(m - 3) {
+        return path_call_type(ws, file, m, k, depth);
+    }
+    call_type(ws, file, m, depth)
+}
+
+/// The type of a macro call `name!(..)` (token m is the `!`, p..=k its brackets): `vec!`, `format!`, a `macro_rules!` of this file
+fn macro_call_type(ws: &[&FileIndex], file: usize, m: usize, p: usize, k: usize, depth: u32) -> Option<String> {
+    let f = ws[file];
+    match f.tok(m - 1) {
+        // (`vec![a, b]` / `vec![x; n]`: the type of the first element)
+        "vec" => {
+            let mut dd = 0;
+            let mut e0 = None;
+            for q in p + 1..k {
+                if f.sym(q, b'(') || f.sym(q, b'[') || f.sym(q, b'{') {
+                    dd += 1;
+                } else if f.sym(q, b')') || f.sym(q, b']') || f.sym(q, b'}') {
+                    dd -= 1;
+                } else if dd == 0 && (f.sym(q, b',') || f.sym(q, b';')) {
+                    e0 = Some(q - 1);
+                    break;
+                }
+            }
+            let e0 = e0.unwrap_or(k - 1);
+            let et = if k > p + 1 { expr_type(ws, file, e0, depth + 1) } else { None };
+            Some(format!("Vec<{}>", et.unwrap_or_else(|| "_".to_string())))
+        }
+        "format" => Some("String".to_string()),
+        // (a `macro_rules!` of this file with one arm: the type of the last expression of the body block)
+        mname => macro_result_type(ws, file, mname, depth),
+    }
+}
+
+/// The type of a call with a turbofish (token m is the `>` before the `(`): a method `x.collect::<Vec<_>>()` / a fn `f::<T>(x)`
+fn turbofish_call_type(ws: &[&FileIndex], file: usize, m: usize, depth: u32) -> Option<String> {
+    let f = ws[file];
+    let mut q = m;
+    let mut dd = 0;
+    while q > 0 {
+        if f.sym(q, b'>') && !f.sym(q - 1, b'-') {
+            dd += 1;
+        } else if f.sym(q, b'<') {
+            dd -= 1;
+            if dd == 0 {
+                break;
+            }
+        }
+        q -= 1;
+    }
+    if q >= 4 && f.sym(q - 1, b':') && f.sym(q - 2, b':') && f.ident(q - 3) && f.sym(q - 4, b'.') && q >= 5 {
+        let tb = f.text[f.toks[q + 1].1 as usize..f.toks[m - 1].2 as usize].to_string();
+        let o = expr_type(ws, file, q - 5, depth + 1)?;
+        return method_call_type_at(ws, file, &o, f.tok(q - 3), m + 1, Some(&tb), depth);
+    }
+    // (the turbofish of a fn `serde_json::from_str::<Value>(s)` / `f::<T>(x)`: into the first type parameter of the return type)
+    if q >= 3 && f.sym(q - 1, b':') && f.sym(q - 2, b':') && f.ident(q - 3) {
+        let tb = f.text[f.toks[q + 1].1 as usize..f.toks[m - 1].2 as usize].to_string();
+        let name = f.tok(q - 3);
+        let qm = if q >= 6 && f.after_path(q - 3) { Some(f.tok(q - 6).to_string()) } else { None };
+        let cands: Vec<&Def> = named(ws, file, name).into_iter().map(|x| x.1).filter(|d| d.owner.is_empty() && d.kind == SymKind::Function && !d.ty.is_empty()).collect();
+        let d = cands.iter().find(|d| qm.as_ref().is_some_and(|qm| d.module.last() == Some(qm))).or(cands.first())?;
+        let mut ret = d.ty.clone();
+        if let Some(g) = ret.split(|c: char| !(c.is_alphanumeric() || c == '_')).find(|w| w.len() == 1 && w.starts_with(|c: char| c.is_ascii_uppercase())) {
+            let g = g.to_string();
+            ret = subst(&ret, &[g], &[tb]);
+        }
+        return Some(strip_lifetimes(&ret));
+    }
+    None
+}
+
+/// The type of a parenthesized expression `(e)` / a tuple expression `(a, b)` / `()` (tokens p..=k)
+fn paren_type(ws: &[&FileIndex], file: usize, p: usize, k: usize, depth: u32) -> Option<String> {
+    let f = ws[file];
+    let mut ends = vec![];
+    let mut dd = 0;
+    for q in p + 1..k {
+        if f.sym(q, b'(') || f.sym(q, b'[') || f.sym(q, b'{') {
+            dd += 1;
+        } else if f.sym(q, b')') || f.sym(q, b']') || f.sym(q, b'}') {
+            dd -= 1;
+        } else if dd == 0 && f.sym(q, b',') {
+            ends.push(q - 1);
+        }
+    }
+    let trailing = ends.last().is_some_and(|&e| e + 2 == k);
+    if !trailing && k > p + 1 {
+        ends.push(k - 1);
+    }
+    if ends.is_empty() {
+        return Some("()".to_string());
+    }
+    if ends.len() == 1 && !trailing {
+        // (a range expression `(a..b)` / `(a..=b)`: Range<T> (T is the type of whichever end is known))
+        if let Some(t) = range_type(ws, file, p + 1, k - 1, depth) {
+            return Some(t);
+        }
+        return expr_type(ws, file, ends[0], depth + 1);
+    }
+    // (no answer if not a single element type is known. Unknown elements are `_`)
+    let ts: Vec<Option<String>> = ends.iter().map(|&e| expr_type(ws, file, e, depth + 1)).collect();
+    if ts.iter().all(|x| x.is_none()) {
+        return None;
+    }
+    Some(format!("({})", ts.into_iter().map(|x| x.unwrap_or_else(|| "_".to_string())).collect::<Vec<_>>().join(", ")))
+}
+
+/// The type of an array expression `[a, b]` / `[x; n]` (tokens p..=k): `[T; N]` (the element type is the first element's)
+fn array_type(ws: &[&FileIndex], file: usize, p: usize, k: usize, depth: u32) -> Option<String> {
+    let f = ws[file];
+    let mut first_end = None;
+    let mut n = 0;
+    let mut rep: Option<usize> = None;
+    let mut dd = 0;
+    for q in p + 1..k {
+        if f.sym(q, b'(') || f.sym(q, b'[') || f.sym(q, b'{') {
+            dd += 1;
+        } else if f.sym(q, b')') || f.sym(q, b']') || f.sym(q, b'}') {
+            dd -= 1;
+        } else if dd == 0 && f.sym(q, b',') {
+            first_end.get_or_insert(q - 1);
+            n += 1;
+        } else if dd == 0 && f.sym(q, b';') {
+            first_end.get_or_insert(q - 1);
+            rep = Some(q);
+        }
+    }
+    if k == p + 1 {
+        return None;
+    }
+    if !f.sym(k - 1, b',') && rep.is_none() {
+        n += 1;
+    }
+    let e0 = first_end.unwrap_or(k - 1);
+    let et = expr_type(ws, file, e0, depth + 1)?;
+    let len = match rep {
+        Some(q) => f.text[f.toks[q + 1].1 as usize..f.toks[k - 1].2 as usize].trim().to_string(),
+        None => n.to_string(),
+    };
+    Some(format!("[{et}; {len}]"))
+}
+
+/// The type of a match / if / block expression (tokens p..=k are its last `{ .. }`): the first of the last expressions of the arms / blocks
+/// whose type is known
+fn block_type(ws: &[&FileIndex], file: usize, p: usize, k: usize, depth: u32) -> Option<String> {
+    let f = ws[file];
+    let s = block_expr_start(f, p)?;
+    let mut tails = vec![];
+    expr_tails(f, file, s, k, &mut tails);
+    // (types without `_` first (the `Option<Type>` of `clif_ty(..)` rather than the `Option<_>` of `None`))
+    let mut rough = None;
+    for l in tails {
+        let e = f.toks.partition_point(|t| (t.2 as usize) < l.end);
+        if e < k {
+            if let Some(t) = expr_type(ws, file, e, depth + 1) {
+                let ts = f.toks.partition_point(|t| (t.1 as usize) < l.start);
+                let t = with_prefix(f, ts, e, t);
+                if !t.contains('_') {
+                    return Some(t);
+                }
+                rough.get_or_insert(t);
+            }
+        }
+    }
+    rough
+}
+
+/// The type of a struct expression `T { .. }` (token m is the name, k the `}`), with the type parameters its fields decide
+fn struct_expr_type(ws: &[&FileIndex], file: usize, m: usize, k: usize, depth: u32) -> Option<String> {
+    let f = ws[file];
+    let name = f.tok(m);
+    let p = m + 1;
+    if name == "Self" {
+        return impl_self_at(f, f.toks[k].1 as usize);
+    }
+    if !name.starts_with(|c: char| c.is_ascii_uppercase()) {
+        return None;
+    }
+    // (a struct with type parameters: the type parameters are decided from the field initializer expressions, `Wrapper { inner: Point::new() }` → Wrapper<Point>)
+    let params = named(ws, file, name).into_iter().map(|x| x.1).find(|d| d.owner.is_empty() && d.kind == SymKind::Struct).map(|d| d.params.clone()).unwrap_or_default();
+    if params.is_empty() {
+        return Some(name.to_string());
+    }
+    let mut args = vec!["_".to_string(); params.len()];
+    let mut j = p + 1;
+    while j < k {
+        if f.ident(j) && (f.sym(j - 1, b'{') || f.sym(j - 1, b',')) && (f.sym(j + 1, b':') && !f.sym(j + 2, b':')) {
+            // (the end of the EXPR of `field: EXPR`)
+            let mut e = j + 2;
+            let mut d = 0;
+            while e < k {
+                if f.sym(e, b'(') || f.sym(e, b'[') || f.sym(e, b'{') {
+                    d += 1;
+                } else if f.sym(e, b')') || f.sym(e, b']') || f.sym(e, b'}') {
+                    d -= 1;
+                } else if d == 0 && f.sym(e, b',') {
+                    break;
+                }
+                e += 1;
+            }
+            let field = f.tok(j);
+            if let Some(fd) = named(ws, file, field).into_iter().map(|x| x.1).find(|d| d.kind == SymKind::Field && d.owner == name) {
+                if let Some(pi) = params.iter().position(|p| *p == fd.ty) {
+                    if let Some(t) = expr_type(ws, file, e - 1, depth + 1) {
+                        args[pi] = t;
+                    }
+                }
+            }
+            j = e;
+        }
+        j += 1;
+    }
+    Some(format!("{name}<{}>", args.join(", ")))
+}
+
+/// The type of a call of a path `Q::f(..)` / `m::f(..)` / `Q::Variant(..)` (token m is the last name, k the `)`)
+fn path_call_type(ws: &[&FileIndex], file: usize, m: usize, k: usize, depth: u32) -> Option<String> {
+    let f = ws[file];
+    let name = f.tok(m);
+    let q = f.tok(m - 3).to_string();
+    let q = if q == "Self" { impl_self_at(f, f.toks[k].1 as usize)? } else { q };
+    // (`a::b::T(..)` / `m::f(..)`: a tuple struct / fn under a module)
+    if q.starts_with(|c: char| c.is_ascii_lowercase()) && q != "self" && q != "super" && q != "crate" {
+        // (if there are several fns with the same name, the one whose module name is the qualifier q: `zustc::macros::expand` is the expand of macros)
+        let cands: Vec<&Def> = named(ws, file, name).into_iter().map(|x| x.1).filter(|d| d.owner.is_empty() && matches!(d.kind, SymKind::Struct | SymKind::Function)).collect();
+        let pick = cands.iter().find(|d| d.module.last() == Some(&q)).or(cands.first());
+        if let Some(t) = pick.map(|d| if d.kind == SymKind::Struct { name.to_string() } else { apply_call_args(ws, file, d.ty.clone(), &d.fnret, m + 1, depth) }).filter(|t| !t.is_empty()) {
+            return Some(strip_lifetimes(&norm_proj_ws(ws, file, &t)));
+        }
+    }
+    // (an associated fn `Q::f(args)`: the type parameters are decided from the arguments (`Mutex::new(x)` → Mutex<type of x>))
+    if let Some((r, d)) = expand(ws, file, &q).iter().find_map(|t| member_def(ws, file, t, name, &[SymKind::Method, SymKind::Function, SymKind::Variant])) {
+        let r = apply_call_args(ws, file, r, &d.fnret, m + 1, depth);
+        return Some(strip_lifetimes(&norm_proj_ws(ws, file, &r)));
+    }
+    name.starts_with(|c: char| c.is_ascii_uppercase()).then(|| q.clone())
+}
+
+/// The type of a call `name(..)` of a plain name (token m): `Some(e)`, `Ok` / `Err`, a tuple struct / variant, a local closure, a fn
+fn call_type(ws: &[&FileIndex], file: usize, m: usize, depth: u32) -> Option<String> {
+    let f = ws[file];
+    let name = f.tok(m);
+    if name == "Some" {
+        // (`Some(e)`: if the type of e is known, Option<type of e>)
+        let close = close_of(f, m + 1);
+        let inner = expr_end(f, m + 2, false).filter(|&e| e + 1 == close).and_then(|e| expr_type(ws, file, e, depth + 1));
+        return Some(format!("Option<{}>", inner.unwrap_or_else(|| "_".to_string())));
+    }
+    if name == "Ok" || name == "Err" {
+        return Some("Result<_, _>".to_string());
+    }
+    if name.starts_with(|c: char| c.is_ascii_uppercase()) {
+        return Some(name.to_string());
+    }
+    // (a call of a local closure `all()`: that closure's return type)
+    if let Some(b) = f.local(m, name) {
+        if let Some(ty) = binding_type(ws, file, b, depth + 1) {
+            if ty.starts_with("impl Fn") {
+                return ty.find(") -> ").map(|i| ty[i + 5..].trim().to_string());
+            }
+        }
+        return None;
+    }
+    // (the fn called: the one decided by name resolution (use, same module). There are fns with the same name in other crates too (`run`))
+    if let Some(t) = def_at(ws, file, f.toks[m].1 as usize).first().and_then(|l| ws[l.file].defs.iter().find(|d| d.start == l.start && d.kind == SymKind::Function)).map(|d| d.ty.clone()) {
+        return Some(t).filter(|t| !t.is_empty());
+    }
+    let kr = f.krate;
+    named(ws, file, name)
+        .into_iter()
+        .filter(|(_, d)| d.owner.is_empty() && d.kind == SymKind::Function && !d.ty.is_empty())
+        .min_by_key(|(i, _)| (*i != file, ws[*i].krate != kr, ws[*i].lib))
+        .map(|(_, d)| d.ty.clone())
 }
 
 /// The token before the end of the statement (`;` / `{` / `else`, outside brackets). From a
@@ -5206,14 +5331,21 @@ fn unify(pat: &str, act: &str, vars: &[String], out: &mut Vec<(String, String)>)
     }
 }
 
-/// The list of the parameter types of a closure (token s is `|` or `move`) (`|x, (a, b)|` → `&D, (u8, char)`)
-fn closure_args(ws: &[&FileIndex], file: usize, s: usize, depth: u32) -> Option<String> {
-    let f = ws[file];
+/// A closure's `|` that opens its parameters (token s is it, or `move` before it) and the `|` that closes them (the
+/// tokens' end when there is none)
+fn closure_bars(f: &FileIndex, s: usize) -> (usize, usize) {
     let s = if f.tok(s) == "move" { s + 1 } else { s };
     let mut e = s + 1;
     while e < f.toks.len() && !f.sym(e, b'|') {
         e += 1;
     }
+    (s, e)
+}
+
+/// The list of the parameter types of a closure (token s is `|` or `move`) (`|x, (a, b)|` → `&D, (u8, char)`)
+fn closure_args(ws: &[&FileIndex], file: usize, s: usize, depth: u32) -> Option<String> {
+    let f = ws[file];
+    let (s, e) = closure_bars(f, s);
     // (for each parameter: for a name its type, for a tuple pattern the element types listed)
     fn pat_ty(ws: &[&FileIndex], file: usize, a: usize, b: usize, depth: u32) -> Option<String> {
         let f = ws[file];
@@ -5271,13 +5403,9 @@ fn closure_args(ws: &[&FileIndex], file: usize, s: usize, depth: u32) -> Option<
 /// The return type of a closure (token s is `|` or `move`) (`-> T`, or the type of the body expression)
 fn closure_ret(ws: &[&FileIndex], file: usize, s: usize, depth: u32) -> Option<String> {
     let f = ws[file];
-    let mut j = if f.tok(s) == "move" { s + 1 } else { s };
-    if !f.sym(j, b'|') {
+    let (o, j) = closure_bars(f, s);
+    if !f.sym(o, b'|') {
         return None;
-    }
-    j += 1;
-    while j < f.toks.len() && !f.sym(j, b'|') {
-        j += 1;
     }
     let b = j + 1;
     if f.sym(b, b'-') && f.sym(b + 1, b'>') {

@@ -2091,11 +2091,29 @@ fn expand_joined(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::
                 Some(j) => i = j,
                 None => break,
             }
-            // (the builtin's: `stringify!`, `std::stringify!`, not a library's macro of that name, `re::stringify!`)
-            if tk(i) == b"stringify" && pm_scope.is_some() && (!(i >= 2 && sym(i - 1, b':') && sym(i - 2, b':')) || (i >= 3 && matches!(tk(i - 3), b"std" | b"core"))) {
+            // (the builtin's: `stringify!`, `std::stringify!` / `core::stringify!` and their absolute `::std::` form; not
+            // a library's macro of that name, `re::stringify!` / `re::std::stringify!`, which can be another macro
+            // re-exported under it, nor a `macro_rules! stringify` of the crate's own)
+            let colons = |k: usize| k >= 2 && sym(k - 1, b':') && sym(k - 2, b':');
+            // (a label or a lifetime is no path segment: `break 'done ::std::stringify!(..)`. The tokens keep only its
+            // name; the quote is the byte before it)
+            let label = |k: usize| toks[k].1 > 0 && b[toks[k].1 - 1] == b'\'';
+            if tk(i) == b"stringify"
+                && !macros.contains_key("stringify")
+                && (!colons(i)
+                    || (i >= 3
+                        && toks[i - 3].0 == 0
+                        && matches!(tk(i - 3), b"std" | b"core")
+                        && !(colons(i - 3) && i >= 6 && toks[i - 6].0 == 0 && path_seg(tk(i - 6)) && !label(i - 6))))
+            {
                 inert_until = inert_until.max(close[i + 2]);
             }
             let mut rules = macros.get(std::str::from_utf8(tk(i)).unwrap_or(""));
+            // (in `stringify!(..)`: a `macro_rules!` call is kept as written, as rustc does: `stringify!(m!())` is
+            // "m!()")
+            if i < inert_until {
+                rules = None;
+            }
             // (a proc macro's function-like call: `name!(..)`, `path::name!(..)`, a name no `macro_rules!` has. A path
             // from a proc-macro crate's name, or a library's that re-exports its macro (`pm::answer!()`,
             // `re::answer!()`), is that crate's even beside a `macro_rules! answer`)
@@ -2554,7 +2572,25 @@ fn find_calls(
             }
         }
         // (中にマクロの名前が無い括弧は辿らない: 括弧ごとに中身を写すと、深く入れ子になったソースで遅い)
-        if let TokenTree::Group(g) = &toks[i] {
+        // (nor the arguments of the builtin `stringify!(..)`: they are its text, not calls, as in expand_with. The
+        // builtin's path only, as there: `stringify!`, `std::` / `core::stringify!`, `::std::stringify!`)
+        let punct = |k: usize, c: char| matches!(&toks[k], TokenTree::Punct(p) if p.as_char() == c);
+        let colons = |k: usize| k >= 2 && punct(k - 1, ':') && punct(k - 2, ':');
+        let inert = i >= 2
+            && matches!(&toks[i - 2], TokenTree::Ident(x) if x == "stringify")
+            && punct(i - 1, '!')
+            && !macros.contains_key("stringify")
+            && {
+                let s = i - 2;
+                !colons(s)
+                    || (s >= 3
+                        && matches!(&toks[s - 3], TokenTree::Ident(x) if x == "std" || x == "core")
+                        && !(colons(s - 3)
+                            && s >= 6
+                            && matches!(&toks[s - 6], TokenTree::Ident(x) if path_seg(x.to_string().as_bytes()))
+                            && !(s >= 7 && punct(s - 7, '\''))))
+            };
+        if let (TokenTree::Group(g), false) = (&toks[i], inert) {
             let r = g.span().byte_range();
             let inner = if r.start <= r.end && r.end <= text.len() { &text[r.start..r.end] } else { "" };
             if inner.is_empty() || macros.keys().any(|m| inner.contains(m.as_str())) {
@@ -3086,6 +3122,28 @@ mod env_tests {
         assert!(norm.contains("core__mh..core__mh"), "{norm}");
         assert!(norm.contains("r.core()"), "{norm}");
         assert!(norm.contains("fnh(core__mh:u8)->u8{core__mh}"), "{norm}");
+    }
+
+    /// `stringify!(m!())` is the call's text in both expanders (#199), through the builtin's paths; a library's
+    /// `re::stringify!` / `re::std::stringify!` can be another macro re-exported under that name, so the calls in its
+    /// arguments expand, as before
+    #[test]
+    fn stringify_keeps_calls_as_text() {
+        let both = |call: &str| {
+            let src = format!("macro_rules! m {{ () => {{ 7 }}; }}\nfn main() {{ let _ = {call}; }}\n");
+            let (a, b) = (expand(&src).unwrap().unwrap(), expand_reference(&src).unwrap().unwrap());
+            assert_eq!(a, b, "{call}: the two expanders");
+            a
+        };
+        for call in ["stringify!(m!())", "std::stringify!(m!())", "core::stringify!(m![])", "::std::stringify! { m!() }"] {
+            assert!(both(call).contains(call), "{call}");
+        }
+        // (a label before the absolute path is no path segment: `break 'done ::std::stringify!(..)`)
+        let call = "'done: loop { break 'done ::std::stringify!(m!()) }";
+        assert!(both(call).contains("::std::stringify!(m!())"), "{call}");
+        for call in ["re::stringify!(m!())", "re::std::stringify!(m!())", "::re::core::stringify!(m!())"] {
+            assert!(!both(call).contains("m!()"), "{call}");
+        }
     }
 
     /// The depth of recursive expansion is limited as in rustc: 128 by default, or the crate's
