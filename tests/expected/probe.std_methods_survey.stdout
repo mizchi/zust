@@ -1,0 +1,18 @@
+5
+42
+s!
+same task
+true
+abccd
+Some(2) Some(13)
+No such file or directory (os error 2) / Permission denied (os error 13)
+Os { code: 13, kind: PermissionDenied, message: "Permission denied" }
+3
+2 [7]
+(3, Some(3))
+(2, Some(2))
+47 40
+[39, 39] [120]
+"" "owned" "xy"
+1 64
+67305985

@@ -7843,6 +7843,10 @@ impl Program {
             return None;
         }
         let tr = &p.segs[n - 2];
+        // (`std::io::Error::from_raw_os_error(e)` / `std::fmt::Error`: std's error types, not the Error trait (#256))
+        if tr.name == "Error" && matches!(p.segs[n - 3].name.as_str(), "io" | "fmt") {
+            return None;
+        }
         // (not a name the program declares a trait of: `Trait::m` would be the program's trait, where the std path names
         // std's (`std::string::ToString::to_string` beside a program's `trait ToString`). That call stays unread)
         let known = self.traits.contains_key(&tr.name) || STD_PATH_TRAITS.contains(&tr.name.as_str());
@@ -8022,6 +8026,13 @@ impl Program {
             return None;
         }
         let name = |k: usize| p.segs[k].name.as_str();
+        // (`io::Error::from_raw_os_error(e)` / `std::io::Error::last_os_error()`: the prelude's IoError's, as the type
+        // `io::Error` is IoError)
+        if n >= 3 && name(n - 3) == "io" && name(n - 2) == "Error" {
+            if let Some(&i) = self.index.get(&format!("IoError::{}", name(n - 1))) {
+                return Some(i);
+            }
+        }
         // `std::collections::HashMap::new` and the like are `HashMap::new`
         if n >= 3 && matches!(name(0), "core" | "std" | "alloc") {
             let ty = name(n - 2);

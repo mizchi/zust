@@ -1287,6 +1287,58 @@ fn __exr_slice_split_at_mut<T>(s: &mut [T], mid: usize) -> (&mut [T], &mut [T]) 
     unsafe { (core::slice::from_raw_parts_mut(p, mid), core::slice::from_raw_parts_mut(p.add(mid), n - mid)) }
 }
 
+// `s.split_first()` / `s.split_last()`: the end element and the rest, None when s is empty
+fn __exr_slice_split_first<T>(s: &[T]) -> Option<(&T, &[T])> {
+    if s.len() == 0 {
+        return None;
+    }
+    unsafe { Some((&*s.as_ptr(), core::slice::from_raw_parts(s.as_ptr().add(1), s.len() - 1))) }
+}
+
+fn __exr_slice_split_last<T>(s: &[T]) -> Option<(&T, &[T])> {
+    let n = s.len();
+    if n == 0 {
+        return None;
+    }
+    unsafe { Some((&*s.as_ptr().add(n - 1), core::slice::from_raw_parts(s.as_ptr(), n - 1))) }
+}
+
+// `s.splitn(n, |x| ..)`: at most n pieces between the elements pred takes, the last one the rest
+pub struct SliceSplitN<T, F> {
+    ptr: *const T,
+    len: usize,
+    n: usize,
+    pred: F,
+}
+
+impl<T, F: FnMut(&T) -> bool> Iterator for SliceSplitN<T, F> {
+    type Item = &[T];
+    fn next(&mut self) -> Option<&[T]> {
+        if self.n == 0 {
+            return None;
+        }
+        self.n -= 1;
+        if self.n > 0 {
+            let mut i = 0;
+            while i < self.len {
+                if (self.pred)(unsafe { &*self.ptr.add(i) }) {
+                    let piece = unsafe { core::slice::from_raw_parts(self.ptr, i) };
+                    self.ptr = unsafe { self.ptr.add(i + 1) };
+                    self.len -= i + 1;
+                    return Some(piece);
+                }
+                i += 1;
+            }
+            self.n = 0;
+        }
+        Some(unsafe { core::slice::from_raw_parts(self.ptr, self.len) })
+    }
+}
+
+fn __exr_slice_splitn<T, F: FnMut(&T) -> bool>(s: &[T], n: usize, pred: F) -> SliceSplitN<T, F> {
+    SliceSplitN { ptr: s.as_ptr(), len: s.len(), n: n, pred: pred }
+}
+
 fn __exr_slice_windows<T>(s: &[T], n: usize) -> Windows<T> {
     if n == 0 {
         panic!("window size must be non-zero");
@@ -1305,6 +1357,10 @@ impl<T> ChunksExact<T> {
     pub fn remainder(&self) -> &[T] {
         let k = self.len - self.len % self.n;
         unsafe { core::slice::from_raw_parts(self.ptr.add(k), self.len - k) }
+    }
+    // (ExactSizeIterator's: the whole chunks still to come)
+    pub fn len(&self) -> usize {
+        (self.len - self.i) / self.n
     }
 }
 
@@ -3624,6 +3680,10 @@ impl<T> Iter<T> {
     pub fn len(&self) -> usize {
         self.len - self.i
     }
+    // (Iterator's, exact as std's for a slice)
+    pub fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len - self.i, Some(self.len - self.i))
+    }
     pub fn as_slice(&self) -> &[T] {
         unsafe { core::slice::from_raw_parts(self.ptr.add(self.i), self.len - self.i) }
     }
@@ -3821,6 +3881,16 @@ impl Chars {
         let (c, _) = __exr_decode_at::<()>(self.ptr, j);
         self.len = j;
         Some(c)
+    }
+    // (DoubleEndedIterator's: the characters from the back)
+    pub fn rfold<B, F: FnMut(B, char) -> B>(self, init: B, f: F) -> B {
+        let mut it = self;
+        let mut f = f;
+        let mut acc = init;
+        while let Some(c) = it.next_back() {
+            acc = f(acc, c);
+        }
+        acc
     }
 }
 
@@ -5555,6 +5625,13 @@ impl<T> MaybeUninit<T> {
     pub unsafe fn assume_init_ref(&self) -> &T {
         &self.value
     }
+    // (a bitwise copy of the value, which stays where it is: the caller must not use both, as std's)
+    pub unsafe fn assume_init_read(&self) -> T {
+        unsafe { (&self.value as *const T).read() }
+    }
+    pub unsafe fn assume_init_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
 }
 
 pub unsafe fn __core_unreachable_unchecked() -> ! {
@@ -5918,6 +5995,10 @@ impl IoError {
     pub fn last_os_error() -> IoError {
         IoError { code: unsafe { *__exr_errno_location() } }
     }
+    // (an errno: a code of 0 or below is no OS error here, as the kinds use them)
+    pub fn from_raw_os_error(code: i32) -> IoError {
+        IoError { code: code }
+    }
     pub fn raw_os_error(&self) -> Option<i32> {
         if self.code > 0 { Some(self.code) } else { None }
     }
@@ -6188,6 +6269,32 @@ impl<T> Deref for Cow<T> {
             Cow::Borrowed(s) => *s,
             Cow::Owned(v) => v.as_slice(),
         }
+    }
+}
+
+// (`s.into()` / `Cow::from(v)`: std's `From<&[T]>` / `From<Vec<T>>`, and `From<&str>` / `From<String>` for
+// `Cow<str>` (#256))
+impl<T> From<&[T]> for Cow<T> {
+    fn from(s: &[T]) -> Cow<T> {
+        Cow::Borrowed(s)
+    }
+}
+
+impl<T> From<Vec<T>> for Cow<T> {
+    fn from(v: Vec<T>) -> Cow<T> {
+        Cow::Owned(v)
+    }
+}
+
+impl From<&str> for __CowStr {
+    fn from(s: &str) -> __CowStr {
+        __CowStr::Borrowed(s)
+    }
+}
+
+impl From<String> for __CowStr {
+    fn from(s: String) -> __CowStr {
+        __CowStr::Owned(s)
     }
 }
 
@@ -7942,6 +8049,16 @@ fn __exr_fmt_ok<G>() -> Result<(), __FmtError> {
     Ok(())
 }
 fn __exr_debug<T>(x: &T, f: &mut Formatter) {}
+// (`x.fmt(f)` / `Display::fmt(&x, f)` of a value with no fmt of its own to call (a number, a str, a derive): what `{}`
+// / `{:?}` writes, with f's flags)
+fn __exr_display_fmt<T>(x: &T, f: &mut Formatter) -> Result<(), __FmtError> {
+    __exr_display(x, f);
+    Ok(())
+}
+fn __exr_debug_fmt<T>(x: &T, f: &mut Formatter) -> Result<(), __FmtError> {
+    __exr_debug(x, f);
+    Ok(())
+}
 
 impl Display for String {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
@@ -10288,6 +10405,10 @@ impl Waker {
     }
     pub fn wake(self) {}
     pub fn wake_by_ref(&self) {}
+    // (every Waker here is the no-op one, which std's will_wake also finds the same: its data and vtable)
+    pub fn will_wake(&self, _other: &Waker) -> bool {
+        true
+    }
 }
 
 pub struct Context<'a> {
@@ -10637,7 +10758,7 @@ impl<T> Mutex<T> {
     pub const fn new(v: T) -> Mutex<T> {
         Mutex { val: v, locked: false }
     }
-    pub fn lock(&self) -> Result<MutexGuard<T>, ()> {
+    pub fn lock(&self) -> Result<MutexGuard<T>, PoisonError<MutexGuard<T>>> {
         let m = &self.locked as *const bool as *mut bool;
         __exr_green_wait(|| unsafe { !*m });
         unsafe {
@@ -10645,11 +10766,46 @@ impl<T> Mutex<T> {
         }
         Ok(MutexGuard { p: &self.val as *const T as *mut T, m: m })
     }
-    pub fn into_inner(self) -> Result<T, ()> {
+    pub fn into_inner(self) -> Result<T, PoisonError<T>> {
         Ok(self.val)
     }
-    pub fn get_mut(&mut self) -> Result<&mut T, ()> {
+    pub fn get_mut(&mut self) -> Result<&mut T, PoisonError<&mut T>> {
         Ok(&mut self.val)
+    }
+}
+
+// `std::sync::PoisonError`, the Err of a Mutex's lock: none comes here (a panic ends the program, so no lock is left
+// poisoned), but a program handles it, `Err(e) => e.into_inner()` (#256)
+pub struct PoisonError<T> {
+    guard: T,
+}
+
+impl<T> PoisonError<T> {
+    pub fn new(guard: T) -> PoisonError<T> {
+        PoisonError { guard: guard }
+    }
+    pub fn into_inner(self) -> T {
+        self.guard
+    }
+    pub fn get_ref(&self) -> &T {
+        &self.guard
+    }
+    pub fn get_mut(&mut self) -> &mut T {
+        &mut self.guard
+    }
+}
+
+impl<T> Debug for PoisonError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_str::<()>(f, "PoisonError { .. }");
+        Ok(())
+    }
+}
+
+impl<T> Display for PoisonError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_str::<()>(f, "poisoned lock: another task failed inside");
+        Ok(())
     }
 }
 
@@ -10915,6 +11071,10 @@ impl<T> Debug for Vec<T> {
 impl String {
     fn pop_byte(&mut self) {
         self.vec.len -= 1;
+    }
+    // (unsafe as in std: the caller keeps the bytes UTF-8)
+    pub unsafe fn as_mut_vec(&mut self) -> &mut Vec<u8> {
+        &mut self.vec
     }
 }
 // --- 順序 (Ordering / 大小比較の glue。型ごとの比較の本体は codegen が作る __exr_cmp) ---
@@ -13714,6 +13874,18 @@ fn __exr_str_eq_ignore_ascii_case<G>(s: &str, t: &str) -> bool {
     true
 }
 
+fn __exr_str_is_ascii<G>(s: &str) -> bool {
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] >= 0x80 {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
 fn __exr_str_replace<G>(s: &str, from: &str, to: &str) -> String {
     __exr_str_replacen::<()>(s, from, to, !0usize)
 }
@@ -14115,6 +14287,31 @@ fn __exr_str_rsplit_once<G>(s: &str, p: &str) -> Option<(&str, &str)> {
 
 fn __exr_str_split_str<G>(s: &str, t: &str) -> SplitStr {
     SplitStr { p: s.as_ptr(), len: s.len(), i: 0, sep: t.as_ptr(), slen: t.len(), done: false }
+}
+
+// `s.splitn(n, pat)`: at most n pieces, the last one the rest (a char pattern comes as its UTF-8)
+pub struct SplitNStr {
+    it: SplitStr,
+    n: usize,
+}
+
+impl Iterator for SplitNStr {
+    type Item = &str;
+    fn next(&mut self) -> Option<&str> {
+        if self.n == 0 || self.it.done {
+            return None;
+        }
+        self.n -= 1;
+        if self.n == 0 {
+            self.it.done = true;
+            return Some(__exr_sub::<()>(unsafe { self.it.p.add(self.it.i) }, self.it.len - self.it.i));
+        }
+        self.it.next()
+    }
+}
+
+fn __exr_str_splitn<G>(s: &str, n: usize, t: &str) -> SplitNStr {
+    SplitNStr { it: __exr_str_split_str::<()>(s, t), n: n }
 }
 
 // `s.char_indices()` / `s.bytes()`
