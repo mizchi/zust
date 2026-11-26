@@ -4381,7 +4381,8 @@ impl Cx<'_> {
                 let first = self.prog.sigs[id as usize].params.first().copied();
                 let takes_ref = matches!(first, Some(Ty::Ref(..)));
                 let takes_mut = matches!(first, Some(Ty::Ref(true, _)));
-                let Ok(Expr::Path(q, mut p)) = crate::parse::parse_expr(&format!("<{} as {tr}>::{method}", self.prog.tn(t))) else { continue };
+                // (at the receiver: an error of the call (a bound of the method's) is the method call's)
+                let Ok(Expr::Path(q, mut p)) = crate::parse::parse_expr_at(&format!("<{} as {tr}>::{method}", self.prog.tn(t)), expr_start(recv)) else { continue };
                 // (the call's own type arguments: `x.m::<u8>()`)
                 if let Some(last) = p.segs.last_mut() {
                     last.args = gargs.to_vec();

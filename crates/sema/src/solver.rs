@@ -693,6 +693,7 @@ impl Solver<'_> {
 
     /// 型パラメータに `Fn(A) -> B` の境界があり、渡したのがクロージャなら A / B と単一化する
     pub fn unify_fn_bounds(&mut self, generics: &[(String, Vec<String>)], pv: &mut Vec<Option<u32>>) {
+        self.int_lit_by_bounds(generics, pv);
         for (g, (_, bounds)) in generics.iter().enumerate() {
             if !bounds.iter().any(|b| b.starts_with("Fn")) {
                 continue;
@@ -715,6 +716,46 @@ impl Solver<'_> {
             }
         }
     }
+    /// An integer literal's variable passed as a type parameter bounded by traits of the program's (`foo2(42)` with
+    /// `fn foo2<I: Foo>` and `impl Foo for isize` only): the one integer type that implements them, as rustc selects
+    /// `{integer}: Foo`, not the i32 default
+    fn int_lit_by_bounds(&mut self, generics: &[(String, Vec<String>)], pv: &[Option<u32>]) {
+        for (g, (_, bounds)) in generics.iter().enumerate() {
+            if bounds.is_empty() {
+                continue;
+            }
+            let Some(v) = pv.get(g).copied().flatten() else { continue };
+            let root = self.find(v);
+            if self.shape[root as usize].is_some() || !self.int_lit.get(root as usize).copied().unwrap_or(false) {
+                continue;
+            }
+            self.int_by_traits(v, bounds);
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn int_by_traits(&mut self, v: u32, bounds: &[String]) {
+        let user = |tr: &str| self.prog.traits.get(tr).is_some_and(|ds| ds.iter().all(|&d| self.prog.item_of.get(d as usize).copied().flatten().is_some_and(|x| x < self.prog.prelude_from)));
+        let trs: Vec<&str> = bounds.iter().map(|b| b.split('<').next().unwrap_or(b).trim()).filter(|b| user(b)).collect();
+        if trs.is_empty() {
+            return;
+        }
+        let mut hit = None;
+        for t in [Ty::I8, Ty::I16, Ty::I32, Ty::I64, Ty::I128, Ty::Isize, Ty::U8, Ty::U16, Ty::U32, Ty::U64, Ty::U128, Ty::Usize] {
+            if trs.iter().all(|tr| self.prog.implements(t, tr)) {
+                if hit.is_some() {
+                    return;
+                }
+                hit = Some(t);
+            }
+        }
+        if let Some(t) = hit {
+            let k = self.known(t);
+            self.unify(v, k);
+        }
+    }
+
     /// v's type is known in full, before any default: no variable is left in it, not even an integer literal's that
     /// resolve would make an i32 (depth stops a cycle of shapes)
     pub fn known_in_full(&mut self, v: u32, depth: u32) -> bool {

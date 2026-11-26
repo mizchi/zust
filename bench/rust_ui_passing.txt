@@ -235,12 +235,15 @@ compile-fail	associated-types/associated-type-shadowed-from-supertrait.rs
 compile-fail	associated-types/associated-type-unconstrained-lifetime.rs
 run-pass	associated-types/associated-types-basic.rs
 run-pass	associated-types/associated-types-binding-in-trait.rs
+run-pass	associated-types/associated-types-binding-in-where-clause.rs
 check-pass	associated-types/associated-types-bound-ambiguity.rs
 run-pass	associated-types/associated-types-bound.rs
 run-pass	associated-types/associated-types-conditional-dispatch.rs
 run-pass	associated-types/associated-types-constant-type.rs
 run-pass	associated-types/associated-types-duplicate-binding-in-env-hrtb.rs
 run-pass	associated-types/associated-types-duplicate-binding-in-env.rs
+run-pass	associated-types/associated-types-enum-field-named.rs
+run-pass	associated-types/associated-types-enum-field-numbered.rs
 compile-fail	associated-types/associated-types-eq-3.rs
 compile-fail	associated-types/associated-types-eq-expr-path.rs
 compile-fail	associated-types/associated-types-eq-hr.rs
@@ -281,6 +284,7 @@ check-pass	associated-types/associated-types-qualified-path-with-trait-with-type
 run-pass	associated-types/associated-types-ref-from-struct.rs
 run-pass	associated-types/associated-types-region-erasure-issue-20582.rs
 check-pass	associated-types/associated-types-resolve-lifetime.rs
+run-pass	associated-types/associated-types-return.rs
 run-pass	associated-types/associated-types-simple.rs
 run-pass	associated-types/associated-types-stream.rs
 run-pass	associated-types/associated-types-struct-field-named.rs
@@ -8242,6 +8246,7 @@ run-pass	traits/inheritance/static2.rs
 run-pass	traits/inheritance/subst.rs
 run-pass	traits/inheritance/subst2.rs
 check-pass	traits/inheritance/supertrait-operator-issue-18088.rs
+run-pass	traits/inheritance/visibility.rs
 compile-fail	traits/inherited-copy-bound.rs
 build-pass	traits/issue-103563.rs
 build-pass	traits/issue-104322.rs
