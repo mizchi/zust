@@ -97,39 +97,104 @@ fn own_reason(g: &Generics, supers: &[Bound], members: &[crate::parse::Item], si
     (false, named)
 }
 
+/// What check found of each trait's text, for the next check (an LSP edit, which changes no trait mostly): its name
+/// and whether it requires `Sized` of its own, and its own reason with the traits that require `Sized` as they were
+#[derive(Default)]
+pub(crate) struct DynMemo {
+    /// text → (name, requires `Sized`), None when it does not parse to an item
+    head: crate::fxhash::FxMap<crate::key::Key, Option<(String, bool)>>,
+    /// (text, the traits that require `Sized`) → own_reason
+    reason: crate::fxhash::FxMap<(crate::key::Key, crate::key::Key), (bool, Vec<String>)>,
+}
+
 /// The first `dyn Trait` of a trait of the program's that is not dyn compatible: `line:1: msg`. `src` is the
-/// prepared text, `items` the program's own items
-pub(super) fn check(src: &str, items: &[crate::lexer::SrcItem]) -> Option<String> {
+/// prepared text, `items` the program's own items. memo: what the last check found of the same traits' texts
+pub(super) fn check(src: &str, items: &[crate::lexer::SrcItem], memo: &mut DynMemo) -> Option<String> {
     use crate::lexer::ItemKind as K;
     // (a program with no trait of its own, or no `dyn` in its own items, has nothing to judge: the prepared text holds
     // the prelude too, which is not read)
     if !items.iter().any(|it| it.kind == K::TraitHeader) || !items.iter().any(|it| src.get(it.start..it.end).is_some_and(|t| t.contains("dyn"))) {
         return None;
     }
-    // (each trait whole: its header, its members, and the closing brace)
-    let mut parsed = vec![];
+    // (each trait whole: its header, its members, and the closing brace. Each header's last member, in one pass)
+    let mut last_end: crate::fxhash::FxMap<u32, usize> = crate::fxhash::FxMap::default();
+    for m in items {
+        if let K::TraitMember(h) = m.kind {
+            let e = last_end.entry(h).or_insert(m.end);
+            *e = (*e).max(m.end);
+        }
+    }
+    let mut texts: Vec<(crate::key::Key, String)> = vec![];
     for (h, it) in items.iter().enumerate() {
         if it.kind != K::TraitHeader {
             continue;
         }
-        let end = items.iter().filter(|m| m.kind == K::TraitMember(h as u32)).map(|m| m.end).max().unwrap_or(it.end);
+        let end = last_end.get(&(h as u32)).copied().unwrap_or(it.end);
         let Some(text) = src.get(it.start..end) else { continue };
-        let Ok(f) = crate::parse::parse_file(&format!("{text}}}")) else { continue };
-        if let Some(item) = f.items.into_iter().next() {
-            parsed.push(item);
+        let text = format!("{text}}}");
+        let mut kh = crate::key::KeyHasher::new();
+        kh.add(text.as_bytes());
+        texts.push((kh.finish(), text));
+    }
+    // (the traits, parsed only when their text is new: their names and whether each requires `Sized`)
+    let parse = |text: &str| crate::parse::parse_file(text).ok().and_then(|f| f.items.into_iter().next());
+    let mut parsed_now: crate::fxhash::FxMap<crate::key::Key, crate::parse::Item> = crate::fxhash::FxMap::default();
+    let mut head: crate::fxhash::FxMap<crate::key::Key, Option<(String, bool)>> = crate::fxhash::FxMap::default();
+    let mut heads: Vec<(crate::key::Key, String, bool)> = vec![];
+    for (k, text) in &texts {
+        let h = match memo.head.get(k).or_else(|| head.get(k)) {
+            Some(h) => h.clone(),
+            None => {
+                let item = parse(text);
+                let h = item.as_ref().and_then(|i| match &i.kind {
+                    ItemKind::Trait(n, _, supers, _) => Some((n.clone(), supers.iter().any(|b| matches!(b, Bound::Trait(_, p) if last(p) == "Sized")))),
+                    _ => None,
+                });
+                if let Some(i) = item {
+                    parsed_now.insert(*k, i);
+                }
+                h
+            }
+        };
+        head.insert(*k, h.clone());
+        if let Some((n, sz)) = h {
+            heads.push((*k, n, sz));
         }
     }
     // (the traits that require `Sized` of their own: `Self:` one of them exempts a method as `Self: Sized` does)
-    let sized: Vec<String> = parsed.iter().filter_map(|i| match &i.kind {
-        ItemKind::Trait(n, _, supers, _) if supers.iter().any(|b| matches!(b, Bound::Trait(_, p) if last(p) == "Sized")) => Some(n.clone()),
-        _ => None,
-    }).collect();
+    let sized: Vec<String> = heads.iter().filter(|h| h.2).map(|h| h.1.clone()).collect();
+    let sized_key = {
+        let mut kh = crate::key::KeyHasher::new();
+        for n in &sized {
+            kh.add(n.as_bytes());
+            kh.add(&0u8);
+        }
+        kh.finish()
+    };
+    let mut reason: crate::fxhash::FxMap<(crate::key::Key, crate::key::Key), (bool, Vec<String>)> = crate::fxhash::FxMap::default();
+    let mut reasons: Vec<(String, (bool, Vec<String>))> = vec![];
+    for (k, n, _) in &heads {
+        let r = match memo.reason.get(&(*k, sized_key)).or_else(|| reason.get(&(*k, sized_key))) {
+            Some(r) => r.clone(),
+            None => {
+                let item = match parsed_now.remove(k) {
+                    Some(i) => Some(i),
+                    None => texts.iter().find(|t| t.0 == *k).and_then(|t| parse(&t.1)),
+                };
+                let Some(item) = item else { continue };
+                let ItemKind::Trait(_, g, supers, members) = &item.kind else { continue };
+                own_reason(g, supers, members, &sized)
+            }
+        };
+        reason.insert((*k, sized_key), r.clone());
+        reasons.push((n.clone(), r));
+    }
+    memo.head = head;
+    memo.reason = reason;
     let mut traits: HashMap<String, Option<(bool, Vec<String>)>> = HashMap::new();
-    for i in &parsed {
-        let ItemKind::Trait(name, g, supers, members) = &i.kind else { continue };
-        let r = own_reason(g, supers, members, &sized);
+    for (name, r) in reasons {
         // (two traits of one name: neither is judged)
-        traits.entry(name.clone()).and_modify(|e| *e = None).or_insert(Some(r));
+        traits.entry(name).and_modify(|e| *e = None).or_insert(Some(r));
     }
     if traits.is_empty() {
         return None;

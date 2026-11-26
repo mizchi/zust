@@ -798,11 +798,13 @@ pub struct Session {
     /// (keep_for_edits) The last analysis's item summaries by their cache key, as the cache's bytes decode: the next
     /// analysis takes those of its items from here instead of decoding each (and dropping them after)
     sum_keep: Option<FxMap<Key, Vec<Summary>>>,
+    /// What the last E0038 check found of the program's traits (dyncompat::check)
+    dyn_memo: dyncompat::DynMemo,
 }
 
 impl Session {
     pub fn new(opts: Options) -> Session {
-        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new(), #[cfg(feature = "build")] ws_diags: None, sum_keep: None }
+        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new(), #[cfg(feature = "build")] ws_diags: None, sum_keep: None, dyn_memo: Default::default() }
     }
 
     /// For a session whose document will be edited (zust-analyzer): the preprocessing keeps its chunks from the first
@@ -1004,7 +1006,7 @@ impl Session {
             }
             // (E0038: a `dyn` of a trait of the program's that is not dyn compatible. rustc's well-formedness check
             // reports it after the errors of resolution and the type check: as late_err below)
-            dyn_err = dyncompat::check(&src, &items[..user_src]);
+            dyn_err = dyncompat::check(&src, &items[..user_src], &mut self.dyn_memo);
             if let Some(e) = cfg_err.take().or_else(|| malformed_attr(src0, &src, &items[..user_src], self.ctx.deps.is_empty() && self.ctx.lib.is_none(), self.opts.edition)) {
                 return Err(e);
             }
