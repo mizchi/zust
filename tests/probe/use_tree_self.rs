@@ -130,11 +130,13 @@ mod user {
         (m() * 10 + m::inner(), al::ByteClasses([5, 6, 7, 8]).get(1).0)
     }
 
-    // (a block's `self` import is the type: `E::V` is a's enum, the call `E()` the glob's fn)
-    pub fn in_block() -> (u8, String) {
+    // (a block's `self` import is the type: `E::V` is a's enum, the call `E()` and the value of `let f = E;` the
+    // glob's fn)
+    pub fn in_block() -> (u8, u8, String) {
         use crate::a::E::{self};
         let v = E::V;
-        (E(), format!("{:?}", v))
+        let f = E;
+        (E(), f(), format!("{:?}", v))
     }
 }
 

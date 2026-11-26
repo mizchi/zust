@@ -1044,9 +1044,17 @@ mod tests {
     /// brings the type E, so `E::V` is a's enum and the call `E()` the fn a glob brings
     #[test]
     fn a_block_self_import_is_no_value() {
-        let src = "mod d {\n    pub mod a {\n        pub enum E { V }\n        pub fn E() -> u8 { 1 }\n    }\n    pub mod b {\n        pub fn E() -> u8 { 2 }\n    }\n    pub mod user {\n        use crate::b::*;\n        pub fn run() -> u8 {\n            use crate::a::E::{self};\n            let _v = E::V;\n            E()\n        }\n    }\n}\nfn main() {}\n";
+        let src = "mod d {\n    pub mod a {\n        pub enum E { V }\n        pub fn E() -> u8 { 1 }\n    }\n    pub mod b {\n        pub fn E() -> u8 { 2 }\n    }\n    pub mod user {\n        use crate::b::*;\n        pub fn run() -> u8 {\n            use crate::a::E::{self};\n            let _v = E::V;\n            let f = E;\n            E() + f()\n        }\n    }\n}\nfn main() {}\n";
         let out = rename_module_collisions_in(src, &["d".to_string()]).unwrap();
-        assert!(out.contains("let _v = d__a__E::V;\n            d__b__E()\n"), "{out}");
+        assert!(out.contains("let _v = d__a__E::V;\n            let f = d__b__E;\n            d__b__E() + f()\n"), "{out}");
+    }
+
+    /// A source that starts with `(` (`(u8)` beside a renamed `fn u8`): the walk back of a call's argument stops at the
+    /// first token (#254 review)
+    #[test]
+    fn a_paren_at_the_start_is_no_call_of_a_variant() {
+        let src = "(u8);\nmod d {\n    pub fn u8() -> u8 { 1 }\n}\nfn main() {}\n";
+        let _ = rename_module_collisions_in(src, &["d".to_string()]);
     }
 
     /// A dependency under another name (`dig:common=cc`, a renamed one, mizchi/zust#249): every module of dig sees
@@ -4295,7 +4303,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                         if d == 0 {
                             // (not a fn pointer's type, `fn(u8)`, nor a tuple struct's or variant's fields,
                             //  `struct u8x2(u8, u8);` / `enum E { lower(u8) }`)
-                            let fields = q >= 2 && (is_id(q - 2, b"struct") || is_id(q - 2, b"union")) || variant_tok[q - 1];
+                            let fields = (q >= 2 && (is_id(q - 2, b"struct") || is_id(q - 2, b"union"))) || (q >= 1 && variant_tok[q - 1]);
                             return q >= 1 && toks[q - 1].0 == 0 && s[toks[q - 1].1].is_ascii_lowercase() && !is_id(q - 1, b"fn") && !fields;
                         }
                         d -= 1;
@@ -4324,17 +4332,24 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             //  one in the type namespace, `use crate::Byte as u8;`, as it shadows the primitive)
             // (the first segment of a path that goes on is a type or module: `E::V(..)`)
             let w = if j > k { NS_TYPE } else { want };
-            // (in the place's namespaces: a block's `use crate::a::E::{self};` is the type, not the call `E()`. A type's
-            //  place that finds none takes any, as `lookup` does, but not for a primitive's name)
+            // (in the place's namespaces: a block's `use crate::a::E::{self};` is the type, not the call `E()` nor the
+            //  value of `let f = E;` (a value's place, as for a primitive's name above). A type's place that finds none
+            //  takes any, as `lookup` does, but not for a primitive's name)
             let in_block = || {
                 if is_def {
                     return None;
                 }
-                let find = |ns: u8| block_imports.iter().filter(|b| b.0 < k && k < b.1 && b.2 == n && b.4 == sc && b.5 & ns != 0).max_by_key(|b| b.0).map(|b| b.3.clone());
+                let of = |b: &&(usize, usize, Vec<u8>, Vec<u8>, usize, u8)| b.0 < k && k < b.1 && b.2 == n && b.4 == sc;
+                if !block_imports.iter().any(|b| of(&b)) {
+                    return None;
+                }
+                let find = |ns: u8| block_imports.iter().filter(|b| of(b) && b.5 & ns != 0).max_by_key(|b| b.0).map(|b| b.3.clone());
                 if prim {
                     find(NS_TYPE)
                 } else if w == NS_TYPE {
                     find(NS_TYPE).or_else(|| find(NS_ANY))
+                } else if w == NS_ANY && j == k && k >= 1 && (value_place() || call_arg()) {
+                    find(NS_VALUE)
                 } else {
                     find(w)
                 }
