@@ -966,3 +966,36 @@ fn renamed_dependencies_run_like_cargo() {
     assert!(ok, "zurgo test: {err}");
     assert_eq!(zurgo_outcomes(&err), cargo_outcomes(&out), "{err}");
 }
+
+/// Proc macros a library re-exports, through that library under another name: `pub use pm::{answer, Describe};` in
+/// facade, and `f = { package = "facade" }` in the bin, which derives `f::Describe` and, imported, `Describe`, and calls
+/// `f::answer!()` beside a `macro_rules! answer` of its own (which a bare `answer!()` calls)
+#[test]
+fn proc_macro_through_a_renamed_library_runs_like_cargo() {
+    let sc = Scratch::new("renamed-facade");
+    let pkg = |name: &str, more: &str| format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n{more}");
+    sc.write(&[
+        ("pm/Cargo.toml", &pkg("pm", "[lib]\nproc-macro = true\n")),
+        (
+            "pm/src/lib.rs",
+            "extern crate proc_macro;\nuse proc_macro::{TokenStream, TokenTree};\n#[proc_macro_derive(Describe)]\npub fn describe(i: TokenStream) -> TokenStream {\n    let mut it = i.into_iter();\n    let mut name = String::new();\n    while let Some(t) = it.next() {\n        if matches!(&t, TokenTree::Ident(x) if x.to_string() == \"struct\") {\n            if let Some(TokenTree::Ident(n)) = it.next() {\n                name = n.to_string();\n            }\n            break;\n        }\n    }\n    format!(\"impl {name} {{ pub fn describe() -> &'static str {{ \\\"{name}\\\" }} }}\").parse().unwrap()\n}\n#[proc_macro]\npub fn answer(_i: TokenStream) -> TokenStream {\n    \"42u32\".parse().unwrap()\n}\n",
+        ),
+        ("facade/Cargo.toml", &pkg("facade", "[dependencies]\npm = { path = \"../pm\" }\n")),
+        ("facade/src/lib.rs", "pub use pm::{answer, Describe};\n"),
+        ("app/Cargo.toml", &pkg("app", "[workspace]\n[dependencies]\nf = { path = \"../facade\", package = \"facade\" }\n")),
+        (
+            "app/src/main.rs",
+            "macro_rules! answer {\n    () => {\n        0u32\n    };\n}\nmod shapes {\n    use f::Describe;\n    #[derive(Describe)]\n    pub struct Line;\n}\n#[derive(f::Describe)]\nstruct Point;\nfn main() {\n    println!(\"{} {} {} {}\", Point::describe(), shapes::Line::describe(), f::answer!(), answer!());\n}\n",
+        ),
+    ]);
+    let app = sc.0.join("app/Cargo.toml");
+    let t = sc.0.join("target");
+    let (ok, _, err) = cargo(&["generate-lockfile", "--offline"], &app, &t);
+    assert!(ok, "{err}");
+    let (ok, want, err) = cargo(&["run", "-q", "--offline"], &app, &t);
+    assert!(ok, "cargo run: {err}");
+    assert_eq!(want, "Point Line 42 0\n");
+    let (ok, got, err) = zurgo(&["run"], &app, &t);
+    assert!(ok, "zurgo run: {err}");
+    assert_eq!(got, want);
+}

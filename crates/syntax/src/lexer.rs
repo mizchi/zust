@@ -3251,7 +3251,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     let resolve_lead = |from: usize, segs: &[Vec<u8>]| -> Option<usize> {
         match ext_path(from, segs) {
             Some(p) => mod_of_path.get(&p).copied(),
-            None => resolve_mod(usize::MAX, segs).or_else(|| {
+            // (the crate's module by its own name: not through the names the root of the source (a bin) gives crates,
+            // which are the bin's alone)
+            None => mod_of_path.get(segs).copied().or_else(|| {
                 let mut p = vec![b"crate".to_vec()];
                 p.extend(segs.iter().cloned());
                 resolve_mod(from, &p).filter(|_| in_crate(from))

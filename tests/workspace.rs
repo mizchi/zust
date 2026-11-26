@@ -436,6 +436,25 @@ fn renamed_dependency_shadowed_by_a_module_that_reexports() {
     assert_eq!(got, want);
 }
 
+/// A name another crate gives a dependency is that crate's alone: the bin names `other` `common`, and a generic fn of
+/// `dig`, which depends on the crate `common` and which the bin instantiates, still means `common` by `::common::..` and
+/// by `common::..`
+#[test]
+fn renamed_dependency_of_a_bin_does_not_reach_a_library() {
+    let (got, want) = zustc_and_rustc(
+        "renamed_leak",
+        &[
+            ("common.rs", "pub fn make() -> u32 {\n    1\n}\n"),
+            ("other.rs", "pub fn make() -> u32 {\n    2\n}\n"),
+            ("dig.rs", "pub fn f<T>() -> u32 {\n    ::common::make() * 10 + common::make()\n}\n"),
+            ("app.rs", "fn main() {\n    println!(\"{} {}\", dig::f::<u8>(), common::make());\n}\n"),
+            ("ws.txt", "lib common common.rs\nlib other other.rs\nlib dig dig.rs common\nbin app app.rs dig extern=common=other\n"),
+        ],
+    );
+    assert_eq!(want, "11 2\n");
+    assert_eq!(got, want);
+}
+
 /// Only a dependency's renamed dependency changes (`chosen=a` to `chosen=b`, the texts the same): its generic fn, which
 /// the bin instantiates, names the other crate now, so the bin is compiled again though the items it reaches are the same
 #[test]

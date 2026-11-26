@@ -1667,10 +1667,16 @@ impl Session {
                             }
                         }
                     }
-                    // (a proc-macro dependency under another name: its macros through that name, `derive::Describe`)
+                    // (a proc-macro dependency under another name: its macros through that name, `derive::Describe`;
+                    // and a library under another name, the macros it re-exports: `f::answer!()` with `pub use
+                    // pm::answer;` in facade, `f = { package = "facade" }`)
                     for (a, n) in &crates[i].aliases {
-                        if let Some(l) = pms.iter_mut().find(|l| l.name == *n) {
-                            l.via.push((a.clone(), "*".to_string(), "*".to_string()));
+                        for l in pms.iter_mut() {
+                            if l.name == *n {
+                                l.via.push((a.clone(), "*".to_string(), "*".to_string()));
+                            }
+                            let more: Vec<(String, String, String)> = l.via.iter().filter(|v| v.0 == *n).map(|v| (a.clone(), v.1.clone(), v.2.clone())).collect();
+                            l.via.extend(more);
                         }
                     }
                 }
