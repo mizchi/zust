@@ -5910,3 +5910,87 @@ fn main() {}
     errors_at("trait Tr {}\ntrait Ext { fn get(&self) -> &u8 { &0 } }\nimpl Ext for dyn Tr {}\nfn leak(x: &(dyn Tr + 'static)) -> &'static u8 { x.get() }\nfn main() {}\n", &[(4, "lifetime may not live long enough")], "p6");
     errors_at("trait Tr { fn get(&self) -> &u8; }\nfn h(t: &dyn Tr) -> &u8 { t.get() }\nfn k(t: &(dyn Tr + 'static)) -> &'static u8 { t.get() }\nfn main() {}\n", &[(3, "lifetime may not live long enough")], "p7");
 }
+
+#[test]
+fn part40_static_bound_constructors_called_generic_fns_elided_self_types() {
+    // (each checked with rustc 1.97. A tuple struct's or an enum's value built in a generic fn, of a type that bounds
+    // its parameter by 'static: the type is well formed only with T: 'static (E0310))
+    errors_at("struct St<T: 'static>(Option<T>);\nfn h1<T>(x: T) {\n    let _ = St(Some(x));\n}\nfn main() {}\n", &[(3, "may not live long enough")], "q1");
+    errors_at("enum En<T: 'static> { A(T), B }\nfn h3<T>(x: T) {\n    let _ = En::A(x);\n}\nfn main() {}\n", &[(3, "may not live long enough")], "q2");
+    errors_at("enum En<T: 'static> { A(T), B }\nfn h4<T>() {\n    let _ = En::<T>::B;\n}\nfn main() {}\n", &[(3, "may not live long enough")], "q3");
+    errors_at("struct St<T: 'static>(Option<T>);\nfn g5<T>(x: T) {\n    let _ = St::<T>(Some(x));\n}\nfn main() {}\n", &[(3, "may not live long enough")], "q4");
+    // (and where the parameter is 'static: by its bound, by an impl's, by a type of the signature)
+    errors_at(r#"use std::marker::PhantomData;
+struct St<T: 'static>(Option<T>);
+enum En<T: 'static> { A(T), B }
+struct Ph<T: 'static>(PhantomData<T>);
+impl<T: 'static> St<T> {
+    fn new(x: T) -> Self { Self(Some(x)) }
+}
+fn f2<T: 'static>(x: T) -> En<T> {
+    if true { En::A(x) } else { En::<T>::B }
+}
+fn f3<T>(s: St<T>) -> usize {
+    let f = || { let _ = Ph::<T>(PhantomData); };
+    f();
+    s.0.is_some() as usize
+}
+fn main() {
+    let _ = St::new(1u8);
+    let _ = f2(2u8);
+    let _ = f3(St(Some(3u8)));
+}
+"#, &[], "q5");
+    // (a generic fn that is called is checked with placeholders too when its body names such a type: an instance
+    // does not tell, with `&u8` or `u8` for T)
+    errors_at("struct St<T: 'static>(Option<T>);\nfn g4<T>() {\n    let _: Option<St<T>> = None;\n}\nfn main() {\n    g4::<&u8>();\n    g4::<u8>();\n}\n", &[(3, "may not live long enough")], "q6");
+    errors_at(r#"use std::cell::OnceCell;
+use std::fmt::Display;
+use std::marker::PhantomData;
+use std::rc::Rc;
+type Storage = Rc<OnceCell<Box<dyn Display + 'static>>>;
+struct Inner<T: Display + 'static>(PhantomData<T>);
+struct Outer<T, U> { input: Option<T>, output: Storage, _p: PhantomData<U> }
+fn extend<T: Display>(x: T) -> Box<dyn Display + 'static> {
+    let storage = Rc::new(OnceCell::new());
+    {
+        let _ = Outer::<T, Inner<T>> { input: Some(x), output: storage.clone(), _p: PhantomData };
+    }
+    Rc::into_inner(storage).unwrap().into_inner().unwrap()
+}
+fn main() {
+    let data = String::from("abc");
+    let _ = extend::<&String>(&data);
+}
+"#, &[(11, "may not live long enough")], "q7");
+    // (OnceCell is not Sync)
+    errors_at("fn require_sync<T: Sync>() {}\nfn main() {\n    require_sync::<std::cell::OnceCell<()>>();\n}\n", &[(3, "Sync")], "q8");
+    // (a receiver that writes the impl's self type with an elided lifetime: one of the method's own, not the impl's
+    // (E0308))
+    errors_at("struct Pair<T, V>(T, V);\nimpl Pair<&str, isize> {\n    fn say(self: &Pair<&str, isize>) {}\n}\nfn main() {}\n", &[(3, "mismatched `self` parameter type")], "q9");
+    errors_at("struct Foo<'a>(&'a ());\nimpl<'a> Foo<'a> {\n    fn f(self: Foo<'_>) {}\n}\nfn main() {}\n", &[(3, "mismatched `self` parameter type")], "q10");
+    errors_at("struct Foo<'a>(&'a ());\nimpl<'a> Foo<'a> {\n    fn f(self: Foo) {}\n}\nfn main() {}\n", &[(3, "mismatched `self` parameter type")], "q11");
+    errors_at("use std::rc::Rc;\nstruct W<T>(T);\ntrait Tr { fn f(self: Rc<Self>); }\nimpl Tr for W<&u8> {\n    fn f(self: Rc<W<&u8>>) {}\n}\nfn main() {}\n", &[(5, "mismatched `self` parameter type")], "q12");
+    errors_at(r#"struct Pair<T, V>(T, V);
+impl<'a> Pair<&'a str, isize> {
+    fn say(self: &Pair<&'a str, isize>) {}
+}
+struct W<T>(T);
+impl W<fn(&u8)> {
+    fn f(self: &W<fn(&u8)>) {}
+}
+impl W<Box<dyn Fn(&u8)>> {
+    fn g(self: &W<Box<dyn Fn(&u8)>>) {}
+}
+struct Foo<'a>(&'a ());
+impl<'a> Foo<'a> {
+    fn f(self: &Self) {}
+    fn g(self: Box<Self>) {}
+    fn h(&self) -> Foo<'_> { Foo(&()) }
+}
+impl W<&'static u8> {
+    fn k(self: &W<&'static u8>) {}
+}
+fn main() {}
+"#, &[], "q13");
+}

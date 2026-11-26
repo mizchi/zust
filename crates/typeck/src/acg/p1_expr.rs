@@ -798,7 +798,13 @@ impl Cx<'_> {
             self.bk.in_ret -= 1;
             return r;
         }
-        self.expr_at(e, expected)
+        let r = self.expr_at(e, expected)?;
+        // (a tuple struct's or an enum's value built by its constructor or named by its variant's path (`St(Some(x))`,
+        // `En::A(x)`, `En::<T>::B`), of a type that bounds a type parameter by 'static: the type is well formed)
+        if self.rg.on && self.inline_depth == 0 && matches!(e, Expr::Path(..) | Expr::Call(..)) {
+            self.rg_ctor_wf(e, r.1);
+        }
+        Ok(r)
     }
 
     fn expr_at(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
