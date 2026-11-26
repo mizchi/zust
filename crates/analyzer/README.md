@@ -1,6 +1,6 @@
 # zust-analyzer
 
-The LSP server (stdio). It supports initialize, didOpen / didChange (full sync) / didClose, shutdown / exit,
+The LSP server (stdio). It supports initialize, didOpen / didChange (incremental sync: a change sends its range, or the full text) / didClose, shutdown / exit,
 documentSymbol, workspace/symbol, definition, references, hover and completion.
 
 - Each open document has its own `Session` with an in-memory cache. Every open and change runs `Session::check`
