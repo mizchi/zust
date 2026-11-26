@@ -110,10 +110,11 @@ LIMIT = ["prlimit", "--as=2147483648", "--"] if subprocess.run(["sh", "-c", "com
 
 def error_lines(text):
     """Lines that `//~ ERROR` annotations point at: `//~` this line, `//~^` one line up per caret, `//~v` one line down
-    per v, `//~|` the same line as the previous annotation"""
+    per v, `//~|` the same line as the previous annotation (of any kind, as compiletest: `//~^ NOTE` then `//~| ERROR`
+    is an error on the note's line)"""
     out, last = set(), None
     for i, line in enumerate(text.split("\n"), 1):
-        m = re.search(r"//~(\^+|v+|\||)\s*(ERROR|error)", line)
+        m = re.search(r"//~(\^+|v+|\||)\s*([A-Za-z]+)", line)
         if not m:
             continue
         mark = m.group(1)
@@ -123,9 +124,9 @@ def error_lines(text):
             at = i + len(mark)
         else:
             at = i - len(mark)
-        if at is not None:
+        last = at
+        if at is not None and m.group(2) in ("ERROR", "error"):
             out.add(at)
-            last = at
     return out
 
 
