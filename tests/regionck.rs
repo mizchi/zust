@@ -5807,4 +5807,24 @@ fn main() {}
     errors_at("trait Obj {}\nimpl dyn Obj { unsafe fn dangerous(&self) -> u8 { 1 } }\nfn f(x: &(dyn Obj + 'static)) -> u8 { x.dangerous() }\nfn main() {}\n", &[(3, "E0133")], "rv3");
     errors_at("trait Obj {}\nimpl dyn Obj { fn change(&mut self) {} }\nfn f(x: &(dyn Obj + 'static)) { x.change() }\nfn main() {}\n", &[(3, "E0596")], "rv4");
     errors_at("trait Tr {}\nimpl dyn Tr { fn get<'a>(&'a self) -> &'a u8 { panic!() } }\nstruct S;\nimpl Tr for S {}\nfn g() -> &'static u8 { let b: Box<dyn Tr> = Box::new(S); b.get() }\nfn main() {}\n", &[(5, "E0515")], "rv5");
+    // (an explicit deref of the Box (`(*b).get()`), through `impl dyn Tr` and through the vtable: its content
+    // borrowed as `b.get()`'s (E0515); of `b: &Box<dyn Tr>` or a field's Box through `&W` a reborrow, not a loan; and
+    // `(*x).get()` of `x: &'a (dyn Tr + 'static)` borrowed for `'a`, not `'static` (9:54))
+    errors_at(r#"trait Tr {}
+impl dyn Tr { fn get<'a>(&'a self) -> &'a u8 { panic!() } }
+struct S; impl Tr for S {}
+fn f() -> &'static u8 { let b: Box<dyn Tr> = Box::new(S); (*b).get() }
+fn g(b: &Box<dyn Tr>) -> &u8 { (*b).get() }
+fn h(b: &Box<dyn Tr>) -> &u8 { (**b).get() }
+struct W { b: Box<dyn Tr> }
+fn k(w: &W) -> &u8 { (*w.b).get() }
+fn l<'a>(x: &'a (dyn Tr + 'static)) -> &'static u8 { (*x).get() }
+fn main() {}
+"#, &[(4, "E0515"), (9, "lifetime may not live long enough")], "rv6");
+    errors_at(r#"trait Tr { fn get<'a>(&'a self) -> &'a u8; }
+fn f(b: Box<dyn Tr>) -> &'static u8 { (*b).get() }
+fn g(b: &Box<dyn Tr>) -> &u8 { (*b).get() }
+fn h(b: &Box<dyn Tr>) -> &u8 { (**b).get() }
+fn main() {}
+"#, &[(2, "E0515")], "rv7");
 }

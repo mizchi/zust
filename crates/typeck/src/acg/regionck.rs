@@ -4360,12 +4360,9 @@ impl Cx<'_> {
             Ty::Ref(_, i) | Ty::Box(i) => *i,
             t => t,
         };
-        // (a Box's content is borrowed for a `&self` method: of what the function owns, a loan)
-        if let (Ty::Box(_), Some(Ty::Ref(..))) = (rty, self.prog.sigs[decl as usize].params.first()) {
-            let r = self.rg.var();
-            if let Some(n) = place_text(recv) {
-                self.rg.loans.push((r, format!("*{n}"), super::borrowck::pos(recv)));
-            }
+        // (a Box's content or an object place (`(*b).get()`) is borrowed for a `&self` method)
+        if let (Ty::Box(_) | Ty::Dyn(_), Some(Ty::Ref(..))) = (rty, self.prog.sigs[decl as usize].params.first()) {
+            let r = self.rg_autoref(recv, rty);
             rtr.insert(0, r);
         }
         let mut sol = sol.to_vec();
@@ -4383,6 +4380,33 @@ impl Cx<'_> {
         self.rg_took_call(mc);
     }
 
+    /// The region of the borrow of a method's receiver place recv of type rty (a Box's content, or the object a
+    /// place of type `dyn Tr` is) for its `&self`: as `&recv`, outlived by the references the place is reached
+    /// through, and a loan of the place when the function owns it (`b.get()` and `(*b).get()` of a local Box, not
+    /// `(*r).get()` of `r: &Box<dyn Tr>`)
+    fn rg_autoref(&mut self, recv: &Expr, rty: Ty) -> u32 {
+        let r = self.rg.var();
+        let sp = super::borrowck::pos(recv);
+        let call = matches!(strip(recv), Expr::Call(..) | Expr::MethodCall(..));
+        let name = place_text(recv).map(|n| if matches!(rty, Ty::Box(_)) { format!("*{n}") } else { n });
+        match self.rt_place(recv) {
+            Some((_, _, ds)) => {
+                if let (true, false, Some(n)) = (ds.is_empty(), call, name) {
+                    self.rg.loans.push((r, n, sp));
+                }
+                for d in ds {
+                    self.rg.edge(d, r, sp);
+                }
+            }
+            None => {
+                if let (Ty::Box(_), Some(n)) = (rty, name) {
+                    self.rg.loans.push((r, n, sp));
+                }
+            }
+        }
+        r
+    }
+
     /// The tree of the receiver of a call through a trait object to a method of `impl dyn Tr` (rg.recv): a
     /// reference's as it is, a Box's content or an object place borrowed for the call. need_static: the impl is for
     /// `dyn Tr + 'static`, which the object's lifetime (its tree's last region) must outlive
@@ -4394,10 +4418,7 @@ impl Cx<'_> {
         let Expr::MethodCall(recv, ..) = mc else { return };
         let Some((rty, mut rtr)) = self.rt_expr(recv) else { return };
         if matches!(rty, Ty::Box(_) | Ty::Dyn(_)) {
-            let r = self.rg.var();
-            if let (Ty::Box(_), Some(n)) = (rty, place_text(recv)) {
-                self.rg.loans.push((r, format!("*{n}"), super::borrowck::pos(recv)));
-            }
+            let r = self.rg_autoref(recv, rty);
             rtr.insert(0, r);
         }
         if let (true, Some(&obj)) = (need_static, rtr.last()) {
