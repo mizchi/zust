@@ -3475,3 +3475,61 @@ fn or_pattern_missing_bindings() {
     let src = "enum E { A(u8), B(u16) }\nfn main() {\n    match E::A(1) {\n        E::A(x) | E::B(x) => { let _ = x; }\n    }\n}\n";
     assert_eq!(first(src), Some((4, 19, "mismatched types: expected `u8`, found `u16`".to_string())), "types");
 }
+
+/// unused_parens (#175), at rustc's places: denied by an item's own attribute (the issue's program, each of its five
+/// in turn as the ones before are blanked) or for the crate (also through `unused` and `warnings`), at the other places
+/// it looks at; not where rustc keeps them (a struct literal before a block, `(a + b) * c`, a tuple, `({ 0 } + 1)`,
+/// `if (return 0) {}`, a lazy `let` scrutinee), not without a deny or under an allow, not around what a macro's
+/// expansion put in parentheses
+#[test]
+fn unused_parens_under_deny() {
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let e = |line: usize, col: usize, what: &str| Some((line, col, format!("unnecessary parentheses around {what}")));
+    let mut src = "#[deny(unused_parens)]\nfn f(x: i32) -> i32 {\n    if (x > 3) { return (x); }\n    let y = (x + 1);\n    match (y) { _ => {} }\n    while (false) {}\n    y\n}\nfn main() { println!(\"{}\", f(1)); }\n".to_string();
+    for (line, col, what, from, to) in [
+        (3, 8, "`if` condition", "(x > 3)", " x > 3 "),
+        (3, 25, "`return` value", "(x);", " x ;"),
+        (4, 13, "assigned value", "(x + 1)", " x + 1 "),
+        (5, 11, "`match` scrutinee expression", "(y)", " y "),
+        (6, 11, "`while` condition", "(false)", " false "),
+    ] {
+        assert_eq!(first(&src), e(line, col, what), "{what}");
+        src = src.replace(from, to);
+    }
+    assert_eq!(first(&src), None);
+    let crate_deny = |lint: &str, body: &str| format!("#![deny({lint})]\nstruct S {{ a: i32 }}\nfn f(x: i32, s: S, t: (i32, i32), o: Option<i32>, v: &[i32]) -> i32 {{\n{body}\n}}\nfn main() {{}}\n");
+    for (lint, body, want) in [
+        ("unused", "    if let Some(y) = (o) { return y; }\n    0", e(4, 22, "`let` scrutinee expression")),
+        ("warnings", "    for _ in (0..x) {}\n    0", e(4, 14, "`for` iterator expression")),
+        ("unused_parens", "    let mut n = 0;\n    n += (1);\n    n", e(5, 10, "assigned value")),
+        ("unused_parens", "    let _ = v[(0)];\n    0", e(4, 15, "index expression")),
+        ("unused_parens", "    let _ = Some((1));\n    let _ = x.max((1));\n    0", e(4, 18, "function argument")),
+        ("unused_parens", "    let _ = x.max((1));\n    0", e(4, 19, "method argument")),
+        ("unused_parens", "    let _ = || (1);\n    0", e(4, 16, "closure body")),
+        ("unused_parens", "    match x { _ => (1) }", e(4, 20, "match arm expression")),
+        ("unused_parens", "    loop { break (1); }", e(4, 18, "`break` value")),
+        ("unused_parens", "    let r = (&x);\n    *r", e(4, 13, "assigned value")),
+        ("unused_parens", "    let _ = &s;\n    (t.0)", e(5, 5, "block return value")),
+        // (the arms before the scrutinee, as rustc's lint pass meets them; the outer of two)
+        ("unused_parens", "    match (x) { _ => (1) }", e(4, 22, "match arm expression")),
+        ("unused_parens", "    if ((S { a: 1 }.a == s.a)) {}\n    0", e(4, 8, "`if` condition")),
+        ("unused_parens", "    if (S { a: 1 }.a == s.a) {}\n    match (S { a: 2 }) { _ => {} }\n    let b = (t.0 + 1) * 2;\n    let c = (1, 2);\n    let d = ({ 0 } + 1);\n    if (return 0) {}\n    if let true = (b > 0 && c.0 > d) {}\n    b", None),
+    ] {
+        assert_eq!(first(&crate_deny(lint, body)), want, "{body}");
+    }
+    // (no deny; an allow of the item, of the statement, of the crate, of a module around it)
+    let body = "fn f(x: i32) -> i32 {\n    let y = (x);\n    y\n}\nfn main() { f(1); }\n";
+    assert_eq!(first(body), None);
+    assert_eq!(first(&format!("#![deny(unused_parens)]\n#[allow(unused_parens)]\n{body}")), None);
+    assert_eq!(first(&format!("#![deny(unused_parens)]\n{}", body.replace("    let y", "    #[allow(unused_parens)]\n    let y"))), None);
+    assert_eq!(first(&format!("#![deny(warnings)]\n#![allow(unused_parens)]\n{body}")), None);
+    let module = "#![deny(unused_parens)]\n#[allow(unused_parens)]\nmod m {\n    pub fn f(x: i32) -> i32 {\n        let y = (x);\n        y\n    }\n}\nfn main() { m::f(1); }\n";
+    assert_eq!(first(module), None);
+    assert_eq!(first(&module.replace("#[allow(unused_parens)]\n", "")), e(4, 17, "assigned value"));
+    // (`allow(warnings)` does not undo a deny of the lint)
+    assert_eq!(first(&format!("#![deny(unused_parens)]\n#![allow(warnings)]\n{body}")), e(4, 13, "assigned value"));
+    // (the parentheses of a macro's expansion are not the program's: rustc reports none here)
+    let mac = "#![deny(unused_parens)]\nmacro_rules! pick {\n    ($c:expr) => {\n        if $c { 1 } else { 2 }\n    };\n}\nfn f(x: i32) -> i32 {\n    let y = pick!(x > 1);\n    y\n}\nfn main() { println!(\"{}\", f(1)); }\n";
+    assert_eq!(first(mac), None);
+}

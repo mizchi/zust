@@ -54,20 +54,34 @@ impl At {
     }
 }
 
-/// Parentheses rustc finds unnecessary, in the order its lint pass meets them: where the first token inside is, how
-/// many `(` come before it from the one around (that one and the inner's own: a tuple's, parentheses inside), and
-/// the place
-type Found = Vec<(Pos, u32, At)>;
+/// Parentheses rustc finds unnecessary, in the order its lint pass meets them: where the first token inside with a
+/// place is, the tokens before it back to the `(` around (that one included, nearest first: the inner's own `(`, a
+/// `&`, a keyword), and the place
+type Found = Vec<(Pos, Vec<&'static str>, At)>;
 
-/// Where an expression's first token is, and how many `(` of its own come before that; None when it has no place
-fn lead(e: &Expr) -> Option<(Pos, u32)> {
+/// Where an expression's first token with a place is, and the tokens of its own before that (nearest first); None
+/// when it has none
+fn lead(e: &Expr) -> Option<(Pos, Vec<&'static str>)> {
+    let with = |x: &Expr, before: &[&'static str]| {
+        lead(x).map(|(p, mut v)| {
+            v.extend_from_slice(before);
+            (p, v)
+        })
+    };
     match e {
-        Expr::Paren(x) => lead(x).map(|(p, n)| (p, n + 1)),
-        Expr::Tuple(xs) => lead(xs.first()?).map(|(p, n)| (p, n + 1)),
+        Expr::Paren(x) => with(x, &["("]),
+        Expr::Tuple(xs) => with(xs.first()?, &["("]),
+        Expr::Ref(m, x) => with(x, if *m { &["mut", "&"] } else { &["&"] }),
+        Expr::If(c, ..) => with(c, &["if"]),
+        Expr::Match(x, _) => with(x, &["match"]),
+        Expr::Return(Some(x)) => with(x, &["return"]),
         Expr::Call(x, _) | Expr::MethodCall(x, ..) | Expr::Field(x, ..) | Expr::Index(x, ..) | Expr::Cast(x, _) | Expr::Try(x) | Expr::Assign(x, _) | Expr::AssignOp(_, x, ..) | Expr::Range(Some(x), ..) => lead(x),
-        Expr::Unary(_, _, s) | Expr::Binary(_, _, _, s) | Expr::Macro(_, _, s) => Some((s.start, 0)),
-        Expr::Lit(_, p) | Expr::Closure(.., p) => Some((*p, 0)),
-        Expr::Path(None, p) | Expr::Struct(p, ..) => Some((p.pos, 0)),
+        Expr::Unary(_, _, s) | Expr::Binary(_, _, _, s) | Expr::Macro(_, _, s) => Some((s.start, vec![])),
+        Expr::Lit(_, p) | Expr::Closure(.., p) => Some((*p, vec![])),
+        Expr::Path(None, p) | Expr::Struct(p, ..) => Some((p.pos, vec![])),
+        // (at the label, when there is one)
+        Expr::Break(l, _, p) => Some((*p, if l.is_some() { vec!["break"] } else { vec![] })),
+        Expr::Continue(l, p) => Some((*p, if l.is_some() { vec!["continue"] } else { vec![] })),
         _ => None,
     }
     .filter(|(p, _)| p.line > 0)
@@ -145,8 +159,9 @@ fn check(v: &Expr, at: At, out: &mut Found) {
     if kept(inner, at) {
         return;
     }
-    if let Some((p, n)) = lead(inner) {
-        out.push((p, n + 1, at));
+    if let Some((p, mut before)) = lead(inner) {
+        before.push("(");
+        out.push((p, before, at));
     }
 }
 
@@ -283,7 +298,12 @@ pub(super) fn first_unused(src: &str, src0: &str, items: &[SrcItem], crate_deny:
     for it in items {
         let text = src.get(it.start..it.end).unwrap_or("");
         let body = text[super::leading_attrs(text).len()..].trim_start();
-        let body = body.strip_prefix("pub ").unwrap_or(body).trim_start();
+        // (past the visibility: `pub`, `pub(crate)`)
+        let body = match body.strip_prefix("pub").map(str::trim_start) {
+            Some(r) if r.starts_with('(') => r.find(')').map_or(r, |k| r[k + 1..].trim_start()),
+            Some(r) => r,
+            None => body,
+        };
         // (a const's or a static's value is looked at at the top level, not in an impl or a trait)
         let value = it.kind == ItemKind::Normal && (body.starts_with("const ") || body.starts_with("static "));
         if !(value || text.contains("fn ")) || text.contains("#[cfg") {
@@ -321,21 +341,28 @@ pub(super) fn first_unused(src: &str, src0: &str, items: &[SrcItem], crate_deny:
         };
         let starts: Vec<usize> = std::iter::once(0).chain(text.match_indices('\n').map(|(i, _)| i + 1)).collect();
         let tb = text.as_bytes();
-        for (p, n, at) in found {
+        let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+        for (p, before, at) in found {
             let Some(&ls) = starts.get(p.line as usize - 1) else { continue };
             let Some(mut o) = text[ls..].char_indices().nth(p.col as usize).map(|(i, _)| ls + i) else { continue };
-            // (back from the first token inside over n `(`, each after any space)
-            let mut ok = true;
-            for _ in 0..n {
-                while o > 0 && tb[o - 1].is_ascii_whitespace() {
-                    o -= 1;
+            // (back from that token over the ones before it, each after any space or `/* */` comment; a word not the end
+            // of a longer one)
+            let ok = before.iter().all(|t| {
+                loop {
+                    while o > 0 && tb[o - 1].is_ascii_whitespace() {
+                        o -= 1;
+                    }
+                    match text[..o].strip_suffix("*/").and_then(|r| r.rfind("/*")) {
+                        Some(k) => o = k,
+                        None => break,
+                    }
                 }
-                if o == 0 || tb[o - 1] != b'(' {
-                    ok = false;
-                    break;
+                if !text[..o].ends_with(t) || (id(t.as_bytes()[0]) && o > t.len() && id(tb[o - t.len() - 1])) {
+                    return false;
                 }
-                o -= 1;
-            }
+                o -= t.len();
+                true
+            });
             if !ok || !denied(o) {
                 continue;
             }

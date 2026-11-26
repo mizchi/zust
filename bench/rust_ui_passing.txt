@@ -4363,6 +4363,7 @@ compile-fail	lint/lint-removed-allow.rs
 compile-fail	lint/lint-removed.rs
 compile-fail	lint/lint-renamed-allow.rs
 compile-fail	lint/lint-renamed.rs
+compile-fail	lint/lint-struct-necessary.rs
 compile-fail	lint/lint-type-overflow.rs
 check-pass	lint/lints-on-stmt-not-overridden-130142.rs
 check-pass	lint/mention-lint-group-in-default-level-lint-note-issue-65464.rs
@@ -4437,6 +4438,7 @@ check-pass	lint/unused-qualifications-global-paths.rs
 check-pass	lint/unused-results-lint-triggered-by-derive-debug-29710.rs
 check-pass	lint/unused-visibilities.rs
 check-pass	lint/unused/break-label-with-parens-147542.rs
+compile-fail	lint/unused/closure-body-issue-136741.rs
 check-pass	lint/unused/concat-in-crate-deprecated-issue-137687.rs
 check-pass	lint/unused/const-local-var.rs
 run-pass	lint/unused/ignored-allow-unused_variables.rs
@@ -4452,7 +4454,10 @@ compile-fail	lint/unused/issue-67691-unused-field-in-or-pattern.rs
 run-pass	lint/unused/issue-70041.rs
 check-pass	lint/unused/issue-71290-unused-paren-binop.rs
 compile-fail	lint/unused/issue-81314-unused-span-ident.rs
+compile-fail	lint/unused/issue-90807-unused-paren-error.rs
 check-pass	lint/unused/issue-90807-unused-paren.rs
+compile-fail	lint/unused/issue-92751.rs
+compile-fail	lint/unused/issue-96606.rs
 compile-fail	lint/unused/lint-unsed-in-macro-issue-151269.rs
 compile-fail	lint/unused/lint-unused-imports-self-single.rs
 compile-fail	lint/unused/lint-unused-imports.rs
@@ -4477,6 +4482,7 @@ compile-fail	lint/unused/unused-macro-with-bad-frag-spec.rs
 compile-fail	lint/unused/unused-macro-with-follow-violation.rs
 compile-fail	lint/unused/unused-mut-warning-captured-var.rs
 check-pass	lint/unused/unused-never-binding-issue-158783.rs
+compile-fail	lint/unused/unused-parens-assign-expr-in-ret-issue-131989.rs
 check-pass	lint/unused/unused-parens-issue-106413.rs
 check-pass	lint/unused/unused-results-unit-and-uninhabited.rs
 compile-fail	lint/unused/unused-var-in-match-arm.rs
