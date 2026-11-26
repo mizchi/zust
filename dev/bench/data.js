@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795712378915,
+  "lastUpdate": 1795727670054,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -61373,6 +61373,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 38.077,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ff4ec00ba6a362a40c69d88a45c4360069e80d49",
+          "message": "lexer: a derive's name is a macro, not a glob-imported type (#251) (#272)\n\nFlattening modules renamed every identifier token that named a renamed item, including the tokens inside attributes and macro names. typenum's #[derive(Eq, ..)] beside its glob-imported `type Eq` became `typenum__operator_aliases__Eq`. That blocked typenum, generic-array, block-buffer and crypto-common.\n\nlexer::macro_ns_toks marks the tokens that name no item: everything inside an attribute, and the name right before `!` of a macro call. Neither renaming pass (module collisions, fn-body hoisting) touches them. A macro path's module segments are still renamed with their module.\n\nThe module renaming looks a macro path's last segment up in a macro-only namespace, which holds the std macros imported under another name. So `m::say!` reaches std's println even beside m's own `fn say`.\n\nTests:\n- probes derive_names_beside_glob_items and macro_path_modules, with expected output from rustc 1.97\n- check.rs derive_names_are_macros_not_glob_items\n- lexer unit tests\n\nFixes #251\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T06:09:14+09:00",
+          "tree_id": "70332231e26cb14b7442e1fcae5c569750af2c62",
+          "url": "https://github.com/mizchi/zust/commit/ff4ec00ba6a362a40c69d88a45c4360069e80d49"
+        },
+        "date": 1795727669123,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 130.474,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 1.043,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 21.818,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 51.857,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.258,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 129.205,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 796.455,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 575.458,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.928,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 73.759,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 238,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.621,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 611.565,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3922.351,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 63.515,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 124.028,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 38.425,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 67.488,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 85.411,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 183.242,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 63.22,
             "unit": "ms"
           }
         ]
