@@ -133,6 +133,13 @@ fn main() {
     println!("{:?} {:?}", e.raw_os_error(), n.raw_os_error());
     println!("{} / {}", e, std::io::Error::from_raw_os_error(13));
     println!("{:?}", n);
+    // (a raw code of 0 or below is an OS error too, apart from the kinds the prelude gives its own errors (#280's
+    // review): it comes back from raw_os_error)
+    for c in [0, -1, -3, -4] {
+        let e = io::Error::from_raw_os_error(c);
+        println!("{:?} {}", e.raw_os_error(), e);
+    }
+    println!("{:?}", io::Error::from_raw_os_error(0));
 
     let data = [1u8, 2, 3, 4, 5, 6, 7];
     let mut chunks = data.chunks_exact(2);

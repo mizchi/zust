@@ -1,8 +1,16 @@
 // Slice and str methods the top crates call (#256): a slice's split_first / split_last / splitn / to_owned
 // (form_urlencoded, percent-encoding, utf8_iter), str's splitn and is_ascii (iana-time-zone, version_check,
 // httpdate), div_ceil (utf8_iter, utf16_iter), wrapping_add_signed (unicode-width) and a str trait's method of a
-// String (`OsString::to_string_lossy`, version_check)
+// String (`OsString::to_string_lossy`, version_check). And from #280's review: a slice's to_owned of a derive(Clone)
+// type with a String in it, a str's `s[..n].to_owned()` (a String), and an empty separator, which matches at every
+// char boundary
 use std::ffi::OsString;
+
+#[derive(Clone, Debug)]
+struct Named {
+    name: String,
+    n: u8,
+}
 
 struct Bytes<'a> {
     bytes: &'a [u8],
@@ -87,4 +95,22 @@ fn main() {
 
     let flags = OsString::from("-Zallow-features=a,b");
     println!("{}", flags.to_string_lossy());
+
+    let named = vec![Named { name: "a".to_string(), n: 1 }, Named { name: "b".to_string(), n: 2 }];
+    let all: &[Named] = &named;
+    let copy = all.to_owned();
+    let first = named[..1].to_owned();
+    println!("{:?} {:?} {}", copy, first, copy[1].n + first[0].n);
+    let text = "hello world";
+    let k = 5;
+    let head = text[..k].to_owned();
+    let owned = String::from("xyz");
+    println!("{} {} {}", head, text[k + 1..].to_owned(), owned[1..].to_owned());
+
+    let e1: Vec<&str> = "ab".splitn(2, "").collect();
+    let e2: Vec<&str> = "ab".splitn(5, "").collect();
+    let e3: Vec<&str> = "h\u{e9}y".splitn(3, "").collect();
+    let e4: Vec<&str> = "".splitn(3, "").collect();
+    let e5: Vec<&str> = "ab".split("").collect();
+    println!("{:?} {:?} {:?} {:?} {:?}", e1, e2, e3, e4, e5);
 }

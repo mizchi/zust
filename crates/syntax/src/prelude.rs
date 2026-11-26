@@ -1423,9 +1423,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if ["default", "Default", "unwrap_or_default", "take"].iter().any(|n| need.contains(n)) {
         need.insert("__exr_default");
     }
-    // Codegen turns `x.clone()` into __exr_clone::<T> (also inside the prelude's Vec::clone / cloned / to_vec)
+    // Codegen turns `x.clone()` into __exr_clone::<T> (also inside the prelude's Vec::clone / cloned / to_vec, and a
+    // slice's to_owned, which is its to_vec)
     // (not needed for types without drop, or for types with their own clone (String / Vec))
-    if ["clone", "cloned", "to_vec", "resize"].iter().any(|n| need.contains(n)) {
+    if ["clone", "cloned", "to_vec", "to_owned", "resize"].iter().any(|n| need.contains(n)) {
         need.insert("__exr_clone");
     }
     if need.contains("join") || need.contains("concat") {
@@ -1581,8 +1582,8 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         need.extend(["__exr_dyn_display", "__exr_dyn_debug"]);
     }
     // (`x.fmt(f)` / `fmt::Debug::fmt(s, f)` of a value with no fmt of its own (a number, a str, a derive): `{}` / `{:?}`
-    // as a fmt::Result (#256))
-    if need.contains("fmt") && (sc.has(".fmt(") || sc.has("::fmt(")) {
+    // as a fmt::Result (#256)) (`.fmt` / `::fmt`, not `.fmt(`: `x.fmt (f)` too)
+    if need.contains("fmt") && (sc.has(".fmt") || sc.has("::fmt")) {
         need.extend(["__exr_display_fmt", "__exr_debug_fmt"]);
     }
     // (ManuallyDrop is used through Deref: `m.0`, `*m`)

@@ -7,6 +7,11 @@ abccd
 Some(2) Some(13)
 No such file or directory (os error 2) / Permission denied (os error 13)
 Os { code: 13, kind: PermissionDenied, message: "Permission denied" }
+Some(0) Success (os error 0)
+Some(-1) Unknown error -1 (os error -1)
+Some(-3) Unknown error -3 (os error -3)
+Some(-4) Unknown error -4 (os error -4)
+Os { code: 0, kind: Uncategorized, message: "Success" }
 3
 2 [7]
 (3, Some(3))

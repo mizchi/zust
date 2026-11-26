@@ -43,8 +43,9 @@ impl Cx<'_> {
             "split_first" => Some(("__exr_slice_split_first", false)),
             "split_last" => Some(("__exr_slice_split_last", false)),
             "splitn" => Some(("__exr_slice_splitn", false)),
-            // (a slice's to_owned is its to_vec; an array's is a clone of it, a `[T; N]`)
-            "to_owned" if !matches!(self.peek(mc_recv).map(|t| self.strip_refs(t)), Some(Ty::Array(..))) => Some(("__exr_slice_to_vec", false)),
+            // (a slice's to_owned is its to_vec: only a receiver known to be one. An array's is a clone of it, a
+            // `[T; N]`, and a str's a String, also of a `s[..n]` whose type is not known here)
+            "to_owned" if matches!(self.peek(mc_recv).map(|t| self.strip_refs(t)), Some(Ty::Slice(_))) => Some(("__exr_slice_to_vec", false)),
             "reverse" => Some(("__exr_slice_reverse", true)),
             "fill" => Some(("__exr_slice_fill", true)),
             "rotate_left" => Some(("__exr_slice_rotate_left", true)),

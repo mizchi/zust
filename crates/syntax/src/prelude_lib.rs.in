@@ -5667,7 +5667,7 @@ pub trait Read {
         while at < buf.len() {
             let n = self.read(&mut buf[at..])?;
             if n == 0 {
-                return Err(IoError { code: -3 });
+                return Err(IoError { code: -3, os: false });
             }
             at += n;
         }
@@ -5686,7 +5686,7 @@ pub trait Write {
         while at < buf.len() {
             let n = self.write(&buf[at..])?;
             if n == 0 {
-                return Err(IoError { code: -4 });
+                return Err(IoError { code: -4, os: false });
             }
             at += n;
         }
@@ -5789,7 +5789,7 @@ fn __exr_cursor_seek(len: usize, pos: &mut u64, to: SeekFrom) -> Result<u64, IoE
             *pos = n;
             Ok(n)
         }
-        None => Err(IoError { code: 22 }),
+        None => Err(IoError { code: 22, os: true }),
     }
 }
 
@@ -5938,9 +5938,11 @@ impl<R: Read> Read for BufReader<R> {
 }
 
 // std::io::Error: OS のエラー (errno) か、種類とメッセージ (code < 0: InvalidData など)
+// (os: whether code is an errno, apart from the kinds' codes: `from_raw_os_error(0)` and `(-1)` are OS errors too (#256))
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct IoError {
     code: i32,
+    os: bool,
 }
 
 unsafe extern "C" {
@@ -5993,17 +5995,18 @@ fn __exr_io_kind<G>(code: i32) -> &str {
 
 impl IoError {
     pub fn last_os_error() -> IoError {
-        IoError { code: unsafe { *__exr_errno_location() } }
+        IoError { code: unsafe { *__exr_errno_location() }, os: true }
     }
-    // (an errno: a code of 0 or below is no OS error here, as the kinds use them)
     pub fn from_raw_os_error(code: i32) -> IoError {
-        IoError { code: code }
+        IoError { code: code, os: true }
     }
     pub fn raw_os_error(&self) -> Option<i32> {
-        if self.code > 0 { Some(self.code) } else { None }
+        if self.os { Some(self.code) } else { None }
     }
     fn __message(&self) -> &str {
-        if self.code == -1 {
+        if self.os {
+            __exr_cstr::<()>(unsafe { __exr_strerror(self.code) })
+        } else if self.code == -1 {
             "stream did not contain valid UTF-8"
         } else if self.code == -3 {
             "failed to fill whole buffer"
@@ -6018,9 +6021,9 @@ impl IoError {
 impl Display for IoError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
         __exr_fmt_str::<()>(f, self.__message());
-        if self.code > 0 {
+        if self.os {
             __exr_fmt_str::<()>(f, " (os error ");
-            __exr_fmt_int::<()>(f, self.code as u64, false);
+            __exr_fmt_int::<()>(f, (self.code as i64).unsigned_abs(), self.code < 0);
             __exr_fmt_str::<()>(f, ")");
         }
         Ok(())
@@ -6029,11 +6032,12 @@ impl Display for IoError {
 
 impl Debug for IoError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
-        if self.code > 0 {
+        if self.os {
             __exr_fmt_str::<()>(f, "Os { code: ");
-            __exr_fmt_int::<()>(f, self.code as u64, false);
+            __exr_fmt_int::<()>(f, (self.code as i64).unsigned_abs(), self.code < 0);
             __exr_fmt_str::<()>(f, ", kind: ");
-            __exr_fmt_str::<()>(f, __exr_io_kind::<()>(self.code));
+            // (an errno's kind; the kinds' own codes are below 0, which no errno names)
+            __exr_fmt_str::<()>(f, __exr_io_kind::<()>(if self.code > 0 { self.code } else { 0 }));
             __exr_fmt_str::<()>(f, ", message: ");
             __exr_fmt_str_debug::<()>(f, self.__message());
             __exr_fmt_str::<()>(f, " }");
@@ -6141,7 +6145,7 @@ pub fn __exr_fs_read_to_string<P>(path: P) -> Result<String, IoError> {
     let v = __exr_fs_read(path)?;
     match String::from_utf8(v) {
         Ok(s) => Ok(s),
-        Err(_) => Err(IoError { code: -1 }),
+        Err(_) => Err(IoError { code: -1, os: false }),
     }
 }
 
@@ -7512,7 +7516,7 @@ impl Command {
                     __exr_close(out[0]);
                     __exr_close(err[0]);
                 }
-                return Err(IoError { code: e });
+                return Err(IoError { code: e, os: true });
             }
             Ok((pid, out[0], err[0]))
         }
@@ -14262,6 +14266,8 @@ fn __exr_str_is_char_boundary<G>(s: &str, i: usize) -> bool {
 }
 
 // `s.split("ab")` (区切りが &str)
+// (an empty separator matches at every char boundary, the start and the end too, as std's: `"ab".split("")` is
+// `["", "a", "b", ""]`; emp: its match at i is still to come (#256))
 pub struct SplitStr {
     p: *const u8,
     len: usize,
@@ -14269,6 +14275,7 @@ pub struct SplitStr {
     sep: *const u8,
     slen: usize,
     done: bool,
+    emp: bool,
 }
 
 impl Iterator for SplitStr {
@@ -14278,6 +14285,21 @@ impl Iterator for SplitStr {
             return None;
         }
         let st = self.i;
+        if self.slen == 0 {
+            // (the next match: at i, or one char past it; none past the end)
+            let m = if self.emp {
+                st
+            } else if st < self.len {
+                let b0 = unsafe { *self.p.add(st) };
+                st + if b0 < 0x80 { 1 } else if b0 < 0xE0 { 2 } else if b0 < 0xF0 { 3 } else { 4 }
+            } else {
+                self.done = true;
+                return Some(__exr_sub::<()>(unsafe { self.p.add(st) }, 0));
+            };
+            self.emp = false;
+            self.i = m;
+            return Some(__exr_sub::<()>(unsafe { self.p.add(st) }, m - st));
+        }
         let mut k = self.i;
         while k + self.slen <= self.len {
             let mut j = 0;
@@ -14381,7 +14403,7 @@ fn __exr_str_rsplit_once<G>(s: &str, p: &str) -> Option<(&str, &str)> {
 }
 
 fn __exr_str_split_str<G>(s: &str, t: &str) -> SplitStr {
-    SplitStr { p: s.as_ptr(), len: s.len(), i: 0, sep: t.as_ptr(), slen: t.len(), done: false }
+    SplitStr { p: s.as_ptr(), len: s.len(), i: 0, sep: t.as_ptr(), slen: t.len(), done: false, emp: true }
 }
 
 // `s.splitn(n, pat)`: at most n pieces, the last one the rest (a char pattern comes as its UTF-8)

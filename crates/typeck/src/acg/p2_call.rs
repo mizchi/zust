@@ -375,10 +375,10 @@ impl Cx<'_> {
 
     /// `x.fmt(f)` (#256): Display's or Debug's fmt, which the impls keep as `S::<Display>::fmt`, not under `S::fmt`,
     /// so the ordinary lookup does not find it. The trait is the one the call names (`fmt::Debug::fmt(x, f)`), else
-    /// the one x's type implements; of both, the one of the impl the call is in (rustc takes that trait to be in
-    /// scope there), else Display. A type with its own impl of it calls that (the lookup goes on with the trait
-    /// named); the others (numbers, str, a derive) are written as `{}` / `{:?}` writes them. None: the ordinary
-    /// lookup (a fmt of the type's own, a trait object, a type parameter)
+    /// the one of x's type's that is in scope (imported, or the trait of the impl the call is in, which rustc takes to
+    /// be in scope there); of both, the impl's, else Display. A type with its own impl of it calls that (the lookup
+    /// goes on with the trait named); the others (numbers, str, a derive) are written as `{}` / `{:?}` writes them.
+    /// None: the ordinary lookup (a fmt of the type's own, a trait object, a type parameter)
     #[cold]
     #[inline(never)]
     fn fmt_method(&mut self, recv: &Expr, f: &Expr, expected: Option<Ty>) -> R<Option<V>> {
@@ -404,14 +404,25 @@ impl Cx<'_> {
             Some(_) => return Ok(None),
             None => {
                 let inside = self.prog.sigs.get(self.root as usize).and_then(|s| s.impl_trait.as_deref()).map(|t| t.split('<').next().unwrap_or(t).trim().rsplit("::").next().unwrap_or(t));
-                match (self.prog.implements(base, "Display"), self.prog.implements(base, "Debug")) {
-                    (true, false) => "Display",
-                    (false, true) => "Debug",
-                    (true, true) if inside == Some("Debug") => "Debug",
-                    (true, true) => "Display",
-                    _ => return Ok(None),
+                let (d, g) = (self.prog.implements(base, "Display"), self.prog.implements(base, "Debug"));
+                // (the fmt traits in scope at the call, as rustc's lookup sees them: the impl's own, and those the
+                // program imports (`use std::fmt::Debug;`). Of the program, not of this scope: one imported in another
+                // module counts too, so where both are, the impl's trait decides, which is in scope here for sure;
+                // with both in scope rustc's is E0034 (multiple applicable items), with neither E0599)
+                let imp = self.prog.fmt_imports;
+                let vd = d && (imp & 1 != 0 || inside == Some("Display"));
+                let vg = g && (imp & 2 != 0 || inside == Some("Debug"));
+                let pick = |d: bool, g: bool| match (d, g) {
+                    (true, false) => Some("Display"),
+                    (false, true) => Some("Debug"),
+                    (true, true) if inside == Some("Debug") => Some("Debug"),
+                    (true, true) => Some("Display"),
+                    _ => None,
+                };
+                match pick(vd, vg).or_else(|| pick(d, g)) {
+                    Some(t) => t.to_string(),
+                    None => return Ok(None),
                 }
-                .to_string()
             }
         };
         if let Ty::Struct(sid) = base {

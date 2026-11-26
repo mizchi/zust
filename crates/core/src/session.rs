@@ -224,6 +224,43 @@ fn blank_comments(s: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| s.to_string())
 }
 
+/// The fmt traits the items' `use` declarations import (fn bodies' too), by their identifier tokens (not a comment's
+/// words): 1 Display, 2 Debug; a glob of a `fmt` path both. Only from a declaration that names `fmt`: a trait of the
+/// program's named Debug is not std's (Program::fmt_imports)
+fn fmt_imports(src: &str, items: &[SrcItem]) -> u8 {
+    let sb = src.as_bytes();
+    let mut mask = 0u8;
+    for it in items {
+        let ids = &it.idents;
+        for (k, &(a, b)) in ids.iter().enumerate() {
+            if b - a != 3 || sb.get(a as usize..b as usize) != Some(b"use") {
+                continue;
+            }
+            // (the declaration's identifiers, up to the first `;` after the keyword: one in a comment inside a `use` is
+            // rare)
+            let stop = it.end.min(sb.len());
+            let end = sb[b as usize..stop].iter().position(|&c| c == b';').map_or(stop, |p| b as usize + p);
+            let words: Vec<&[u8]> = ids[k + 1..].iter().take_while(|&&(x, _)| (x as usize) < end).filter_map(|&(x, y)| sb.get(x as usize..y as usize)).collect();
+            if !words.contains(&&b"fmt"[..]) {
+                continue;
+            }
+            if words.contains(&&b"Display"[..]) {
+                mask |= 1;
+            }
+            if words.contains(&&b"Debug"[..]) {
+                mask |= 2;
+            }
+            // (`use std::fmt::*;` / `use core::fmt::{*, ..}`)
+            let compact: Vec<u8> = sb[b as usize..end].iter().copied().filter(|c| !c.is_ascii_whitespace()).collect();
+            let glob = compact.windows(6).any(|w| w == b"fmt::*") || compact.windows(6).position(|w| w == b"fmt::{").is_some_and(|p| compact[p..].contains(&b'*'));
+            if glob {
+                mask |= 3;
+            }
+        }
+    }
+    mask
+}
+
 /// Where the string or char literal at b[i] ends (past it): `"..."`, `b'{'`, `'\n'`; None for anything else (a
 /// lifetime `'a`)
 fn literal_end(b: &[u8], i: usize) -> Option<usize> {
@@ -2190,6 +2227,12 @@ impl Session {
                 // (its identifier tokens: not the words of a comment in it)
                 prog.use_names.extend(it.idents.iter().map(|&(x, y)| (x as usize, y as usize)).filter(|&(x, y)| x > b && y <= end).filter_map(|(x, y)| src.get(x..y)).map(str::to_string));
             }
+        }
+        // (the fmt traits the program's `use` declarations import, for `x.fmt(f)` of a type with both (#256): only when
+        // the program calls a `fmt` method)
+        let user_end = items[..user].last().map_or(0, |it| it.end.min(src.len()));
+        if src[..user_end].contains(".fmt") {
+            prog.fmt_imports = fmt_imports(&src, &items[..user]);
         }
         // (a field or an impl's self type that names a struct of the program's whose parameter's bound does not hold:
         // `struct Hoge<K> { s: S<K> }` with `struct S<T: Tr>`)

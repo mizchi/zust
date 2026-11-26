@@ -569,6 +569,10 @@ pub struct Program {
     /// the names the program's `use` declarations write (fn bodies' too): a value of one is imported, not undeclared,
     /// though zustc may not have it (`use std::convert::identity;`)
     pub use_names: FxSet<String>,
+    /// the fmt traits the program's `use` declarations import (fn bodies' too; of the whole program, not each
+    /// scope's): 1 Display, 2 Debug (`use std::fmt::Debug;`, `use core::fmt::{self, Display as _}`; a glob `fmt::*`
+    /// both). Which one `x.fmt(f)` calls where x's type has both (#256)
+    pub fmt_imports: u8,
     /// a constant with a lowercase name exists (`const or: usize`): an identifier pattern of any case may name one;
     /// without, only an uppercase one is looked up
     pub lower_consts: bool,
@@ -1603,6 +1607,7 @@ impl Program {
             ambiguous_methods: FxMap::default(),
             unbounded_blankets: FxSet::default(),
             use_names: FxSet::default(),
+            fmt_imports: 0,
             impl_selfs: FxMap::default(),
             user_traits: FxSet::default(),
             tdb: Default::default(),
