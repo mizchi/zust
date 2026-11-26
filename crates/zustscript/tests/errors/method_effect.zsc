@@ -1,0 +1,5 @@
+// expect: `f` performs effects: a method cannot yet
+enum Log { Say(String) -> () }
+type P = { x: i32 }
+impl P { fn f(self) -> i32 { perform Say("x"); self.x } }
+fn g(p: P) -> i32 { handle p.f() { Say(s), k => k(()) } }

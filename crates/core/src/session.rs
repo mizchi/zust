@@ -924,6 +924,7 @@ impl Session {
         crate::macros::BAD_FRAGMENT.with(|c| c.borrow_mut().take());
         crate::macros::BAD_DEF.with(|c| c.set(false));
         crate::macros::BAD_FOLLOW.with(|c| c.borrow_mut().take());
+        crate::macros::EXPORTED.with(|c| c.borrow_mut().clear());
         crate::macros::PAT_WITH_OR.with(|c| c.set(self.opts.edition >= 2021));
         crate::macros::UNBOUND.with(|c| c.borrow_mut().take());
         crate::macros::DUP_EXPORT.with(|c| c.borrow_mut().take());
@@ -1003,6 +1004,18 @@ impl Session {
             }
             // (a `macro_rules!` matcher's fragment specifier rustc does not know, used or not: the expansion notes one when
             // it reads the definitions; its place is read from the text then)
+            // (a doc comment the source ends in, read from its end as written)
+            if let Some(e) = crate::lexer::doc_at_end(src0) {
+                return Err(e);
+            }
+            // (E0255: a `#[macro_export]` macro of a name a `pub use` of std's at the crate root brings into the
+            // macro namespace too (`pub use std::panic;`), at the macro)
+            let exported = crate::macros::EXPORTED.with(|c| std::mem::take(&mut *c.borrow_mut()));
+            if !exported.is_empty() {
+                if let Some(e) = export_beside_std_reexport(src0, &exported) {
+                    return Err(e);
+                }
+            }
             // (E0428: two `#[macro_export]` macros of one name, at the second)
             if let Some(n) = crate::macros::DUP_EXPORT.with(|c| c.borrow_mut().take()) {
                 let pat = format!("macro_rules! {n}");
@@ -1952,6 +1965,9 @@ impl Session {
         // or std's)
         if self.ctx.map.inputs.is_empty() && self.ctx.deps.is_empty() {
             if let Some(e) = unknown_trait_bound(&prog, &src, src0, &items, user) {
+                return Err(e);
+            }
+            if let Some(e) = unknown_impl_type(&prog, &src, src0, &items, user) {
                 return Err(e);
             }
         }
@@ -9851,14 +9867,32 @@ fn name_line(e: &str, src: &str, items: &[SrcItem]) -> String {
         .find_map(|p| rest.strip_prefix(p))
         .and_then(|r| r.split('`').next());
     let (Some(name), Some(it)) = (name, items.iter().find(|it| it.line == line)) else { return e.to_string() };
-    let text = &src[it.start..it.end.min(src.len())];
-    let word = |i: usize| {
-        let before = text[..i].chars().next_back().is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
-        let after = text[i + name.len()..].chars().next().is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
-        before && after
+    // (the line of the name as a word in an item's text)
+    let found = |it: &SrcItem| {
+        let text = src.get(it.start..it.end.min(src.len()))?;
+        let word = |i: usize| {
+            let before = text[..i].chars().next_back().is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+            let after = text[i + name.len()..].chars().next().is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+            before && after
+        };
+        text.match_indices(name).map(|(i, _)| i).find(|&i| word(i)).map(|i| it.line + text[..i].matches('\n').count())
     };
-    match text.match_indices(name).map(|(i, _)| i).find(|&i| word(i)) {
-        Some(i) => format!("{}:1: {rest}", line + text[..i].matches('\n').count()),
+    // (a type the item does not write itself, for "cannot find type": the self type of the impl a member is in
+    // (`impl Core<XXX> { fn spawn(self) }`), or a type alias's right-hand side that the item names through the alias
+    // (`type Foo = Bar;`): rustc reports it there)
+    let elsewhere = || {
+        if !rest.starts_with("cannot find type `") {
+            return None;
+        }
+        if let crate::lexer::ItemKind::ImplMember(hi) = it.kind {
+            if let Some(l) = items.get(hi as usize).and_then(|h| found(h)) {
+                return Some(l);
+            }
+        }
+        items.iter().filter(|j| src.get(j.start..j.end).is_some_and(|t| t.trim_start().starts_with("type ") || t.trim_start().starts_with("pub type "))).find_map(|j| found(j))
+    };
+    match found(it).or_else(elsewhere) {
+        Some(l) => format!("{l}:1: {rest}"),
         None => e.to_string(),
     }
 }
@@ -11922,6 +11956,154 @@ const NON_PRELUDE_TRAITS: &[&str] = &[
     "UnwindSafe", "RefUnwindSafe", "Unsize", "CoerceUnsized", "DispatchFromDyn", "Tuple",
 ];
 
+/// A `#[macro_export]` macro whose name a crate-root `pub use` of std's (or core's, alloc's) also brings as a macro:
+/// `pub use std::panic;` re-exports the module and the macro `panic!`, so `#[macro_export] macro_rules! panic` is
+/// "the name `panic` is defined multiple times" (E0255), at the macro. Only std's macros of that name count (a
+/// module or fn of the name is in another namespace)
+#[cold]
+#[inline(never)]
+fn export_beside_std_reexport(src0: &str, exported: &[String]) -> Option<String> {
+    const STD_MACROS: &[&str] = &[
+        "panic", "assert", "assert_eq", "assert_ne", "debug_assert", "debug_assert_eq", "debug_assert_ne", "vec", "format", "print", "println", "eprint",
+        "eprintln", "write", "writeln", "todo", "unimplemented", "unreachable", "matches", "dbg", "concat", "stringify", "line", "file", "column", "env",
+        "include", "include_str", "include_bytes", "compile_error", "format_args", "thread_local",
+    ];
+    // (the crate root's `pub use std::..::name;` / `pub use core::..::name as other;`: at a line's start)
+    let mut names: Vec<&str> = vec![];
+    for line in src0.lines() {
+        let Some(r) = line.strip_prefix("pub use ") else { continue };
+        let r = r.trim_end().trim_end_matches(';').trim();
+        let r = r.strip_prefix("::").unwrap_or(r);
+        if !(r.starts_with("std::") || r.starts_with("core::") || r.starts_with("alloc::")) || r.contains(['{', '*']) {
+            continue;
+        }
+        let (path, alias) = match r.split_once(" as ") {
+            Some((p, a)) => (p.trim(), Some(a.trim())),
+            None => (r, None),
+        };
+        let last = path.rsplit("::").next().unwrap_or("");
+        if STD_MACROS.contains(&last) {
+            names.push(alias.unwrap_or(last));
+        }
+    }
+    if names.is_empty() {
+        return None;
+    }
+    // (the exported macros the expansion read, at their `macro_rules!` in the source as written)
+    let name = exported.iter().find(|n| names.contains(&n.as_str()))?;
+    let at = src0.match_indices("macro_rules!").map(|(k, _)| k).find(|&k| {
+        let r = src0[k + 12..].trim_start();
+        r.starts_with(name.as_str()) && r[name.len()..].chars().next().is_none_or(|c| !(c.is_alphanumeric() || c == '_'))
+    })?;
+    let line = 1 + src0[..at].matches('\n').count();
+    let col = at - src0[..at].rfind('\n').map_or(0, |p| p + 1) + 1;
+    Some(format!("{line}:{col}: the name `{name}` is defined multiple times (E0255)"))
+}
+
+/// A type an impl's header names that nothing declares (`impl A<B> {}`): "cannot find type `B` in this scope" (rustc
+/// 1.100's E0412), at the name. Read from the header's tokens: a capitalized name in the self type or in the trait's
+/// arguments, not the trait itself, not a path's segment (`T::A`, `E::V`), an associated type's name (`Item = ..`), a
+/// bound (after `dyn`, `impl`, `:`, `+`), a macro, `Self` or one of the impl's parameters. A single file's, with no
+/// glob `use` (a glob may bring any name); a name the program, its prelude or a `use` gives is no error
+#[cold]
+#[inline(never)]
+fn unknown_impl_type(prog: &Program, src: &str, src0: &str, items: &[SrcItem], user: usize) -> Option<String> {
+    let mut globs: Option<bool> = None;
+    let known = |n: &str| {
+        prog.struct_index.contains_key(n) || prog.aliases.contains_key(n) || prog.traits.contains_key(n) || prog.user_traits.contains(n) || prog.use_names.contains(n)
+            || matches!(n, "Box" | "Vec" | "String" | "Option" | "Result" | "Self")
+            // (std's traits: a bound past a binder, `dyn for<'x> Fn(&'x A)`)
+            || STD_TRAITS.contains(&n)
+            || prog.consts.iter().any(|c| c.name == n)
+    };
+    for it in items[..user.min(items.len())].iter().filter(|it| matches!(it.kind, crate::lexer::ItemKind::ImplHeader)) {
+        // (the header's identifiers first: one whose capitalized names are all known is not tokenized)
+        if !it.idents.iter().any(|&(a, b)| src.get(a as usize..b as usize).is_some_and(|n| n.starts_with(|c: char| c.is_ascii_uppercase()) && !known(n))) {
+            continue;
+        }
+        let text = src.get(it.start..it.end)?;
+        let tb = text.as_bytes();
+        let toks = crate::lexer::tokenize(tb);
+        let tk = |k: usize| toks.get(k).map_or("", |t| &text[t.1..t.2]);
+        let sym = |k: usize, c: u8| toks.get(k).is_some_and(|t| t.0 == 1 && t.2 == t.1 + 1 && tb[t.1] == c);
+        // (a `>` that closes an angle: not the `>` of `->` (`F: Fn(&i32) -> &i32`))
+        let close = |k: usize| sym(k, b'>') && !(k >= 1 && sym(k - 1, b'-') && toks[k - 1].2 == toks[k].1);
+        let Some(imp) = (0..toks.len()).find(|&k| toks[k].0 == 0 && tk(k) == "impl") else { continue };
+        // (the impl's own parameters: a name after `<` or `,` at depth 1, past `const`)
+        let mut params: Vec<&str> = vec![];
+        let mut k = imp + 1;
+        if sym(k, b'<') {
+            let mut d = 0i32;
+            while k < toks.len() {
+                if sym(k, b'<') {
+                    d += 1;
+                } else if close(k) {
+                    d -= 1;
+                    if d == 0 {
+                        k += 1;
+                        break;
+                    }
+                } else if d == 1 && (sym(k - 1, b'<') || sym(k - 1, b',')) && toks[k].0 == 0 {
+                    let n = if tk(k) == "const" { tk(k + 1) } else { tk(k) };
+                    params.push(n);
+                }
+                k += 1;
+            }
+        }
+        // (the trait: the first name before a `for` at depth 0)
+        let mut d = 0i32;
+        let has_for = (k..toks.len()).any(|j| {
+            if sym(j, b'<') || sym(j, b'(') || sym(j, b'[') {
+                d += 1;
+            } else if close(j) || sym(j, b')') || sym(j, b']') {
+                d -= 1;
+            }
+            d == 0 && toks[j].0 == 0 && tk(j) == "for" && !sym(j + 1, b'<')
+        });
+        let trait_at = if has_for { Some(k) } else { None };
+        while k < toks.len() && !sym(k, b'{') && tk(k) != "where" {
+            let n = tk(k);
+            let named = toks[k].0 == 0 && n.starts_with(|c: char| c.is_ascii_uppercase());
+            // (a name after `'` is a lifetime (`for<'A> fn(&'A ())`); one before `:` is a path segment (`Foo::`), a
+            // fn pointer's parameter name (`fn(Arg: u8)`) or an associated type's bound)
+            let skip = !named
+                || (toks[k].1 > 0 && tb[toks[k].1 - 1] == b'\'')
+                || Some(k) == trait_at
+                || n == "Self"
+                || params.contains(&n)
+                || sym(k + 1, b':')
+                || (k >= 2 && sym(k - 1, b':') && sym(k - 2, b':'))
+                || sym(k + 1, b'!')
+                || sym(k + 1, b'=')
+                || (k >= 1 && (sym(k - 1, b':') || sym(k - 1, b'+') || matches!(tk(k - 1), "dyn" | "impl")));
+            if !skip && !known(n) {
+                // (read once: whether a `use` of the source as written is a glob)
+                if *globs.get_or_insert_with(|| src0.contains("::*") || src0.contains("::{*")) {
+                    return None;
+                }
+                // (an item of the name anywhere in the source as written: a const generic argument's const
+                // (`Print<L>`), an item in a block or a macro's; read only for a name nothing else gives)
+                let declared = ["const ", "static ", "struct ", "enum ", "union ", "type ", "trait ", "fn ", "mod "].iter().any(|kw| {
+                    src0.match_indices(kw).any(|(i, _)| {
+                        let r = &src0[i + kw.len()..];
+                        r.starts_with(n) && r[n.len()..].chars().next().is_none_or(|c| !(c.is_alphanumeric() || c == '_'))
+                    })
+                });
+                if declared {
+                    k += 1;
+                    continue;
+                }
+                let off = it.start + toks[k].1;
+                let line = src[..off].matches('\n').count() + 1;
+                let col = off - src[..off].rfind('\n').map_or(0, |p| p + 1) + 1;
+                return Some(format!("{line}:{col}: cannot find type `{n}` in this scope (E0412)"));
+            }
+            k += 1;
+        }
+    }
+    None
+}
+
 /// A trait bound of a fn of the program's (its own type parameters', inline or in its where clause, and its `impl Tr`
 /// parameters') that names no trait in scope: "cannot find trait `Nope` in this scope", at the name (rustc 1.100's
 /// E0405; E0404 for `Debug` and `Hash`, std's derive macros of those names being in scope). Not a trait the program
@@ -12034,6 +12216,56 @@ pub(crate) fn unhoist_err(a: &Analysis, e: String) -> String {
         Some(l) => with_line(&e, l),
         None => e,
     }
+}
+
+/// When (line, col) of src is a macro call (`name!(..)`), the place of the name n in its arguments. Read by tokens, so
+/// a delimiter or the name inside a literal or a comment does not count. None when the program's definition of the
+/// macro writes n itself (`($unused:ident) => { x }`): the name may come from its body, and stays at the call
+#[cold]
+#[inline(never)]
+fn macro_arg_at(src: &str, line: usize, col: usize, n: &str) -> Option<(usize, usize)> {
+    let ls = if line <= 1 { 0 } else { src.match_indices('\n').nth(line - 2)?.0 + 1 };
+    let at = ls + col.checked_sub(1)?;
+    let b = src.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let tk = |k: usize| toks.get(k).map_or("", |t| &src[t.1..t.2]);
+    let sym = |k: usize, c: u8| toks.get(k).is_some_and(|t| t.0 == 1 && t.2 == t.1 + 1 && b[t.1] == c);
+    // (the group that opens at token k: the index of its closing token)
+    let group = |k: usize| {
+        let (open, close) = match toks.get(k).filter(|t| t.0 == 1).map(|t| b[t.1])? {
+            b'(' => (b'(', b')'),
+            b'[' => (b'[', b']'),
+            b'{' => (b'{', b'}'),
+            _ => return None,
+        };
+        let mut d = 0i32;
+        for e in k..toks.len() {
+            if sym(e, open) {
+                d += 1;
+            } else if sym(e, close) {
+                d -= 1;
+                if d == 0 {
+                    return Some(e);
+                }
+            }
+        }
+        None
+    };
+    let c = toks.iter().position(|t| t.1 == at && t.0 == 0)?;
+    if !sym(c + 1, b'!') {
+        return None;
+    }
+    let e = group(c + 2)?;
+    let name = tk(c);
+    if let Some(j) = (0..toks.len()).find(|&j| tk(j) == "macro_rules" && sym(j + 1, b'!') && tk(j + 2) == name) {
+        let end = group(j + 3)?;
+        if (j + 4..end).any(|q| toks[q].0 == 0 && tk(q) == n && !sym(q - 1, b'$')) {
+            return None;
+        }
+    }
+    let q = (c + 3..e).find(|&q| toks[q].0 == 0 && tk(q) == n)?;
+    let off = toks[q].1;
+    Some((src[..off].matches('\n').count() + 1, off - src[..off].rfind('\n').map_or(0, |p| p + 1) + 1))
 }
 
 /// 位置付きのエラー (行・桁は 1 始まり)。check / LSP が返す
@@ -12320,6 +12552,16 @@ impl Session {
             allow_variant_bindings(src, &mut errs);
         }
         let mut d: Vec<Diagnostic> = errs.iter().map(|e| Diagnostic::parse(e)).collect();
+        // (a name a macro call's argument writes, reported at the call (`foo!(\n    x\n)` of `($id:ident) => { $id }`):
+        // at the argument, as rustc)
+        for x in d.iter_mut() {
+            if let Some(n) = x.msg.strip_prefix("cannot find value `").and_then(|r| r.split('`').next()) {
+                if let Some((l, c)) = macro_arg_at(src, x.line, x.col, n) {
+                    x.line = l;
+                    x.col = c;
+                }
+            }
+        }
         // (an item moved out of a fn body (`fn main() { fn helper() { .. } }`) is past the source's last line: its borrow
         // and region checks' errors are at the lines it was moved from, and the type errors that hold wherever it is
         // (hoisted_check_err_holds). Not its other errors: typeck does not know all such an item may name where it was

@@ -1,0 +1,2 @@
+// expect: add the bound `T: Hash`
+fn f<T>(xs: Array<T>) -> Set<T> { Set::from(xs) }

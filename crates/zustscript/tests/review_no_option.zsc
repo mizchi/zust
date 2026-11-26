@@ -1,0 +1,4 @@
+// tests/examples.rs review_edges_same_in_js_and_wasm: a user enum with a variant named `Some` leaves out the prelude's
+// `Option`; `reverse` does not need it, in JS or in wasm
+enum Mine { Some(i32), Nothing }
+@wasm export fn reversed(xs: Array<i32>) -> Array<i32> { xs.reverse() }

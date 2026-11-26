@@ -10,6 +10,9 @@ pm2 = open("tests/selfhost/mini_pm2.rs").read()
 lexer = open("crates/syntax/src/lexer.rs").read()
 key = open("crates/base/src/key.rs").read()
 cfg = open("crates/syntax/src/cfg.rs").read()
+# (expand runs proc macros through pm.rs, and keeps its tables in fxhash's FxMap)
+pm = open("crates/syntax/src/pm.rs").read()
+fx = open("crates/base/src/fxhash.rs").read()
 print("""// 自動生成: tests/selfhost/build_macros.py (zustc の crates/syntax/src/macros.rs をそのまま含む)
 """ + pm2 + """
 mod cache {
@@ -27,6 +30,15 @@ mod cfg {
 mod macros {
 """ + macros + """
 use crate::proc_macro2;
+}
+
+mod pm {
+""" + pm + """
+use crate::proc_macro2;
+}
+
+mod fxhash {
+""" + fx + """
 }
 
 fn fnv(s: &str) -> u64 {

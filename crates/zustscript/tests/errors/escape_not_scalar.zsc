@@ -1,0 +1,2 @@
+// expect: `\u{D800}` is not a Unicode scalar value
+fn f() -> String { `a\u{D800}` }

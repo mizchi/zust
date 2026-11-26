@@ -1,5 +1,5 @@
 """Combines zustc's own crates/syntax/src/ast_summary.rs (item summaries; a port of front.rs's summarize) together with lexer / types / parse /
-ast_types / ast_closure into a one-file program.
+ast_types / ast_closure / regions / wf into a one-file program.
 usage: python3 tests/selfhost/build_ast_summary.py > out/selfhost/ast_summary_main.rs
 For each argument file, main flattens the modules, moves nested items out, then lexes it and prints the summaries of all items."""
 
@@ -11,7 +11,8 @@ a = cache.index("pub type Key = u128;")
 b = len(cache)
 hasher = cache[a:b]
 parts = [("types", "crates/syntax/src/types.rs"), ("parse", "crates/syntax/src/parse.rs"), ("ast_types", "crates/syntax/src/ast_types.rs"),
-         ("ast_closure", "crates/syntax/src/ast_closure.rs"), ("ast_summary", "crates/syntax/src/ast_summary.rs"), ("lexer", "crates/syntax/src/lexer.rs"), ("fxhash", "crates/base/src/fxhash.rs")]
+         ("ast_closure", "crates/syntax/src/ast_closure.rs"), ("ast_summary", "crates/syntax/src/ast_summary.rs"), ("regions", "crates/syntax/src/regions.rs"),
+         ("wf", "crates/syntax/src/wf.rs"), ("lexer", "crates/syntax/src/lexer.rs"), ("fxhash", "crates/base/src/fxhash.rs")]
 out = ["// 自動生成: tests/selfhost/build_ast_summary.py (zustc の src/*.rs をそのまま含む)",
        "mod cache {\nuse std::hash::{Hash, Hasher};\n" + hasher + "}\n"]
 for name, path in parts:

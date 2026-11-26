@@ -1,5 +1,5 @@
 """Bundles zustc's own crates/sema/src/program.rs (the global tables: fn signatures, struct / enum layouts, trait impls), together with the modules
-up to summaries (lexer / prelude / types / parse / ast_types / ast_closure / ast_summary), into a single-file program.
+up to summaries (lexer / prelude / types / parse / ast_types / ast_closure / ast_summary / regions / wf) and simd_sig, into a single-file program.
 usage: python3 tests/selfhost/build_program.py > out/selfhost/program_main.rs
 For each file in its arguments, main builds the items by the same steps as the driver (flatten modules, move nested items out, append the prelude),
 summarizes them all and runs Program::build, and prints the fns, types (size, alignment, field offsets), trait impls and consts
@@ -17,7 +17,8 @@ prelude = (body("crates/syntax/src/prelude.rs")
 parts = [("key", body("crates/base/src/key.rs")), ("fxhash", body("crates/base/src/fxhash.rs")), ("lexer", body("crates/syntax/src/lexer.rs")),
          ("prelude", prelude), ("types", body("crates/syntax/src/types.rs")), ("parse", body("crates/syntax/src/parse.rs")),
          ("ast_types", body("crates/syntax/src/ast_types.rs")), ("ast_closure", body("crates/syntax/src/ast_closure.rs")),
-         ("ast_summary", body("crates/syntax/src/ast_summary.rs")), ("program", body("crates/sema/src/program.rs")),
+         ("ast_summary", body("crates/syntax/src/ast_summary.rs")), ("regions", body("crates/syntax/src/regions.rs")), ("wf", body("crates/syntax/src/wf.rs")),
+         ("simd_sig", body("crates/sema/src/simd_sig.rs")), ("program", body("crates/sema/src/program.rs")),
          ("ast_consteval", body("crates/sema/src/ast_consteval.rs")), ("solver", body("crates/sema/src/solver.rs")), ("traits", body("crates/sema/src/traits.rs")), ("ctors", body("crates/syntax/src/ctors.rs")), ("ast_infer", body("crates/sema/src/ast_infer.rs"))]
 out = ["// 自動生成: tests/selfhost/build_program.py (zustc の src/*.rs をそのまま含む)", "mod cache {\n    pub use crate::key::*;\n}\n"]
 for name, src in parts:

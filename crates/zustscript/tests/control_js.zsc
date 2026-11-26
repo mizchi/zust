@@ -1,0 +1,77 @@
+// tests/examples.rs control_flow_in_js: `return` and `loop` in the JS layer: with strings, closures, async, effects,
+// and the order of evaluation around a `return` in an operand
+extern fn note(s: String) -> () = "globalThis.note";
+
+fn statement_style(x: i32) -> String {
+  if x > 10 { return "big"; }
+  return "small";
+}
+
+fn unit_ret(x: i32) -> () {
+  if x > 0 { note("pos"); return; }
+  note("nonpos");
+}
+
+// (a `return` in a closure returns from the closure)
+fn in_closure(xs: Array<i32>) -> Array<i32> {
+  xs.map((x) => { if x < 0 { return 0; } x * 10 })
+}
+
+fn first_word(s: String) -> String {
+  for w in s.split(" ") {
+    if w.len() > 0 { return w; }
+  }
+  "-"
+}
+
+// (the argument before the `match` is evaluated first, then the `return` leaves)
+fn tick(n: i32) -> i32 { note(`t${n}`); n }
+fn add(a: i32, b: i32) -> i32 { a + b }
+fn ordered(o: Option<i32>) -> i32 { add(tick(1), match o { Some(n) => n, None => return -tick(2) }) }
+
+// (with `?` in the same function)
+fn parsed(o: Option<i32>, limit: i32) -> Option<String> {
+  let n = o?;
+  if n > limit { return Some("over"); }
+  Some(n.to_string())
+}
+
+// effects: a `return` in a function that performs (direct calls, and a generator when the arm does not resume)
+enum Ask { Get(String) -> i32 }
+enum Fail { Stop(String) -> i32 }
+fn total(keys: Array<String>) -> i32 {
+  let mut t = 0;
+  for k in keys {
+    let v = perform Get(k);
+    if v < 0 { return -1; }
+    t += v;
+  }
+  t
+}
+fn guarded(n: i32) -> i32 { if n > 5 { return perform Stop("too big"); } n }
+fn counted(n: i32) -> i32 {
+  let mut i = 0;
+  loop {
+    if i == n { return i; }
+    if i > 3 { perform Stop("past 3"); }
+    i += 1;
+  }
+}
+
+export fn run() -> String {
+  unit_ret(1);
+  unit_ret(0);
+  let a = handle total(["a", "bb"]) { Get(k), r => r(k.len()) };
+  let b = handle total(["a", "", "c"]) { Get(k), r => r(if k.len() == 0 { -5 } else { 1 }) };
+  let c = handle guarded(9) { Stop(m), r => { note(m); 0 } };
+  let d = handle guarded(2) { Stop(m), r => 0 };
+  let e = handle counted(2) { Stop(m), r => -1 };
+  let f = handle counted(7) { Stop(m), r => { note(m); -1 } };
+  `${statement_style(11)} ${statement_style(1)} ${in_closure([1, -2, 3]).map((n) => n.to_string()).join(",")} [${first_word("  hi there")}] [${first_word(" ")}] ${ordered(Some(5))} ${ordered(None)} ${parsed(Some(3), 5).unwrap_or("none")} ${parsed(Some(9), 5).unwrap_or("none")} ${parsed(None, 5).unwrap_or("none")} ${a} ${b} ${c} ${d} ${e} ${f}`
+}
+
+export async fn early_async(x: i32) -> String {
+  if x < 0 { return "neg"; }
+  let f = async (y: i32) => { if y > 100 { return "huge"; } "fine" };
+  await f(x)
+}

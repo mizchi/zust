@@ -418,10 +418,17 @@ impl Inf<'_> {
         // (a value of another instance (`S::<u16>(_)` matching `S(1u8)`) is then a mismatch where it is built)
         if p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Ty(_)))) {
             if let Some(t) = self.variant_turbofish(p, sid) {
-                let k = self.known(t);
-                self.unify(v, k);
+                self.unify_written(v, t);
             }
         }
+    }
+
+    /// v is the type t the program writes (a turbofish): t is its representative, whatever v's arguments are
+    fn unify_written(&mut self, v: u32, t: Ty) {
+        let k = self.known(t);
+        self.written += 1;
+        self.unify(v, k);
+        self.written -= 1;
     }
 
     /// The struct a path with a turbofish on its last segment names (`S::<u32>`)
@@ -813,7 +820,7 @@ impl Inf<'_> {
                 };
                 self.pat(p, i, None);
             }
-            Pat::Or(cs) => {
+            Pat::Or(cs, _) => {
                 for c in cs {
                     self.pat(c, v, mode);
                 }
@@ -1386,8 +1393,7 @@ impl Inf<'_> {
                     Some((sid, vi)) => {
                         let v = self.adt_ctor(sid, Some(vi), vec![]);
                         if let Some(t) = self.variant_turbofish(p, sid) {
-                            let k = self.known(t);
-                            self.unify(v, k);
+                            self.unify_written(v, t);
                         }
                         v
                     }
@@ -1516,8 +1522,7 @@ impl Inf<'_> {
                     // (`S::<u32> { t: 1 }`: the instance the turbofish writes)
                     let v = self.adt_ctor(sid, None, args);
                     if let Some(t) = self.variant_turbofish(p, sid) {
-                        let k = self.known(t);
-                        self.unify(v, k);
+                        self.unify_written(v, t);
                     }
                     v
                 } else {
@@ -2003,8 +2008,7 @@ impl Inf<'_> {
                     // (`SomeEnum::SomeVariant::<&u32>(&c)`: the instance the turbofish writes)
                     if p.segs.iter().any(|s| !s.args.is_empty()) {
                         if let Some(t) = self.variant_turbofish(p, sid) {
-                            let k = self.known(t);
-                            self.unify(v, k);
+                            self.unify_written(v, t);
                         }
                     }
                     return v;
@@ -2022,8 +2026,7 @@ impl Inf<'_> {
                         // (`SomeStruct::<&u32>(&c)`: the instance the turbofish writes)
                         if plain.is_none() {
                             if let Some(t) = self.variant_turbofish(p, sid) {
-                                let k = self.known(t);
-                                self.unify(v, k);
+                                self.unify_written(v, t);
                             }
                         }
                         return v;

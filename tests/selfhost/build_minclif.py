@@ -6,7 +6,7 @@ src = open("crates/minclif/src/lib.rs").read().replace("zust_ir::", "crate::ir::
 ir = open("crates/ir/src/lib.rs").read()
 test = open("tests/minclif.rs").read()
 a = test.index("/// sum(n)")
-b = test.index("/// main: printf")
+b = test.index("/// main: prints the results with printf")
 fns = test[a:b].replace("zustc::minclif::", "minclif::")
 # The fns for floating point, i128, overflow, bit operations, indirect calls and data
 a2 = test.index("/// 浮動小数点・i128・オーバーフロー")
