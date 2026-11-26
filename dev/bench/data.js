@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795654785558,
+  "lastUpdate": 1795654787759,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -112231,6 +112231,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/c8d7b59df5f4f39a01d0e08afe68dd419d8ae816"
         },
         "date": 1795639585263,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.552,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 77.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 81.818,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 71.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.537,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "99fc03194eea8993245b3b044dcb02ba40038e3a",
+          "message": "lexer: a literal or comment the file ends in is reported before a mismatched delimiter (review of #223) (#227)\n\nFrom CodeRabbit's review of #223. Checked against rustc 1.100, the finding\nholds for a mismatched closing delimiter, not for the example it gave:\n\n- `fn main() { let _ = ([)]; }\\n/*`: rustc reports \"unexpected closing\n  delimiter\" at 1:27, as zustc already did. A closing delimiter with none open\n  comes first.\n- `fn main() { let _ = (1; }\\n/* x`: rustc reports E0758 at 2:1; zustc\n  reported \"mismatched closing delimiter\" at 1:25. The same holds for an\n  unterminated string (E0765) or raw string (E0748) after the mismatch.\n\n`split` now asks unterminated_literal when the delimiter error is a mismatch,\nand keeps an unexpected closing delimiter as the error.\n\nTests: six more cases in tests/check.rs `literals_and_comments_a_file_ends_in`\n(a mismatch before a comment, a comment in an item, a string and a raw\nstring; an unexpected closing delimiter before a comment; a mismatch alone),\neach at rustc's line and column.\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T09:54:24+09:00",
+          "tree_id": "6c51d3d77089d99cae97c1866fd1410e111057b4",
+          "url": "https://github.com/mizchi/zust/commit/99fc03194eea8993245b3b044dcb02ba40038e3a"
+        },
+        "date": 1795654787492,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
