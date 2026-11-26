@@ -10404,18 +10404,7 @@ fn angle_items(t: &str, k: usize) -> Option<(Vec<&str>, usize)> {
         match b[i] {
             b'>' if i > 0 && b[i - 1] == b'-' => {}
             // (a char or byte literal, `b'>'`, `'\''`, and a string: their brackets close nothing)
-            b'\'' if b.get(i + 1) == Some(&b'\\') || b.get(i + 2) == Some(&b'\'') => {
-                i += if b.get(i + 1) == Some(&b'\\') { 3 } else { 2 };
-                while i < b.len() && b[i] != b'\'' {
-                    i += 1;
-                }
-            }
-            b'"' => {
-                i += 1;
-                while i < b.len() && b[i] != b'"' {
-                    i += if b[i] == b'\\' { 2 } else { 1 };
-                }
-            }
+            b'\'' | b'"' if quote_end(b, i).is_some() => i = quote_end(b, i).unwrap_or(i),
             b'<' | b'(' | b'[' => d += 1,
             b'>' | b')' | b']' => {
                 d -= 1;
@@ -10438,14 +10427,58 @@ fn angle_items(t: &str, k: usize) -> Option<(Vec<&str>, usize)> {
     None
 }
 
-/// The byte of t's first `;` outside brackets (`fn f(_: [u8; 1]) where T: 'a;`: the last one)
+/// The byte of the closing quote of a char, byte or string literal whose opening quote is at byte i of b (`'x'`,
+/// `'\''`, `b']'`, `"a]"`). None for a lifetime (`'a`), which has none
+fn quote_end(b: &[u8], i: usize) -> Option<usize> {
+    match b.get(i)? {
+        b'\'' if b.get(i + 1) == Some(&b'\\') || b.get(i + 2) == Some(&b'\'') => {
+            let mut j = i + if b.get(i + 1) == Some(&b'\\') { 3 } else { 2 };
+            while j < b.len() && b[j] != b'\'' {
+                j += 1;
+            }
+            Some(j)
+        }
+        b'"' => {
+            let mut j = i + 1;
+            while j < b.len() && b[j] != b'"' {
+                j += if b[j] == b'\\' { 2 } else { 1 };
+            }
+            Some(j)
+        }
+        _ => None,
+    }
+}
+
+/// The byte of t's first `;` outside brackets and literals (`fn f(_: [u8; 1]) where T: 'a;`: the last one; not one
+/// after `b']'`)
 fn top_semi(t: &str) -> Option<usize> {
+    let b = t.as_bytes();
     let mut d = 0i32;
-    for (i, c) in t.bytes().enumerate() {
-        match c {
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'\'' | b'"' if quote_end(b, i).is_some() => i = quote_end(b, i).unwrap_or(i),
             b'(' | b'[' | b'{' => d += 1,
             b')' | b']' | b'}' => d -= 1,
             b';' if d == 0 => return Some(i),
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// The byte of a generic list item's `=` before its default (`T = fn(x: u8)`, `const N: usize = 3`), not one in
+/// brackets (`Iterator<Item = u8>`)
+fn top_eq(it: &str) -> Option<usize> {
+    let b = it.as_bytes();
+    let mut d = 0i32;
+    for i in 0..b.len() {
+        match b[i] {
+            b'>' if i > 0 && b[i - 1] == b'-' => {}
+            b'<' | b'(' | b'[' | b'{' => d += 1,
+            b'>' | b')' | b']' | b'}' => d -= 1,
+            b'=' if d == 0 => return Some(i),
             _ => {}
         }
     }
@@ -10519,6 +10552,8 @@ fn stricter_impl_where(src: &str, items: &[SrcItem]) -> Option<String> {
         let mut bounds = vec![];
         for it in its {
             let it = it.trim().strip_prefix("const ").unwrap_or(it.trim());
+            // (the name and bounds before a default: not the `:` of `T = fn(x: u8)`)
+            let it = it[..top_eq(it).unwrap_or(it.len())].trim();
             let (n, rest) = match it.find(':') {
                 Some(c) => (it[..c].trim(), &it[c + 1..]),
                 None => (it.split('=').next().unwrap_or(it).trim(), ""),
@@ -10537,20 +10572,7 @@ fn stricter_impl_where(src: &str, items: &[SrcItem]) -> Option<String> {
         where_preds(head).unwrap_or_default().into_iter().flat_map(|(s, bs)| bs.into_iter().filter(|b| b.starts_with('\'')).map(move |b| (s.clone(), b))).collect()
     };
     // (a generic list item's default: `T = ()`, `const N: usize = 3`; not the `=` of `Iterator<Item = u8>`)
-    let default_of = |it: &str| -> Option<String> {
-        let b = it.as_bytes();
-        let mut d = 0i32;
-        for i in 0..b.len() {
-            match b[i] {
-                b'>' if i > 0 && b[i - 1] == b'-' => {}
-                b'<' | b'(' | b'[' | b'{' => d += 1,
-                b'>' | b')' | b']' | b'}' => d -= 1,
-                b'=' if d == 0 => return Some(it[i + 1..].trim().to_string()),
-                _ => {}
-            }
-        }
-        None
-    };
+    let default_of = |it: &str| -> Option<String> { top_eq(it).map(|i| it[i + 1..].trim().to_string()) };
     // (the generic parameters after a fn's name in its text: `fn f<T>`, not the `f` of `fn`)
     let fn_generics = |t: &str, name: &str| -> Vec<String> {
         let Some(k) = t.find("fn ") else { return vec![] };
@@ -10606,10 +10628,13 @@ fn stricter_impl_where(src: &str, items: &[SrcItem]) -> Option<String> {
             }
             None => (vec![], vec![], ik + 4),
         };
-        let Some(f) = head[after..].find(" for ") else { continue };
-        let trait_part = head[after..after + f].trim();
+        // (the keyword `for` after a space or a line break, not the `for<'b>` of a higher-ranked type in the
+        // arguments)
+        let hs = &head[after..];
+        let Some(f) = hs.match_indices("for").map(|(i, _)| i).find(|&i| hs[..i].ends_with(char::is_whitespace) && hs[i + 3..].starts_with(char::is_whitespace)) else { continue };
+        let trait_part = hs[..f].trim();
         // (to its `where`, after a space or a line break)
-        let rest = &head[after + f + 5..];
+        let rest = &hs[f + 3..];
         let self_ty = rest[..find_word(rest, "where").unwrap_or(rest.len())].trim();
         let tn_end = trait_part.find('<').unwrap_or(trait_part.len());
         let tname = trait_part[..tn_end].rsplit("::").next().unwrap_or("").trim();
@@ -10681,7 +10706,13 @@ fn stricter_impl_where(src: &str, items: &[SrcItem]) -> Option<String> {
         // nothing from `for &'a T` or `Tr<'a, &'a T>` here: `where T: 'a` is stricter). As text, and parsed
         // (wf_implies: `(&'a u8, &'b u8)` implies nothing of `'a: 'b`); the text of what does not parse is read as
         // before)
-        let mut pieces: Vec<String> = sig_type_pieces(dh).iter().map(|p| subst_names(p, &map)).collect();
+        // (the trait's method's own generics renamed in its types: its `T` is not the impl header's `T`)
+        let mut dmap = map.clone();
+        dmap.extend(downs.iter().map(|d| (d.clone(), match d.strip_prefix('\'') {
+            Some(l) => format!("'__m_{l}"),
+            None => format!("__m_{d}"),
+        })));
+        let mut pieces: Vec<String> = sig_type_pieces(dh).iter().map(|p| subst_names(p, &dmap)).collect();
         pieces.extend(sig_type_pieces(mh).iter().map(|p| subst_names(p, &[])));
         let parse_sig = |t: &str| -> Option<crate::parse::FnSig> {
             match crate::parse::parse_file(&format!("{};", t.trim_end())).ok()?.items.into_iter().next()?.kind {
@@ -10691,7 +10722,7 @@ fn stricter_impl_where(src: &str, items: &[SrcItem]) -> Option<String> {
         };
         let (mut tys, mut loose): (Vec<crate::parse::Ty>, Vec<String>) = (vec![], vec![]);
         let fn_at = |t: &str| t.find("fn ").unwrap_or(0);
-        for (sg, text_pieces) in [(subst_names(&dh[fn_at(dh)..], &map), sig_type_pieces(dh).iter().map(|p| subst_names(p, &map)).collect::<Vec<_>>()), (mh[fn_at(mh)..].to_string(), sig_type_pieces(mh).iter().map(|p| subst_names(p, &[])).collect())] {
+        for (sg, text_pieces) in [(subst_names(&dh[fn_at(dh)..], &dmap), sig_type_pieces(dh).iter().map(|p| subst_names(p, &dmap)).collect::<Vec<_>>()), (mh[fn_at(mh)..].to_string(), sig_type_pieces(mh).iter().map(|p| subst_names(p, &[])).collect())] {
             match parse_sig(&sg) {
                 Some(fs) => tys.extend(fs.recv_ty.into_iter().chain(fs.params.into_iter().map(|p| p.1)).chain(fs.ret)),
                 None => loose.extend(text_pieces),
@@ -10725,7 +10756,9 @@ fn stricter_impl_where(src: &str, items: &[SrcItem]) -> Option<String> {
             } else {
                 pieces.iter().any(|p| word_in(p, &subj) && word_in(p, &bound))
             };
-            if mentions_own || implied {
+            // (a type that names no parameter and no lifetime outlives every lifetime: `fn(u8): 'a`, `(): 'a`)
+            let trivial = !subj.contains('\'') && !impl_names.iter().any(|n| word_in(&subj, n)) && !word_in(&subj, "Self");
+            if mentions_own || implied || trivial {
                 continue;
             }
             let held = if subj.starts_with('\'') {
@@ -10787,26 +10820,34 @@ fn static_implies(t: &crate::parse::Ty, n: &str) -> bool {
     wf_implies(t, n, "'static")
 }
 
-/// Whether a type names the lifetime l (`&'a T`, `W<'a>`, `dyn Tr + 'a`)
-fn ty_names_lt(t: &crate::parse::Ty, l: &str) -> bool {
+/// Whether n (a type parameter or a lifetime) is a component of a type, what its outliving a lifetime makes outlive
+/// it (RFC 1214): not the inputs of a projection (`<T as Has>::Item`, `T::Item`: an `Item` may hold nothing of T)
+fn comp_names(t: &crate::parse::Ty, n: &str) -> bool {
     use crate::parse::{Bound, GArg, Ty as PTy};
+    let lt = n.starts_with('\'');
     let path = |p: &crate::parse::Path| {
-        p.segs.iter().any(|s| {
-            s.args.iter().any(|a| match a {
-                GArg::Lifetime(x) => x == l,
-                GArg::Ty(t) | GArg::Bind(_, t) => ty_names_lt(t, l),
-                _ => false,
-            }) || s.fn_args.as_ref().is_some_and(|(ps, r)| ps.iter().any(|t| ty_names_lt(t, l)) || r.as_deref().is_some_and(|t| ty_names_lt(t, l)))
-        })
+        // (`T::Item`: a projection)
+        if p.segs.len() > 1 && p.segs.first().is_some_and(|s| s.name == n || s.name == "Self") {
+            return false;
+        }
+        (!lt && p.segs.len() == 1 && p.segs[0].name == n)
+            || p.segs.iter().any(|s| {
+                s.args.iter().any(|a| match a {
+                    GArg::Lifetime(x) => lt && x == n,
+                    GArg::Ty(t) | GArg::Bind(_, t) => comp_names(t, n),
+                    _ => false,
+                }) || s.fn_args.as_ref().is_some_and(|(ps, r)| ps.iter().any(|t| comp_names(t, n)) || r.as_deref().is_some_and(|t| comp_names(t, n)))
+            })
     };
     match t {
-        PTy::Ref(r, _, i) => r.as_deref() == Some(l) || ty_names_lt(i, l),
-        PTy::Path(q, p) => q.as_deref().is_some_and(|q| ty_names_lt(q, l)) || path(p),
-        PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => ty_names_lt(i, l),
-        PTy::Tuple(ts) => ts.iter().any(|t| ty_names_lt(t, l)),
-        PTy::Fn(ps, r) => ps.iter().any(|t| ty_names_lt(t, l)) || ty_names_lt(r, l),
+        PTy::Path(Some(_), _) => false,
+        PTy::Path(None, p) => path(p),
+        PTy::Ref(r, _, i) => (lt && r.as_deref() == Some(n)) || comp_names(i, n),
+        PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => comp_names(i, n),
+        PTy::Tuple(ts) => ts.iter().any(|t| comp_names(t, n)),
+        PTy::Fn(ps, r) => ps.iter().any(|t| comp_names(t, n)) || comp_names(r, n),
         PTy::Impl(bs) | PTy::Dyn(bs) => bs.iter().any(|b| match b {
-            Bound::Lifetime(x) => x == l,
+            Bound::Lifetime(x) => lt && x == n,
             Bound::Trait(_, p) => path(p),
         }),
         _ => false,
@@ -10819,7 +10860,7 @@ fn ty_names_lt(t: &crate::parse::Ty, l: &str) -> bool {
 /// element beside an l elsewhere (`(T, &'static str)`, `(&'a u8, &'b u8)`)
 fn wf_implies(t: &crate::parse::Ty, n: &str, l: &str) -> bool {
     use crate::parse::{Bound, GArg, Ty as PTy};
-    let names = |t: &crate::parse::Ty| if n.starts_with('\'') { ty_names_lt(t, n) } else { ty_names(t, n) };
+    let names = |t: &crate::parse::Ty| comp_names(t, n);
     match t {
         PTy::Ref(Some(r), _, i) if r == l && names(i) => true,
         PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => wf_implies(i, n, l),

@@ -5689,3 +5689,24 @@ fn main() {
     // closure, 4:13))
     errors_at("fn inspect<F: Fn()>(_: &F) {}\nfn main() {\n    let mut n = 0;\n    let c = || n += 1;\n    inspect(&c);\n}\n", &[(4, "expected a closure that implements the `Fn` trait")], "rw9");
 }
+
+#[test]
+fn part37_review_impl_where_clauses_2() {
+    // (#221's second review, each checked with rustc 1.97. Accepted: a `b']'` in an array length before the
+    // declaration's `;`, a `:` in a default (`T = fn(x: u8)`), a bound that holds for every lifetime (`fn(u8): 'a`))
+    errors_at(r#"trait Tr<'a, T> { fn f(_: [u8; b']' as usize]) where T: 'a; }
+impl<'a, T> Tr<'a, T> for () { fn f(_: [u8; b']' as usize]) where T: 'a {} }
+trait Td<'a, T = fn(x: u8)> { fn f() where T: 'a; }
+impl<'a, U> Td<'a, U> for () { fn f() where U: 'a {} }
+trait Tz<'a, T = fn(x: u8)> { fn f(); }
+impl<'a> Tz<'a> for () { fn f() where fn(u8): 'a {} }
+fn main() {}
+"#, &[], "rw10");
+    // (stricter: `&'a <T as Has>::Item` gives nothing of T, the trait's method's own `T` is not the impl header's,
+    // and a header whose `for` starts a line is compared too)
+    let e = "impl has stricter requirements than trait";
+    errors_at("trait Has { type Item; }\ntrait Tr<'a, T: Has> { fn f(_: &'a <T as Has>::Item); }\nimpl<'a, T: Has> Tr<'a, T> for () { fn f(_: &'a <T as Has>::Item) where T: 'a {} }\nfn main() {}\n", &[(3, e)], "rw11");
+    errors_at("trait Tr<'a> { fn f<T>(_: &'a T); }\nimpl<'a, T> Tr<'a> for (T,) { fn f<U>(_: &'a U) where T: 'a {} }\nfn main() {}\n", &[(2, e)], "rw12");
+    errors_at("trait Tr<'a, T> { fn f(); }\nimpl<'a, T> Tr<'a, T>\nfor () { fn f() where T: 'a {} }\nfn main() {}\n", &[(3, e)], "rw13");
+    errors_at("trait Tr<'a, T> { fn f(); }\nimpl<'a, T> Tr<'a, for<'b> fn(&'b T)>\nfor () { fn f() where T: 'a {} }\nfn main() {}\n", &[(3, e)], "rw14");
+}
