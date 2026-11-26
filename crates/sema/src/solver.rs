@@ -792,11 +792,12 @@ impl Solver<'_> {
             _ => return self.var(),
         };
         // (a type with a Deref impl, `*b` of a `Ref<T>`: its target, as field_at takes it (`let p; p = &*b;`))
-        match self.prog.method(sid, "deref").map(|d| self.prog.sigs[d as usize].ret) {
+        let d = self.prog.method(sid, "deref");
+        match d.map(|d| self.prog.sigs[d as usize].ret) {
             Some(Ty::Ref(_, t)) if !self.prog.has_param(*t) && *t != Ty::Struct(sid) => self.known(*t),
             Some(Ty::Ref(_, Ty::Param(i))) => {
                 let vars = self.adt_view(v, self.prog.base_of(sid));
-                match vars.get(*i as usize) {
+                match d.and_then(|d| self.deref_arg(d, *i)).and_then(|k| vars.get(k)) {
                     Some(&k) => k,
                     None => self.var(),
                 }
@@ -815,6 +816,12 @@ impl Solver<'_> {
             }
             _ => self.var(),
         }
+    }
+    /// Of a Deref impl's `deref` (d) whose target is its parameter i, the place of the type's argument that is that
+    /// parameter: `impl<B, A> Deref for Wrap<A, B> { type Target = A }` gives Wrap's first, not its second
+    fn deref_arg(&self, d: u32, i: u8) -> Option<usize> {
+        let Some(Ty::Struct(st)) = self.prog.sigs[d as usize].self_ty else { return None };
+        self.prog.structs[st as usize].args.iter().position(|&a| a == Ty::Param(i))
     }
     /// 自動 deref しながらフィールドの型を引く
     pub fn field(&mut self, base: u32, name: &str) -> u32 {
@@ -835,15 +842,15 @@ impl Solver<'_> {
         match self.prog.field(b, name) {
             Some((ft, _)) => self.field_var(ft, &vars),
             // (フィールドがなく Deref を実装した型 (`self.prog` で self: &Inf → Solver): deref の先のフィールド)
-            None => match self.prog.method(sid, "deref").map(|d| self.prog.sigs[d as usize].ret) {
+            None => match self.prog.method(sid, "deref").map(|d| (d, self.prog.sigs[d as usize].ret)) {
                 // (not to itself: `impl Deref for Foo { type Target = Foo }` would never end)
-                Some(Ty::Ref(_, t)) if depth < 128 && !self.prog.has_param(*t) && !matches!(t, Ty::Str | Ty::Slice(_) | Ty::Dyn(_)) && *t != Ty::Struct(sid) => {
+                Some((_, Ty::Ref(_, t))) if depth < 128 && !self.prog.has_param(*t) && !matches!(t, Ty::Str | Ty::Slice(_) | Ty::Dyn(_)) && *t != Ty::Struct(sid) => {
                     let k = self.known(*t);
                     self.field_at(k, name, depth + 1)
                 }
                 // (a deref to the struct's own parameter, `Ref<T>` → `&T`: the argument's type variable)
-                Some(Ty::Ref(_, Ty::Param(i))) if depth < 128 && (*i as usize) < vars.len() => {
-                    let k = vars[*i as usize];
+                Some((d, Ty::Ref(_, Ty::Param(i)))) if depth < 128 && self.deref_arg(d, *i).is_some_and(|k| k < vars.len()) => {
+                    let k = vars[self.deref_arg(d, *i).unwrap_or(0)];
                     self.field_at(k, name, depth + 1)
                 }
                 _ => self.var(),

@@ -38,6 +38,18 @@ impl<T> Deref for G<T> {
         &self.0
     }
 }
+// (an impl whose parameters are in another order than the type's (#263's review): the target is the type's first
+// argument, through the field and through `*`)
+struct Wrap<A, B>(A, B);
+impl<B, A> Deref for Wrap<A, B> {
+    type Target = A;
+    fn deref(&self) -> &A {
+        &self.0
+    }
+}
+struct P {
+    f: u16,
+}
 fn second<'a>() -> fn(&'a u32, &'a u32) -> &'a u32 {
     let g: fn(_, _) -> _ = |_x, y| y;
     g
@@ -70,6 +82,11 @@ fn main() {
     let h;
     h = *g;
     println!("{} {} {} {} {} {}", p, a.len(), c.len(), d + 1, e + 1, h * 2);
+    let wr = Wrap(1u8, "s");
+    let x;
+    x = *wr;
+    let wp = Wrap(P { f: 3 }, "t");
+    println!("{} {} {} {}", x + 1, wr.1, wp.f + 1, wp.1);
     let add: fn(_, _) -> _ = |x: u8, y: u8| x + y;
     println!("{} {} {}", second()(&1, &2), first()(&3, &4), add(5, 6));
 }
