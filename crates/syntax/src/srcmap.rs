@@ -228,6 +228,10 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
             return Err(format!("{display}:{e}"));
         }
     }
+    // (a doc comment the file ends in, as written: a module's file is a list of items too)
+    if let Some(e) = crate::lexer::doc_at_end(&src) {
+        return Err(format!("{display}:{e}"));
+    }
     // (cfg is evaluated first: the file of a false `#[cfg(..)] mod x;` is not read)
     // (and whether it may call `env!` / `option_env!`, seen by the same tokens)
     let mut env = None;

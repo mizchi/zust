@@ -377,6 +377,19 @@ fn dead_code_fields_variants_members_aliases() {
     assert_eq!(first(ok), None);
 }
 
+#[test]
+fn a_doc_comment_a_crate_file_ends_in() {
+    // (rustc 1.100: the same error for a crate built from its files, at the file's comment)
+    let dir = std::env::temp_dir().join(format!("zust-doc-at-end-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("main.rs");
+    std::fs::write(&f, "fn main() {}\n/// hi\n").unwrap();
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_zustc")).arg("check").arg(&f).output().unwrap();
+    let err = String::from_utf8_lossy(&o.stderr).into_owned();
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(err.contains(":2:1: expected item after doc comment"), "{err}");
+}
+
 /// `#![deny(unreachable_code)]` inside expressions: an argument after one that diverges, a call whose last argument
 /// diverges, an operation whose operand diverges, and the statement after a `match` on an empty enum or an
 /// `if`/`else` whose branches both diverge; not the right of `||`, which may not run
@@ -3177,6 +3190,9 @@ fn macro_matchers_with_no_fragment_no_repetition_operator_or_an_empty_repetition
     assert_eq!(first("macro_rules! m {\n    ($()*) => {};\n}\nfn main() {}\n"), e(2, 7, "repetition matches empty token tree"));
     assert_eq!(first("macro_rules! m {\n    ($($v:vis)*) => {};\n}\nfn main() {}\n"), e(2, 7, "repetition matches empty token tree"));
     assert_eq!(first("macro_rules! m {\n    ($($a:ident),* $crate) => {};\n    ($($x:tt);* ) => {};\n}\nfn main() {}\n"), None);
+    // (a nested repetition separated by `::` can match nothing too; one that must match a token is fine)
+    assert_eq!(first("macro_rules! m { ($($($i:ident)::*)*) => {} }\nfn main() {}\n"), e(1, 20, "repetition matches empty token tree"));
+    assert_eq!(first("macro_rules! m { ($($($i:ident)::+)*) => {} }\nfn main() {}\n"), None);
 }
 
 #[test]
@@ -3193,6 +3209,11 @@ fn a_doc_comment_the_source_ends_in() {
     assert_eq!(first("fn main() {}\n/** a */\n"), e(2, 1));
     assert_eq!(first("fn main() {}\n//// four slashes are a plain comment\n"), None);
     assert_eq!(first("fn main() {}\n/// hi\nfn f() {}\n"), None);
+    // (a plain block comment after the doc is whitespace; a `/**` inside a line comment or a block comment opens no doc)
+    assert_eq!(first("fn main() {}\n/// hi\n/* plain */\n"), e(2, 1));
+    assert_eq!(first("fn main() {} // /** text */\n"), None);
+    assert_eq!(first("fn main() {}\n/* outer /** nested */ */\n"), None);
+    assert_eq!(first("fn main() {}\nconst S: &str = \"/// in a string\";\n"), None);
     // (the doc comment of a `macro_rules!` the source ends in, which the expansion takes out of the text: cfg-if's)
     assert_eq!(first("fn main() {}\n/// The macro.\n#[macro_export]\nmacro_rules! m { () => {} }\n"), None);
 }
@@ -3209,6 +3230,9 @@ fn types_that_nothing_declares_in_impl_headers_and_type_aliases() {
     assert_eq!(at("struct Core<T>(T);\nimpl Core<XXX> {\n    pub fn spawn(self) {}\n}\nfn main() {}\n"), Some(2));
     assert_eq!(at("type Foo = Bar;\nfn check(f: impl FnOnce(Foo), val: Foo) {\n    f(val);\n}\nfn main() {}\n"), Some(1));
     assert_eq!(first("struct A;\nimpl A<B> {}\nfn main() {}\n"), Some((2, "cannot find type `B` in this scope (E0412)".to_string())));
+    // (not a lifetime of a higher-ranked binder, or a fn pointer's parameter name)
+    assert_eq!(first("trait Tr {}\nimpl<F> Tr for (F, for<'A> fn(&'A ())) {}\nfn main() {}\n"), None);
+    assert_eq!(first("trait Local {}\nimpl Local for fn(Arg: u8) {}\nfn main() {}\n"), None);
     // (not a const generic argument's const, std's types and traits, an impl's own parameters, or `->` in a bound)
     let ok = "struct V<const N: usize>;\nconst L: usize = 2;\ntrait Tr {}\nimpl Tr for V<L> {}\nimpl<T> Tr for Box<T> {}\n\
               impl<'a, F: Fn(&'a i32) -> &'a i32> Tr for Option<F> {}\nimpl<'a, A> Tr for &'a (dyn for<'x> Fn(&'x A) + 'a) {}\nfn main() {}\n";
@@ -3221,6 +3245,12 @@ fn a_name_a_macro_argument_writes_is_reported_at_the_argument() {
     let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let d = s.check("macro_rules! foo {\n    ($id: ident) => {\n        $id\n    }\n}\nfn main() {\n    foo!(\n        x\n    );\n}\n");
     assert_eq!(d.first().map(|d| (d.line, d.col)), Some((8, 9)), "{d:?}");
+    // (by tokens: a `)` in a string argument closes nothing)
+    let d = s.check("macro_rules! m { ($s:literal, $id:ident) => { $id } }\nfn main() {\n    m!(\")\",\n        x\n    );\n}\n");
+    assert_eq!(d.first().map(|d| (d.line, d.col)), Some((4, 9)), "{d:?}");
+    // (a name the definition writes itself may come from its body: it stays at the call)
+    let d = s.check("macro_rules! m {\n    ($unused:ident) => { x };\n}\nfn main() {\n    m!(\n        x\n    );\n}\n");
+    assert_eq!(d.first().map(|d| (d.line, d.col)), Some((5, 5)), "{d:?}");
 }
 
 #[test]
