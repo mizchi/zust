@@ -3354,6 +3354,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 renamed: &renamed_map,
                 def_ns: &def_ns,
                 imports: $i,
+                // (whether an import of one namespace's item, `name#t` / `name#v`, is there to look for)
+                ns_imports: $i.keys().any(|k| k.1.ends_with(b"#t") || k.1.ends_with(b"#v")),
                 items: Default::default(),
                 modules: Default::default(),
                 active_items: Default::default(),
@@ -4561,6 +4563,7 @@ struct Names<'a> {
     def_ns: &'a LMap<(usize, Vec<u8>), u8>,
     /// the names imported by `use` (not globs): (scope, name) -> (new name, namespaces)
     imports: &'a LMap<(usize, Vec<u8>), (Vec<u8>, u8)>,
+    ns_imports: bool,
     items: std::cell::RefCell<LMap<(usize, usize, Vec<u8>, u8), GlobHit>>,
     modules: std::cell::RefCell<LMap<(usize, usize, Vec<u8>), ModHit>>,
     /// the lookups in progress
@@ -4676,7 +4679,7 @@ impl<'a> Names<'a> {
             }
         }
         // (an import of one namespace's item, beside another's of the name: other_ns_item)
-        if want == NS_TYPE || want == NS_VALUE {
+        if self.ns_imports && (want == NS_TYPE || want == NS_VALUE) {
             if let Some((nn, ns)) = self.imports.get(&(t, ns_key(n, want))) {
                 if inner || self.vis.imports.contains(&key) {
                     return GlobHit::Item(nn.clone(), *ns);

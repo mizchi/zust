@@ -19,8 +19,8 @@ use std::sync::OnceLock;
 use crate::lexer::{ItemKind, SrcItem};
 
 /// The prelude's items (lexed only once): (item, the name it defines, whether it is usable only through core::)
-fn items() -> &'static [(SrcItem, Option<String>, bool)] {
-    static ITEMS: OnceLock<Vec<(SrcItem, Option<String>, bool)>> = OnceLock::new();
+fn items() -> &'static [(SrcItem, Option<&'static str>, bool)] {
+    static ITEMS: OnceLock<Vec<(SrcItem, Option<&'static str>, bool)>> = OnceLock::new();
     ITEMS.get_or_init(|| {
         // (build.rs has already done the splitting)
         PRELUDE_ITEMS
@@ -590,7 +590,7 @@ fn owner(h: usize) -> Option<&'static str> {
 }
 
 /// The name of `fn x` / `struct X` / `enum X` (`__core_x` is looked up as x)
-fn defined_name(src: &str, it: &SrcItem) -> Option<String> {
+fn defined_name(src: &'static str, it: &SrcItem) -> Option<&'static str> {
     // (called for every prelude item at startup, so it walks the identifiers without building a Vec)
     let mut ids = it.idents.iter().map(|&(a, b)| &src[a as usize..b as usize]);
     // (a type alias `pub type Path = str;` too, but not an associated type `type Item` in an impl)
@@ -602,7 +602,8 @@ fn defined_name(src: &str, it: &SrcItem) -> Option<String> {
     if n == "fn" || n == "mut" {
         n = ids.next()?;
     }
-    Some(n.strip_prefix("__core_").unwrap_or(n).to_string())
+    // (a slice of the prelude's text: no String for each of its thousands of items at startup)
+    Some(n.strip_prefix("__core_").unwrap_or(n))
 }
 
 /// Returns, as source, only the prelude items the user's code may use (found by following identifiers).
@@ -1993,6 +1994,15 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             {
                 continue;
             }
+            // (std::alloc's functions, which take a Layout: only with it, as `alloc` is also the prelude's own name
+            // (a method of its Vec), which every program with a Vec would otherwise bring them by)
+            if *core_only
+                && matches!(it.kind, ItemKind::Normal)
+                && matches!(name.as_deref(), Some("alloc" | "alloc_zeroed" | "dealloc" | "realloc" | "handle_alloc_error"))
+                && !need.contains("Layout")
+            {
+                continue;
+            }
             // (`impl Error for IoError { fn __err_mark .. }`: when the program names Error and that type)
             // (and the trait itself with them)
             let err_impl = name.as_deref() == Some("__err_mark")
@@ -2004,7 +2014,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                 };
             // A variant name (Some and so on) needs its enum
             let wanted = err_impl || drop_member || match name {
-                Some(n) => need.contains(n.as_str()),
+                Some(n) => need.contains(*n),
                 None => false,
             } || (name.as_deref() == Some("Option")
                 && (need.contains("Some") || need.contains("None")))

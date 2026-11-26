@@ -634,17 +634,14 @@ impl Layout {
     pub fn align_to(&self, align: usize) -> Result<Layout, LayoutError> {
         Layout::from_size_align(self.__lay_size, if align > self.__lay_align { align } else { self.__lay_align })
     }
-    pub fn padding_needed_for(&self, align: usize) -> usize {
-        let len = self.__lay_size;
-        (len.wrapping_add(align).wrapping_sub(1) & !align.wrapping_sub(1)).wrapping_sub(len)
-    }
     pub fn pad_to_align(&self) -> Layout {
-        let pad = self.padding_needed_for(self.__lay_align);
-        Layout { __lay_size: self.__lay_size + pad, __lay_align: self.__lay_align }
+        let a = self.__lay_align;
+        Layout { __lay_size: (self.__lay_size + a - 1) & !(a - 1), __lay_align: a }
     }
     pub fn extend(&self, next: Layout) -> Result<(Layout, usize), LayoutError> {
         let new_align = if next.__lay_align > self.__lay_align { next.__lay_align } else { self.__lay_align };
-        let pad = self.padding_needed_for(next.__lay_align);
+        let (len, a) = (self.__lay_size, next.__lay_align);
+        let pad = (len.wrapping_add(a).wrapping_sub(1) & !a.wrapping_sub(1)).wrapping_sub(len);
         let offset = match self.__lay_size.checked_add(pad) {
             Some(o) => o,
             None => return Err(LayoutError),
