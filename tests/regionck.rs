@@ -5843,4 +5843,14 @@ impl<T: Default> Get<T> for dyn O<T> + '_ { fn get(&self) -> T { T::default() } 
 fn h(x: &dyn O<u8>) -> impl std::fmt::Display { x.get() }
 fn main() {}
 "#, &[], "rv8");
+    // (the third review's, accepted by rustc 1.97: a user type named as a std one (`RwLock<'a, T: ?Sized + 'a>`) gives
+    // its object its bound, not `'static`; a method's turbofish in an `impl Trait` body's inference)
+    errors_at(r#"struct RwLock<'a, T: ?Sized + 'a>(&'a T);
+trait Obj {}
+impl<'a> RwLock<'a, dyn Obj> { fn get(&self) -> u8 { 1 } }
+fn f<'a>(w: RwLock<'a, dyn Obj + 'a>) -> u8 { w.get() }
+impl dyn Obj { fn make<T: Default>(&self) -> T { T::default() } }
+fn g(x: &(dyn Obj + 'static)) -> impl std::fmt::Display { x.make::<u8>() }
+fn main() {}
+"#, &[], "rv9");
 }

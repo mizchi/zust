@@ -2519,6 +2519,23 @@ impl Inf<'_> {
                 if !self.prog.has_param(ret) {
                     return self.known(ret);
                 }
+                // (the method's own parameters from its turbofish, the last ones: `x.make::<u8>()`)
+                let tys: Vec<&PTy> = tf.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None }).collect();
+                let ng = sol.len();
+                if !tys.is_empty() && tys.len() <= ng {
+                    let mut pv: Vec<Option<u32>> = vec![None; ng];
+                    for (i, t) in sol.into_iter().enumerate() {
+                        pv[i] = t.map(|t| self.known(t));
+                    }
+                    for (k, t) in tys.into_iter().enumerate() {
+                        let v = self.ty_var(t);
+                        let i = (ng + k).wrapping_sub(tf.len());
+                        if i < ng && pv[i].is_none() {
+                            pv[i] = Some(v);
+                        }
+                    }
+                    return self.known_g(ret, &mut pv);
+                }
             }
             return self.var();
         }

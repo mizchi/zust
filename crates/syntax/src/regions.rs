@@ -923,19 +923,11 @@ fn bare_dyn(t: &PTy, behind: bool) -> bool {
                 && !bs.iter().any(|b| matches!(b, Bound::Trait(_, p) if p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Lifetime(_))))))
         }
         PTy::Ref(_, _, i) => bare_dyn(i, true),
-        PTy::Path(None, p) if unbounded_params(p) => p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Ty(t) if bare_dyn(t, false)))),
+        // (not one among a path's arguments: the type's parameter may take a lifetime bound that is its default
+        // (`struct W<'a, T: ?Sized + 'a>`, `impl<'a> W<'a, dyn Obj>`), and the header cannot tell a std type
+        // (`Box<dyn Tr>`, 'static) from a user's of the same name)
         _ => false,
     }
-}
-
-/// p is a std type whose type parameters take no lifetime bound (`Box<dyn Tr>`), so a trait object among its
-/// arguments defaults to `'static`. Another type's (`struct W<'a, T: ?Sized + 'a>`, `impl<'a> W<'a, dyn Obj>`) may
-/// take its bound, which the header does not see
-fn unbounded_params(p: &crate::parse::Path) -> bool {
-    matches!(
-        p.segs.last().map(|s| s.name.as_str()),
-        Some("Box" | "Vec" | "Rc" | "Arc" | "Option" | "Result" | "Cell" | "RefCell" | "Mutex" | "RwLock" | "VecDeque" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet")
-    )
 }
 
 /// t with `+ 'static` on each trait object bare_dyn finds
@@ -949,23 +941,14 @@ fn static_dyn(t: &mut PTy, behind: bool) {
             }
         }
         PTy::Ref(_, _, i) => static_dyn(i, true),
-        PTy::Path(None, p) if unbounded_params(p) => {
-            for s in &mut p.segs {
-                for a in &mut s.args {
-                    if let GArg::Ty(t) = a {
-                        static_dyn(t, false);
-                    }
-                }
-            }
-        }
         _ => {}
     }
 }
 
 /// The regions of an impl / trait header
 pub fn hdr_regions(g: &Generics, self_ty: Option<&PTy>) -> Option<Box<RImplSyn>> {
-    // (a trait object in the self type not behind a reference, `impl dyn Tr` / `impl X for Box<dyn Tr>`, is
-    // `dyn Tr + 'static`: its default is decided by the header, not by the `&self` that later holds Self)
+    // (the self type a trait object, `impl dyn Tr` / `impl X for dyn Tr`, is `dyn Tr + 'static`: its default is
+    // decided by the header, not by the `&self` that later holds Self)
     let static_obj = self_ty.filter(|t| bare_dyn(t, false)).map(|t| {
         let mut t = t.clone();
         static_dyn(&mut t, false);
