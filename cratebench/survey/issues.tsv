@@ -1,0 +1,24 @@
+# Errors with a tracking issue: a Python regex on an error's text, the issue (empty: none yet), and the fix's name.
+# survey.py gives each error the first fix whose regex matches. A name zustc cannot find is, without a match here, a
+# prelude addition (#250) when the crate does not define it, or a crate's own item zustc lost (#254) when it does. The
+# other errors are grouped by their text without places and names. The report's "What to fix, by importance" lists them.
+renames its dependency	249	zurgo: renamed dependencies
+Two versions of one crate are not supported	28	zurgo: two versions of one crate in a graph
+cannot find derive macro `\w+__\w+`	251	a derive's name resolved to a glob-imported type
+impls for references to a type parameter	144	`impl<T: Tr> Tr for &T`
+macro expansion is too deep	252	macro expansion too deep at a crate's first line
+constants of type `\*mut \(\)` are not supported	253	a fn pointer cast to `*mut ()` in a static
+`Infallible: Error`	250	prelude: `impl Error for Infallible`
+`__FmtError: Error`	197	prelude: `impl Error for fmt::Error`
+`\[u8; \d+\]: AsMut<\[u8\]>`	250	prelude: `[T; N]: AsMut<[T]>`
+core::arch::x86_64 intrinsics zustc supports|cannot find value `(_mm\w*|__cpuid\w*)`		x86_64 intrinsics zustc lacks
+no method (named )?`[^`]*` (on type|on|found for) `	256	methods zustc does not find (std methods the prelude lacks; lookup)
+expected (an? [a-z ]+|`[^`]*`) \(found	257	parser: syntax zustc does not parse
+no rules expected|no rules of `[^`]*` matched this call	258	macro_rules: calls zustc's matcher rejects
+mismatched types: expected	259	mismatched types (to sort by cause)
+missing generics for `	260	`missing generics for` a type used without its parameters
+the trait bound `[^`]*` is not satisfied \(E0277\)	261	false E0277: a bound zustc does not see
+cannot infer the `[^`]*` return type of	262	cannot infer an `impl Trait` return type
+impl has stricter requirements than trait	264	false E0276 in bitflags' impls
+cannot find value \(unsupported path\)	265	value paths zustc cannot resolve
+takes \d+ type arguments?, but \d+ (were|was) given	266	std iterator adapters' arity (`Copied`, `Cloned`, `Map`)
