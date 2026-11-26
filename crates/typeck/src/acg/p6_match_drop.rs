@@ -417,7 +417,8 @@ impl Cx<'_> {
                         let Some(lplace) = ({ let ex = self.bare_none_ty(lexpr, &[&**lpat])?; self.bk_scrutinee(lexpr, ex, &[&**lpat])? }) else {
                             break;
                         };
-                        self.pat_test(lpat, lplace, next)?;
+                        // (a pattern that is not of the value's type: at the pattern, `Ok(x) if let Err(_) = x`)
+                        self.pat_test(lpat, lplace, next).map_err(|m| self.at(crate::parse::pat_pos(lpat), m))?;
                         self.bk_bind_begin();
                         let r = self.pat_bind(lpat, lplace, BindMode::Move);
                         self.bk_bind_end();
