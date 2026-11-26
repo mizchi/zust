@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795728456576,
+  "lastUpdate": 1795728458830,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -119347,6 +119347,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 93.035,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "898af8a0ae829a7b60ab5f9e5031671a4142b8a4",
+          "message": "zurgo: renamed dependencies (#249) (#269)\n\nzurgo refused every graph in which a package renames a dependency (`common = { package = \"crypto-common\" }`). That stopped 15 of the surveyed top crates before zustc read anything. A renamed dependency now works as rustc's `--extern alias=lib.rlib` does: the dependent sees the library under the new name in all its modules, and the library keeps its own name elsewhere.\n\n- CrateSpec::aliases (alias, library), filled by zurgo's deps_of for lib, bin, test and build-script crates. The workspace file writes them as `extern=ALIAS=NAME`.\n- Module flattening treats `crate:alias=name` entries like rustc's extern prelude:\n  - the module's own items and modules first, by type namespace only (a fn of that name does not hide the alias);\n  - then the alias;\n  - `::alias::..`, `pub use alias;` and `extern crate x as y;` also work.\n  - An absolute path in a library never sees a bin's aliases.\n- Proc macros:\n  - a renamed proc-macro dependency's macros resolve through its alias;\n  - a renamed library's re-exports resolve under its alias, rewritten once from the libraries' own routes;\n  - a library's own name that the dependent gives to another dependency is that dependency's.\n- Each crate's fingerprint includes its aliases.\n\nTests:\n- tests/workspace.rs runs against rustc --extern.\n- crates/zurgo/tests/zurgo.rs runs against cargo. It covers features through the new name, `dep:`, a bin's and a dev-dependency's renames, renamed proc macros, re-exports through renamed libraries, and names swapped between dependencies.\n\nSurvey: graph-fail goes from 20 to 5 of 273. The 5 left are two versions of one crate (#28).\n\nFixes #249\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T06:22:13+09:00",
+          "tree_id": "a6777e2e8fb6dbda183e188329aa90fd5c7a782c",
+          "url": "https://github.com/mizchi/zust/commit/898af8a0ae829a7b60ab5f9e5031671a4142b8a4"
+        },
+        "date": 1795728458542,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 85,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 96.774,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 98.06,
             "unit": "%"
           }
         ]
