@@ -4117,8 +4117,23 @@ pub fn expand_module_aliases(src: &str) -> Option<String> {
     if names.is_empty() {
         return None;
     }
-    // (the innermost block around token k: a module's body, or a function's for a `use` in it)
-    let scope = |k: usize| blocks.iter().filter(|&&(o, c)| o < k && k < c).min_by_key(|&&(o, c)| c - o).copied();
+    // (the innermost block around token k: a module's body, or a function's for a `use` in it. The `{`s still open
+    // before k, read forward as k grows (the `use`s are asked in order): the innermost of them that a `}` closes.
+    // Looking through every block for each `use` was quadratic in a program of many modules)
+    let close_of: LMap<usize, usize> = blocks.iter().copied().collect();
+    let mut open_at: Vec<usize> = vec![];
+    let mut read = 0usize;
+    let mut scope = |k: usize| -> Option<(usize, usize)> {
+        while read < k {
+            if is_sym(read, b'{') {
+                open_at.push(read);
+            } else if is_sym(read, b'}') {
+                open_at.pop();
+            }
+            read += 1;
+        }
+        open_at.iter().rev().find_map(|&o| close_of.get(&o).map(|&c| (o, c)))
+    };
     let mut reps: Vec<(usize, Vec<u8>, usize)> = vec![]; // (token, its new text, the size of the use's scope)
     let mut k = 0;
     while k < toks.len() {
