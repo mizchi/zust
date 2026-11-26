@@ -795,17 +795,22 @@ pub struct Session {
     /// In a check_workspace: each crate's result (and no objects are written)
     #[cfg(feature = "build")]
     ws_diags: Option<Vec<CrateCheck>>,
+    /// (keep_for_edits) The last analysis's item summaries by their cache key, as the cache's bytes decode: the next
+    /// analysis takes those of its items from here instead of decoding each (and dropping them after)
+    sum_keep: Option<FxMap<Key, Vec<Summary>>>,
 }
 
 impl Session {
     pub fn new(opts: Options) -> Session {
-        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new(), #[cfg(feature = "build")] ws_diags: None }
+        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new(), #[cfg(feature = "build")] ws_diags: None, sum_keep: None }
     }
 
     /// For a session whose document will be edited (zust-analyzer): the preprocessing keeps its chunks from the first
     /// analysis on, so that the first edit preprocesses only what it changed (PrepMemo::keep_from_first)
     pub fn keep_for_edits(&mut self) {
         self.sel.prep.keep_from_first();
+        // (and the item summaries, decoded, from one analysis to the next)
+        self.sum_keep = Some(FxMap::default());
     }
 
     pub fn load_cache(&mut self, path: &std::path::Path) {
@@ -1058,6 +1063,15 @@ impl Session {
         let cid = self.cid;
         let mut sums: Vec<Summary> = vec![Summary::default(); items.len()];
         let mut n_parsed = 0;
+        // (the last analysis's summaries (keep_for_edits; not without the cache, which would not give them), and each
+        // item's key, to keep this one's for the next; and those parsed now, as the cache's bytes decode)
+        let mut keep = if self.opts.no_cache { None } else { self.sum_keep.take() };
+        // (still on after an analysis that stops at an error: the next starts with none kept)
+        if keep.is_some() {
+            self.sum_keep = Some(FxMap::default());
+        }
+        let mut sum_keys: Vec<Key> = if keep.is_some() { vec![0; items.len()] } else { vec![] };
+        let mut parsed_now: Vec<(usize, Summary)> = vec![];
         // (the keys' common prefix, hashed once: a closure's captures depend on the edition (WILD_FAKE_READS))
         let seed = {
             let mut h = KeyHasher::new();
@@ -1077,6 +1091,15 @@ impl Session {
                 let mut h = seed.clone();
                 h.add(&it.hash);
                 let k = h.finish();
+                if let Some(keep) = &mut keep {
+                    sum_keys[i] = k;
+                    // (what the cache's bytes for k decode to, from the last analysis; still a use of k for the cache)
+                    if let Some(sm) = keep.get_mut(&k).and_then(|v| v.pop()) {
+                        self.used.insert(k);
+                        sums[i] = sm;
+                        continue;
+                    }
+                }
                 if let Some(sm) = self.get(k).and_then(|d| Summary::decode(&d)) {
                     sums[i] = sm;
                     continue;
@@ -1173,6 +1196,11 @@ impl Session {
                 n_parsed += 1;
                 let mut b = vec![];
                 sm.encode(&mut b);
+                if keep.is_some() {
+                    if let Some(d) = Summary::decode(&b) {
+                        parsed_now.push((i, d));
+                    }
+                }
                 sums[i] = sm;
                 self.put(k, b);
             }
@@ -2546,6 +2574,18 @@ impl Session {
         a.assoc_keys = a.assoc_keys();
         if self.opts.opt && std::env::var_os("ZUSTC_NO_INLINE").is_none() {
             a.inl = inline_bodies(&a);
+        }
+        // (this analysis's summaries for the next, by key; those parsed now as their bytes decode. The last ones it
+        // did not take are dropped)
+        if let Some(mut k) = keep {
+            k.clear();
+            for (i, d) in parsed_now {
+                sums[i] = d;
+            }
+            for (i, sm) in sums.into_iter().enumerate() {
+                k.entry(sum_keys[i]).or_default().push(sm);
+            }
+            self.sum_keep = Some(k);
         }
         Ok(a)
     }
