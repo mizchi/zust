@@ -2363,7 +2363,7 @@ impl Inf<'_> {
                 Some(Shape::Adt(b, _, _)) => Some(b),
                 _ => None,
             };
-            if let Some(id) = sid.and_then(|s| self.prog.method(s, n)) {
+            if let Some(id) = sid.and_then(|s| self.prog.self_method(s, n)) {
                 // (a method of the program's own type that has a scalar method's name (`checked_add`): its overloads too,
                 // as below)
                 let id = self.pick_inherent_overload(id, rv);
@@ -2379,7 +2379,8 @@ impl Inf<'_> {
             Some(Shape::Adt(b, _, _)) => Some(b),
             _ => None,
         };
-        let mut callee = sid.and_then(|sid| self.prog.method(sid, n).or_else(|| self.prog.default_method(sid, n)));
+        // (a method with `self`: an associated function of the name is none (self_method))
+        let mut callee = sid.and_then(|sid| self.prog.self_method(sid, n).or_else(|| self.prog.default_method(sid, n)));
         let mut rv = rv;
         let mut sid = sid;
         let mut hops = 0;
@@ -2397,7 +2398,7 @@ impl Inf<'_> {
                     Some(Shape::Adt(b, _, _)) => Some(b),
                     _ => None,
                 };
-                callee = sid.and_then(|sid| self.prog.method(sid, n).or_else(|| self.prog.default_method(sid, n)));
+                callee = sid.and_then(|sid| self.prog.self_method(sid, n).or_else(|| self.prog.default_method(sid, n)));
             } else {
                 break;
             }
@@ -2568,7 +2569,7 @@ impl Inf<'_> {
                 _ => None,
             };
             if let (Some(e), Some(&vb)) = (elem, self.prog.struct_index.get("Vec")) {
-                if let Some(id) = self.prog.method(vb, n) {
+                if let Some(id) = self.prog.self_method(vb, n) {
                     if !matches!(n, "len" | "is_empty" | "iter" | "iter_mut" | "into_iter") {
                         let vv = self.adt(vb, vec![e]);
                         return self.apply_recv(Some(id), avs.clone(), vv);

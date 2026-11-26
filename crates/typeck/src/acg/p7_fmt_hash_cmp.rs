@@ -1352,7 +1352,7 @@ impl Cx<'_> {
                 t = *i;
             }
             if let Ty::Struct(sid) = t {
-                if self.prog.method(sid, &name).is_some() {
+                if self.prog.self_method(sid, &name).is_some() {
                     return Ok(None);
                 }
             }
@@ -1362,7 +1362,7 @@ impl Cx<'_> {
         let (ra, rt) = self.ord_addr(v, t);
         // (`Abs(-3).cmp(&b)`: a hand-written impl found only once the receiver's type is known after evaluation calls that method with the evaluated value)
         if let Ty::Struct(sid) = rt {
-            if let Some(id) = self.prog.method(sid, &name) {
+            if let Some(id) = self.prog.self_method(sid, &name) {
                 let args: Vec<&Expr> = margs.iter().collect();
                 return self.call_fn(id, Some((ra, Ty::Ref(false, intern(rt)))), &args, None, None, SP).map(Some);
             }

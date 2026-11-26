@@ -6807,6 +6807,19 @@ impl Program {
             .copied()
     }
 
+    /// The method named name a method call on sid's type finds among its impls: one with `self`. An associated
+    /// function without it is no method candidate (rustc's probe): `impl Wire for Vec<T> { fn get(r: &[u8]) -> Self }`
+    /// does not hide the inherent `Vec::get(&self, i)` from `v.get(i)` (#207). None when every fn of the name lacks it
+    pub fn self_method(&self, sid: u32, name: &str) -> Option<u32> {
+        let key = format!("{}::{name}", self.structs[self.base_of(sid) as usize].name);
+        let &id = self.index.get(&key)?;
+        if self.sigs[id as usize].has_self {
+            return Some(id);
+        }
+        // (the first one with `self` among the fns of the name in other impls of the type)
+        self.overloads.get(&key)?.iter().copied().find(|&c| self.sigs[c as usize].has_self)
+    }
+
     pub fn size_align(&self, t: Ty) -> (u32, u32) {
         match t {
             Ty::Struct(id) => {
