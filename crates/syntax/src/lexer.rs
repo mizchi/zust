@@ -147,7 +147,16 @@ impl St<'_> {
 pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
     // (a closing delimiter that does not close the innermost open one is rustc's lexer's error, before any of the
     // parser's: read for only when the split fails)
-    split_items(src).map_err(|e| mismatched_delim(src.as_bytes()).unwrap_or(e))
+    // (rustc 1.100 reports a closing delimiter with none open first, but a mismatched one only after a literal or a
+    // block comment the file ends in: `(1; }` then `/* x` is E0758 at the comment, `"abc` E0765 at the string)
+    split_items(src).map_err(|e| {
+        let b = src.as_bytes();
+        match mismatched_delim(b) {
+            Some(m) if m.contains(": mismatched closing delimiter") => unterminated_literal(b).unwrap_or(m),
+            Some(m) => m,
+            None => e,
+        }
+    })
 }
 
 /// The line (from 1) of b's first merge diff marker, `<<<<<<<` at a line's start outside strings and comments
