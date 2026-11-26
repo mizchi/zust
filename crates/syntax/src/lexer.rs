@@ -4009,6 +4009,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             // (a primitive type's name that is no call is the type, not a fn or const of the name: getrandom's
             //  `pub fn u32() -> Result<u32, Error>`, chrono's `fn char` beside `|c: char|`)
             let prim = want != NS_VALUE
+                && n.len() <= 5
+                && matches!(n[0], b'u' | b'i' | b'f' | b'b' | b'c' | b's')
                 && matches!(
                     n,
                     b"u8" | b"u16" | b"u32" | b"u64" | b"u128" | b"usize" | b"i8" | b"i16" | b"i32" | b"i64" | b"i128" | b"isize" | b"f32"
@@ -4529,7 +4531,8 @@ fn ns_key(n: &[u8], ns: u8) -> Vec<u8> {
 /// The item of the other namespace than ns that module m's name n is, when it is another than nn (one namespace's
 /// item found first): libc's `fn sigaction` and the `struct sigaction` a glob of the same module brings
 fn other_ns_item(names: &Names, m: usize, n: &[u8], ns: u8, nn: &[u8]) -> Option<(Vec<u8>, u8)> {
-    if ns != NS_TYPE && ns != NS_VALUE {
+    // (only through a glob of m's: m's own items and imports of the name are one namespace's)
+    if ns != NS_TYPE && ns != NS_VALUE || !names.adj.contains_key(&m) {
         return None;
     }
     let other = NS_ANY ^ ns;

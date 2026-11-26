@@ -1662,7 +1662,7 @@ impl Program {
                 if !adt_names.contains(n.as_str()) {
                     p.aliases.insert(n.clone(), (g.clone(), t.clone()));
                     if !sm.adt_defaults.is_empty() {
-                        p.alias_defaults.insert(n.clone(), sm.adt_defaults.clone());
+                        p.add_alias_defaults(n, &sm.adt_defaults);
                     }
                 }
             }
@@ -3859,6 +3859,12 @@ impl Program {
     /// A method of primitive type t (from a trait impl, or else the trait's default method)
     /// prim_method for a method call: of the functions of that name, one that takes self (`impl Foo for isize`
     /// with `fn new() -> bool` and `impl Bar for isize` with `fn new(&self) -> bool`: `1.new()` is Bar's)
+    #[cold]
+    #[inline(never)]
+    fn add_alias_defaults(&mut self, n: &str, ds: &[Option<TySyn>]) {
+        self.alias_defaults.insert(n.to_string(), ds.to_vec());
+    }
+
     /// Whether alias n's type parameters from the k-th on all have defaults (a use may give only the first k)
     pub fn alias_fills(&self, n: &str, k: usize) -> bool {
         self.alias_defaults.get(n).is_some_and(|ds| k < ds.len() && ds[k..].iter().all(Option::is_some))
