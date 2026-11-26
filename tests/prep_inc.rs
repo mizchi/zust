@@ -265,3 +265,32 @@ fn prep_inc_macro_rules_with_a_fn_body() {
     let srcs = vec![base.to_string(), edited, again];
     assert_eq!(through_memo(&srcs), vec![false, true]);
 }
+
+/// The skeletons blank the fn signatures outside the bodies (`fn name() {`): an edit in a body is still preprocessed as
+/// the full preparation does it, beside generics with a `->` (`<F: Fn(u8) -> u8>`), a where clause, a struct pattern, a
+/// parameter's attribute, a trait's declarations, a macro call that makes a fn, and a fn whose body keeps an item
+/// (its signature stays). An edit of a signature changes the skeleton, as before (the whole is preprocessed)
+#[test]
+fn prep_inc_signatures_in_skeletons() {
+    let base = "\
+macro_rules! mk { ($n:ident) => { fn $n(a: u8) -> u8 { a + 1 } }; }
+mk!(made);
+struct P { x: u8, y: u8 }
+trait Tr { fn m(&self) -> u8; fn d(&self) -> u8 { 1 } }
+impl Tr for P { fn m(&self) -> u8 { self.x } }
+fn apply<F: Fn(u8) -> u8>(f: F, v: u8) -> Vec<u8> where F: Copy { vec![f(v)] }
+fn pat(P { x, y }: P) -> u8 { x + y }
+fn attr(#[cfg(any())] q: u8, r: u8) -> u8 { r }
+fn outer<T: Copy>(t: T) -> T { fn inner<U>(u: U) -> U { u } inner(t) }
+fn edited() -> u8 {
+    let a = apply(made, 1);
+    a[0] + pat(P { x: 1, y: 2 }) + attr(3) + outer(4u8)
+}
+fn main() { let _ = edited(); }
+";
+    let in_body = base.replace("    let a = apply", "    let _q = 1;\n    let a = apply");
+    let again = in_body.replace("let _q = 1;", "let _q = 2;");
+    let in_sig = again.replace("r: u8) -> u8 { r }", "r: u8) -> u16 { r as u16 }");
+    assert!(base != in_body && in_body != again && again != in_sig);
+    assert_eq!(through_memo(&[base.to_string(), in_body, again, in_sig]), vec![false, true, false]);
+}
