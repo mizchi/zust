@@ -1081,7 +1081,11 @@ impl Checker {
                 "hole" => r == Ty::Str || r == Ty::Bool || self.numeric(&r),
                 "key" => self.key_type(&r),
                 "signed" => matches!(r, Ty::I32 | Ty::I64),
-                "json" => self.jsonable(&r, &mut vec![]),
+                "json" => {
+                    // (one memo per top-level check: arrays, tuples and collections recurse with `seen` empty)
+                    self.json_memo.borrow_mut().clear();
+                    self.jsonable(&r, &mut vec![])
+                }
                 "child" => match &r {
                     Ty::Jsx | Ty::Str => true,
                     t if self.numeric(t) => true,
@@ -1128,9 +1132,6 @@ impl Checker {
     /// (an answer per type within one check: the check is a conjunction, so an answer that assumed an outer type
     /// on `seen` holds whenever the whole answer is true. A type shared by many fields is checked once)
     fn jsonable(&self, t: &Ty, seen: &mut Vec<Ty>) -> bool {
-        if seen.is_empty() {
-            self.json_memo.borrow_mut().clear();
-        }
         if let Some(&r) = self.json_memo.borrow().get(t) {
             return r;
         }

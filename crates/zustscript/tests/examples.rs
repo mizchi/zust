@@ -1100,7 +1100,7 @@ fn json_proto_and_inline_primitive() {
     std::fs::write(
         &src,
         format!(
-            "type R = {{ __proto__: i32 }}\nexport fn d(s: String) -> String {{ let r: Result<R, String> = json_decode(s); match r {{ Ok(v) => json_encode(v), Err(m) => m }} }}\nexport fn prim(s: String) -> String {{ let r: Result<i32, String> = json_decode(s); match r {{ Ok(v) => v.to_string(), Err(m) => m }} }}\nexport fn encode(JSON: i32) -> String {{ json_encode(JSON) }}\n{}\nfn deep(s: String) -> bool {{ let r: Result<D28, String> = json_decode(s); r.is_ok() }}\n",
+            "type R = {{ __proto__: i32 }}\nexport fn d(s: String) -> String {{ let r: Result<R, String> = json_decode(s); match r {{ Ok(v) => json_encode(v), Err(m) => m }} }}\nexport fn prim(s: String) -> String {{ let r: Result<i32, String> = json_decode(s); match r {{ Ok(v) => v.to_string(), Err(m) => m }} }}\nexport fn encode(JSON: i32) -> String {{ json_encode(JSON) }}\n{}\nfn deep(s: String) -> bool {{ let r: Result<D28, String> = json_decode(s); r.is_ok() }}\nfn pair(s: String) -> bool {{ let r: Result<(Array<D28>, Map<String, D28>, D28), String> = json_decode(s); r.is_ok() }}\n",
             deep.join("\n")
         ),
     )
