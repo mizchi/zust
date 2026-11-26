@@ -40,7 +40,7 @@ jobs:
       - name: Run rustc's tests/ui
         run: |
           python3 bench/rust_ui.py --fetch
-          python3 bench/rust_ui.py --bench-json out/ci/rust_ui.json --json out/ci/rust_ui_summary.json --results out/ci/rust_ui.tsv
+          python3 bench/rust_ui.py --bench-json out/ci/rust_ui.json --json out/ci/rust_ui_summary.json --results out/ci/rust_ui.tsv --reasons out/ci/rust_ui_reasons.tsv
       # (the measured numbers in README.md, PERFORMANCE.md and SUPPORT.md come from this run; the commit skips CI, so
       # it does not measure itself)
       - name: Update the numbers in README.md, PERFORMANCE.md and SUPPORT.md
