@@ -1,0 +1,2 @@
+// expect: not an Option of an Option
+fn f(o: Option<Option<i32>>) -> String { json_encode(o) }

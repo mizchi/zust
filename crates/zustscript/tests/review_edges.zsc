@@ -1,0 +1,20 @@
+// tests/examples.rs review_edges_same_in_js_and_wasm: cases from the review of mizchi/zust#232: string order by UTF-16 units,
+// a string method on an owned local, `unwrap_or`'s argument evaluated, temporaries that cannot shadow, a guard that
+// assigns the matched local or changes a Map, a unit arm after a guard
+extern fn note(s: String) -> () = "globalThis.note";
+enum Opt2 { Some2(i32), None2 }
+@wasm fn sorted() -> Array<i32> { ["\u{10000}", "\u{E000}", "a"].sort().map((s) => s.len()) }
+fn unit_guard(x: i32) -> () { match x { _ if true => {}, _ => note("fallback") } }
+fn reassign() -> i32 { let mut x = 0; match x { _ if { x = 1; false } => -1, 0 => 10, _ => 20 } }
+fn guard_live() -> i32 {
+  let mut m: Map<i32, i32> = Map::new();
+  match 0 { _ if m.insert(1, 2).is_empty() => 1, _ if m.contains_key(1) => 2, _ => 3 }
+}
+@wasm fn owned_str(n: i32) -> i32 { let s = n.to_string(); if s.is_empty() { 0 } else if s.starts_with("1") { 1 } else { 2 } }
+@wasm fn order(o: Option<i32>) -> i32 { let mut x = 0; let v = o.unwrap_or({ x = 5; 9 }); v * 100 + x }
+@wasm fn user_e0() -> Array<i32> { let __zs_e0 = 7; let zs_e0 = 8; [{ 1 }, zs_e0, __zs_e0] }
+@wasm fn param_r(xs: Array<i32>, zs_r: i32) -> i32 { xs.get(zs_r).unwrap_or(-1) + xs.slice(zs_r, zs_r + 1).len() }
+@wasm fn empty_slice() -> i32 { "😀".slice(1, 1).len() }
+@wasm export fn wasm_run() -> Array<i32> { sorted().concat([owned_str(15), owned_str(25), order(Some(1)), order(None)]).concat(user_e0()).concat([param_r([4, 5], 1), empty_slice()]) }
+export fn js_run() -> String { unit_guard(1); `${reassign()} ${guard_live()}` }
+

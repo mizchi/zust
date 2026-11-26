@@ -1,0 +1,2 @@
+// expect: `json_encode` is built in: call it
+fn f() -> String { let enc = json_encode; enc(1) }

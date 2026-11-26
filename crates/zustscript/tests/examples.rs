@@ -1053,6 +1053,51 @@ fn methods_same_in_js_and_wasm() {
     assert!(js.contains("const st = Stack$push(Stack$push(Stack$empty(), \"a\"), \"b\");"), "{js}");
 }
 
+/// tests/review_edges.zsc: cases from the review of mizchi/zust#232, the same in JS and wasm; and a match over 26
+/// fields of `true | false` is checked at once (the coverage of identical remaining rows is reused)
+#[test]
+fn review_edges_same_in_js_and_wasm() {
+    let src = root().join("tests/review_edges.zsc");
+    let mut outs = vec![];
+    for (name, flags) in [("review-wasm", &[][..]), ("review-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = compare_build(&src, &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        outs.push(node(
+            &d,
+            "const l = []; globalThis.note = (s) => l.push(s); const m = await import('./review_edges.js'); console.log(JSON.stringify(m.wasm_run()), m.js_run(), JSON.stringify(l));",
+        ));
+        let o = compare_build(&root().join("tests/review_no_option.zsc"), &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        outs.push(node(&d, "const m = await import('./review_no_option.js'); console.log(JSON.stringify(m.reversed([1, 2, 3])));"));
+    }
+    assert_eq!(outs[0..2], outs[2..4], "wasm and JS differ");
+    assert_eq!(outs[0], "[1,2,1,1,2,105,905,1,8,7,6,0] 10 3 []\n");
+    assert_eq!(outs[1], "[3,2,1]\n");
+    let d = out_dir("review-coverage");
+    let src = d.join("wide.zsc");
+    let fields: Vec<String> = (b'a'..=b'z').map(|c| format!("{}: bool", c as char)).collect();
+    let pats: Vec<String> = (b'a'..=b'z').map(|c| format!("{}: true | false", c as char)).collect();
+    std::fs::write(&src, format!("type W = {{ {} }}\nfn f(w: W) -> i32 {{ match w {{ W {{ {} }} => 1 }} }}\n", fields.join(", "), pats.join(", "))).unwrap();
+    let t = std::time::Instant::now();
+    let o = zsc(&src, &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert!(t.elapsed() < std::time::Duration::from_secs(5), "{:?}", t.elapsed());
+}
+
+/// JSON (review of mizchi/zust#232): a `__proto__` field is an own property; a primitive's decoder reports a
+/// mismatch with the inline runtime too
+#[test]
+fn json_proto_and_inline_primitive() {
+    let d = out_dir("json-proto");
+    let src = d.join("p.zsc");
+    std::fs::write(&src, "type R = { __proto__: i32 }\nexport fn d(s: String) -> String { let r: Result<R, String> = json_decode(s); match r { Ok(v) => json_encode(v), Err(m) => m } }\nexport fn prim(s: String) -> String { let r: Result<i32, String> = json_decode(s); match r { Ok(v) => v.to_string(), Err(m) => m } }\n").unwrap();
+    let o = zsc(&src, &d, &["--inline-runtime"]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let out = node(&d, "const m = await import('./p.js'); console.log(m.d('{\"__proto__\":7}'), '|', m.prim('\"x\"'), '|', m.prim('42'));");
+    assert_eq!(out, "{\"__proto__\":7} | expected an i32 at $, found \"x\" | 42\n");
+}
+
 /// tests/js_values.zsc: extern types (properties, methods, a setter, a constructor, a module's), `null` from JS as
 /// `None` and `None` to JS as `undefined`, and what JS throws (or a Promise rejects with) as an `Err`
 #[test]

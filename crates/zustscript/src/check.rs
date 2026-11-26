@@ -219,6 +219,8 @@ pub struct Checker {
     jsons: Vec<(Id, Ty)>,
     method_fns: Vec<(Id, String, Ty)>,
     rust_insts: Vec<(Id, Vec<Ty>)>,
+    /// the callee of the call being checked (a built-in such as `range` or `Map::new` is only called)
+    callee_id: Option<Id>,
     casts: Vec<(Id, Pos, Ty, Ty)>,
     /// the numeric bounds of the function being checked
     bounds: HashMap<String, String>,
@@ -230,6 +232,9 @@ pub struct Checker {
     tys: Vec<(Id, Ty)>,
     /// [`Checker::eqable`]'s finished answers
     eq_memo: std::cell::RefCell<HashMap<Ty, bool>>,
+    /// the answers of `uncovered` in one match, by its types and its rows (the patterns' addresses): `true | false`
+    /// in many fields gives the same remaining rows on both sides
+    cover_memo: std::cell::RefCell<HashMap<(Vec<Ty>, Vec<Vec<usize>>), bool>>,
     eq_low: std::cell::Cell<usize>,
     eq_pending: std::cell::RefCell<(Vec<Ty>, HashMap<Ty, usize>)>,
     bound_checks: Vec<(Pos, Ty, String)>,
@@ -407,6 +412,7 @@ impl Checker {
             jsons: vec![],
             method_fns: vec![],
             rust_insts: vec![],
+            callee_id: None,
             casts: vec![],
             bounds: HashMap::new(),
             insts: vec![],
@@ -414,6 +420,7 @@ impl Checker {
             typed_lits: vec![],
             tys: vec![],
             eq_memo: Default::default(),
+            cover_memo: Default::default(),
             eq_low: std::cell::Cell::new(usize::MAX),
             eq_pending: Default::default(),
             bound_checks: vec![],
@@ -629,8 +636,15 @@ impl Checker {
                         } else if let Some(x) = self.info.ext_types.get(n) {
                             x.params.len()
                         } else if n == "Map" || n == "Set" {
-                            // (the built-in collections, unless the file names a type so)
+                            // (the built-in collections, unless the file names a type so. The key is checked with the
+                            // bounds of the function the type is written in)
                             arity(self, if n == "Map" { 2 } else { 1 });
+                            if let Some(k) = args.first()
+                                && !self.key_type(k)
+                            {
+                                let s = self.show(k);
+                                self.err(*pos, format!("a Map's key or a Set's element is an integer, a String, a bool or an enum without data, not {s}{}", if let Ty::Param(p) = k { format!(": add the bound `{p}: Hash`") } else { String::new() }));
+                            }
                             return Ty::Named(n.clone(), args);
                         } else if let Some((_, _, vs)) = PRELUDE.iter().find(|p| p.0 == n) {
                             let vs: Vec<&str> = vs.iter().map(|v| v.0).collect();
@@ -674,6 +688,9 @@ impl Checker {
             if let Item::Record { name, pos, .. } | Item::Enum { name, pos, .. } = it {
                 if name == "Promise" {
                     self.err(*pos, "`Promise` is the built-in type of `async` / `await`: name this type otherwise");
+                }
+                if name == "Map" || name == "Set" {
+                    self.err(*pos, format!("`{name}` is the built-in collection: name this type otherwise"));
                 }
             }
             // (`Option` / `Result` are the prelude's: a file written before the prelude may declare them the same way)
@@ -749,7 +766,7 @@ impl Checker {
                         self.err(*pos, format!("`{name}` cannot be both async and @wasm / @simd (a Promise does not cross into wasm)"));
                     }
                     if let Some(p) = names.insert(name.clone(), *pos) {
-                        self.err(*pos, format!("`{name}` is already defined at {p}"));
+                        self.err(*pos, format!("`{}` is already defined at {p}", name.replace('$', "::")));
                     }
                     self.prelude_name(name, *pos);
                     for (_, b) in bounds {
@@ -757,8 +774,11 @@ impl Checker {
                             self.err(*pos, format!("unknown bound `{b}` (the bounds are Num, Integer, Float, Eq, Ord, Hash)"));
                         }
                     }
+                    // (the bounds a `Map<K, V>` in the signature needs)
+                    self.bounds = bounds.iter().cloned().collect();
                     let a = args.iter().map(|(_, t)| self.ty_of(t, generics)).collect();
                     let r = ret.as_ref().map(|t| self.ty_of(t, generics)).unwrap_or(Ty::Unit);
+                    self.bounds.clear();
                     // (an `async fn`'s callers get a Promise of its result; JS adopts a Promise its body gives, so
                     // the result is written as the value)
                     if *is_async && promised(&r).is_some() {
@@ -770,7 +790,7 @@ impl Checker {
                 }
                 Item::Extern { name, module, generics, args, ret, js, pos, zsc } => {
                     if let Some(p) = names.insert(name.clone(), *pos) {
-                        self.err(*pos, format!("`{name}` is already defined at {p}"));
+                        self.err(*pos, format!("`{}` is already defined at {p}", name.replace('$', "::")));
                     }
                     self.prelude_name(name, *pos);
                     let a = args.iter().map(|t| self.ty_of(t, generics)).collect();
@@ -784,7 +804,7 @@ impl Checker {
                 }
                 Item::WasmFn { name, args, ret, pos, .. } => {
                     if let Some(p) = names.insert(name.clone(), *pos) {
-                        self.err(*pos, format!("`{name}` is already defined at {p}"));
+                        self.err(*pos, format!("`{}` is already defined at {p}", name.replace('$', "::")));
                     }
                     self.info.wasm.insert(name.clone(), (args.clone(), ret.clone()));
                 }
@@ -1043,6 +1063,7 @@ impl Checker {
                 }
                 "hole" => r == Ty::Str || r == Ty::Bool || self.numeric(&r),
                 "key" => self.key_type(&r),
+                "signed" => matches!(r, Ty::I32 | Ty::I64),
                 "json" => self.jsonable(&r, &mut vec![]),
                 "child" => match &r {
                     Ty::Jsx | Ty::Str => true,
@@ -1064,7 +1085,8 @@ impl Checker {
                         _ => format!("cannot compare {s} with `<`"),
                     },
                     "hole" => format!("a `${{..}}` of a template string takes a String, a number or a bool, not {s}"),
-                    "json" => format!("JSON holds numbers (not i64: JSON.parse rounds past 2^53), strings, bools, and arrays, records, enums, Option, Map and Set of them, not {s}"),
+                    "json" => format!("JSON holds numbers (not i64: JSON.parse rounds past 2^53), strings, bools, and arrays, records, enums, Option (not an Option of an Option: both `None`s would be `null`), Map and Set of them, not {s}"),
+                    "signed" => format!("`abs` is a method of i32 and i64, not {s}"),
                     "key" => match &r {
                         Ty::Param(p) => format!("a Map's key or a Set's element is an integer, a String, a bool or an enum without data, not {s}: add the bound `{p}: Hash`"),
                         _ => format!("a Map's key or a Set's element is an integer, a String, a bool or an enum without data, not {s}"),
@@ -1092,9 +1114,14 @@ impl Checker {
             Ty::Array(e) => self.jsonable(e, seen),
             Ty::Tuple(ts) => ts.iter().all(|t| self.jsonable(t, seen)),
             Ty::Named(n, a) if (n == "Map" && a.len() == 2 || n == "Set" && a.len() == 1) && self.builtin_coll(n) => a.iter().all(|t| self.jsonable(t, seen)),
+            // (`None` and `Some(None)` would both be `null`)
+            Ty::Named(n, a) if n == "Option" && a.len() == 1 && matches!(&a[0], Ty::Named(m, b) if m == "Option" && b.len() == 1) => false,
             Ty::Named(n, targs) => {
                 if seen.contains(t) {
                     return true;
+                }
+                if ty_size(t, 4096) >= 4096 {
+                    return false;
                 }
                 let (params, fields): (Vec<String>, Vec<Ty>) = if let Some(r) = self.info.records.get(n) {
                     (r.params.clone(), r.fields.iter().map(|f| f.1.clone()).collect())
@@ -1103,7 +1130,9 @@ impl Checker {
                 } else {
                     return false;
                 };
-                if seen.len() > 64 {
+                // (a type that grows without repeating is refused before its fields are substituted, as for `==`)
+                let sizes: HashMap<String, usize> = params.iter().cloned().zip(targs.iter().map(|a| ty_size(a, 4096))).collect();
+                if seen.len() > 64 || fields.iter().any(|f| subst_size(f, &sizes, 4096) >= 4096) {
                     return false;
                 }
                 let m: HashMap<String, Ty> = params.into_iter().zip(targs.iter().cloned()).collect();
@@ -1227,7 +1256,10 @@ impl Checker {
                 let inst = self.instantiate(&params, &all);
                 let (ftys, targs) = inst.split_at(fields.len());
                 self.unify(*rpos, t, &Ty::Named(n.clone(), targs.to_vec()));
-                for (f, p) in fs {
+                for (k, (f, p)) in fs.iter().enumerate() {
+                    if fs[..k].iter().any(|x| x.0 == *f) {
+                        self.err(*rpos, format!("the field `{f}` is named twice in the pattern"));
+                    }
                     match fields.iter().position(|x| x.0 == *f) {
                         Some(k) => {
                             let ft = ftys[k].clone();
@@ -1251,7 +1283,10 @@ impl Checker {
         }
         // (nested patterns: `A(Some(n))` and `A(None)` cover `A`, `(None, _)` and `(_, None)` the rest of a tuple's)
         let rows: Vec<Vec<&Pat>> = pats.iter().map(|p| vec![*p]).collect();
-        if !self.uncovered(std::slice::from_ref(t), &rows) {
+        self.cover_memo.borrow_mut().clear();
+        let gap = self.uncovered(std::slice::from_ref(t), &rows);
+        self.cover_memo.borrow_mut().clear();
+        if !gap {
             return;
         }
         match self.resolve(t) {
@@ -1284,6 +1319,16 @@ impl Checker {
     /// of a row of wildcards, splitting on the constructors of the first column (enum variants, `true` / `false`,
     /// a tuple). Numbers and strings have no finite set of them: only the rows with a wildcard there cover them.
     fn uncovered(&self, tys: &[Ty], rows: &[Vec<&Pat>]) -> bool {
+        let key = (tys.to_vec(), rows.iter().map(|r| r.iter().map(|p| *p as *const Pat as usize).collect()).collect::<Vec<Vec<usize>>>());
+        if let Some(&r) = self.cover_memo.borrow().get(&key) {
+            return r;
+        }
+        let r = self.uncovered_rows(tys, rows);
+        self.cover_memo.borrow_mut().insert(key, r);
+        r
+    }
+
+    fn uncovered_rows(&self, tys: &[Ty], rows: &[Vec<&Pat>]) -> bool {
         let Some((t, rest)) = tys.split_first() else { return rows.is_empty() };
         // (`A | B` in the first column: a row for each)
         if rows.iter().any(|r| matches!(r[0], Pat::Or(_))) {
@@ -1389,6 +1434,9 @@ impl Checker {
                 if self.info.variant_of.contains_key(n) {
                     return self.variant(e.id, pos, None, n);
                 }
+                if (n == "json_encode" || n == "json_decode" || n == "range") && self.callee_id != Some(e.id) {
+                    self.err(pos, format!("`{n}` is built in: call it (`{n}(..)`), or wrap it in a closure to pass it"));
+                }
                 if n == "json_encode" || n == "json_decode" {
                     let dec = n == "json_decode";
                     let t = self.fresh();
@@ -1441,6 +1489,9 @@ impl Checker {
                 }
             }
             EK::Path(tn, c) if (tn == "Map" || tn == "Set") && self.builtin_coll(tn) => {
+                if self.callee_id != Some(e.id) {
+                    self.err(pos, format!("`{tn}::{c}` is built in: call it, or wrap it in a closure to pass it"));
+                }
                 let set = tn == "Set";
                 let k = self.fresh();
                 let t = if set { Ty::Named("Set".into(), vec![k.clone()]) } else { Ty::Named("Map".into(), vec![k.clone(), self.fresh()]) };
@@ -1461,6 +1512,7 @@ impl Checker {
             }
             EK::Path(en, v) => self.variant(e.id, pos, Some(en), v),
             EK::Call(f, args) => {
+                self.callee_id = Some(f.id);
                 let ft = self.infer(f, None);
                 let mut ft = self.resolve(&ft);
                 // (a callee whose type is not known yet: a function of these arguments)
@@ -1534,11 +1586,13 @@ impl Checker {
                     }
                     let ft = self.fn_value(e.id, pos, &fname);
                     let Ty::Fn(params, ret) = ft.clone() else { unreachable!() };
-                    self.unify(recv.pos, &rt, &params[0]);
-                    if params.len() != args.len() + 1 {
-                        self.err(pos, format!("`.{name}()` takes {} argument(s), found {}", params.len() - 1, args.len()));
+                    if let Some(p0) = params.first() {
+                        self.unify(recv.pos, &rt, p0);
                     }
-                    for (a, p) in args.iter().zip(&params[1..]) {
+                    if params.len() != args.len() + 1 {
+                        self.err(pos, format!("`.{name}()` takes {} argument(s), found {}", params.len().saturating_sub(1), args.len()));
+                    }
+                    for (a, p) in args.iter().zip(params.iter().skip(1)) {
                         let t = self.infer(a, Some(p));
                         self.unify(a.pos, &t, p);
                     }
@@ -1585,6 +1639,11 @@ impl Checker {
                     // (by `==`, as the operator compares: by content)
                     (Builtin::Std(On::Array, "includes" | "index_of"), Ty::Array(t)) => self.deferred.push((pos, e.id, "eq", *t)),
                     (Builtin::Std(On::Array, "sort"), Ty::Array(t)) => self.deferred.push((pos, e.id, "ord", *t)),
+                    _ => {}
+                }
+                // (an integer literal's `abs`: its type may be decided u32 later)
+                match (b, self.resolve(&rt)) {
+                    (Builtin::Std(On::Int, "abs"), t @ Ty::Var(_)) => self.deferred.push((pos, e.id, "signed", t)),
                     _ => {}
                 }
                 if params.len() != args.len() {
@@ -1941,6 +2000,8 @@ impl Checker {
                             }
                             if !irrefutable(p) {
                                 self.err(x.pos, "a `let` pattern must always match (use `match`)");
+                            } else if has_or(p) {
+                                self.err(x.pos, "an `|` pattern in a `let`: use `match`");
                             }
                             let mut binds = vec![];
                             self.check_pat(p, &t, x.pos, &mut binds);
@@ -2528,6 +2589,16 @@ impl Checker {
 }
 
 
+/// An `|` somewhere in the pattern
+fn has_or(p: &Pat) -> bool {
+    match p {
+        Pat::Or(_) => true,
+        Pat::Tuple(ps) | Pat::Variant(_, _, ps, _) => ps.iter().any(has_or),
+        Pat::Record(_, fs, _, _) => fs.iter().any(|f| has_or(&f.1)),
+        Pat::Wild | Pat::Bind(_) | Pat::Lit(_) => false,
+    }
+}
+
 fn irrefutable(p: &Pat) -> bool {
     match p {
         Pat::Wild | Pat::Bind(_) => true,
@@ -2614,6 +2685,8 @@ impl EffWalk<'_> {
             EK::Call(f, args) => {
                 match &f.kind {
                     EK::Var(n) if self.info.effects.contains_key(n) => out.extend(self.info.effects[n].iter().cloned()),
+                    // (`P::f(p)`: the function `P$f` of an `impl`)
+                    EK::Path(tn, c) if self.info.effects.contains_key(&format!("{tn}${c}")) => out.extend(self.info.effects[&format!("{tn}${c}")].iter().cloned()),
                     EK::Var(n) if self.conts.contains(n) && self.in_closure > 0 => {
                         self.errors.push((f.pos, format!("the continuation `{n}` is called inside a closure: call it in the handler's arm itself")));
                     }
@@ -2656,7 +2729,12 @@ impl EffWalk<'_> {
                     self.errors.push((e.pos, format!("this closure performs {v:?}: an effect cannot leave a closure (handle it inside)")));
                 }
             }
-            EK::Lit(_) | EK::Path(..) => {}
+            EK::Path(tn, c) => {
+                if self.info.effects.get(&format!("{tn}${c}")).is_some_and(|s| !s.is_empty()) {
+                    self.errors.push((e.pos, format!("`{tn}::{c}` performs effects and cannot be used as a value (call it, or handle its effects in a wrapper)")));
+                }
+            }
+            EK::Lit(_) => {}
             EK::Method(r, _, args) => {
                 out.extend(self.expr(r));
                 for a in args {
@@ -2838,7 +2916,9 @@ pub fn diverges(e: &Expr) -> bool {
 pub fn breaks(body: &Expr) -> bool {
     match &body.kind {
         EK::Break => true,
-        EK::While(..) | EK::For(..) | EK::Loop(_) | EK::Closure(..) | EK::Async(_) => false,
+        // (a `for`'s iterable is evaluated outside its loop: a `break` there leaves this one)
+        EK::For(_, it, _) => breaks(it),
+        EK::While(..) | EK::Loop(_) | EK::Closure(..) | EK::Async(_) => false,
         _ => subexprs(body).into_iter().any(breaks),
     }
 }

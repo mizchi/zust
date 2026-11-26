@@ -493,18 +493,14 @@ impl Lv<'_> {
                 }
                 let n = self.frozen.len();
                 self.frozen.extend(frozen);
-                // (a guard that fails goes on to the next arms: what is live after it is its body's and theirs)
-                let mut entries = vec![];
-                for a in arms {
+                // (last arm first: a guard that fails goes on to the arms after it, their guards included, so what
+                // is live after it is its body's and theirs)
+                let mut acc: HashSet<usize> = HashSet::new();
+                for a in arms.iter().rev() {
                     let mut l = after.clone();
                     self.expr(&a.body, &mut l);
-                    entries.push(l);
-                }
-                let all: HashSet<usize> = entries.iter().flatten().copied().collect();
-                let mut acc = HashSet::new();
-                for (a, mut l) in arms.iter().zip(entries) {
                     if let Some(g) = &a.guard {
-                        l.extend(all.iter().copied());
+                        l.extend(acc.iter().copied());
                         self.expr(g, &mut l);
                     }
                     self.kill_pat(&a.pat, a.body.id, &mut l);

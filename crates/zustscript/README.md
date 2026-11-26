@@ -435,7 +435,7 @@ fn greet(u: User) -> String { let User { name, .. } = u; name }
 
 - `A | B` は入れ子にも書ける(`Some(Circle(_) | Square(_))`)。どの選択肢も同じ名前を同じ型で束縛する
 - ガード `pat if cond =>` は、パターンの名前を使える(`?` も書ける)。ガードのある腕は網羅性の検査では数えない
-- レコードのパターン `Point { x, y: py, .. }` は `match` / `if let` / `let` に書ける。書かないフィールドがあれば `..` で終える
+- レコードのパターン `Point { x, y: py, .. }` は `match` / `if let` / `let` に書ける。書かないフィールドがあれば `..` で終える。`let` には `|` を書けない(`match` で書く)
 - JS
   - `|` は 1 つの条件(`e.TAG === "A" || e.TAG === "B"`)。束縛は、合った選択肢でのその位置
   - ガードのある match はラベル付きのブロックで、腕ごとの `if` が合えばそこから抜ける
@@ -501,7 +501,7 @@ fn words(s: String) -> Map<String, i32> {
 - 配列と同じく不変: `insert` / `remove` は新しい値を返す。ほかから見えないローカル変数なら、その場で変える(`m = m.insert(k, f(m.get(k)))` の形も)
 - 順序は JS の Map / Set と同じ挿入順(既にあるキーを入れ直しても位置は変わらない)。JS では JS の `Map` / `Set` そのもので、`.d.ts` は `ReadonlyMap` / `ReadonlySet`
 - `@wasm` では、挿入順の配列と `HashMap` の索引を持つ型(`ZsMap` / `ZsSet`)。JS と同じ結果になる(`tests/collections.zsc`)。`Map::from` と `entries()`(タプル)、境界を越えることはまだできない
-- `==` では比べられない
+- `==` では比べられない。`Map` / `Set` という名前の型は宣言できない(組み込みの名前)。`Map::new` などは呼び出す形でだけ書ける(値として渡すならクロージャで包む。`json_encode` / `range` も同じ)
 
 ### JSON: `json_decode` / `json_encode`
 
@@ -520,7 +520,7 @@ fn save(ts: Array<Todo>) -> String { json_encode(ts) }
   - `Option` は `null` か値(フィールドがなければ `None`)
   - データのない enum は文字列、データのある enum は JS での値(`{ "TAG": "Circle", "_0": 1.5 }`、TS から読んだ union はその形)
   - `Map<String, V>` はオブジェクト(他のキーは `[key, value]` の配列)、`Set` は配列
-- 使えない型: i64(JSON.parse が 2^53 を超える整数を丸める)、関数、JSX、`extern type`、総称の型引数
+- 使えない型: i64(JSON.parse が 2^53 を超える整数を丸める)、`Option<Option<T>>`(`None` と `Some(None)` がどちらも `null` になる)、関数、JSX、`extern type`、総称の型引数
 - JS 層だけ(`@wasm` ではエラー)
 
 ### 代数的エフェクト(enum で宣言する)

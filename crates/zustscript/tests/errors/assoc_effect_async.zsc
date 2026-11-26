@@ -1,0 +1,2 @@
+// expect: the async fn `g` performs ["Log"]
+enum Log { Say(String) -> () } type P = { x: i32 } impl P { fn f(self) -> i32 { perform Say("x"); 1 } } async fn g(p: P) -> i32 { P::f(p) }

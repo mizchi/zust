@@ -741,8 +741,10 @@ impl<'a> Js<'a> {
             }
             EK::Match(s, arms) => {
                 // (an arm's bindings get names of their own, so they never hide the subject)
+                // (a guard may assign the local: the arms after it test the value matched, kept first)
+                let guarded = arms.iter().any(|a| a.guard.is_some());
                 let subj = match &s.kind {
-                    EK::Var(n) if matches!(self.info.callee.get(&s.id), Some(Callee::Local)) => self.local(n),
+                    EK::Var(n) if matches!(self.info.callee.get(&s.id), Some(Callee::Local)) && !guarded => self.local(n),
                     _ => {
                         let t = self.fresh();
                         let v = self.expr(s);
@@ -783,9 +785,9 @@ impl<'a> Js<'a> {
                             false
                         };
                         self.stmt_expr(&a.body, d);
+                        // (a body written as `return` may still write nothing, `{}`: the block is left either way)
                         let ends = !guarded && !open;
-                        // (a body written as `return` leaves anyway)
-                        if !ends && !matches!(d, Dest::Return) {
+                        if !ends {
                             self.line(&format!("break {label};"));
                         }
                         if guarded {
@@ -1793,6 +1795,9 @@ impl<'a> Js<'a> {
             _ => None,
         };
         if let Some(h) = prim {
+            if dec {
+                self.helpers.insert("$json_fail");
+            }
             return dec.then(|| self.helper_name(h).to_string());
         }
         if !dec && self.json_plain(t, &mut vec![]) {
@@ -1869,7 +1874,7 @@ impl<'a> Js<'a> {
                     .iter()
                     .map(|(f, t)| {
                         let c = conv(self, t, &format!("v{}", member(f)), &format!("p + {}", js_str(&format!(".{f}"))));
-                        format!("{}: {c}", js_str(f))
+                        format!("{}: {c}", json_key(f))
                     })
                     .collect();
                 format!("{}  return {{ {} }};\n", if dec { object } else { "" }, cs.join(", "))
@@ -1888,11 +1893,11 @@ impl<'a> Js<'a> {
                     let _ = writeln!(s, "  switch (v{}) {{", member(&key));
                     for (v, fs) in &vs {
                         let tag = self.tag_js(&n, v);
-                        let mut parts = vec![format!("{}: {tag}", js_str(&key))];
+                        let mut parts = vec![format!("{}: {tag}", json_key(&key))];
                         for (k, ft) in fs.iter().enumerate() {
                             let fk = self.field_key(&n, v, k);
                             let c = conv(self, ft, &format!("v{}", member(&fk)), &format!("p + {}", js_str(&format!(".{fk}"))));
-                            parts.push(format!("{}: {c}", js_str(&fk)));
+                            parts.push(format!("{}: {c}", json_key(&fk)));
                         }
                         let _ = writeln!(s, "    case {tag}: return {{ {} }};", parts.join(", "));
                     }
@@ -2540,6 +2545,12 @@ pub fn extern_check(items: &[Item], info: &Info) -> Option<(String, Vec<(usize, 
 }
 
 /// The name of the shared runtime module (`zsc-runtime.js` and `.d.ts`, written next to the modules)
+/// A property name in an object literal the JSON converters build: `__proto__` as a computed key, so it is an own
+/// property, not the object's prototype
+fn json_key(f: &str) -> String {
+    if f == "__proto__" { format!("[{}]", js_str(f)) } else { js_str(f) }
+}
+
 /// The JS of the helper `name` (the wasm glue shares some: `$to_f64`)
 pub fn helper_code(name: &str) -> &'static str {
     HELPERS.iter().find(|h| h.0 == name).map_or("", |h| h.1)
