@@ -12516,7 +12516,10 @@ impl Session {
         // One with no operator or call of its own (`= 1;`, `= u8::MAX;`, `= A;`) has none. One that is not placed is
         // at the constant's line, as before)
         if !self.const_lines.is_empty() {
-            let (mut placed, mut unplaced) = (vec![], vec![]);
+            let mut placed = vec![];
+            // (each one's error, and whether it is placed at its operation; the others' at their lines)
+            let mut errs_of: FxMap<&str, (String, bool)> = FxMap::default();
+            let mut at_lines: Vec<(&str, String)> = vec![];
             let own = |c: &crate::program::ConstDef| c.item < a.prog.prelude_from && !a.ext_items.get(c.item as usize).copied().unwrap_or(false) && !c.name.contains("::");
             for c in a.prog.consts.iter().filter(|c| (c.ty.is_int() || c.ty == Ty::Bool) && own(c) && c.expr.bytes().any(|b| matches!(b, b'+' | b'-' | b'*' | b'/' | b'%' | b'<' | b'>' | b'('))) {
                 let Err(e) = a.prog.const_int(&c.name, 0) else { continue };
@@ -12529,19 +12532,19 @@ impl Session {
                     Some(eq) => format!("{}:1: in constant `{}`: {e}", src[..eq.min(src.len())].matches('\n').count() + 1, c.name),
                     None => unhoist_err(&a, format!("{}:1: in constant `{}`: {e}", a.items[c.item as usize].line, c.name)),
                 };
-                match eq.and_then(|eq| const_op_err(&a.prog, &c.name, src, eq)) {
-                    Some(Some(m)) => placed.push(m),
-                    // (in another constant it reads: that one's error, at its operation; at this one only when no
-                    // other has it (an associated constant's))
-                    Some(None) => errs.push(at_line),
-                    None => unplaced.push(at_line),
+                let at_op = eq.and_then(|eq| const_op_err(&a.prog, &c.name, src, eq)).flatten();
+                errs_of.insert(&c.name, (e, at_op.is_some()));
+                match at_op {
+                    Some(m) => placed.push(m),
+                    None => at_lines.push((&c.name, at_line)),
                 }
             }
-            // (and not at a constant that reads one of them, `const X: u8 = Y + 0;`, where a fn read it)
-            let msgs: FxSet<&str> = placed.iter().filter_map(|m| m.split_once(": ").map(|x| x.1)).collect();
-            errs.retain(|e| !(e.ends_with("(E0080)") && e.split_once(": in constant `").and_then(|x| x.1.split_once("`: ")).is_some_and(|x| msgs.contains(x.1))));
+            // (and not at a constant whose error is that of a constant it reads that has it placed, `const X: u8 = Y +
+            // 0;` (where a fn read it too); one that reads an associated constant has it at its line)
+            let reads_placed = |n: &str, m: &str| const_reads(&a.prog, n).iter().any(|r| const_err_placed(&a.prog, &errs_of, r, m, 0));
+            errs.retain(|e| !(e.ends_with("(E0080)") && e.split_once(": in constant `").and_then(|x| x.1.split_once("`: ")).is_some_and(|(n, m)| reads_placed(n, m))));
             errs.extend(placed);
-            errs.extend(unplaced);
+            errs.extend(at_lines.into_iter().filter(|(n, e)| !e.split_once("`: ").is_some_and(|(_, m)| reads_placed(n, m))).map(|x| x.1));
         }
         self.const_lines.clear();
         if errs.is_empty() {
@@ -12634,6 +12637,43 @@ fn const_init_eq(src: &str, name: &str) -> Option<usize> {
         eq += 1;
     }
     Some(eq)
+}
+
+/// The constants constant `n`'s initializer names (`A`, `T::W`)
+#[cold]
+fn const_reads(prog: &Program, n: &str) -> Vec<String> {
+    use crate::parse::TokKind;
+    let Some(ts) = prog.const_index.get(n).and_then(|&ci| crate::parse::tokenize(&prog.consts[ci as usize].expr).ok()) else { return vec![] };
+    let mut out = vec![];
+    let colons = |k: usize| ts.get(k).is_some_and(|t| t.text == ":") && ts.get(k + 1).is_some_and(|t| t.text == ":");
+    for (k, t) in ts.iter().enumerate().filter(|(_, t)| t.kind == TokKind::Ident) {
+        // (`T::W`: an associated constant's two names; not `T` alone)
+        if colons(k + 1) {
+            continue;
+        }
+        let x = if k >= 3 && colons(k - 2) && ts[k - 3].kind == TokKind::Ident { format!("{}::{}", ts[k - 3].text, t.text) } else { t.text.clone() };
+        if prog.const_index.contains_key(x.as_str()) {
+            out.push(x);
+        }
+    }
+    out
+}
+
+/// Whether the E0080 `msg` of a constant that reads constant `n` is n's, placed at n's operation, or that of a
+/// constant n reads, placed so (errs_of: the error of each constant of the unused-constant pass, and whether it is
+/// placed): so that it is not reported again at the constant that reads it
+#[cold]
+fn const_err_placed(prog: &Program, errs_of: &FxMap<&str, (String, bool)>, n: &str, msg: &str, depth: u32) -> bool {
+    if depth > 16 {
+        return false;
+    }
+    match errs_of.get(n) {
+        Some((m, true)) => m == msg,
+        Some((m, false)) if m != msg => false,
+        // (one the pass does not take, an associated constant: its error must be msg too)
+        None if !prog.const_int(n, 0).is_err_and(|e| e == msg) => false,
+        _ => const_reads(prog, n).iter().any(|r| const_err_placed(prog, errs_of, r, msg, depth + 1)),
+    }
 }
 
 /// The E0080 of constant `name`, whose initializer follows the `=` at src[eq], at the operation: the initializer

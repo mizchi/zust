@@ -3180,6 +3180,13 @@ fn const_overflow_and_division_by_zero_are_e0080_at_the_operation() {
     let d = all(src);
     assert_eq!(d.iter().map(|d| d.0).collect::<Vec<_>>(), vec![5, 11], "{d:?}");
     assert!(d[0].2.ends_with("attempt to compute `0_u8 - 1_u8`, which would overflow (E0080)") && d[1].2.ends_with("attempt to compute `u8::MAX + 1_u8`, which would overflow (E0080)"), "{d:?}");
+    // (not when another constant has the same error placed and this one does not read it: A's and T::W's (at X's
+    // line, zustc's place; rustc's is at W, 4:19))
+    let src = "const A: u8 = 200 + 100;\nstruct T;\nimpl T {\n    const W: u8 = 200 + 100;\n}\nconst X: u8 = T::W + 0;\nfn main() {}\n";
+    assert_eq!(all(src), vec![over(1, 15, "200_u8 + 100_u8"), (6, 1, "in constant `X`: attempt to compute `200_u8 + 100_u8`, which would overflow (E0080)".to_string())]);
+    // (one a macro writes that reads a constant whose error is placed: that one's only)
+    let src = "const Y: u8 = 200 + 100;\nmacro_rules! k {\n    ($n:ident) => {\n        const $n: u8 = Y + 0;\n    };\n}\nk!(X);\nfn main() {}\n";
+    assert_eq!(all(src), vec![over(1, 15, "200_u8 + 100_u8")]);
     // (`pow` and `abs`: the operation in core that overflows, at the call)
     let src = "const P: u8 = 2u8.pow(8);\nconst Q: i8 = i8::MIN.abs();\nconst V: i32 = (3i32.pow(21));\nconst W: u64 = 10u64.pow(20);\nconst X: i16 = (-2i16).pow(15) - 1;\nconst Y: u8 = 3u8.pow(5) + 2u8.pow(7);\nconst OK: u32 = 2u32.pow(31) + 7i8.abs() as u32;\nfn main() {}\n";
     assert_eq!(
