@@ -1110,6 +1110,20 @@ mod tests {
         assert!(out.contains("unsafe impl Send for a__DIR") && out.contains("unsafe impl Send for b__DIR"), "{out}");
     }
 
+    /// An attribute's names and a macro's are no items (#251): typenum's `#[derive(Eq, ..)]` beside the `pub type Eq<A,
+    /// B>` of `pub use crate::operator_aliases::*;` became `typenum__operator_aliases__Eq`. Nor do `#[repr(C)]` beside a
+    /// `struct C`, `#[default]` beside a `fn default` and `write!` beside a `fn write` change; a macro's arguments and the
+    /// alias in a type's place are still renamed
+    #[test]
+    fn attributes_and_macro_names_are_not_items() {
+        let src = "mod typenum {\n    pub mod operator_aliases {\n        pub type Eq<A, B> = (A, B);\n        pub struct C;\n        pub fn write() {}\n        pub fn default() {}\n    }\n    pub use crate::operator_aliases::*;\n    #[derive(Eq, PartialEq, Clone, core::cmp::Ord, Debug, Default)]\n    #[repr(C)]\n    pub struct Greater;\n    #[derive(Default)]\n    pub enum E { #[default] A }\n    pub fn f(out: &mut String, e: Eq<u8, u16>) {\n        write!(out, \"{}\", default()).unwrap();\n        write![out, \"{:?}\", e].unwrap();\n    }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["typenum".to_string()]).unwrap();
+        assert!(out.contains("#[derive(Eq, PartialEq, Clone, core::cmp::Ord, Debug, Default)]\n    #[repr(C)]\n    pub struct typenum__Greater;"), "{out}");
+        assert!(out.contains("pub enum typenum__E { #[default] A }"), "{out}");
+        assert!(out.contains("e: typenum__operator_aliases__Eq<u8, u16>)"), "{out}");
+        assert!(out.contains("{\n        write!(out, \"{}\", typenum__operator_aliases__default()).unwrap();\n        write![out, \"{:?}\", e].unwrap();"), "{out}");
+    }
+
     #[test]
     fn formatting_and_comments_do_not_change_hash() {
         let a = hashes("fn f(x: u32) -> u32 { x + 1 }\nfn g() {}");
@@ -2233,10 +2247,13 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
             }
         }
         let mut at: Vec<(usize, usize)> = vec![]; // (トークン, renames の番号)
+        // (not an attribute's tokens or a macro's name: `#[derive(Debug)]` / `write!(..)` beside a nested `struct Debug` /
+        // `fn write`)
+        let no_item = macro_ns_toks(&toks, s);
         for (ri, r) in renames.iter().enumerate() {
             let mut k = r.0 + 1;
             while k < r.1 {
-                if toks[k].0 == 0 && &s[toks[k].1..toks[k].2] == r.2.as_slice() {
+                if toks[k].0 == 0 && !no_item[k] && &s[toks[k].1..toks[k].2] == r.2.as_slice() {
                     at.push((k, ri));
                 }
                 k += 1;
@@ -3583,6 +3600,11 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     for &v in &variant_toks {
         skip[v] = true;
     }
+    // (nor an attribute's tokens or a macro's name: `#[derive(Eq)]` / `write!(..)` beside a module's `type Eq` /
+    // `fn write`)
+    for (sk, m) in skip.iter_mut().zip(macro_ns_toks(&toks, s)) {
+        *sk |= m;
+    }
     let mut def_tok: Vec<bool> = vec![false; toks.len()];
     for d in &defs {
         def_tok[d.2] = true;
@@ -4676,6 +4698,48 @@ impl<'a> Names<'a> {
             _ => None,
         }
     }
+}
+
+/// The tokens (lexer tokens, s their text) that name no item, which renaming an item leaves as they are: an
+/// attribute's, `#[derive(Eq, Debug)]` / `#[repr(C)]` / `#![allow(x)]` (its path and a derive's names are macros, the
+/// rest its own arguments), and the path of a macro call, `write!(..)` / `m::mac![..]` (the macro namespace, where no
+/// item is). typenum's `#[derive(Eq, ..)]` took the `pub type Eq<A, B>` that `operator_aliases::*` brings,
+/// `typenum__operator_aliases__Eq`: no derive has that name
+fn macro_ns_toks(toks: &[(u8, usize, usize)], s: &[u8]) -> Vec<bool> {
+    let sym = |k: usize, c: u8| toks[k].0 == 1 && toks[k].2 == toks[k].1 + 1 && s[toks[k].1] == c;
+    let mut out = vec![false; toks.len()];
+    let mut k = 0;
+    while k + 2 < toks.len() {
+        if sym(k, b'#') && (sym(k + 1, b'[') || (sym(k + 1, b'!') && sym(k + 2, b'['))) {
+            let open = if sym(k + 1, b'[') { k + 1 } else { k + 2 };
+            let mut d = 0usize;
+            let mut e = open;
+            while e < toks.len() {
+                if sym(e, b'[') {
+                    d += 1;
+                } else if sym(e, b']') {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                e += 1;
+            }
+            out[open..e.min(toks.len())].fill(true);
+            k = e + 1;
+            continue;
+        }
+        if toks[k].0 == 0 && sym(k + 1, b'!') && (sym(k + 2, b'(') || sym(k + 2, b'[') || sym(k + 2, b'{')) {
+            out[k] = true;
+            let mut j = k;
+            while j >= 3 && sym(j - 1, b':') && sym(j - 2, b':') && toks[j - 3].0 == 0 {
+                j -= 3;
+                out[j] = true;
+            }
+        }
+        k += 1;
+    }
+    out
 }
 
 /// Whether the item, `mod` or `use` whose keyword is at token kw is written `pub` (`pub`, `pub(crate)`, ..; past
