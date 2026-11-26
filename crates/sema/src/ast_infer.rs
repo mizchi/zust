@@ -2391,8 +2391,14 @@ impl Inf<'_> {
         while sid.is_some() {
             let x = self.find(v);
             match self.shape[x as usize] {
-                Some(Shape::Ref(m, i)) => (wrap, v) = (Some(m), i),
-                Some(Shape::Bx(i)) => (wrap, v) = (None, i),
+                Some(Shape::Ref(m, i)) => {
+                    wrap = Some(m);
+                    v = i;
+                }
+                Some(Shape::Bx(i)) => {
+                    wrap = None;
+                    v = i;
+                }
                 _ => break,
             }
         }
