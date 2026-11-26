@@ -675,14 +675,14 @@ impl Cx<'_> {
             }
             let std_target = match t {
                 Some(Ty::Str | Ty::Slice(_)) => true,
-                Some(Ty::Struct(sid)) => matches!(self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), "String" | "Vec"),
+                Some(Ty::Struct(sid)) => matches!(self.std_struct_name(sid), "String" | "Vec"),
                 _ => false,
             };
             // (not where a `&mut Vec<T>` is expected: Vec's other AsMut, `AsMut<Vec<T>>`)
             let wants_vec = matches!(expected, Some(Ty::Ref(true, Ty::Struct(sid))) if self.prog.structs[self.prog.base_of(*sid) as usize].name == "Vec");
             if std_target && !shared && !wants_vec {
                 // (a String's `as_mut_str()`: `&mut s[..]` of a String is a `&str` here)
-                let is_string = matches!(t, Some(Ty::Struct(sid)) if self.prog.structs[self.prog.base_of(sid) as usize].name == "String");
+                let is_string = matches!(t, Some(Ty::Struct(sid)) if self.std_struct_name(sid) == "String");
                 let ne = if is_string {
                     mcall(paren(recv.clone()), "as_mut_str", vec![])
                 } else {
@@ -723,7 +723,7 @@ impl Cx<'_> {
                     t = Some(*i);
                 }
                 let name = match t {
-                    Some(Ty::Struct(sid)) => self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(),
+                    Some(Ty::Struct(sid)) => self.std_struct_name(sid),
                     _ => "",
                 };
                 if !shared && (matches!(t, Some(Ty::Slice(_) | Ty::Str)) || name == "Vec" || name == "String") {
@@ -733,7 +733,8 @@ impl Cx<'_> {
                     } else {
                         paren(Expr::Ref(true, Box::new(Expr::Index(Box::new(r), Box::new(full_range()), crate::parse::Span::default()))))
                     };
-                    let m2 = Expr::MethodCall(Box::new(nr), method.to_string(), gargs.clone(), margs.clone(), crate::parse::Span::default());
+                    // (the call's span: an unsafe method's check needs it)
+                    let m2 = Expr::MethodCall(Box::new(nr), method.to_string(), gargs.clone(), margs.clone(), msp);
                     return self.method_call(&m2, expected);
                 }
             }
@@ -2078,6 +2079,16 @@ impl Cx<'_> {
             }
         }
         Ok(())
+    }
+
+    /// The name of std's (the prelude's) struct sid's base, "" for a program's own type (`struct String` of its own)
+    pub(crate) fn std_struct_name(&self, sid: u32) -> &str {
+        let b = self.prog.base_of(sid);
+        if self.prog.struct_item.get(b as usize).is_some_and(|&i| i >= self.prog.prelude_from) {
+            self.prog.structs[b as usize].name.as_str()
+        } else {
+            ""
+        }
     }
 
     /// 組み込みの AsRef (`s.as_ref()` → `s.as_bytes()` / `&s[..]`)。受け手が as_ref を持つ構造体 (Option など) なら None

@@ -3563,19 +3563,32 @@ impl Program {
             if matches!(b, Ty::Ref(..)) {
                 return false;
             }
-            let name = match b {
-                Ty::Struct(sid) => self.structs[self.base_of(sid) as usize].name.as_str(),
+            // (std's String / Vec, not a program's type of the name)
+            let std_name = match b {
+                Ty::Struct(sid) if self.struct_item.get(self.base_of(sid) as usize).is_some_and(|&i| i >= self.prelude_from) => {
+                    self.structs[self.base_of(sid) as usize].name.as_str()
+                }
                 _ => "",
             };
-            let text = b == Ty::Str || name == "String";
-            let seq = matches!(b, Ty::Array(..) | Ty::Slice(_)) || name == "Vec";
-            if (text && inner == "<str>") || (seq && inner.starts_with("<[")) {
-                return true;
+            let text = b == Ty::Str || std_name == "String";
+            let elem = match b {
+                Ty::Array(e, _) | Ty::Slice(e) => Some(*e),
+                Ty::Struct(sid) if std_name == "Vec" => self.structs[sid as usize].args.first().copied(),
+                _ => None,
+            };
+            if text {
+                return inner == "<str>";
             }
-            if let Ty::Struct(sid) = b {
-                return self.impls.contains(&(self.base_of(sid), "AsMut".to_string()));
+            if let Some(e) = elem {
+                // (the slice's element is the sequence's: not `Vec<u16>: AsMut<[u8]>`. Only told apart for primitive
+                // types; another element (a parameter's placeholder, `[Item]`) is taken as the sequence's)
+                let Some(x) = inner.strip_prefix("<[").and_then(|r| r.strip_suffix("]>")) else { return false };
+                return !matches!((Ty::prim(x), Ty::prim(&self.tn(e))), (Some(a), Some(c)) if a != c);
             }
-            return false;
+            // (a program's type: its impls, by the general rule below, which looks at the instance)
+            if !matches!(b, Ty::Struct(_)) {
+                return false;
+            }
         }
         // The targets of collect (built-in): String / Vec / HashMap and so on
         if tr.starts_with("FromIterator") {
