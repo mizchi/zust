@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795673818445,
+  "lastUpdate": 1795673821545,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -136659,6 +136659,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/652a74cd83e461bdf1b09c516ff8e3aa3b27bc1b"
         },
         "date": 1795673242809,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.69,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1915,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.88,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1557,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 72.95,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5388,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "181a2c28f9ea69e7854cdd41190d3ac17e3df08e",
+          "message": "zurgo check: every crate's errors at once, not only the first (#216)\n\n`zurgo check` prepares the crates as `zurgo build` does (build scripts and proc macros run), then type checks each one in dependency order with Session::check and prints all its errors, one `file:line:col: message` line each, instead of compiling it. A crate's errors do not stop the crates that depend on it. A crate that cannot be prepared (unreadable or unexpandable source, a failing build script, a proc-macro crate that cannot be read or does not build, or, without the proc-macro server, one that uses a stub's macro) has that error, the crates that use it are reported as not checked, and the others are checked. No objects or fingerprints are written. A build stops as before.\n\nOn wasm-bindgen 0.2.130 for wasm32: 63 errors in one run (~11 s), where a build shows one. KPIs within ±0.6%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9hDiRLf4kwKxcyPQ7u",
+          "timestamp": "2026-11-26T15:01:52+09:00",
+          "tree_id": "97d18e5d771017bfacc0fd1eacd805d4914d5ccf",
+          "url": "https://github.com/mizchi/zust/commit/181a2c28f9ea69e7854cdd41190d3ac17e3df08e"
+        },
+        "date": 1795673821054,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
