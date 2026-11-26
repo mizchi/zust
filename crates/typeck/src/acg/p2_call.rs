@@ -664,6 +664,34 @@ impl Cx<'_> {
                 return self.expr(ne, expected);
             }
         }
+        // `x.as_mut()` (AsMut: String / str to `&mut str`, Vec / arrays / slices to `&mut [T]`): `&mut x[..]`, of a
+        // receiver that is one of them or `&mut` to one (Option's and Box's own `as_mut` are not these)
+        if method == "as_mut" && margs.is_empty() {
+            let mut t = self.peek(recv);
+            let mut shared = false;
+            while let Some(Ty::Ref(m, i)) = t {
+                shared |= !m;
+                t = Some(*i);
+            }
+            let std_target = match t {
+                Some(Ty::Str | Ty::Slice(_)) => true,
+                Some(Ty::Struct(sid)) => matches!(self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), "String" | "Vec"),
+                _ => false,
+            };
+            // (not where a `&mut Vec<T>` is expected: Vec's other AsMut, `AsMut<Vec<T>>`)
+            let wants_vec = matches!(expected, Some(Ty::Ref(true, Ty::Struct(sid))) if self.prog.structs[self.prog.base_of(*sid) as usize].name == "Vec");
+            if std_target && !shared && !wants_vec {
+                // (a String's `as_mut_str()`: `&mut s[..]` of a String is a `&str` here)
+                let is_string = matches!(t, Some(Ty::Struct(sid)) if self.prog.structs[self.prog.base_of(sid) as usize].name == "String");
+                let ne = if is_string {
+                    mcall(paren(recv.clone()), "as_mut_str", vec![])
+                } else {
+                    Expr::Ref(true, Box::new(Expr::Index(Box::new(paren(recv.clone())), Box::new(full_range()), crate::parse::Span::default())))
+                };
+                let ne = self.keep_expr(ne);
+                return self.expr(ne, expected);
+            }
+        }
         let tf: Option<&[GArg]> = (!gargs.is_empty()).then_some(&gargs[..]);
         // `x.unwrap()` / `x.expect(..)`: panic の場所 (メソッド名の位置) を先に書いておく (#[track_caller] 相当)
         // (and `c.borrow()` / `c.replace(..)` .. of a RefCell, whose overlapping borrow panics at the call, as in std)
@@ -685,6 +713,30 @@ impl Cx<'_> {
         // 受け手が `a.as_slice()` (a: 配列) なら `(&a[..])` にして呼び直す (`a.as_slice().len()`)
         // (an array's `as_mut()` too: its one AsMut is `AsMut<[T]>`, `seed.as_mut().iter_mut()` in rand_core)
         if let Expr::MethodCall(ir, iname, _, iargs, _) = strip_paren(recv) {
+            // (and a Vec's / slice's / String's `as_mut()`, `v.as_mut().len()`: `(&mut v[..])` / `(s.as_mut_str())`, as
+            // the call alone is lowered, so the method is the slice's / str's. Not through a shared reference)
+            if iargs.is_empty() && iname == "as_mut" {
+                let mut t = self.peek(ir);
+                let mut shared = false;
+                while let Some(Ty::Ref(m, i)) = t {
+                    shared |= !m;
+                    t = Some(*i);
+                }
+                let name = match t {
+                    Some(Ty::Struct(sid)) => self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(),
+                    _ => "",
+                };
+                if !shared && (matches!(t, Some(Ty::Slice(_) | Ty::Str)) || name == "Vec" || name == "String") {
+                    let r = paren((**ir).clone());
+                    let nr = if name == "String" {
+                        paren(mcall(r, "as_mut_str", vec![]))
+                    } else {
+                        paren(Expr::Ref(true, Box::new(Expr::Index(Box::new(r), Box::new(full_range()), crate::parse::Span::default()))))
+                    };
+                    let m2 = Expr::MethodCall(Box::new(nr), method.to_string(), gargs.clone(), margs.clone(), crate::parse::Span::default());
+                    return self.method_call(&m2, expected);
+                }
+            }
             if iargs.is_empty() && matches!(iname.as_str(), "as_slice" | "as_mut_slice" | "as_mut") {
                 if let Some(Ty::Array(..)) = self.peek(ir).map(|t| self.strip_refs(t)) {
                     let r = (**ir).clone();

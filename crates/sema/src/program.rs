@@ -3552,6 +3552,31 @@ impl Program {
             }
             return false;
         }
+        // The built-in AsMut<str> / AsMut<[T]> (std's: `String` and `str` to `str`, `Vec` / arrays / slices to `[T]`,
+        // and `&mut T` to what T's is; not `&T`)
+        if tr.starts_with("AsMut") && tr.contains('<') {
+            let inner: String = tr["AsMut".len()..].chars().filter(|c| !c.is_whitespace()).collect();
+            let mut b = t;
+            while let Ty::Ref(true, i) = b {
+                b = *i;
+            }
+            if matches!(b, Ty::Ref(..)) {
+                return false;
+            }
+            let name = match b {
+                Ty::Struct(sid) => self.structs[self.base_of(sid) as usize].name.as_str(),
+                _ => "",
+            };
+            let text = b == Ty::Str || name == "String";
+            let seq = matches!(b, Ty::Array(..) | Ty::Slice(_)) || name == "Vec";
+            if (text && inner == "<str>") || (seq && inner.starts_with("<[")) {
+                return true;
+            }
+            if let Ty::Struct(sid) = b {
+                return self.impls.contains(&(self.base_of(sid), "AsMut".to_string()));
+            }
+            return false;
+        }
         // The targets of collect (built-in): String / Vec / HashMap and so on
         if tr.starts_with("FromIterator") {
             if let Ty::Struct(sid) = t {
@@ -7551,7 +7576,12 @@ fn syn_unify(a: &TySyn, ga: &[String], b: &TySyn, gb: &[String], sub: &mut Vec<(
         };
         if let Some(n) = var(a, sa) {
             let sized = !g[sa as usize].iter().any(|x| x.strip_prefix('?') == Some(n.as_str()));
-            if sized && matches!(b, TySyn::Slice(_) | TySyn::Str | TySyn::Dyn(_)) {
+            // (and std's unsized types, `impl<T> AsMut<T>` beside `impl AsMut<::std::path::Path>`: `Path`, `OsStr`,
+            // `CStr`, by their last segment)
+            let std_unsized = |t: &TySyn| {
+                matches!(t, TySyn::Named(m) if matches!(m.rsplit("::").next().unwrap_or(m), "Path" | "OsStr" | "CStr"))
+            };
+            if sized && (matches!(b, TySyn::Slice(_) | TySyn::Str | TySyn::Dyn(_)) || std_unsized(b)) {
                 return false;
             }
             if let Some((_, (s2, t2))) = sub.iter().find(|x| x.0 == (sa, n.clone())).cloned() {

@@ -2457,6 +2457,9 @@ impl String {
     pub fn as_str(&self) -> &str {
         unsafe { core::str::from_utf8_unchecked(self.vec.as_slice()) }
     }
+    pub fn as_mut_str(&mut self) -> &mut str {
+        unsafe { &mut *(self.vec.as_mut_slice() as *mut [u8] as *mut str) }
+    }
     pub fn clone(&self) -> String {
         String {
             vec: self.vec.clone(),

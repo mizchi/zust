@@ -1472,6 +1472,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("String") && (sc.has("&*") || sc.has("[..]")) {
         need.insert("as_str");
     }
+    // (`s.as_mut()` of a String: acg rewrites it to `s.as_mut_str()`)
+    if need.contains("String") && need.contains("as_mut") {
+        need.extend(["as_mut_str", "as_mut_slice"]);
+    }
     // A collect into String uses push_str when the elements are &str / String
     if need.contains("collect") && need.contains("String") {
         need.extend(["push_str", "as_str"]);

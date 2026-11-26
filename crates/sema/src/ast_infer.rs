@@ -2848,14 +2848,9 @@ impl Inf<'_> {
                 let sl = self.with(Shape::Slc(el));
                 self.with(Shape::Ref(n == "as_mut_slice", sl))
             }
-            // (an array's as_mut: its one AsMut is `AsMut<[T]>`; a Vec's has two, left to the use)
-            "as_mut" if args.is_empty() && {
-                let mut t = self.resolve(r);
-                while let Some(Ty::Ref(_, i)) = t {
-                    t = Some(*i);
-                }
-                matches!(t, Some(Ty::Array(..)))
-            } => {
+            // (an array's / slice's / Vec's as_mut: `&mut [T]`, as acg lowers it (a Vec's `AsMut<Vec<T>>` only where the
+            // expected type says so, which acg leaves to the use))
+            "as_mut" if args.is_empty() => {
                 let sl = self.with(Shape::Slc(el));
                 self.with(Shape::Ref(true, sl))
             }
