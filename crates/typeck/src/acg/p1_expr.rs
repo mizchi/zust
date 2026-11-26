@@ -1615,7 +1615,7 @@ impl Cx<'_> {
                 self.b.ins().jump(t, &[]);
                 Ok(self.dead())
             }
-            Expr::Return(value) => {
+            Expr::Return(value, pos) => {
                 let ret = self.ret;
                 let v = match value {
                     Some(e) => {
@@ -1637,9 +1637,10 @@ impl Cx<'_> {
                         v
                     }
                     None => {
-                        // (E0069: `return;` in a fn of another return type, `!` too)
+                        // (E0069: `return;` in a fn of another return type, `!` too; at the keyword, also where it
+                        // has no statement of its own: `0 => return,`)
                         if self.same(SP, Ty::Unit, ret).is_err() {
-                            return err(SP, "`return;` in a function whose return type is not `()` (E0069)");
+                            return Err(self.at(*pos, "`return;` in a function whose return type is not `()` (E0069)".to_string()));
                         }
                         None
                     }
@@ -4810,7 +4811,7 @@ fn diverging_tail(e: &Expr) -> bool {
     fn has_unit_return(e: &Expr) -> bool {
         let mut found = false;
         crate::ast_closure::each_child_pub(e, &mut |c| {
-            found |= matches!(c, Expr::Return(None)) || (!matches!(c, Expr::Closure(..)) && has_unit_return(c))
+            found |= matches!(c, Expr::Return(None, _)) || (!matches!(c, Expr::Closure(..)) && has_unit_return(c))
         });
         found
     }
@@ -4826,7 +4827,7 @@ fn diverging_tail(e: &Expr) -> bool {
     }
     match tail(e) {
         Expr::Loop(..) => !has_break(tail(e)),
-        Expr::Return(_) => true,
+        Expr::Return(..) => true,
         Expr::Macro(p, _, _) if p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")) => has_unit_return(e),
         _ => false,
     }
