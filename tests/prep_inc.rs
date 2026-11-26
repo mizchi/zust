@@ -329,3 +329,26 @@ fn main() { let _ = a() + b() + c(); }
     assert!(base != in_c && in_c != again && again != in_a);
     assert_eq!(through_memo(&[base.to_string(), in_c, again, in_a]), vec![false, true, true]);
 }
+
+/// A macro that calls a macro its input names (`($dispatch:ident) => { $dispatch!() }`, named as the macro itself or
+/// another item-free one) may make an item, whatever that macro makes: a call of it is kept in the skeletons. Here `dispatch!(mkf)` makes `fn inner`, moved out of `a`'s body and
+/// numbered with `b`'s (`inner__h0`, `inner__h1`): an edit of `b` gives the full preparation's names
+#[test]
+fn prep_inc_macro_called_through_a_metavariable() {
+    let base = "\
+macro_rules! mkf { () => {{ fn inner() -> u8 { 1 } inner() }}; }
+macro_rules! dispatch { ($dispatch:ident) => { $dispatch!() }; }
+fn a() -> u8 {
+    dispatch!(mkf)
+}
+fn b() -> u8 {
+    let q = { fn inner() -> u8 { 2 } inner() };
+    q
+}
+fn main() { let _ = a() + b(); }
+";
+    let edited = base.replace("    q\n}", "    let _z = 1;\n    q\n}");
+    let again = edited.replace("let _z = 1;", "let _z = 2;");
+    assert!(base != edited && edited != again);
+    assert_eq!(through_memo(&[base.to_string(), edited, again]), vec![false, true]);
+}

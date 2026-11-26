@@ -521,7 +521,8 @@ struct MacroDef {
 /// The keywords an item starts with (or has: `impl`, `extern`): tokens without any of them make no item
 const ITEM_WORDS: [&[u8]; 14] = [b"fn", b"struct", b"enum", b"impl", b"trait", b"mod", b"use", b"static", b"const", b"macro_rules", b"macro", b"type", b"union", b"extern"];
 
-/// Whether the tokens a..b have an item's keyword, and the macros they call (`name!`)
+/// Whether the tokens a..b have an item's keyword, and the macros they call (`name!`). A call through a metavariable
+/// (`$m!()`, the macro its input names) may make anything: it counts as an item's keyword
 fn items_and_calls(s: &[u8], toks: &[(u8, usize, usize)], a: usize, b: usize) -> (bool, Vec<String>) {
     let mut items = false;
     let mut calls: Vec<String> = vec![];
@@ -532,6 +533,10 @@ fn items_and_calls(s: &[u8], toks: &[(u8, usize, usize)], a: usize, b: usize) ->
         let w = &s[toks[m].1..toks[m].2];
         items |= ITEM_WORDS.contains(&w);
         if m + 1 < toks.len() && toks[m + 1].0 == 1 && s[toks[m + 1].1] == b'!' {
+            if m > 0 && toks[m - 1].0 == 1 && s[toks[m - 1].1] == b'$' && toks[m - 1].2 == toks[m].1 {
+                items = true;
+                continue;
+            }
             let w = String::from_utf8_lossy(w).into_owned();
             if !calls.contains(&w) {
                 calls.push(w);
@@ -593,14 +598,29 @@ fn macro_defs(t: &str) -> Vec<MacroDef> {
 /// The macros whose calls make no item: no rules of theirs have an item's keyword, and they call only such macros and
 /// std's that expand to expressions (to a fixed point; for a name defined twice, all its definitions). Sorted as names
 fn item_free(defs: &[MacroDef], names: &[String]) -> Vec<String> {
-    let mut free: Vec<String> = names.iter().filter(|n| defs.iter().filter(|d| &d.name == *n).all(|d| !d.items)).cloned().collect();
+    // (each name's definitions: whether one has an item's keyword, and all the macros they call)
+    let mut by_name: FxMap<&str, (bool, Vec<&str>)> = FxMap::default();
+    for d in defs {
+        let e = by_name.entry(d.name.as_str()).or_default();
+        e.0 |= d.items;
+        e.1.extend(d.calls.iter().map(|c| c.as_str()));
+    }
+    let mut free: crate::fxhash::FxSet<&str> = by_name.iter().filter(|(_, e)| !e.0).map(|(n, _)| *n).collect();
+    // (a round takes away those that call a macro no longer free; until a round takes none)
     loop {
-        let was = free.clone();
-        free.retain(|n| defs.iter().filter(|d| &d.name == n).all(|d| d.calls.iter().all(|c| was.contains(c) || (!names.contains(c) && std_expr_macro(c)))));
-        if free.len() == was.len() {
-            return free;
+        let out: Vec<&str> = free
+            .iter()
+            .copied()
+            .filter(|n| !by_name[n].1.iter().all(|c| free.contains(c) || (!by_name.contains_key(c) && std_expr_macro(c))))
+            .collect();
+        if out.is_empty() {
+            break;
+        }
+        for n in out {
+            free.remove(n);
         }
     }
+    names.iter().filter(|n| free.contains(n.as_str())).cloned().collect()
 }
 
 /// Skeleton: within fn bodies, removes the tokens that are not items / calls of user macros that may make one (and thread_local!) /
