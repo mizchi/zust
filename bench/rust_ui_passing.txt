@@ -732,6 +732,7 @@ run-pass	binding/nil-pattern.rs
 run-pass	binding/nullary-or-pattern.rs
 run-pass	binding/optional_comma_in_match_arm.rs
 run-pass	binding/or-pattern.rs
+run-pass	binding/order-drop-with-match.rs
 run-pass	binding/pat-ranges.rs
 run-pass	binding/pat-tuple-1.rs
 run-pass	binding/pat-tuple-2.rs
@@ -8676,6 +8677,7 @@ compile-fail	typeck/typeck-default-trait-impl-assoc-type.rs
 compile-fail	typeck/typeck-default-trait-impl-send-param.rs
 run-pass	typeck/typeck-fn-to-unsafe-fn-ptr.rs
 compile-fail	typeck/typeck-inner-expr-on-field-access-error.rs
+run-pass	typeck/typeck_type_placeholder_1.rs
 compile-fail	typeck/typeck_type_placeholder_item_help.rs
 compile-fail	typeck/typeck_type_placeholder_lifetime_1.rs
 compile-fail	typeck/typeck_type_placeholder_lifetime_2.rs

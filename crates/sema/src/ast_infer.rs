@@ -982,7 +982,17 @@ impl Inf<'_> {
                             }
                             if self.prog.has_param(t) { v } else { k }
                         }
-                        None => v,
+                        // (and `let v = it.collect::<Vec<_>>();`, whose turbofish writes the type the same way)
+                        None => {
+                            let mut call = init.as_ref();
+                            while let Some(Expr::Paren(x)) = call {
+                                call = Some(x);
+                            }
+                            if !self.s.collects.is_empty() && matches!(call, Some(Expr::MethodCall(_, m, tf, _, _)) if m == "collect" && !tf.is_empty()) {
+                                self.s.ready_collects();
+                            }
+                            v
+                        }
                     };
                     if self.no_record == 0 {
                         self.lets.push((stmt_key(st), v));

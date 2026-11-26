@@ -8501,6 +8501,65 @@ fn duplicate_import(src0: &str, split: &str, items: &[SrcItem]) -> Option<String
 /// A top-level `use a::..` (at the start of a line) whose first segment is no crate the build knows (std, core,
 /// a dependency, an `extern crate`), no module or item of the program, nor `crate` / `self` / `super`:
 /// "unresolved import `a`" (E0432). Only read when such a `use` is there at all
+/// E0433 / E0412 of a std collection named where no `use` brings it into scope (`HashMap::new()` with no `use
+/// std::collections::HashMap;`): the prelude defines them all, so nothing else reports it. Looked for only when the
+/// program has another error (one with none is accepted, as before). Not when any `use` names it or globs a
+/// `collections`, nor when the program defines an item of the name (macros and other crates are not followed)
+#[cold]
+#[inline(never)]
+fn undeclared_std_collection(src: &str) -> Option<String> {
+    const NAMES: [&str; 7] = ["HashMap", "HashSet", "BTreeMap", "BTreeSet", "VecDeque", "BinaryHeap", "LinkedList"];
+    if !NAMES.iter().any(|n| src.contains(n)) {
+        return None;
+    }
+    let toks = crate::parse::tokenize(src).ok()?;
+    let text = |i: usize| toks.get(i).map_or("", |t| t.text.as_str());
+    let path_sep = |i: usize| text(i) == ":" && text(i + 1) == ":";
+    let mut known: Vec<&str> = vec![];
+    let mut i = 0;
+    while i < toks.len() {
+        match text(i) {
+            // (what a `use` names, anywhere in it; a `collections::*` brings them all)
+            "use" => {
+                let mut j = i + 1;
+                while j < toks.len() && text(j) != ";" {
+                    if text(j) == "collections" && path_sep(j + 1) && text(j + 3) == "*" {
+                        return None;
+                    }
+                    if let Some(n) = NAMES.iter().find(|n| **n == text(j)) {
+                        known.push(n);
+                    }
+                    j += 1;
+                }
+                i = j;
+            }
+            "struct" | "enum" | "type" | "trait" | "union" | "mod" | "fn" | "macro_rules" => {
+                if let Some(n) = NAMES.iter().find(|n| **n == text(i + 1)) {
+                    known.push(n);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    for (i, t) in toks.iter().enumerate() {
+        if t.kind != crate::parse::TokKind::Ident || !NAMES.contains(&t.text.as_str()) || known.contains(&t.text.as_str()) {
+            continue;
+        }
+        // (a path's first segment, not `collections::HashMap`, nor a field or method of the name)
+        if (i >= 2 && path_sep(i - 2)) || (i >= 1 && text(i - 1) == ".") {
+            continue;
+        }
+        if path_sep(i + 1) {
+            return Some(format!("{}:{}: failed to resolve: use of undeclared type `{}` (E0433)", t.line, t.col + 1, t.text));
+        }
+        if matches!(text(i + 1), "<" | ";" | ">" | "," | ")" | "=") {
+            return Some(format!("{}:{}: cannot find type `{}` in this scope (E0412)", t.line, t.col + 1, t.text));
+        }
+    }
+    None
+}
+
 fn unresolved_import(src: &str, split: &str, items: &[SrcItem], deps: &[String]) -> Option<String> {
     // (and the names std's prelude brings: `use Default::default` / `use Option::*`)
     let known = |n: &str| {
@@ -12435,6 +12494,10 @@ impl Session {
                     d.line = l;
                     d.col = c;
                 }
+                // (a std collection named with no `use` of it, at an earlier line: rustc reports it first)
+                if let Some(u) = undeclared_std_collection(src).map(|u| Diagnostic::parse(&u)).filter(|u| (u.line, u.col) < (d.line, d.col)) {
+                    return vec![u, d];
+                }
                 return vec![d];
             }
         };
@@ -12670,6 +12733,12 @@ impl Session {
             }
         }
         d.retain(|d| d.line <= user_lines);
+        // (a std collection named with no `use` of it: looked for only beside another error)
+        if !d.is_empty() {
+            if let Some(u) = undeclared_std_collection(src) {
+                d.push(Diagnostic::parse(&u));
+            }
+        }
         d.sort_by(|x, y| (x.line, x.col).cmp(&(y.line, y.col)));
         d.dedup();
         d

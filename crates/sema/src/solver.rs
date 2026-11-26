@@ -220,11 +220,12 @@ impl Solver<'_> {
     pub fn seq_unify(&mut self, a: u32, b: u32) {
         let (fa, fb) = (self.find(a), self.find(b));
         let elem = |s: &mut Self, v: u32| -> Option<u32> {
-            // (`&[T]` against `[U; N]` (`PartialEq<[U; N]> for &[T]`): the slice's element)
+            // (`&[T]` against `[U; N]` (`PartialEq<[U; N]> for &[T]`): the slice's element. So for a reference to an
+            // array, a `&[_]` initialized from one: `let e: &[_] = &[1, 2, 3]; assert_eq!(e, ORDER)`)
             let v = match s.shape[v as usize] {
                 Some(Shape::Ref(_, i)) => {
                     let i = s.find(i);
-                    if matches!(s.shape[i as usize], Some(Shape::Slc(_))) { i } else { v }
+                    if matches!(s.shape[i as usize], Some(Shape::Slc(_) | Shape::Arr(..))) { i } else { v }
                 }
                 _ => v,
             };

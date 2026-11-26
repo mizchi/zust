@@ -3650,3 +3650,23 @@ fn an_array_length_or_a_discriminant_zustc_cannot_evaluate_is_reported_where_it_
     let e = errs("enum E {\n    A,\n    B = || {},\n}\nfn main() {}\n");
     assert!(e.iter().any(|(l, _)| *l == 3), "{e:?}");
 }
+
+#[test]
+fn a_turbofish_collect_s_elements_a_ref_array_s_and_an_unimported_collection_beside_another_error() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| (d.line, d.msg)).collect::<Vec<_>>()
+    };
+    // (`collect::<Vec<_>>()` takes its elements from the iterator at its `let`, so a later comparison decides the
+    // literals: the Vec is a `Vec<usize>`)
+    let e = errs("fn main() {\n    let expected: &[usize] = &[0, 1, 2];\n    let x = (0..3).collect::<Vec<_>>();\n    let _ = x == expected;\n    let _: () = x;\n}\n");
+    assert!(e.iter().any(|(_, m)| m.contains("found `Vec<usize>`")), "{e:?}");
+    // (a `&[_]` initialized from an array, against a `[usize; 3]`)
+    let e = errs("static ORDER: [usize; 3] = [1, 2, 3];\nfn main() {\n    let expected: &[_] = &[1, 2, 3];\n    assert_eq!(expected, ORDER);\n    let _: () = expected;\n}\n");
+    assert!(e.iter().any(|(_, m)| m.contains("usize")), "{e:?}");
+    // (a std collection with no `use` of it, beside another error: E0433 at it, as rustc reports first)
+    let e = errs("fn main() {\n    let mut m = HashMap::new();\n    m.insert(1u8, 2u8);\n    let _: () = 1;\n}\n");
+    assert!(e.iter().any(|(l, m)| *l == 2 && m.contains("use of undeclared type `HashMap` (E0433)")), "{e:?}");
+    let e = errs("use std::collections::HashMap;\nfn main() {\n    let mut m = HashMap::new();\n    m.insert(1u8, 2u8);\n    let _: () = 1;\n}\n");
+    assert!(!e.iter().any(|(_, m)| m.contains("E0433")), "{e:?}");
+}
