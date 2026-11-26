@@ -1802,7 +1802,9 @@ impl Cx<'_> {
                         }
                         Some(t0) => {
                             if t0.len() != tl.len() || t0.iter().zip(tl.iter()).any(|(a, b)| a.1 != b.1) {
-                                return err(SP, "`|` alternatives bind different types");
+                                // (at the alternative, as rustc: `Some(y) | None`)
+                                let at = [crate::parse::pat_pos(case), crate::parse::pat_pos(&cases[0])].into_iter().find(|s| s.line != 0).unwrap_or(SP);
+                                return Err(self.at(at, "`|` alternatives bind different types".to_string()));
                             }
                         }
                     }

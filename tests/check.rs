@@ -3624,3 +3624,14 @@ fn a_string_macro_s_methods_and_a_slice_s_first_mut_and_last_mut() {
     let src = "fn main() {\n    let mut arr = [1u8, 2, 3];\n    *arr.last_mut().unwrap() = 30;\n    *arr.first_mut().unwrap() += 10;\n    let mut v = vec![1, 2];\n    let s: &mut [i32] = &mut v;\n    *s.first_mut().unwrap() = 5;\n    if let Some(x) = v.last_mut() {\n        *x = 20;\n    }\n}\n";
     assert!(errs(src).is_empty(), "{:?}", errs(src));
 }
+
+#[test]
+fn an_or_pattern_whose_alternatives_bind_differently_is_reported_at_the_alternative() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| (d.line, d.msg)).collect::<Vec<_>>()
+    };
+    // (at the arm's pattern, not the `match`)
+    let e = errs("fn main() {\n    let x = Some(1);\n    match x {\n        Some(y) | None => {}\n    }\n}\n");
+    assert!(e.iter().any(|(l, m)| *l == 4 && m.contains("`|` alternatives bind different types")), "{e:?}");
+}
