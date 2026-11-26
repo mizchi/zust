@@ -11623,6 +11623,141 @@ pub(crate) fn unhoist_err(a: &Analysis, e: String) -> String {
     }
 }
 
+/// When line of src calls a macro that src defines (`name!(..)` of `macro_rules! name`), the place of the token t in
+/// the transcribers of its rules, where a parse error of its expansion comes from: only when t is there once, and not
+/// in the call's arguments (where a fragment could have brought it)
+#[cold]
+#[inline(never)]
+fn macro_body_at(src: &str, line: usize, col: usize, t: &str) -> Option<(usize, usize)> {
+    if t.is_empty() || !src.contains("macro_rules!") {
+        return None;
+    }
+    let text = src.lines().nth(line.checked_sub(1)?)?;
+    // (the token at the place reported: the error is in the program's own text, not in an expansion)
+    if col.checked_sub(1).and_then(|c| text.get(c..)).is_some_and(|r| r.starts_with(t)) {
+        return None;
+    }
+    let sb = src.as_bytes();
+    let base = text.as_ptr() as usize - src.as_ptr() as usize;
+    let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+    let op = |c: u8| b"=<>!+-*/%&|^:.".contains(&c);
+    // (the end of the line at k, in bytes: a source can have other characters than ASCII)
+    let eol = |k: usize| sb[k..].iter().position(|&c| c == b'\n').map_or(sb.len(), |e| k + e);
+    let skip_ws = |mut i: usize| {
+        loop {
+            while i < sb.len() && sb[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if !sb[i..].starts_with(b"//") {
+                return i;
+            }
+            i = eol(i);
+        }
+    };
+    // (the closing delimiter of the group that opens at i, past comments and string literals)
+    let close = |i: usize| -> Option<usize> {
+        let (o, c) = match sb.get(i)? {
+            b'{' => (b'{', b'}'),
+            b'(' => (b'(', b')'),
+            b'[' => (b'[', b']'),
+            _ => return None,
+        };
+        let (mut d, mut e) = (0i32, i);
+        while e < sb.len() {
+            match sb[e] {
+                b'/' if sb.get(e + 1) == Some(&b'/') => e = eol(e),
+                b'"' => {
+                    e += 1;
+                    while e < sb.len() && sb[e] != b'"' {
+                        e += if sb[e] == b'\\' { 2 } else { 1 };
+                    }
+                }
+                x if x == o => d += 1,
+                x if x == c => {
+                    d -= 1;
+                    if d == 0 {
+                        return Some(e);
+                    }
+                }
+                _ => {}
+            }
+            e += 1;
+        }
+        None
+    };
+    // (the places of t as a token in from..to: not part of a longer one (`=` of `=>`, `x` of `xs`), nor in a comment)
+    let tb = t.as_bytes();
+    let occurs = |from: usize, to: usize| -> Vec<usize> {
+        let mut out = vec![];
+        let mut k = from;
+        while k < to {
+            if sb[k..].starts_with(b"//") {
+                k = eol(k);
+                continue;
+            }
+            if k + tb.len() <= to && sb[k..].starts_with(tb) {
+                let (p, q) = (k.checked_sub(1).map(|j| sb[j]), sb.get(k + tb.len()).copied());
+                let whole = if id(tb[0]) {
+                    p.is_none_or(|c| !id(c)) && q.is_none_or(|c| !id(c))
+                } else {
+                    p.is_none_or(|c| !op(c) || !op(tb[0])) && q.is_none_or(|c| !op(c) || !op(tb[tb.len() - 1]))
+                };
+                if whole {
+                    out.push(k);
+                }
+            }
+            k += 1;
+        }
+        out
+    };
+    let mut i = 0;
+    while i < text.len() {
+        let tx = text.as_bytes();
+        if !id(tx[i]) || (i > 0 && id(tx[i - 1])) {
+            i += 1;
+            continue;
+        }
+        let s0 = i;
+        while i < tx.len() && id(tx[i]) {
+            i += 1;
+        }
+        let n = &text[s0..i];
+        if tx.get(i) != Some(&b'!') || n == "macro_rules" {
+            continue;
+        }
+        // (the call's arguments)
+        let a = skip_ws(base + i + 1);
+        let Some(ae) = close(a) else { continue };
+        if !occurs(a + 1, ae).is_empty() {
+            continue;
+        }
+        let def = format!("macro_rules! {n}");
+        let Some(at) = src.match_indices(&def).map(|(k, _)| k).find(|&k| sb.get(k + def.len()).is_none_or(|&c| !id(c))) else { continue };
+        let open = skip_ws(at + def.len());
+        let end = close(open)?;
+        // (the rules: a matcher, `=>`, a transcriber (its tokens and its closing delimiter), and `;` between them)
+        let mut hits = vec![];
+        let mut r = skip_ws(open + 1);
+        while r < end {
+            r = skip_ws(close(r)? + 1);
+            if !sb[r..].starts_with(b"=>") {
+                return None;
+            }
+            r = skip_ws(r + 2);
+            let te = close(r)?;
+            hits.extend(occurs(r + 1, te + 1));
+            r = skip_ws(te + 1);
+            if sb.get(r) == Some(&b';') {
+                r = skip_ws(r + 1);
+            }
+        }
+        if let [off] = hits[..] {
+            return Some((src[..off].matches('\n').count() + 1, off - src[..off].rfind('\n').map_or(0, |p| p + 1) + 1));
+        }
+    }
+    None
+}
+
 /// When (line, col) of src is a macro call (`name!(..)`), the place of the name n as a word in its arguments
 #[cold]
 #[inline(never)]
@@ -11713,7 +11848,17 @@ impl Session {
         self.checking = false;
         let mut a = match r {
             Ok(a) => a,
-            Err(e) => return vec![Diagnostic::parse(&self.unhoist_analysis_err(src, diff_marker_first(src, e)))],
+            Err(e) => {
+                let mut d = Diagnostic::parse(&self.unhoist_analysis_err(src, diff_marker_first(src, e)));
+                // (a parse error in a macro's expansion, reported at the call: at the token of the rule's body that was
+                // found, as rustc)
+                let found = d.msg.strip_prefix("expected ").and_then(|m| m.rsplit_once("found `")).and_then(|(_, r)| r.rsplit_once('`'));
+                if let Some((l, c)) = found.and_then(|(t, _)| macro_body_at(src, d.line, d.col, t)) {
+                    d.line = l;
+                    d.col = c;
+                }
+                return vec![d];
+            }
         };
         // 検査だけ: コード生成 (acg) で型を検査し、機械語は作らない (ZUSTC_CHECK_CODEGEN=1 で機械語まで作る)。
         // 検査済みの印は、要求したインスタンスへの再配置だけを持つ空の Blob を、ビルドとは別のキーで覚える

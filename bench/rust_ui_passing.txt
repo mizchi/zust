@@ -386,6 +386,7 @@ check-pass	async-await/async-closures/different-projection-lengths-for-different
 compile-fail	async-await/async-closures/dont-ice-when-body-tainted-by-errors.rs
 compile-fail	async-await/async-closures/fn-exception-target-features.rs
 compile-fail	async-await/async-closures/fn-exception.rs
+compile-fail	async-await/async-closures/ice-async-closure-variance-issue-148488.rs
 build-pass	async-await/async-closures/implements-fnmut.rs
 compile-fail	async-await/async-closures/kind-due-to-arg-with-box-wrap.rs
 check-pass	async-await/async-closures/mac-body.rs
@@ -1901,6 +1902,7 @@ run-pass	consts/const-enum-tuplestruct.rs
 run-pass	consts/const-enum-vec-ptr.rs
 run-pass	consts/const-enum-vector.rs
 compile-fail	consts/const-err-early.rs
+compile-fail	consts/const-err-multi.rs
 run-pass	consts/const-err-rpass.rs
 compile-fail	consts/const-eval/array-len-mismatch-type.rs
 compile-fail	consts/const-eval/const-eval-overflow-2.rs
@@ -2493,6 +2495,7 @@ compile-fail	dyn-keyword/suggest-dyn-on-bare-trait-in-pat.rs
 compile-fail	dyn-keyword/suggest-struct-or-union-add-generic-impl-trait.rs
 compile-fail	dyn-keyword/unresolved-associated-item.rs
 compile-fail	editions/dyn-trait-sugg-2021.rs
+compile-fail	editions/edition-cstr-2015-2018.rs
 run-pass	editions/edition-specific-identifier-shadowing-53333.rs
 compile-fail	entry-point/async-main.rs
 build-pass	entry-point/hello-world.rs
@@ -4587,6 +4590,7 @@ check-pass	macros/issue-22463.rs
 run-pass	macros/issue-25274.rs
 compile-fail	macros/issue-26094.rs
 check-pass	macros/issue-2804.rs
+compile-fail	macros/issue-30007.rs
 compile-fail	macros/issue-30143.rs
 check-pass	macros/issue-33185.rs
 compile-fail	macros/issue-35450.rs
@@ -4633,6 +4637,7 @@ check-pass	macros/macro-attributes.rs
 run-pass	macros/macro-block-nonterminal.rs
 compile-fail	macros/macro-comma-support.rs
 check-pass	macros/macro-const-stringify.rs
+compile-fail	macros/macro-context.rs
 run-pass	macros/macro-crate-use.rs
 check-pass	macros/macro-delimiter-significance.rs
 check-pass	macros/macro-doc-comments.rs
@@ -4660,6 +4665,7 @@ run-pass	macros/macro-lifetime.rs
 run-pass	macros/macro-literal.rs
 compile-fail	macros/macro-match-nonterminal.rs
 check-pass	macros/macro-meta-items-modern.rs
+compile-fail	macros/macro-metavar-expr-concat/empty-input.rs
 run-pass	macros/macro-method-issue-4621.rs
 compile-fail	macros/macro-missing-fragment.rs
 check-pass	macros/macro-multiple-items.rs
@@ -5027,6 +5033,7 @@ check-pass	modules/path-attr-inner-attr-nested-mod-rs/path-attr-inner-attr-neste
 run-pass	modules/primitive-type-module-deprecated-paths.rs
 check-pass	modules/pub-use-handling-in-modules-56128.rs
 check-pass	modules/pub-use-module-alias-5950.rs
+compile-fail	modules/special_module_name.rs
 run-pass	modules/special_module_name_ignore.rs
 compile-fail	modules/super-at-crate-root.rs
 run-pass	modules/use-statement-duplicate-check-7663.rs
@@ -5759,6 +5766,7 @@ compile-fail	parser/issues/issue-39616.rs
 compile-fail	parser/issues/issue-41155.rs
 compile-fail	parser/issues/issue-43196.rs
 compile-fail	parser/issues/issue-44021.rs
+compile-fail	parser/issues/issue-44406.rs
 compile-fail	parser/issues/issue-45296.rs
 compile-fail	parser/issues/issue-46186.rs
 check-pass	parser/issues/issue-48137-macros-cannot-interpolate-impl-items.rs
@@ -5942,6 +5950,7 @@ compile-fail	parser/macro/do-not-suggest-semicolon-between-macro-without-exclama
 compile-fail	parser/macro/expr-in-attribute.rs
 check-pass	parser/macro/extern-abi-from-mac-literal-frag.rs
 compile-fail	parser/macro/issue-33569.rs
+compile-fail	parser/macro/issue-37234.rs
 compile-fail	parser/macro/kw-in-item-pos-recovery-149692.rs
 compile-fail	parser/macro/lit-err-in-macro.rs
 compile-fail	parser/macro/macro-bad-delimiter-ident.rs
@@ -5949,6 +5958,7 @@ check-pass	parser/macro/macro-bare-trait-object-maybe-trait-bound.rs
 compile-fail	parser/macro/macro-doc-comments-1.rs
 compile-fail	parser/macro/macro-doc-comments-2.rs
 compile-fail	parser/macro/macro-in-attribute.rs
+compile-fail	parser/macro/macro-incomplete-parse.rs
 compile-fail	parser/macro/macro-keyword.rs
 compile-fail	parser/macro/macro-missing-right-paren.rs
 compile-fail	parser/macro/macros-no-semicolon-items.rs
@@ -5975,6 +5985,7 @@ compile-fail	parser/missing-fn-issue-65381-1.rs
 compile-fail	parser/missing-fn-issue-65381-2.rs
 compile-fail	parser/missing-fn-issue-65381-3.rs
 compile-fail	parser/missing-operator-after-float.rs
+compile-fail	parser/missing-semicolon.rs
 compile-fail	parser/missing-struct-issue-125446.rs
 compile-fail	parser/missing_right_paren.rs
 compile-fail	parser/misspelled-keywords/async-move.rs

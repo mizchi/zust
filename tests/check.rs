@@ -3373,3 +3373,21 @@ fn macro_rules_with_whitespace_before_the_bang() {
     // (a name that only starts with it is no definition)
     assert_eq!(first("macro_rules! m { () => { 1 } }\nfn main() { let my_macro_rules = 1; let _x = my_macro_rules != m!(); }\n"), None);
 }
+
+#[test]
+fn a_parse_error_in_a_macro_expansion_is_at_the_token_of_the_rule() {
+    // (rustc reports a parse error of the expansion at the token of the `macro_rules!` body it found, not at the
+    // call; a token that is part of a longer one (`x` of `xs`, `=` of `==`) is not it)
+    let at = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col))
+    };
+    assert_eq!(at("macro_rules! m {\n    () => {{\n        let x = 5 \"\";\n    }}\n}\nfn main() {\n    m!();\n}\n"), Some((3, 19)));
+    assert_eq!(at("macro_rules! t {\n    () => ( String ; );\n}\nfn main() {\n    let _i: Vec<t!()>;\n}\n").map(|p| p.0), Some(2));
+    assert_eq!(at("macro_rules! m {\n    () => {{\n        let xs = 1;\n        let y = 5 x;\n    }}\n}\nfn main() {\n    m!();\n}\n"), Some((4, 19)));
+    // (a token the arguments could have brought, or one the rules have twice: at the call)
+    assert_eq!(at("macro_rules! m {\n    ($e:tt) => {{\n        let x = 5 $e;\n    }}\n}\nfn main() {\n    m!(x);\n}\n").map(|p| p.0), Some(7));
+    assert_eq!(at("macro_rules! m {\n    () => {{ let y = 5 x; }};\n    (a) => {{ let x = 1; }};\n}\nfn main() {\n    m!();\n}\n").map(|p| p.0), Some(6));
+    // (other characters than ASCII in the rules)
+    assert_eq!(at("macro_rules! m {\n    () => {{\n        let \u{e9} = 5 \"\";\n    }}\n}\nfn main() {\n    m!();\n}\n").map(|p| p.0), Some(3));
+}
