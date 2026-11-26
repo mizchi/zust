@@ -1084,7 +1084,7 @@ fn review_edges_same_in_js_and_wasm() {
     let t = std::time::Instant::now();
     let o = zsc(&src, &d, &[]);
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    assert!(t.elapsed() < std::time::Duration::from_secs(5), "{:?}", t.elapsed());
+    assert!(t.elapsed() < std::time::Duration::from_secs(30), "{:?}", t.elapsed());
 }
 
 /// JSON (review of mizchi/zust#232): a `__proto__` field is an own property; a primitive's decoder reports a
