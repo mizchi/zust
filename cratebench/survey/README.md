@@ -19,6 +19,7 @@ python3 cratebench/survey/survey.py report              # CRATES_SUPPORT.md agai
 |---|---|---|
 | `crates.tsv` | the crates: the top N by recent downloads, then `extra.tsv`'s; rank, name, version, downloads, kind, category, features | `survey.py list [--top N]` |
 | `extra.tsv` | crates surveyed besides the top N, or again with other features (tokio `full`, embassy, embedded crates) | by hand |
+| `issues.tsv` | the fixes with a tracking issue: a regex on an error's text, the issue, the fix's name | by hand, when an issue is filed |
 | `Cargo.lock` | one lock for every probe (the probes resolved as one workspace); each probe takes the versions it uses | `survey.py lock [--fresh]` |
 | `results.json` | each crate's result, each package's errors, and the priorities and error kinds derived from them | `survey.py run` / `report` |
 | `history.tsv` | one row per survey on main | `run --history` (CI) |
@@ -81,7 +82,27 @@ Crates of one kind tend to stop zustc in the same places, so each crate has a ca
 (`SLUGS` in survey.py), or by name where those say little (`BY_NAME`). `list` keeps the category a crate already has
 in crates.tsv, so a category corrected by hand stays.
 
-## What to fix first
+## What to fix, by importance
+
+Every error (and every reason zurgo cannot plan or build a crate) is given the fix it needs:
+
+1. The first row of `issues.tsv` whose regex matches the error's text, which gives its issue.
+2. Otherwise, a name zustc cannot find:
+   - if the crate does not define it, a prelude addition (#250);
+   - if it does, one of the crate's own items zustc lost (#254).
+3. Otherwise, the error's text without places and names (its *kind*), with no issue yet.
+
+Each surveyed crate that does not build needs the fixes of every error in its graph, its own and its dependencies'. Its downloads are shared equally among them. A fix's score, *holds back*, is the sum of its shares, as a share of the surveyed crates' downloads.
+
+- **A sole blocker** of many popular crates ranks first.
+- **A fix that is one of many** in each graph ranks lower.
+- **A frequent error in crates nobody depends on** ranks low too.
+
+*Alone* lists the crates that need only that fix. Fixing it makes them check, or plan, or build, until the next error shows.
+
+The top rows without an issue are the next ones to file. When one is filed, add its row to `issues.tsv`.
+
+## Packages with errors
 
 For each package with errors:
 

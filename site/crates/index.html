@@ -51,9 +51,10 @@
     <nav class="toc" aria-label="On this page">
       <p class="label">On this page</p>
       <a href="#tiles">Summary</a>
+      <a href="#importance">What to fix, by importance</a>
       <a href="#categories">By category</a>
       <a href="#history">Over time</a>
-      <a href="#fix">What to fix first</a>
+      <a href="#fix">Packages with errors</a>
       <a href="#kinds">Errors by kind</a>
       <a href="#gaps">Graphs and names</a>
       <a href="#all">All crates</a>
@@ -75,6 +76,21 @@
 
   <section class="tiles" id="tiles" aria-label="Summary"></section>
 
+  <section class="sec" id="importance">
+    <h2>What to fix, by importance</h2>
+    <p class="note">Every error, grouped by the fix it needs (cratebench/survey/issues.tsv names the fixes with a tracking
+      issue; the rest are grouped by their text without names), ordered by what the fix holds back. Each surveyed crate
+      that does not build shares its downloads equally among the fixes its graph needs; a fix's share is the sum.
+      <em>Alone</em>: crates that need only this fix, as far as zustc shows (it stops a crate at its first item error, so
+      another can come next). A bar without an issue is the next one to file.</p>
+    <div class="legend"><span><i style="background:var(--s1)"></i>has a tracking issue</span><span><i style="background:var(--s3)"></i>no issue yet</span></div>
+    <div class="chart tall" id="c-imp"></div>
+    <div class="tablewrap"><table class="table" id="t-imp">
+      <thead><tr><th>#</th><th class="l">Fix</th><th class="l">Issue</th><th>Holds back</th><th>Crates</th><th class="l">Alone</th><th>Packages</th><th>Errors</th><th class="l">Example</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+
   <section class="sec" id="categories">
     <h2>Status by category</h2>
     <p class="note">One bar per category, one segment per status (a crate's status is the first that applies: zurgo cannot
@@ -95,7 +111,7 @@
   </section>
 
   <section class="sec" id="fix">
-    <h2>What to fix first</h2>
+    <h2>Packages with errors</h2>
     <p class="note">Packages with errors, ordered by the downloads of the surveyed crates that only they keep from
       checking (<em>alone</em>: no other package of the crate's graph has errors), then by how many surveyed crates need
       them. The error count is what zustc reports now: a lower bound, since zustc stops reading a crate at a syntax or
@@ -296,6 +312,42 @@
     lineChart(document.getElementById('c-he'), H, 'error_count', '--bad');
   }
 
+  function renderImportance(R) {
+    const fx = R.fixes || [];
+    const repo = 'https://github.com/mizchi/zust/issues/';
+    document.querySelector('#t-imp tbody').replaceChildren(...fx.slice(0, 40).map((g, i) => el('tr', {},
+      el('td', {}, i + 1),
+      el('td', {className: 'short', title: g.fix}, clip(g.fix, 90)),
+      el('td', {className: 'l'}, g.issue ? el('a', {href: repo + g.issue}, `#${g.issue}`) : '—'),
+      el('td', {}, `${g.share.toFixed(1)}%`), el('td', {}, g.crates.length),
+      el('td', {className: 'short', title: g.alone.join(', ')}, g.alone.length ? `${g.alone.length}: ${g.alone.slice(0, 4).join(', ')}${g.alone.length > 4 ? ', …' : ''}` : '0'),
+      el('td', {}, g.packages.length), el('td', {}, g.errors),
+      el('td', {className: 'err', title: g.example}, clip(g.example, 140)))));
+    const host = document.getElementById('c-imp');
+    host.replaceChildren();
+    const top = fx.slice(0, 20);
+    if (!top.length) return;
+    const W = host.clientWidth || 600, rowH = 22;
+    const left = Math.min(380, W * 0.55), H = top.length * rowH + 24;
+    const x = d3.scaleLinear().domain([0, d3.max(top, (g) => g.share)]).range([left, W - 48]);
+    const svg = d3.select(host).append('svg').attr('width', W).attr('height', H).attr('role', 'img')
+      .attr('aria-label', 'Fixes by the share of the surveyed downloads they hold back');
+    const maxChars = Math.floor(left / 6.2);
+    top.forEach((g, i) => {
+      const y = i * rowH + 2;
+      const label = `${i + 1}. ${g.issue ? '#' + g.issue + ' ' : ''}${g.fix}`;
+      svg.append('text').attr('x', left - 8).attr('y', y + rowH / 2).attr('text-anchor', 'end').attr('dominant-baseline', 'middle')
+        .attr('class', 'lbl').text(label.length > maxChars ? label.slice(0, maxChars - 1) + '…' : label);
+      svg.append('rect').attr('x', left).attr('y', y + 3).attr('width', Math.max(1, x(g.share) - left)).attr('height', rowH - 7)
+        .attr('rx', 2).attr('fill', css(g.issue ? '--s1' : '--s3'))
+        .on('mousemove', (ev) => tip.show(host, ev, [el('div', {className: 'strong'}, g.fix),
+          el('div', {}, `${g.share.toFixed(1)}% held back · ${g.crates.length} crates need it · ${g.alone.length} only it`),
+          el('div', {className: 'mute'}, g.example.slice(0, 240))]))
+        .on('mouseleave', tip.hide);
+      svg.append('text').attr('x', x(g.share) + 6).attr('y', y + rowH / 2).attr('dominant-baseline', 'middle').text(`${g.share.toFixed(1)}%`);
+    });
+  }
+
   function renderFix(R) {
     const tb = document.querySelector('#t-fix tbody');
     tb.replaceChildren(...(R.priorities || []).slice(0, 30).map((r) => el('tr', {},
@@ -334,7 +386,7 @@
     document.querySelector('#t-graph tbody').replaceChildren(...(R.graph_reasons || []).map((g) => el('tr', {},
       el('td', {className: 'err', title: g.crates.join(', ')}, g.reason), el('td', {}, g.crates.length))));
     document.querySelector('#t-missing tbody').replaceChildren(...(R.missing || []).slice(0, 30).map((m) => el('tr', {},
-      el('td', {className: 'l mono'}, m.name), el('td', {className: 'l'}, m.own ? 'crate' : 'std'),
+      el('td', {className: 'l mono'}, m.name), el('td', {className: 'l'}, m.own === true ? 'crate' : m.own === false ? 'std' : '?'),
       el('td', {className: 'short', title: m.packages.join(', ')}, `${m.packages.length}: ${m.packages.slice(0, 3).map((p) => p.split(' ')[0]).join(', ')}${m.packages.length > 3 ? ', …' : ''}`))));
   }
 
@@ -382,7 +434,7 @@
   function render() {
     if (!R) return;
     const S = summarize(R);
-    renderHead(R, S); renderCategories(R, S); renderHistory(H); renderFix(R); renderKinds(R); renderGaps(R); renderAll(R, S);
+    renderHead(R, S); renderImportance(R); renderCategories(R, S); renderHistory(H); renderFix(R); renderKinds(R); renderGaps(R); renderAll(R, S);
   }
   Promise.all([
     fetch('data/results.json').then((r) => { if (!r.ok) throw new Error(`results.json: ${r.status}`); return r.json(); }),
