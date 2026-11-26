@@ -3910,12 +3910,19 @@ impl Program {
 
     /// When struct sid has no method named name, the default method of a trait it implements
     pub fn default_method(&self, sid: u32, name: &str) -> Option<u32> {
-        let r = self.default_method_inner(sid, name);
+        let r = self.default_method_inner(sid, name, false);
         // (or else a blanket impl's method)
         r.or_else(|| self.blanket.get(name).copied())
     }
 
-    fn default_method_inner(&self, sid: u32, name: &str) -> Option<u32> {
+    /// default_method for a method call: one with `self`, as self_method. A trait's default associated function
+    /// without it (`fn val() -> i32 { 5 }`) is no method candidate: `w.val()` goes on to what w derefs to
+    pub fn self_default_method(&self, sid: u32, name: &str) -> Option<u32> {
+        let r = self.default_method_inner(sid, name, true);
+        r.or_else(|| self.blanket.get(name).copied().filter(|&b| self.sigs[b as usize].has_self))
+    }
+
+    fn default_method_inner(&self, sid: u32, name: &str, self_only: bool) -> Option<u32> {
         let sid = self.base_of(sid);
         let mut found = None;
         for (s, tr) in &self.impls {
@@ -3927,6 +3934,7 @@ impl Program {
             };
             for &d in decls {
                 if self.sigs[d as usize].has_body
+                    && (!self_only || self.sigs[d as usize].has_self)
                     && self.names[d as usize].rsplit("::").next() == Some(name)
                 {
                     found = Some(d);
@@ -6880,7 +6888,9 @@ impl Program {
         if self.sigs[id as usize].impl_trait.is_some() || !self.sigs[id as usize].has_self {
             return id;
         }
-        let Some(group) = self.overloads.get(&self.names[id as usize]) else { return id };
+        // (by the group's name: self_method may give an overload, `W::f#1`)
+        let name = &self.names[id as usize];
+        let Some(group) = self.overloads.get(name.split('#').next().unwrap_or(name)) else { return id };
         let fit: Vec<u32> = group
             .iter()
             .copied()
@@ -6944,6 +6954,56 @@ impl Program {
                 self.structs[self.base_of(sid) as usize].name
             ))
             .copied()
+    }
+
+    /// The method named name a method call on sid's type finds among its impls: one with `self`. An associated
+    /// function without it is no method candidate (rustc's probe): `impl Wire for Vec<T> { fn get(r: &[u8]) -> Self }`
+    /// does not hide the inherent `Vec::get(&self, i)` from `v.get(i)` (#207). None when every fn of the name lacks it.
+    /// For a receiver of the type by value (self_method_at for one reached through a reference)
+    pub fn self_method(&self, sid: u32, name: &str) -> Option<u32> {
+        self.self_method_at(sid, name, None)
+    }
+
+    /// self_method for a receiver that reaches sid's type last through `wrap`: a `&` (Some(false)) or a `&mut`
+    /// (Some(true)), or None by value (also through a Box or a deref)
+    pub fn self_method_at(&self, sid: u32, name: &str, wrap: Option<bool>) -> Option<u32> {
+        let key = format!("{}::{name}", self.structs[self.base_of(sid) as usize].name);
+        let &id = self.index.get(&key)?;
+        if self.sigs[id as usize].has_self {
+            return Some(id);
+        }
+        // (one with `self` among the fns of the name in other impls of the type, as rustc's probe picks it: the receiver
+        // steps in order, the type as the receiver reaches it, then `&` and `&mut` of it (by value: `self`, `&self`,
+        // `&mut self`; through a `&`: `&self`, `self`, `&mut self`; through a `&mut`: `&mut self`, `self`, `&self`), and
+        // at one step an inherent method before the traits'. So `S(0).f()` with `impl Take for S { fn f(self) }` beside
+        // `impl S { fn f(&self) }` is Take's and `(&s).f()` the inherent one; with `impl Other for S { unsafe fn
+        // f(&self) }` instead, `S(0).f()` is the inherent one. One for sid's instance first)
+        let group = self.overloads.get(&key)?;
+        let rank = |c: u32| -> (u8, bool) {
+            let sig = &self.sigs[c as usize];
+            let step = match (sig.params.first(), wrap) {
+                (Some(Ty::Ref(false, _)), Some(false)) | (Some(Ty::Ref(true, _)), Some(true)) => 0,
+                (Some(Ty::Struct(_) | Ty::Param(_)), None) => 0,
+                (Some(Ty::Struct(_) | Ty::Param(_)), Some(_)) | (Some(Ty::Ref(false, _)), None) => 1,
+                (Some(Ty::Ref(..)), _) => 2,
+                _ => 3,
+            };
+            (step, sig.impl_trait.is_some())
+        };
+        let t = Ty::Struct(sid);
+        let fits = |c: u32| {
+            let sig = &self.sigs[c as usize];
+            sig.self_ty.is_some_and(|st| self.match_ty(st, t, &mut vec![None; sig.generics.len()]) && self.arg_refs_agree(st, t))
+        };
+        let with_self = || group.iter().copied().filter(|&c| self.sigs[c as usize].has_self);
+        with_self().filter(|&c| fits(c)).min_by_key(|&c| rank(c)).or_else(|| with_self().min_by_key(|&c| rank(c)))
+    }
+
+    /// self_method resolved for a receiver of sid's own instance: of inherent methods of the name in impls for other
+    /// instances (`impl Target<u8> { fn edit(&self) }`, `impl Target<u16> { fn edit(&mut self) }`), the one for sid's
+    /// (inherent_overload_for), for what reads how the call takes its receiver
+    pub fn self_method_of(&self, sid: u32, name: &str) -> Option<u32> {
+        self.self_method(sid, name).map(|id| self.inherent_overload_for(id, Ty::Struct(sid)))
     }
 
     pub fn size_align(&self, t: Ty) -> (u32, u32) {

@@ -3247,7 +3247,7 @@ impl Cx<'_> {
                     }
                 }
                 let Ty::Struct(sid) = t else { return None };
-                let id = self.prog.method(sid, name).or_else(|| self.prog.default_method(sid, name))?;
+                let id = self.prog.self_method(sid, name).or_else(|| self.prog.self_default_method(sid, name))?;
                 let sig = &self.prog.sigs[id as usize];
                 let mut sol = vec![None; sig.generics.len()];
                 if sig.trait_of.is_some() {

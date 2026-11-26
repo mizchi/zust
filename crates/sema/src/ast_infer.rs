@@ -2226,7 +2226,9 @@ impl Inf<'_> {
     /// tell them apart yet
     fn pick_inherent_overload(&mut self, id: u32, rv: u32) -> Option<u32> {
         let p = self.prog;
-        let Some(group) = p.overloads.get(&p.names[id as usize]) else { return Some(id) };
+        // (by the group's name: self_method may give an overload, `W::f#1`)
+        let name = &p.names[id as usize];
+        let Some(group) = p.overloads.get(name.split('#').next().unwrap_or(name)) else { return Some(id) };
         let inh: Vec<u32> = group.iter().copied().filter(|&c| p.sigs[c as usize].has_self && p.sigs[c as usize].impl_trait.is_none() && p.sigs[c as usize].self_ty.is_some()).collect();
         if inh.len() < 2 || !inh.contains(&id) {
             // (impls of one trait for instances of the type (the prelude's `impl Read for Cursor<Vec<u8>>` and `.. for
@@ -2366,7 +2368,7 @@ impl Inf<'_> {
                 Some(Shape::Adt(b, _, _)) => Some(b),
                 _ => None,
             };
-            if let Some(id) = sid.and_then(|s| self.prog.method(s, n)) {
+            if let Some(id) = sid.and_then(|s| self.prog.self_method(s, n)) {
                 // (a method of the program's own type that has a scalar method's name (`checked_add`): its overloads too,
                 // as below)
                 let id = self.pick_inherent_overload(id, rv);
@@ -2382,7 +2384,25 @@ impl Inf<'_> {
             Some(Shape::Adt(b, _, _)) => Some(b),
             _ => None,
         };
-        let mut callee = sid.and_then(|sid| self.prog.method(sid, n).or_else(|| self.prog.default_method(sid, n)));
+        // (a method with `self`: an associated function of the name is none (self_method), by the reference the receiver
+        // reaches its struct through last, as the lowering's lookup (self_method_at))
+        let mut wrap = None;
+        let mut v = r;
+        while sid.is_some() {
+            let x = self.find(v);
+            match self.shape[x as usize] {
+                Some(Shape::Ref(m, i)) => {
+                    wrap = Some(m);
+                    v = i;
+                }
+                Some(Shape::Bx(i)) => {
+                    wrap = None;
+                    v = i;
+                }
+                _ => break,
+            }
+        }
+        let mut callee = sid.and_then(|sid| self.prog.self_method_at(sid, n, wrap).or_else(|| self.prog.self_default_method(sid, n)));
         let mut rv = rv;
         let mut sid = sid;
         let mut hops = 0;
@@ -2400,7 +2420,7 @@ impl Inf<'_> {
                     Some(Shape::Adt(b, _, _)) => Some(b),
                     _ => None,
                 };
-                callee = sid.and_then(|sid| self.prog.method(sid, n).or_else(|| self.prog.default_method(sid, n)));
+                callee = sid.and_then(|sid| self.prog.self_method(sid, n).or_else(|| self.prog.self_default_method(sid, n)));
             } else {
                 break;
             }
@@ -2571,7 +2591,7 @@ impl Inf<'_> {
                 _ => None,
             };
             if let (Some(e), Some(&vb)) = (elem, self.prog.struct_index.get("Vec")) {
-                if let Some(id) = self.prog.method(vb, n) {
+                if let Some(id) = self.prog.self_method(vb, n) {
                     if !matches!(n, "len" | "is_empty" | "iter" | "iter_mut" | "into_iter") {
                         let vv = self.adt(vb, vec![e]);
                         return self.apply_recv(Some(id), avs.clone(), vv);
