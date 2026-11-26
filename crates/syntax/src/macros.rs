@@ -1932,13 +1932,16 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
             // a library's macro of that name, `re::stringify!` / `re::std::stringify!`, which can be another macro
             // re-exported under it, nor a `macro_rules! stringify` of the crate's own)
             let colons = |k: usize| k >= 2 && sym(k - 1, b':') && sym(k - 2, b':');
+            // (a label or a lifetime is no path segment: `break 'done ::std::stringify!(..)`. The tokens keep only its
+            // name; the quote is the byte before it)
+            let label = |k: usize| toks[k].1 > 0 && b[toks[k].1 - 1] == b'\'';
             if tk(i) == b"stringify"
                 && !macros.contains_key("stringify")
                 && (!colons(i)
                     || (i >= 3
                         && toks[i - 3].0 == 0
                         && matches!(tk(i - 3), b"std" | b"core")
-                        && !(colons(i - 3) && i >= 6 && toks[i - 6].0 == 0 && path_seg(tk(i - 6)))))
+                        && !(colons(i - 3) && i >= 6 && toks[i - 6].0 == 0 && path_seg(tk(i - 6)) && !label(i - 6))))
             {
                 inert_until = inert_until.max(close[i + 2]);
             }
@@ -2414,7 +2417,10 @@ fn find_calls(
                 !colons(s)
                     || (s >= 3
                         && matches!(&toks[s - 3], TokenTree::Ident(x) if x == "std" || x == "core")
-                        && !(colons(s - 3) && s >= 6 && matches!(&toks[s - 6], TokenTree::Ident(x) if path_seg(x.to_string().as_bytes()))))
+                        && !(colons(s - 3)
+                            && s >= 6
+                            && matches!(&toks[s - 6], TokenTree::Ident(x) if path_seg(x.to_string().as_bytes()))
+                            && !(s >= 7 && punct(s - 7, '\''))))
             };
         if let (TokenTree::Group(g), false) = (&toks[i], inert) {
             let r = g.span().byte_range();
@@ -2964,6 +2970,9 @@ mod env_tests {
         for call in ["stringify!(m!())", "std::stringify!(m!())", "core::stringify!(m![])", "::std::stringify! { m!() }"] {
             assert!(both(call).contains(call), "{call}");
         }
+        // (a label before the absolute path is no path segment: `break 'done ::std::stringify!(..)`)
+        let call = "'done: loop { break 'done ::std::stringify!(m!()) }";
+        assert!(both(call).contains("::std::stringify!(m!())"), "{call}");
         for call in ["re::stringify!(m!())", "re::std::stringify!(m!())", "::re::core::stringify!(m!())"] {
             assert!(!both(call).contains("m!()"), "{call}");
         }
