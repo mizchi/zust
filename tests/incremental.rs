@@ -111,3 +111,42 @@ fn associated_type_invalidates() {
     assert!(e.contains("lifetime may not live long enough"), "{e}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The reference graph refers to names, not to each fn of a name (#188): a change to the signature of one of a
+/// name's fns (`S3::area`) compiles again every fn that names it, as before: `uses_area`, which calls `S0::area` and
+/// `S1::area` only (the over-approximation by the name's last segment), main, and each `area` (its definition names
+/// it). Not `other`
+#[test]
+fn a_names_signature_change_reaches_its_callers() {
+    let program = |ret: &str| {
+        let mut s = String::new();
+        for i in 0..6 {
+            let r = if i == 3 { ret } else { "u64" };
+            s.push_str(&format!("struct S{i}(u64);\nimpl S{i} {{\n    fn area(&self) -> {r} {{ (self.0 * {}) as {r} }}\n}}\n", i + 2));
+        }
+        s.push_str("fn uses_area(x: u64) -> u64 { S0(x).area() + S1(x).area() }\n");
+        s.push_str("fn other(x: u64) -> u64 { x.wrapping_mul(3) }\n");
+        s.push_str("fn main() {\n    let v = uses_area(2) + other(5) + S3(1).area() as u64;\n    println!(\"{v}\");\n}\n");
+        s
+    };
+    let dir = std::env::temp_dir().join(format!("d2names_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("p");
+    let cp = dir.join("p.cache");
+    let run = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Default::default() });
+        s.load_cache(&cp);
+        let rep = s.build(src, &out).unwrap();
+        s.save_cache(&cp).unwrap();
+        let o = std::process::Command::new(&out).output().unwrap();
+        (rep, String::from_utf8_lossy(&o.stdout).into_owned())
+    };
+    let (_, a) = run(&program("u64"));
+    assert_eq!(a, "30\n");
+    let (r, b) = run(&program("u64"));
+    assert_eq!((r.fns_compiled, b.as_str()), (0, "30\n"), "{r:?}");
+    // (the six `area`s, uses_area and main)
+    let (r, c) = run(&program("u32"));
+    assert_eq!((r.fns_compiled, c.as_str()), (8, "30\n"), "{r:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

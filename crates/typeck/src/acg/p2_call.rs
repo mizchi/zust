@@ -2747,7 +2747,7 @@ impl Cx<'_> {
                 // the methods of the name are looked through)
                 let tr = tr0?;
                 let prog = self.prog;
-                let mut bl = prog.by_last.get(&m)?.iter().copied().filter(|&c| {
+                let mut bl = prog.fns_named(&m)?.iter().copied().filter(|&c| {
                     let bsig = &prog.sigs[c as usize];
                     matches!(bsig.self_ty, Some(Ty::Param(_))) && bsig.impl_trait.as_deref().is_some_and(|t| t.split('<').next().unwrap_or(t).trim() == tr)
                 });

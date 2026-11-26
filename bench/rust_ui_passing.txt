@@ -4374,6 +4374,7 @@ check-pass	lint/non-local-defs/convoluted-locals-131474.rs
 check-pass	lint/non-local-defs/convoluted-locals-132427.rs
 check-pass	lint/non-local-defs/exhaustive-trait.rs
 check-pass	lint/non-local-defs/from-local-for-global.rs
+check-pass	lint/non-local-defs/inside-macro_rules.rs
 check-pass	lint/non-local-defs/local.rs
 check-pass	lint/non-local-defs/module_as_local.rs
 check-pass	lint/non-local-defs/ref-complex.rs
@@ -4628,6 +4629,7 @@ check-pass	macros/issue-99261.rs
 check-pass	macros/issue-99907.rs
 compile-fail	macros/local-ambiguity-multiple-parsing-options.rs
 compile-fail	macros/local-ambiguity-option-ordering.rs
+run-pass	macros/macro-2.rs
 run-pass	macros/macro-as-fn-body.rs
 run-pass	macros/macro-at-most-once-rep-2015-rpass.rs
 compile-fail	macros/macro-at-most-once-rep-2015.rs
@@ -4700,6 +4702,7 @@ run-pass	macros/macro-self-mutability-7911.rs
 check-pass	macros/macro-seq-followed-by-seq.rs
 check-pass	macros/macro-stmt-2.rs
 run-pass	macros/macro-stmt.rs
+run-pass	macros/macro-stmt_macro_in_expr_macro.rs
 compile-fail	macros/macro-use-bad-args-1.rs
 compile-fail	macros/macro-use-bad-args-2.rs
 run-pass	macros/macro-variable-declaration-with-bounds-5554.rs
