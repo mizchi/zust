@@ -2,7 +2,8 @@ name: Crate survey
 
 # Builds the top crates of crates.io (cratebench/survey/crates.tsv) with zurgo, each in a probe package in a temporary
 # directory (sources from crates.io, versions from cratebench/survey/Cargo.lock), and commits what it finds to main:
-# CRATES_SUPPORT.md, cratebench/survey/results.json and a row of cratebench/survey/history.tsv. The Pages workflow then
+# CRATES_SUPPORT.md, TODO.md's "what to fix next", cratebench/survey/results.json and a row of
+# cratebench/survey/history.tsv. The Pages workflow then
 # rebuilds /crates/ from them. It reports; it does not fail on a crate that does not build yet.
 #
 # Two jobs: the survey runs the crates' build scripts (code from crates.io), so it has a read-only token and keeps no
@@ -58,6 +59,7 @@ jobs:
           name: crate-survey
           path: |
             CRATES_SUPPORT.md
+            TODO.md
             cratebench/survey/results.json
             cratebench/survey/history.tsv
           if-no-files-found: error
@@ -81,7 +83,8 @@ jobs:
         env:
           FROM: ${{ runner.temp }}/crate-survey
         run: |
-          files="CRATES_SUPPORT.md cratebench/survey/results.json cratebench/survey/history.tsv"
+          # (TODO.md: only its crate-priorities block differs from this commit's, so the rebase below keeps others' edits)
+          files="CRATES_SUPPORT.md TODO.md cratebench/survey/results.json cratebench/survey/history.tsv"
           for f in $files; do cp "$FROM/$f" "$f"; done
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

@@ -46,6 +46,7 @@ LOCK = os.path.join(HERE, "Cargo.lock")
 RESULTS = os.path.join(HERE, "results.json")
 HISTORY = os.path.join(HERE, "history.tsv")
 DOC = os.path.join(ROOT, "CRATES_SUPPORT.md")
+TODO = os.path.join(ROOT, "TODO.md")
 ZURGO = os.environ.get("ZURGO") or os.path.join(os.environ.get("CARGO_TARGET_DIR") or os.path.join(ROOT, "target"), "release/zurgo")
 TARGET = "x86_64-unknown-linux-gnu"
 TIMEOUT = 900
@@ -628,6 +629,101 @@ def graph_reasons(res):
     return sorted(G.items(), key=lambda kv: (-len(kv[1]), kv[0]))
 
 
+ISSUES = os.path.join(HERE, "issues.tsv")
+
+
+@functools.lru_cache(maxsize=None)
+def issue_rules():
+    """issues.tsv: (regex, issue or None, the fix's name), in order"""
+    rows = []
+    if os.path.exists(ISSUES):
+        for line in open(ISSUES):
+            if line.startswith("#") or not line.strip():
+                continue
+            pat, num, title = line.rstrip("\n").split("\t")
+            rows.append((re.compile(pat), int(num) if num.strip() else None, title))
+    return tuple(rows)
+
+
+def owner_of(pkg, what, name, known):
+    """whether the package defines the name zustc cannot find (each package on its own: one that defines `Error`
+    does not make another's missing `Error` its own); without its sources, the class a run gave the name"""
+    d = defines(pkg, name) if pkg else None
+    return known.get((what, name)) if d is None else d
+
+
+def fix_of(msg, pkg, known):
+    """an error's fix: (its name, its issue or None). `pkg`: the package the error is in (`name version`, or None);
+    `known`: the classes results.json kept of the names zustc cannot find"""
+    for pat, num, title in issue_rules():
+        if pat.search(msg):
+            return title, num
+    m = MISSING.search(msg)
+    if m:
+        o = owner_of(pkg, m.group(1), m.group(2), known)
+        if o is False:
+            return f"prelude: {m.group(1)} `{m.group(2)}`", 250
+        if o is True:
+            return "a crate's own item zustc cannot find (resolution, cfg, a macro's output)", 254
+    return kind_of(msg), None
+
+
+# (a build's first error: `name version: ` when it is a dependency's, then zurgo's `crate`: name or probe, a path)
+BUILD_ENVELOPE = re.compile(r"^(?:(?P<pkg>[\w.+-]+ \d[^ :]*): )?(?:[\w.+-]+: (?=\S+\.rs:\d+:\d+: ))?")
+
+
+def fixes(res):
+    """What to fix, by importance. Each surveyed crate that does not build needs a set of fixes: those of every error
+    in its graph (its own and its dependencies'), or of why zurgo cannot plan or build it. Its downloads are shared
+    equally among them, and a fix's score is the sum of its shares: what it holds back, as far as zustc shows. A crate
+    that needs one fix only is *alone* for it: fixing it makes the crate check (or plan, or build), until the next error
+    shows"""
+    s = summarize(res)
+    known = {(m["what"], m["name"]): m.get("own") for m in res.get("missing") or []}
+    F = {}
+
+    def entry(key, num, example):
+        return F.setdefault(key, dict(fix=key, issue=num, score=0.0, crates=[], alone=[], packages=set(), errors=0,
+                                      example=example))
+    pkg_fixes = {}
+    for k, v in s["with_err"].items():
+        for e in v["errors"]:
+            key, num = fix_of(e, k, known)
+            g = entry(key, num, f"{k}: {e}")
+            g["packages"].add(k)
+            g["errors"] += 1
+            pkg_fixes.setdefault(k, set()).add(key)
+    for c in sorted(s["C"], key=lambda c: c["rank"]):
+        need = set()
+        if c["status"] in ("graph-fail", "build-fail", "timeout"):
+            # (the message without its envelope: the dependency's name, zurgo's probe name, so that one error in
+            #  several probes is one fix; the package it names, or the crate's own, for the name's class)
+            m = BUILD_ENVELOPE.match(c["first_error"])
+            msg = c["first_error"][m.end():]
+            pkg = m.group("pkg") or f'{c["name"]} {c["version"]}'
+            key, num = fix_of(msg, pkg, known)
+            if num is None and c["status"] == "build-fail":
+                key = "build: " + key
+            g = entry(key, num, f'{c["id"]}: {c["first_error"]}')
+            g["packages"].add(f'{c["name"]} {c["version"]}')
+            g["errors"] += 1
+            need.add(key)
+        elif c["status"] in ("errors", "blocked"):
+            for p in [f'{c["name"]} {c["version"]}'] + list(c.get("blocked_by") or []):
+                need |= pkg_fixes.get(p, set())
+        for key in need:
+            F[key]["score"] += c["downloads"] / len(need)
+            F[key]["crates"].append(c["id"])
+            if len(need) == 1:
+                F[key]["alone"].append(c["id"])
+    rows = sorted(F.values(), key=lambda g: (-g["score"], -len(g["packages"]), g["fix"]))
+    for g in rows:
+        g["packages"] = sorted(g["packages"])
+        g["share"] = round(100 * g["score"] / s["dl"], 2)
+        g["score"] = round(g["score"])
+    return rows
+
+
 def cell(s, n=140):
     s = " ".join((s or "").split()).replace("|", "\\|")
     return (s[:n] + "…") if len(s) > n else s
@@ -694,7 +790,25 @@ def write_report(res, history):
         top = "; ".join(f"{k} ({v})" for k, v in sorted(ks.items(), key=lambda kv: (-kv[1], kv[0]))[:2])
         o.append(f"| {label} | {len(cs)} | {n('builds')} | {n('build-fail')} | {n('blocked')} | {n('errors')} | "
                  f"{n('graph-fail')} | {sum(c['errors'] for c in cs) or ''} | {cell(top, 140)} |")
-    o += ["", "## What to fix first", "",
+    fx = fixes(res)
+    o += ["", "## What to fix, by importance", "",
+          "Every error, grouped by the fix it needs ([issues.tsv](cratebench/survey/issues.tsv) names the fixes with a "
+          "tracking issue; the rest are grouped by their text without names), and ordered by what the fix holds back. "
+          "Each surveyed crate that does not build shares its downloads equally among the fixes its graph needs (every "
+          "error in it, its own and its dependencies', or why zurgo cannot plan or build it); a fix's share is the sum. "
+          "*Alone*: the crates that need only this fix, as far as zustc shows (it stops a crate at its first item "
+          "error, so another can come next).", "",
+          "| # | fix | issue | holds back | crates | alone | packages | errors | example |",
+          "|---:|---|---|---:|---:|---|---:|---:|---|"]
+    for n, g in enumerate(fx[:40], 1):
+        al = ", ".join(g["alone"][:5]) + (" …" if len(g["alone"]) > 5 else "")
+        iss = f"#{g['issue']}" if g["issue"] else "—"
+        o.append(f"| {n} | {cell(g['fix'], 90)} | {iss} | {g['share']:.1f}% | {len(g['crates'])} | "
+                 f"{len(g['alone'])}{': ' + al if al else ''} | {len(g['packages'])} | {g['errors']} | {cell(g['example'], 100)} |")
+    no_issue = [g for g in fx if not g["issue"]]
+    o += ["", f"{len(fx)} fixes; {len(no_issue)} have no tracking issue yet "
+              f"(together {sum(g['share'] for g in no_issue):.1f}%). The top ones without an issue are the next to file."]
+    o += ["", "## Packages with errors", "",
           "Packages with errors, ordered by the downloads of the surveyed crates that only they keep from checking "
           "(*alone*: no other package of the crate's graph has errors), then by how many surveyed crates need them. "
           "Errors are what zustc reports now; lines are the package's `.rs` lines.", "",
@@ -742,6 +856,7 @@ def write_report(res, history):
             o.append(f"| {c['rank']} | {c['name']} {c['version']}{feats} | {st} | {c['errors'] or ''} | {cell(bb, 60)} | "
                      f"{cell(c['first_error'], 100)} |")
     open(DOC, "w").write("\n".join(o) + "\n")
+    write_todo(res, s, fx)
     print(f"{DOC}: {s['builds']} / {len(C)} build; {s['n_err']} errors in {len(s['with_err'])} packages")
     derived = dict(
         priorities=[dict(package=r["package"], errors=r["errors"], lines=r["lines"], first=r["first"],
@@ -749,6 +864,7 @@ def write_report(res, history):
                          alone_downloads=sum(c["downloads"] for c in r["alone"]), needed_by=len(r["need"]))
                     for r in priorities(res)[:100]],
         kinds=[dict(kind=k, packages=sorted(g["packages"]), errors=g["errors"], example=g["example"]) for k, g in kinds(res)[:100]],
+        fixes=fx[:150],
         missing=missing(res)[:100],
         graph_reasons=[dict(reason=k, crates=[c["id"] for c in sorted(cs, key=lambda c: c["rank"])]) for k, cs in graph_reasons(res)])
     if history:
@@ -781,6 +897,48 @@ def save(res, derived):
             else:
                 h.write(f"{json.dumps(k)}: {json.dumps(v, ensure_ascii=False)}" + end)
         h.write("}\n")
+
+
+def tier_of(share):
+    """an issue's tier from the share of the surveyed downloads its fixes hold back together"""
+    return "T0" if share >= 2 else "T1" if share >= 1 else "T2"
+
+
+def write_todo(res, s, fx):
+    """TODO.md's "Crate coverage: what to fix next": the top fixes, between its markers (nothing when they are not there)"""
+    if not os.path.exists(TODO):
+        return
+    text = open(TODO).read()
+    start, end = "<!-- crate-priorities -->", "<!-- /crate-priorities -->"
+    if start not in text or end not in text:
+        return
+    url = "https://github.com/mizchi/zust/issues/"
+    o = [start, "",
+         f"Survey of {res['date']} on `{res['commit']}`: {s['builds']} of {len(s['C'])} crates build "
+         f"({pct(s['builds_dl'], s['dl'])} of their downloads); {s['n_err']} errors in {len(s['with_err'])} packages.", "",
+         "| # | fix | issue | holds back | crates it alone unblocks |", "|---:|---|---|---:|---:|"]
+    for n, g in enumerate(fx[:12], 1):
+        iss = f"[#{g['issue']}]({url}{g['issue']})" if g["issue"] else "none yet"
+        o.append(f"| {n} | {cell(g['fix'], 80)} | {iss} | {g['share']:.1f}% | {len(g['alone'])} |")
+    # (by issue: the issues' tiers, the labels T0 / T1 / T2 on GitHub)
+    tot = {}
+    for g in fx:
+        if g["issue"]:
+            t = tot.setdefault(g["issue"], dict(share=0.0, fixes=[]))
+            t["share"] += g["share"]
+            t["fixes"].append(g["fix"])
+    o += ["", "By issue, with its tier (the issue's label: **T0** holds back 2% or more of the surveyed downloads with "
+              "all its fixes, **T1** 1% or more, **T2** less; relabel an issue when its tier here changes):", "",
+          "| tier | issue | holds back | fixes | the largest |", "|---|---|---:|---:|---|"]
+    for num, t in sorted(tot.items(), key=lambda kv: -kv[1]["share"]):
+        o.append(f"| {tier_of(t['share'])} | [#{num}]({url}{num}) | {t['share']:.1f}% | {len(t['fixes'])} | "
+                 f"{cell(t['fixes'][0], 70)} |")
+    nxt = [g for g in fx if not g["issue"]][:5]
+    if nxt:
+        o += ["", "No issue yet, the next to file: " + "; ".join(f"{cell(g['fix'], 60)} ({g['share']:.1f}%)" for g in nxt) + "."]
+    o += ["", end]
+    a, b = text.index(start), text.index(end) + len(end)
+    open(TODO, "w").write(text[:a] + "\n".join(o) + text[b:])
 
 
 def cmd_report(a):
