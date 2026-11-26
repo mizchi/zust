@@ -3505,3 +3505,22 @@ fn modules_that_rename_a_union_or_a_name_a_lifetime_shares() {
         fn main() {\n    let _ = u::union();\n    let _ = su::union::union().union;\n    let x = uu::union::union();\n    let _ = unsafe { x.union };\n}\n";
     assert!(errs(src).is_empty(), "{:?}", errs(src));
 }
+
+#[test]
+fn associated_type_bounds_in_generics_and_trait_arguments_they_do_not_give() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| (d.line, d.msg)).collect::<Vec<_>>()
+    };
+    // (`A: Iterator<Item: Copy>` in a trait's or a type alias's generics is an associated type bound, not a written
+    // `impl Trait`, which stays an error there)
+    assert!(errs("trait Case<A: Iterator<Item: Copy>> {}\nfn main() {}\n").is_empty());
+    assert_eq!(errs("trait Foo {}\nfn f<T: Iterator<Item = impl Foo>>() {}\nfn main() {}\n").first().map(|e| e.0), Some(2));
+    // (a bound that gives one of the program's traits too few or too many generic arguments: E0107 at the trait's
+    // name; an associated type's bound or binding is no argument, a default lets one out)
+    let e = errs("trait Trait<Type> {\n    type Type;\n    fn one(&self, val: impl Trait<Type: Default>);\n}\nfn main() {}\n");
+    assert_eq!(e.first().map(|e| e.0), Some(3), "{e:?}");
+    assert!(e[0].1.contains("trait takes 1 generic argument but 0 generic arguments were supplied"), "{e:?}");
+    assert_eq!(errs("trait Tr<A> {}\nfn f<T: Tr<u8, u16>>() {}\nfn main() {}\n").first().map(|e| e.0), Some(2));
+    assert!(errs("trait Tr<A, B = u8> { type O; type G<'a>; }\nfn f<T: Tr<u8>>() {}\nfn g<T: Tr<u8, u16, O = u8>>() {}\nfn h<'r, T>() where T: Tr<i32, O: Copy, G<'r> = ()> {}\nfn main() {}\n").is_empty());
+}

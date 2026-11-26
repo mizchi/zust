@@ -2442,6 +2442,12 @@ impl Session {
         if let Some(e) = first_gat_arity_error(&src, src0, &items[..user]) {
             return Err(e);
         }
+        // (E0107 at a bound that gives one of the program's traits the wrong number of generic arguments)
+        if items[..user].iter().any(|it| matches!(it.kind, crate::lexer::ItemKind::TraitHeader)) {
+            if let Some(e) = first_bound_arity_error(&src, src0, &items[..user]) {
+                return Err(e);
+            }
+        }
         // (a derive whose field has not the trait: `#[derive(Hash)] struct S { x: Error }`)
         if !prog.derived.is_empty() {
             if let Some(e) = derive_field_error(&prog, &src, &items[..user]) {
@@ -3412,9 +3418,10 @@ fn angle_parts(t: &[(u8, usize, usize)], text: &[u8], open: usize) -> Option<(Ve
 /// E0107 at an impl of one of the program's traits that gives it more generic (type / const) arguments than the
 /// trait declares, or fewer than it requires: `impl Seq<bool> for u32` with `trait Seq {}`. Read from the trait
 /// headers and the impl headers only (lifetimes and `Item = ..` bindings are not counted)
-fn first_trait_arity_error(src: &str, orig: &str, items: &[SrcItem]) -> Option<String> {
+/// Each of the program's traits' (required, declared) count of generic type and const arguments, from the trait
+/// headers (defaults make the required count smaller; lifetimes are not counted); None for a name declared twice
+fn trait_arities<'a>(src: &'a str, items: &[SrcItem]) -> crate::fxhash::FxMap<&'a str, Option<(usize, usize)>> {
     use crate::lexer::ItemKind;
-    // (each trait's (required, declared) count; a name declared twice is left out)
     let mut decl: crate::fxhash::FxMap<&str, Option<(usize, usize)>> = Default::default();
     for it in items.iter().filter(|it| matches!(it.kind, ItemKind::TraitHeader)) {
         let text = &src[it.start..it.end];
@@ -3457,6 +3464,12 @@ fn first_trait_arity_error(src: &str, orig: &str, items: &[SrcItem]) -> Option<S
         };
         decl.entry(name).and_modify(|e| *e = None).or_insert(Some(counts));
     }
+    decl
+}
+
+fn first_trait_arity_error(src: &str, orig: &str, items: &[SrcItem]) -> Option<String> {
+    use crate::lexer::ItemKind;
+    let decl = trait_arities(src, items);
     if decl.is_empty() {
         return None;
     }
@@ -3512,6 +3525,60 @@ fn first_trait_arity_error(src: &str, orig: &str, items: &[SrcItem]) -> Option<S
                 format!("trait takes {takes} {} but {given} {} {} supplied", plural(declared.max(required)), plural(given), if given == 1 { "was" } else { "were" })
             };
             // (rustc points at the trait's name)
+            let (line, col) = item_pos(src, orig, &crate::prep::hoist_marks(src), it, t[nk].1);
+            return Some(format!("{line}:{col}: {what} (E0107)"));
+        }
+    }
+    None
+}
+
+/// E0107 at a bound that names one of the program's traits with the wrong number of generic (type / const) arguments,
+/// after `:`, `+`, `impl` or `dyn` in any item: `fn two<T: Trait<Type: Default>>()` with `trait Trait<Type>` gives
+/// none (an associated type's bound or binding, `Type: ..` / `Type = ..`, is no argument; lifetimes are not counted)
+fn first_bound_arity_error(src: &str, orig: &str, items: &[SrcItem]) -> Option<String> {
+    let decl = trait_arities(src, items);
+    if !decl.values().any(|d| d.is_some_and(|(r, _)| r > 0)) {
+        return None;
+    }
+    let plural = |n: usize| if n == 1 { "generic argument" } else { "generic arguments" };
+    for it in items {
+        let text = &src[it.start..it.end];
+        if !decl.keys().any(|n| text.contains(n)) {
+            continue;
+        }
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+        let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && b[t[k].1] == c;
+        for nk in 1..t.len() {
+            let Some(&Some((required, declared))) = decl.get(w(nk)) else { continue };
+            if !sym(nk + 1, b'<') {
+                continue;
+            }
+            // (a bound: after `:` (not a path's `::`), `+`, `impl` or `dyn`)
+            let bound = (sym(nk - 1, b':') && !(nk >= 2 && sym(nk - 2, b':'))) || sym(nk - 1, b'+') || matches!(w(nk - 1), "impl" | "dyn");
+            if !bound {
+                continue;
+            }
+            let Some((parts, _)) = angle_parts(&t, b, nk + 1) else { continue };
+            let given = parts
+                .iter()
+                .filter(|p| {
+                    let lifetime = b[t[p.0].1] == b'\'' || (t[p.0].1 > 0 && b[t[p.0].1 - 1] == b'\'');
+                    // (`Type = ..`, `Type: ..`, and a generic associated type's `Assoc<'r> = ..` past its own arguments)
+                    let mut q = p.0 + 1;
+                    if t[p.0].0 == 0 && sym(q, b'<') {
+                        q = angle_parts(&t, b, q).map_or(q, |(_, close)| close + 1);
+                    }
+                    let named = t[p.0].0 == 0 && p.1 >= q && ((sym(q, b'=') && !sym(q + 1, b'=')) || (sym(q, b':') && !sym(q + 1, b':')));
+                    !lifetime && !named
+                })
+                .count();
+            if given <= declared && given >= required {
+                continue;
+            }
+            let takes = if required == declared { format!("{declared}") } else if given > declared { format!("at most {declared}") } else { format!("at least {required}") };
+            let what = format!("trait takes {takes} {} but {given} {} {} supplied", plural(declared.max(required)), plural(given), if given == 1 { "was" } else { "were" });
             let (line, col) = item_pos(src, orig, &crate::prep::hoist_marks(src), it, t[nk].1);
             return Some(format!("{line}:{col}: {what} (E0107)"));
         }

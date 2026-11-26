@@ -225,7 +225,12 @@ fn collect_generics(g: &Generics, out: &mut Vec<(String, Vec<String>)>) -> R<()>
         if let GParam::Ty(_, bs, _) = p {
             for b in bs {
                 if let Bound::Trait(_, bp) = b {
-                    if bp.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, crate::parse::GArg::Bind(_, PTy::Impl(_)) | crate::parse::GArg::Ty(PTy::Impl(_))))) {
+                    // (one written `impl`: an associated type bound, `Iterator<Item: Copy>`, is parsed as `Item = impl Copy`
+                    // and is allowed there)
+                    if bp.segs.iter().any(|s| {
+                        s.args.iter().any(|a| matches!(a, crate::parse::GArg::Bind(_, PTy::Impl(_)) | crate::parse::GArg::Ty(PTy::Impl(_))))
+                            && s.text.split(|c: char| !(c == '_' || c.is_ascii_alphanumeric())).any(|w| w == "impl")
+                    }) {
                         return err("`impl Trait` is not allowed in generics");
                     }
                 }
