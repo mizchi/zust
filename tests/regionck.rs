@@ -5742,3 +5742,43 @@ impl<'a, U> Tr<'a> for (U,) {
 fn main() {}
 "#, &[(7, "impl has stricter requirements than trait")], "rw16");
 }
+
+#[test]
+fn part38_methods_of_impls_for_trait_objects() {
+    // (#169: methods of `impl dyn Tr { .. }` and of a trait's impl for the object, `impl X for dyn Tr`, found through
+    // the object and called with it as `&self`; each checked with rustc 1.97. A header's object not behind a reference
+    // is `dyn Tr + 'static` (a written `+ '_` is not), so the call needs the receiver's object to be 'static, rustc's
+    // E0521: none here, where it is or the impl says `'_`)
+    errors_at(r#"trait Tr { fn name(&self) -> u8; }
+impl dyn Tr { fn m(&self) -> u8 { self.name() + 1 } }
+struct S;
+impl Tr for S { fn name(&self) -> u8 { 1 } }
+trait ObjectTrait {}
+trait MyTrait { fn use_self(&self) -> &() { panic!() } }
+impl MyTrait for dyn ObjectTrait + '_ {}
+trait Other { fn other(&self) -> &(); }
+impl Other for dyn ObjectTrait + '_ { fn other(&self) -> &() { panic!() } }
+fn a<'a>(val: &'a dyn ObjectTrait) -> &'a () { val.use_self() }
+fn b<'a>(val: &'a dyn ObjectTrait) -> &'a () { val.other() }
+fn c<'a>(val: &'a (dyn Tr + 'static)) -> u8 { val.m() }
+fn main() {
+    let r: &dyn Tr = &S;
+    let x: Box<dyn Tr> = Box::new(S);
+    let _ = (r.m(), (*x).m(), x.m());
+}
+"#, &[], "dy1");
+    let e = "lifetime may not live long enough";
+    // (an inherent method of `impl dyn ObjectTrait`, the trait's method for the object, its default, and the default
+    // named as `MyTrait::use_self(val)`: each requires 'a: 'static)
+    errors_at("trait ObjectTrait {}\nimpl dyn ObjectTrait { fn use_self(&self) -> &() { panic!() } }\nfn use_it<'a>(val: &'a dyn ObjectTrait) -> &'a () {\n    val.use_self()\n}\nfn main() {}\n", &[(4, e)], "dy2");
+    errors_at("trait ObjectTrait {}\ntrait MyTrait { fn use_self(&self) -> &(); }\nimpl MyTrait for dyn ObjectTrait { fn use_self(&self) -> &() { panic!() } }\nfn use_it(val: &dyn ObjectTrait) -> &() {\n    val.use_self()\n}\nfn main() {}\n", &[(5, e)], "dy3");
+    errors_at("trait ObjectTrait {}\ntrait MyTrait { fn use_self(&self) -> &() { panic!() } }\nimpl MyTrait for dyn ObjectTrait {}\nfn use_it<'a>(val: &'a dyn ObjectTrait) -> &'a () {\n    val.use_self()\n}\nfn main() {}\n", &[(5, e)], "dy4");
+    errors_at("trait ObjectTrait {}\ntrait MyTrait { fn use_self(&self) -> &() { panic!() } }\nimpl MyTrait for dyn ObjectTrait {}\nfn use_it<'a>(val: &'a dyn ObjectTrait) -> &'a () {\n    MyTrait::use_self(val)\n}\nfn main() {}\n", &[(5, e)], "dy5");
+    // (a generic impl for an object of a generic trait, its parameter from the object's arguments, and a method's
+    // turbofish)
+    errors_at("trait ObjectTrait<T> {}\ntrait MyTrait<T> { fn use_self<K>(&self) -> &(); }\nimpl<T> MyTrait<T> for dyn ObjectTrait<T> { fn use_self<K>(&self) -> &() { panic!() } }\nfn use_it<'a>(val: &'a dyn ObjectTrait<u8>) -> &'a () {\n    val.use_self::<u16>()\n}\nfn main() {}\n", &[(5, e)], "dy6");
+    // (an `impl Trait` result whose type is such a method's: `&'a ()` for `impl OtherTrait<'a> + 'a`)
+    errors_at("trait OtherTrait<'a> {}\nimpl<'a> OtherTrait<'a> for &'a () {}\ntrait ObjectTrait {}\nimpl dyn ObjectTrait { fn use_self(&self) -> &() { panic!() } }\nfn use_it<'a>(val: &'a dyn ObjectTrait) -> impl OtherTrait<'a> + 'a {\n    val.use_self()\n}\nfn main() {}\n", &[(6, e)], "dy7");
+    // (two traits whose defaults of the name the object has: ambiguous, E0034)
+    errors_at("trait ObjectTrait {}\ntrait A { fn f(&self) {} }\ntrait B { fn f(&self) {} }\nimpl A for dyn ObjectTrait + '_ {}\nimpl B for dyn ObjectTrait + '_ {}\nfn g(val: &dyn ObjectTrait) {\n    val.f()\n}\nfn main() {}\n", &[(7, "multiple applicable items in scope")], "dy8");
+}
