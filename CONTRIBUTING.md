@@ -311,9 +311,11 @@ Mutants the tests miss are written to `mutants.out/missed.txt`; add tests to kil
   builds without the crate-local ThinLTO (`CARGO_PROFILE_RELEASE_LTO=off`: the workspace builds in ~2/3 of the time)
   and installs valgrind from cached packages while it builds. The size budget depends on the linker, so CI installs wild 0.11.0 and measures with
   `ZUSTC_BENCH_LINKER=wild` (`bench/budget.txt` also holds wild sizes).
-- `.github/workflows/kpi.yml` runs on every push to a pull request. It builds the merge base and the head one after
-  the other on the same runner and measures both with `bench/kpi_track.py --lsp --dry-run` (a zust-analyzer session
-  included). `bench/kpi_pr.py` then keeps one comment on the pull request up to date: the change of each KPI against
+- `.github/workflows/kpi.yml` runs on every push to a pull request. It measures the head and the merge base with
+  `bench/kpi_track.py --dry-run --only <sections>` (a zust-analyzer session included), in two parts on runners side
+  by side, the base's beside the head's: gen5000, and traits, crates and patterns followed by the LSP session. An instruction count is the same on any
+  runner of the image. The base's numbers are cached, so a base measured before is not measured again.
+  `bench/kpi_pr.py` then keeps one comment on the pull request up to date: the change of each KPI against
   the base, and one row per push with the change against the push before. A KPI that grows by more than 1% is marked and gives a warning; the job does not fail.
 - `.github/workflows/bench.yml` runs `bench/ci_bench.py` on every push to main and stores the results in `dev/bench/`
   on the gh-pages branch with
