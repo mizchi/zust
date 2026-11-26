@@ -522,6 +522,12 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         hoisted: vec![],
         in_fmt_args: 0,
         late_flags: vec![],
+        parts: vec![],
+        pat_moved: vec![],
+        pat_vars: vec![],
+        rel_parts: None,
+        part_vars: vec![],
+        known_var: vec![],
         owned: vec![],
         temps: vec![],
         owned_binds: 0,
@@ -1129,12 +1135,18 @@ pub struct Loop {
     pub no_value: Option<&'static str>,
 }
 
+/// What a pattern moved out of a place (pat_parts): the parts (offset, type), and the variants (offset, enum,
+/// variant) its enum patterns matched
+pub type PatParts = (Vec<(i32, Ty)>, Vec<(i32, u32, usize)>);
+
 #[derive(Clone, Copy)]
 pub struct Owned {
     pub loc: Loc,
     pub ty: Ty,
     pub flag: StackSlot,
     pub depth: usize,
+    /// the offset of the part of loc this owns (a part of a local partly moved out of, split_moved), else 0
+    pub off: i32,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -1255,6 +1267,22 @@ pub struct Cx<'p> {
     pub hoisted: Vec<(String, Value, Value, Ty, Option<(Value, Value, Value)>)>,
     pub in_fmt_args: u32,
     pub late_flags: Vec<StackSlot>,
+    /// The parts of locals partly moved out of (split_moved): (the local's flag, offset, type, the part's flag)
+    pub parts: Vec<(StackSlot, i32, Ty, StackSlot)>,
+    /// What patterns bound by value that needs dropping: (the base address of the place, its offset, type). A release
+    /// after a pattern reads the entries its pattern added (pat_parts)
+    pub pat_moved: Vec<(Option<Value>, i32, Ty)>,
+    /// The enum variants patterns matched: (the base address of the enum's place, its offset, the enum, the variant)
+    pub pat_vars: Vec<(Option<Value>, i32, u32, usize)>,
+    /// The parts (offset in the place released, type) that the pattern of the next release moved out of, and the
+    /// variants (offset, enum, variant) it matched on the way
+    pub rel_parts: Option<PatParts>,
+    /// The variants (offset in the local, enum, variant) of the split under way (split_moved)
+    pub part_vars: Vec<(i32, u32, usize)>,
+    /// Locals (their drop flags) that a match left known to be one variant (enum, variant): every arm that went on
+    /// matched it. Until the local is assigned or borrowed `&mut`, rustc takes another variant's fields for
+    /// uninitialized, and a partial move out of one leaves the rest undropped (known_variant)
+    pub known_var: Vec<(StackSlot, u32, usize)>,
     pub owned: Vec<Owned>,
     pub temps: Vec<Owned>,
     pub owned_binds: usize,
@@ -2483,7 +2511,8 @@ impl Cx<'_> {
                     self.rg.scrut = scrut_saved.2;
                     let ob = self.owned_binds;
                     let pm = self.bk.pat_moves;
-                    let pre = if is_place_expr(init) { self.moved_flag(init) } else { None };
+                    let pre = if is_place_expr(init) { self.moved_root(init) } else { None };
+                    let pv0 = (self.pat_moved.len(), self.pat_vars.len());
                     self.bk_bind_begin();
                     // (the pattern's position, after the `let`, where an error of a `x @ sub` in it is reported)
                     let ap0 = std::mem::replace(&mut self.at_pat_at, Some(Sp { line: let_at.line, col: let_at.col + 4 }).filter(|s| s.line != 0));
@@ -2496,7 +2525,12 @@ impl Cx<'_> {
                     }
                     if self.owned_binds > ob {
                         match pre {
-                            Some(f) => self.clear_flag(f),
+                            Some((loc, t, f)) => {
+                                let parts = self.pat_parts(place, pv0);
+                                if !self.split_moved(init, loc, t, f, parts) {
+                                    self.clear_flag(f);
+                                }
+                            }
                             None => {
                                 let f = self.last_scrut;
                                 self.release(init, f)?;

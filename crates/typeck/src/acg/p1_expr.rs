@@ -2210,6 +2210,9 @@ impl Cx<'_> {
     pub(crate) fn reference(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Ref(m, rexpr) = e else { return err(SP, "internal: expected a reference") };
         let m = *m;
+        if m && !self.known_var.is_empty() {
+            self.forget_variant(rexpr);
+        }
         // (`&(42,).0` / `&NUMS[i]`: a field or an element of a constant is borrowed out of the constant promoted to
         // static data, `&(*&B).f` / `&(*&B)[i]`, so the reference outlives the function)
         // (`&CONST`: the constant's own static data, not a copy in this frame)

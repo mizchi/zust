@@ -96,6 +96,10 @@ impl Cx<'_> {
     }
 
     pub(crate) fn method_call(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
+        // (a method may take its receiver `&mut`: what a match knew of the local's variant is forgotten)
+        if let (Expr::MethodCall(r, ..), false) = (e, self.known_var.is_empty()) {
+            self.forget_variant(r);
+        }
         // (invalid_atomic_ordering, deny by default: an atomic's load / store / failure ordering it cannot have)
         if let Expr::MethodCall(r, m, _, args, sp) = e {
             if self.user_code
