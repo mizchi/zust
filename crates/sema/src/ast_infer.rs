@@ -1636,9 +1636,26 @@ impl Inf<'_> {
             Expr::Closure(..) => self.closure(e),
             Expr::MethodCall(recv, name, tf, args, _) => self.method_call(recv, name, tf, args),
             Expr::Cast(x, t) => {
-                self.expr(x);
+                let xv = self.expr(x);
                 match self.parse_ty(t) {
-                    Some(t) => self.known(t),
+                    Some(t) => {
+                        // (`&data as *const *const ()` with `let data = ptr::null();`: the reference coerces to the
+                        // pointer, so what it refers to is the pointer's pointee, when not known yet)
+                        let mut xe = &**x;
+                        while let Expr::Paren(i) = xe {
+                            xe = i;
+                        }
+                        if let (Ty::Ptr(_, pt), Expr::Ref(..)) = (t, xe) {
+                            let r = self.find(xv);
+                            if let Some(Shape::Ref(_, i)) = self.shape[r as usize] {
+                                if !self.known_in_full(i, 0) && !self.prog.has_param(*pt) {
+                                    let k = self.known(*pt);
+                                    self.unify(i, k);
+                                }
+                            }
+                        }
+                        self.known(t)
+                    }
                     None => self.var(),
                 }
             }

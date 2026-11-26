@@ -3702,3 +3702,15 @@ fn a_trait_object_of_auto_traits_alone() {
     // (a `dyn` with no trait at all stays an error)
     assert!(!errs("type Z = dyn 'static;\nfn main() {}\n").is_empty());
 }
+
+#[test]
+fn a_reference_cast_to_a_raw_pointer_tells_what_it_refers_to() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (`&data as *const *const ()` with `let data = ptr::null();`: data is a `*const ()`)
+    assert!(errs("fn main() {\n    let data = std::ptr::null();\n    let _ = &data as *const *const ();\n    if data.is_null() {}\n}\n").is_empty());
+    // (not when what it refers to is known: `&x as *const u8` with x a u32 stays an error)
+    assert!(!errs("fn main() {\n    let x = 1u32;\n    let _ = &x as *const u8;\n}\n").is_empty());
+}

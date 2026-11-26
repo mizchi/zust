@@ -3853,6 +3853,7 @@ check-pass	inference/infer-binary-operand-behind-reference.rs
 run-pass	inference/infer-fn-tail-expr.rs
 check-pass	inference/infer-result-type-through-dead-code.rs
 check-pass	inference/inference-thread-loop-closure.rs
+check-pass	inference/inference-variable-behind-raw-pointer.rs
 compile-fail	inference/issue-103587.rs
 compile-fail	inference/issue-107090.rs
 compile-fail	inference/issue-113354.rs
