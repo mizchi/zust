@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795693189652,
+  "lastUpdate": 1795693192395,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -116277,6 +116277,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 94.967,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6d7e2c275dd721502f5aa0060477e9a4b8fb101d",
+          "message": "sema: E0080 with rustc's text at the operation, for every constant (#176) (#238)\n\n* sema: E0080 with rustc's text, at the operation, for overflow and division by zero in constants (#176)\n\nThe bug: an overflow or a division by zero in a constant was reported with\nzustc's own text, \"in constant `A`: overflow in constant\", at column 1 of the\nconstant's line, and only for the first constant a fn read. With\n`let _ = (A, B);` B's error was missing, and a constant nothing reads was never\nreported. rustc reports each one as E0080 at the operation: \"attempt to compute\n`u8::MAX + 1_u8`, which would overflow\", \"attempt to divide `1_i32` by zero\",\n\"attempt to calculate the remainder of `5_u32` with a divisor of zero\".\n\nCause: Program::eval_t turned every failed checked_* result, and a division\nor remainder by zero, into \"overflow in constant\". The operands, the operator\nand the type were known there, but the text dropped them. A constant's\ninitializer is kept as joined token text, so its parsed expression has no\nsource position. And constants were evaluated only where a fn read them,\nwhile a fn's check stops at its first error.\n\nThe fix:\n- eval_t builds rustc's text when an operation fails (It::arith_err, a cold\n  path, so nothing extra runs on success). Operands are written as `200_u8`,\n  `-1_i32`, `i8::MIN` or `u8::MAX`. Besides the three forms, it covers `-`\n  (\"attempt to negate\") and shifts (\"attempt to shift left by `9_i32`\"). The\n  message ends with \"(E0080)\", as zustc's other error codes do. It (the\n  evaluator's integer type) now tells usize / isize from u64 / i64 by name\n  only; equality and hashing ignore the difference.\n- The error carries where the operation is in the text that was parsed. That\n  place is dropped where the text is not the caller's (another constant, a\n  const fn body) and by the public entry points other than the new\n  Program::eval_const_placed. An error in a const fn is placed at the call,\n  as rustc does.\n- Session::check finds the place: it parses the constant's initializer again\n  at its position in the source and evaluates it with eval_const_placed. A\n  parenthesized operation is placed at its `(`, as rustc's span is.\n- Session::check evaluates every integer constant of the program whose\n  initializer has an operator or a call, used or not, as rustc does. So B and\n  unused constants are reported. A constant that only reads a failing one gets\n  no error of its own.\n\nTests: tests/check.rs const_overflow_and_division_by_zero_are_e0080_at_the_operation\ncovers the issue's constants and its table, unused constants, usize, u128,\nshifts, negation, a static, parentheses, an initializer over two lines, a\nmodule, a fn body, a const fn, and a constant that reads a failing one. Each\ncase has rustc 1.97's text and line:column. tests/compile_errors/const_overflow.err\nnow has rustc's text (the build path's position is unchanged).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\n* sema: E0080 places survive conditions, indexing and inline aggregates (#176)\n\nReview of #238. An E0080 of an unused constant was lost when zustc could not\nplace it, in these cases:\n- A `;` in a literal or a comment ended the initializer. `b';' + 255` and\n  `255 /* ; */ + 1` were read back as text that does not parse.\n- An `if` condition, an index, and the operands of `&&` / `||` were evaluated\n  through eval_const, which drops the place.\n- A part of an array, tuple or struct written in the initializer\n  (`[255u8 + 1][0]`, `(255u8 + 1,).0`, `S { x: 255u8 + 1 }.x`) lost its place.\n  Only another constant's part should, since its places are in that\n  constant's text.\n- An error zustc could not place at all was dropped, so placement failing\n  hid a real error.\n\nThe fix:\n- The initializer's boundary scan skips string, raw string, byte and char\n  literals (literal_end, which tells `'a` from a char) and comments.\n- eval_t evaluates those sub-expressions itself, keeping the place.\n- const_part says whether the part is another constant's; the place is\n  dropped only then.\n- const_op_err tells \"in another constant it reads\" from \"not read back\".\n  The unused-constant pass reports an error that is not placed at its\n  constant's line, as before. One that is another constant's is reported\n  there only when no constant has it placed (an associated constant's). The\n  pass also takes bool constants (`1u8 / 0 == 0 && true`).\n- `pow` and `abs` past the type are rustc's E0080 at the call, as rustc 1.97\n  reports them: the first multiplication that overflows in core's pow\n  (`2u8.pow(8)`: `16_u8 * 16_u8`), and `-self` in abs (`attempt to negate\n  `i8::MIN``). A parenthesized call is at its `(`.\n\nTests: the tests/check.rs test has rustc 1.97's text and line:column for a\n`;` in `b';'`, in a block comment, in a line comment and in a byte string, a\n`'\\''` char, an `if` condition, an index, `&&`, `||`, `[255u8 + 1][0]`,\n`(255u8 + 1,).0`, a struct field, and six `pow` / `abs` cases. It also checks\nthat a constant read through an associated one, and one a macro writes, are\nstill reported at their lines.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\n* sema: E0080 fallbacks are dropped only for a constant that reads the placed one (#176)\n\nReview of #238. The unused-constant pass reports an E0080 it cannot place at\nthe constant's line. It dropped that report when another constant had the\nsame message placed, checking the text only, not whether this constant reads\nthat one:\n- `const A: u8 = 200 + 100;` and `const X: u8 = T::W + 0;`, where T::W is an\n  associated constant with the same overflow: X's report, the only one of\n  T::W's error, was dropped because A had the same message.\n- Reports the pass could not place at all were appended without the check.\n  So a `const X: u8 = Y + 0;` written by a macro, where Y overflows, was\n  reported at Y and again at X.\n\nThe fix: a report at a constant's line, from a fn or from the pass, is\ndropped only when that constant reads a constant whose error is that message\nand is placed. The read can be direct or through constants that read it\n(const_reads: the names the initializer's tokens give, `A`, `T::W`;\nconst_err_placed). The pass's reports at lines get the same check.\n\nTests: tests/check.rs asserts both cases. A / T::W / X reports A at 1:15 (as\nrustc) and X at 6:1 (zustc's place; rustc reports W at 4:19). The macro case\nreports Y's error only, at 1:15 (as rustc).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\n* sema: E0080 pass takes bit and comparison operators, skips comments (#176)\n\nReview of #238:\n- The unused-constant pass took only initializers with `+ - * / % < > (`, so\n  `const X: u8 = T::W & 1;` was never evaluated. When T::W, an associated\n  constant, overflows, that error was hidden. The pass now also takes\n  `& | ^ !` and `==`. Shifts were already covered by `<` and `>`. Plain\n  aliases (`= A;`, `= u8::MAX;`) are still skipped.\n- const_init_eq found a declaration by its text, so\n  `// const A: u8 = 1 / 0;` above `const A: u8 = 255 + 1;` was taken for A.\n  That reported a division by zero on the comment's line. The lookup now\n  skips comments and string and char literals, with the skipper the\n  initializer scan already used, now shared as literal_or_comment_end.\n- const_reads lists each constant once, so `C2 = C1 + C1` chains are not\n  followed twice at each level.\n\nTests: tests/check.rs asserts `T::W & 1`, `T::W == 0`, `T::W ^ 1 | 0` and\n`!T::W`, each reported at its constant's line. That is zustc's place; rustc\nreports the error at W, 3:19, with a note at each. It also asserts A at 4:15\n(as rustc) below a commented-out declaration, a block comment and a string\nthat contain one.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T20:33:48+09:00",
+          "tree_id": "01af7dedbeb0792db879fcb157cd0e63bd2b7485",
+          "url": "https://github.com/mizchi/zust/commit/6d7e2c275dd721502f5aa0060477e9a4b8fb101d"
+        },
+        "date": 1795693191937,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 77.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 66.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 90.625,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 88.235,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 92.308,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.749,
             "unit": "%"
           }
         ]
