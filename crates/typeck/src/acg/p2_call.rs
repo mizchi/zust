@@ -696,8 +696,15 @@ impl Cx<'_> {
             }
         }
         // `[T; N]::as_slice()` / `as_mut_slice()`: `&a[..]` / `&mut a[..]`
+        // (and a slice's `as_mut()` (`T: AsMut<[u8]> + ?Sized` at `[u8]`), a Vec's where it is its AsMut<[T]>:
+        // as_mut_slice_elem)
         if margs.is_empty() && matches!(method, "as_slice" | "as_mut_slice" | "as_mut") {
-            if let Some(Ty::Array(..)) = self.peek(recv).map(|t| self.strip_refs(t)) {
+            let array = match self.peek(recv).map(|t| self.strip_refs(t)) {
+                Some(Ty::Array(..)) => true,
+                Some(Ty::Slice(_)) => method == "as_mut",
+                _ => false,
+            };
+            if array || (method == "as_mut" && self.as_mut_slice_elem(recv, expected).is_some()) {
                 let ix = Expr::Index(Box::new(paren(recv.clone())), Box::new(full_range()), crate::parse::Span::default());
                 let e = Expr::Ref(method != "as_slice", Box::new(ix));
                 return self.expr(&e, expected);
@@ -2053,6 +2060,33 @@ impl Cx<'_> {
         } else {
             Expr::Ref(false, Box::new(Expr::Index(Box::new(r), Box::new(Expr::Range(None, None, false)), Default::default())))
         })
+    }
+
+    /// The element type, when `recv.as_mut()` is a Vec's (through references) built-in `AsMut<[T]>`: a Vec has
+    /// `AsMut<Vec<T>>` too, so only where the expected type (`&mut [T]`) or a bound of the function on the
+    /// receiver's type parameter (`S: AsMut<[u8]>`) asks for the slice. None otherwise (no method, as rustc's
+    /// ambiguity is not told apart)
+    pub(crate) fn as_mut_slice_elem(&self, recv: &Expr, expected: Option<Ty>) -> Option<Ty> {
+        let t = self.peek(recv)?;
+        let base = self.strip_refs(t);
+        let Ty::Struct(sid) = base else { return None };
+        if self.prog.structs[self.prog.base_of(sid) as usize].name != "Vec" {
+            return None;
+        }
+        let elem = self.vec_fields(sid)?.2;
+        if matches!(expected, Some(Ty::Ref(true, Ty::Slice(e))) if **e == elem) {
+            return Some(elem);
+        }
+        let sig = &self.prog.sigs[self.root as usize];
+        let asks = sig.generics.iter().any(|(pn, bs)| {
+            let pt = self.env.params.iter().find(|(n, _)| n == pn).map(|p| p.1);
+            pt.is_some_and(|p| p == t || self.strip_refs(p) == base)
+                && bs.iter().any(|b| {
+                    let b: String = b.chars().filter(|c| !c.is_whitespace()).collect();
+                    b.strip_prefix("AsMut<").is_some_and(|x| x.starts_with('['))
+                })
+        });
+        asks.then_some(elem)
     }
 
     /// 組み込みの AsRef の結果の型

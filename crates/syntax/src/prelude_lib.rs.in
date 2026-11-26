@@ -616,6 +616,150 @@ pub unsafe fn __core_write_bytes<T>(dst: *mut T, val: u8, count: usize) {
     unsafe { __exr_memset(dst as *mut u8, val as i32, count * core::mem::size_of::<T>()) };
 }
 
+// `core::alloc::Layout`: a size and a power-of-two alignment, the size rounded up to the alignment at most isize::MAX
+// (what std's constructors check). (`\x4c` in the texts: a program's own `Layout` renames this one's, word by word)
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Layout {
+    __l_size: usize,
+    __l_align: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LayoutError;
+
+pub type LayoutErr = LayoutError;
+
+impl Layout {
+    pub const fn from_size_align(size: usize, align: usize) -> Result<Layout, LayoutError> {
+        if align == 0 || align & (align - 1) != 0 || size > isize::MAX as usize - (align - 1) {
+            return Err(LayoutError);
+        }
+        Ok(Layout { __l_size: size, __l_align: align })
+    }
+    pub const unsafe fn from_size_align_unchecked(size: usize, align: usize) -> Layout {
+        Layout { __l_size: size, __l_align: align }
+    }
+    pub const fn new<T>() -> Layout {
+        Layout { __l_size: core::mem::size_of::<T>(), __l_align: core::mem::align_of::<T>() }
+    }
+    pub fn for_value<T>(t: &T) -> Layout {
+        Layout { __l_size: core::mem::size_of_val(t), __l_align: core::mem::align_of_val(t) }
+    }
+    pub fn array<T>(n: usize) -> Result<Layout, LayoutError> {
+        match core::mem::size_of::<T>().checked_mul(n) {
+            Some(size) => Layout::from_size_align(size, core::mem::align_of::<T>()),
+            None => Err(LayoutError),
+        }
+    }
+    pub const fn size(&self) -> usize {
+        self.__l_size
+    }
+    pub const fn align(&self) -> usize {
+        self.__l_align
+    }
+    pub const fn pad_to_align(&self) -> Layout {
+        let m = self.__l_align - 1;
+        Layout { __l_size: (self.__l_size + m) & !m, __l_align: self.__l_align }
+    }
+    pub fn align_to(&self, align: usize) -> Result<Layout, LayoutError> {
+        if align == 0 || align & (align - 1) != 0 {
+            return Err(LayoutError);
+        }
+        Layout::from_size_align(self.__l_size, if align > self.__l_align { align } else { self.__l_align })
+    }
+    pub fn extend(&self, next: Layout) -> Result<(Layout, usize), LayoutError> {
+        let m = next.__l_align - 1;
+        let offset = (self.__l_size + m) & !m;
+        let align = if next.__l_align > self.__l_align { next.__l_align } else { self.__l_align };
+        match offset.checked_add(next.__l_size) {
+            Some(size) => match Layout::from_size_align(size, align) {
+                Ok(l) => Ok((l, offset)),
+                Err(e) => Err(e),
+            },
+            None => Err(LayoutError),
+        }
+    }
+}
+
+// (std's Debug of the alignment: `8 (1 << 3)`)
+struct __LayoutAlign(usize);
+
+impl Debug for __LayoutAlign {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{} (1 << {})", self.0, self.0.trailing_zeros())
+    }
+}
+
+impl Debug for Layout {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.debug_struct("\x4cayout").field("size", &self.__l_size).field("align", &__LayoutAlign(self.__l_align)).finish()
+    }
+}
+
+impl Display for LayoutError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.pad("invalid parameters to \x4cayout::from_size_align")
+    }
+}
+
+unsafe extern "C" {
+    #[link_name = "aligned_alloc"]
+    fn __exr_aligned_alloc(align: usize, size: usize) -> *mut u8;
+}
+
+unsafe extern "C" {
+    #[link_name = "calloc"]
+    fn __exr_calloc(n: usize, size: usize) -> *mut u8;
+}
+
+// `std::alloc::alloc` / `alloc_zeroed` / `realloc` / `dealloc`: libc's allocator, which Box and Vec use too (malloc's
+// blocks are aligned to 16; aligned_alloc for a larger alignment). A failure is a null pointer, as std's
+pub unsafe fn __core_alloc(layout: Layout) -> *mut u8 {
+    let a = layout.__l_align;
+    unsafe {
+        if a <= 16 {
+            __exr_malloc(layout.__l_size)
+        } else {
+            __exr_aligned_alloc(a, (layout.__l_size + a - 1) & !(a - 1))
+        }
+    }
+}
+pub unsafe fn __core_alloc_zeroed(layout: Layout) -> *mut u8 {
+    if layout.__l_align <= 16 {
+        return unsafe { __exr_calloc(1, layout.__l_size) };
+    }
+    let p = unsafe { __core_alloc(layout) };
+    if !p.is_null() {
+        unsafe { __exr_memset(p, 0, layout.__l_size) };
+    }
+    p
+}
+pub unsafe fn __core_realloc(ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+    if layout.__l_align <= 16 {
+        return unsafe { __exr_realloc(ptr, new_size) };
+    }
+    let q = unsafe { __core_alloc(Layout { __l_size: new_size, __l_align: layout.__l_align }) };
+    if !q.is_null() {
+        let n = if new_size < layout.__l_size { new_size } else { layout.__l_size };
+        unsafe {
+            __exr_memcpy(q, ptr as *const u8, n);
+            __exr_free(ptr);
+        }
+    }
+    q
+}
+pub unsafe fn __core_dealloc(ptr: *mut u8, _layout: Layout) {
+    unsafe { __exr_free(ptr) };
+}
+// (std's message, then abort)
+pub fn __core_handle_alloc_error(layout: Layout) -> ! {
+    __exr_err_str::<()>("memory allocation of ");
+    __exr_err_num::<()>(layout.__l_size as u64);
+    __exr_err_str::<()>(" bytes failed\n");
+    unsafe { __exr_abort() };
+    loop {}
+}
+
 // The capacity `Vec::reserve` grows to (twice the old one, or what is needed), or a panic when it does not fit:
 // len + extra past usize, or a block past isize::MAX bytes (as std). (Not generic: checked and compiled once,
 // not per element type)
@@ -2999,6 +3143,7 @@ impl<T> Iterator for __IterRepeat<T> {
 pub fn __core_repeat<T: Clone>(v: T) -> __IterRepeat<T> {
     __IterRepeat { v: v }
 }
+pub type Repeat<T> = __IterRepeat<T>;
 pub struct __IterOnce<T> {
     v: Option<T>,
 }
@@ -3901,11 +4046,22 @@ impl DebugStruct {
     }
     pub fn finish_non_exhaustive(&mut self) -> Result<(), __FmtError> {
         let f = unsafe { &mut *self.f };
+        // (std's: `Name { .. }` with no fields, in `{:#?}` too; a pretty one's `..` has no comma after it)
+        if self.n == 0 {
+            if f.alt {
+                f.indent -= 1;
+                f.buf.pop_byte();
+                f.buf.push(' ');
+            }
+            f.buf.push_str(".. }");
+            return Ok(());
+        }
         __exr_dbg_item::<()>(f, self.n, "");
         f.buf.push_str("..");
-        __exr_dbg_item_end::<()>(f);
-        self.n += 1;
-        __exr_dbg_end::<()>(f, self.n, self.kind, false);
+        if f.alt {
+            f.buf.push('\n');
+        }
+        __exr_dbg_end::<()>(f, self.n + 1, self.kind, false);
         Ok(())
     }
 }
@@ -6133,6 +6289,12 @@ pub fn __exr_env_args() -> Args {
 /// std::convert::Infallible: the error of a conversion that cannot fail (no values)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Infallible {}
+
+impl Display for Infallible {
+    fn fmt(&self, _f: &mut Formatter) -> Result<(), __FmtError> {
+        match *self {}
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VarError {
@@ -9580,6 +9742,8 @@ struct __GreenTh {
     run: Option<Box<dyn FnMut()>>,
     done: bool,
     waiting: bool,
+    // (`Thread::unpark`'s token, which the next `park` takes)
+    token: bool,
 }
 
 struct __GreenSched {
@@ -9608,7 +9772,7 @@ fn __exr_green() -> *mut __GreenSched {
     unsafe {
         if __EXR_GREEN.is_null() {
             let mut ths: Vec<__GreenTh> = Vec::new();
-            ths.push(__GreenTh { ctx: __exr_green_alloc(1024), stack: 0usize as *mut u8, run: None, done: false, waiting: false });
+            ths.push(__GreenTh { ctx: __exr_green_alloc(1024), stack: 0usize as *mut u8, run: None, done: false, waiting: false, token: false });
             let s = __exr_green_alloc(core::mem::size_of::<__GreenSched>()) as *mut __GreenSched;
             s.write(__GreenSched { ths: ths, cur: 0, live: 1, epoch: 0 });
             __EXR_GREEN = s;
@@ -9744,7 +9908,7 @@ fn __exr_green_start(run: Box<dyn FnMut()>) -> usize {
         *(ctx.add(32) as *mut usize) = __EXR_GREEN_STACK;
         __exr_makecontext(ctx, __exr_green_entry, 0);
         let id = (*s).ths.len();
-        (*s).ths.push(__GreenTh { ctx: ctx, stack: stack, run: Some(run), done: false, waiting: false });
+        (*s).ths.push(__GreenTh { ctx: ctx, stack: stack, run: Some(run), done: false, waiting: false, token: false });
         (*s).live += 1;
         // (the new thread runs at once, until it waits or ends: a thread that never waits runs as it did before
         // there were green threads)
@@ -9787,6 +9951,10 @@ impl<T> JoinHandle<T> {
     pub fn is_finished(&self) -> bool {
         __exr_green_done(self.id)
     }
+    // (a Thread is the thread's index alone, as `id` here: the handle's own field read as one)
+    pub fn thread(&self) -> &Thread {
+        unsafe { &*(&self.id as *const usize as *const Thread) }
+    }
 }
 
 pub fn __core_spawn<T, F: FnOnce() -> T>(f: F) -> JoinHandle<T> {
@@ -9813,6 +9981,57 @@ pub fn __core_yield_now() {
 // (`thread::panicking()`: a panic stops the process without unwinding, so no drop ever runs while panicking)
 pub fn __core_panicking() -> bool { false }
 
+// `std::thread::Thread`: a handle to a green thread, its index in the scheduler (the main thread is 0, also before
+// any thread is spawned). std numbers its ThreadIds from 1 in the order the threads are made, so the id is the index
+// + 1. `park` waits for the thread's token, which `unpark` sets, running the other threads meanwhile. (`\x54` in the
+// Debug name, as `\x4c` in Layout's: a program's own `Thread` renames this one, word by word)
+#[derive(Clone)]
+pub struct Thread {
+    __th_id: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ThreadId(u64);
+
+impl Thread {
+    pub fn id(&self) -> ThreadId {
+        ThreadId(self.__th_id as u64 + 1)
+    }
+    // (no `Builder` here: only the main thread has a name)
+    pub fn name(&self) -> Option<&str> {
+        if self.__th_id == 0 { Some("main") } else { None }
+    }
+    pub fn unpark(&self) {
+        unsafe {
+            let s = __exr_green();
+            (*s).ths[self.__th_id].token = true;
+        }
+        __exr_green_progress();
+    }
+}
+
+impl Debug for Thread {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.debug_struct("\x54hread").field("id", &self.id()).field("name", &self.name()).finish_non_exhaustive()
+    }
+}
+
+pub fn __core_current() -> Thread {
+    unsafe { Thread { __th_id: if __EXR_GREEN.is_null() { 0 } else { (*__EXR_GREEN).cur } } }
+}
+
+// (when no thread is left that could unpark this one, std's blocks forever: a panic, as `join`'s)
+pub fn __core_park() {
+    let s = __exr_green();
+    let me = unsafe { (*s).cur };
+    if !__exr_green_wait(|| unsafe { (*s).ths[me].token }) {
+        panic!("deadlock: every thread is waiting");
+    }
+    unsafe {
+        (*s).ths[me].token = false;
+    }
+}
+
 /// `std::fmt::Arguments`: a formatted text (`format_args!` makes a String here, so this holds one)
 #[derive(Clone)]
 pub struct Arguments<'a> {
@@ -9837,6 +10056,49 @@ impl<'a> Debug for Arguments<'a> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
         f.buf.push_str(&self.__args_s);
         Ok(())
+    }
+}
+
+/// `std::ops::ControlFlow`: go on with a C, or stop early with a B
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ControlFlow<B, C = ()> {
+    Continue(C),
+    Break(B),
+}
+
+impl<B, C> ControlFlow<B, C> {
+    pub fn is_break(&self) -> bool {
+        match self {
+            ControlFlow::Break(_) => true,
+            ControlFlow::Continue(_) => false,
+        }
+    }
+    pub fn is_continue(&self) -> bool {
+        !self.is_break()
+    }
+    pub fn break_value(self) -> Option<B> {
+        match self {
+            ControlFlow::Break(b) => Some(b),
+            ControlFlow::Continue(_) => None,
+        }
+    }
+    pub fn continue_value(self) -> Option<C> {
+        match self {
+            ControlFlow::Continue(c) => Some(c),
+            ControlFlow::Break(_) => None,
+        }
+    }
+    pub fn map_break<T, F: FnOnce(B) -> T>(self, f: F) -> ControlFlow<T, C> {
+        match self {
+            ControlFlow::Break(b) => ControlFlow::Break(f(b)),
+            ControlFlow::Continue(c) => ControlFlow::Continue(c),
+        }
+    }
+    pub fn map_continue<T, F: FnOnce(C) -> T>(self, f: F) -> ControlFlow<B, T> {
+        match self {
+            ControlFlow::Continue(c) => ControlFlow::Continue(f(c)),
+            ControlFlow::Break(b) => ControlFlow::Break(b),
+        }
     }
 }
 
@@ -10683,6 +10945,60 @@ impl<T> Drop for MutexGuard<T> {
     }
 }
 
+// `std::sync::Condvar` (green threads: `wait` lets the guard's Mutex go, waits for a notify after it, then takes the
+// Mutex again. `notify_one` wakes every waiter: the others' is a spurious wakeup, which std allows. With no thread
+// left that could notify, std's waits forever: a panic, as `join`'s)
+pub struct Condvar {
+    // (how many notifies there have been)
+    __cv_n: u64,
+}
+
+impl Condvar {
+    pub const fn new() -> Condvar {
+        Condvar { __cv_n: 0 }
+    }
+    pub fn wait<T>(&self, guard: MutexGuard<T>) -> Result<MutexGuard<T>, ()> {
+        let n = &self.__cv_n as *const u64;
+        let seen = unsafe { *n };
+        let m = guard.m;
+        unsafe {
+            *m = false;
+        }
+        __exr_green_progress();
+        if !__exr_green_wait(|| unsafe { *n != seen }) {
+            panic!("deadlock: every thread is waiting");
+        }
+        __exr_green_wait(|| unsafe { !*m });
+        unsafe {
+            *m = true;
+        }
+        Ok(guard)
+    }
+    pub fn wait_while<T, F: FnMut(&mut T) -> bool>(&self, guard: MutexGuard<T>, condition: F) -> Result<MutexGuard<T>, ()> {
+        let mut g = guard;
+        let mut condition = condition;
+        while condition(unsafe { &mut *g.p }) {
+            g = self.wait(g).unwrap();
+        }
+        Ok(g)
+    }
+    pub fn notify_one(&self) {
+        self.notify_all();
+    }
+    pub fn notify_all(&self) {
+        unsafe {
+            *(&self.__cv_n as *const u64 as *mut u64) += 1;
+        }
+        __exr_green_progress();
+    }
+}
+
+impl Debug for Condvar {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.debug_struct("\x43ondvar").finish_non_exhaustive()
+    }
+}
+
 // `std::sync::RwLock` (green threads, as Mutex: `read` waits while a writer holds it, `write` while anyone does; a
 // guard's drop lets it go)
 pub struct RwLock<T> {
@@ -10786,6 +11102,73 @@ impl<T: Debug> Debug for RwLock<T> {
 // `std::sync::OnceLock` (スレッドは 1 本なので、初期化済みかどうかと値だけ)
 pub struct OnceLock<T> {
     val: Option<T>,
+}
+
+// `std::sync::Once` (green threads: a `call_once` while another thread runs the closure waits for it to end. A panic
+// stops the process, so no Once is ever seen poisoned)
+pub struct Once {
+    // (0: not run, 1: running, 2: done)
+    __once_st: u8,
+}
+
+pub struct OnceState {
+    __os_poisoned: bool,
+}
+
+pub const ONCE_INIT: Once = Once { __once_st: 0 };
+
+impl Once {
+    pub const fn new() -> Once {
+        Once { __once_st: 0 }
+    }
+    pub fn is_completed(&self) -> bool {
+        self.__once_st == 2
+    }
+    pub fn call_once<F: FnOnce()>(&self, f: F) {
+        if self.__once_st != 2 && self.__once_begin() {
+            f();
+            self.__once_end();
+        }
+    }
+    pub fn call_once_force<F: FnOnce(&OnceState)>(&self, f: F) {
+        if self.__once_st != 2 && self.__once_begin() {
+            f(&OnceState { __os_poisoned: false });
+            self.__once_end();
+        }
+    }
+    // (true: this thread is to run the closure; false: another one ran it meanwhile)
+    fn __once_begin(&self) -> bool {
+        let p = &self.__once_st as *const u8 as *mut u8;
+        // (the closure calls call_once on its own Once, or what it waits for cannot come: std's deadlocks)
+        if !__exr_green_wait(|| unsafe { *p != 1 }) {
+            panic!("deadlock: every thread is waiting");
+        }
+        if unsafe { *p } == 2 {
+            return false;
+        }
+        unsafe {
+            *p = 1;
+        }
+        true
+    }
+    fn __once_end(&self) {
+        unsafe {
+            *(&self.__once_st as *const u8 as *mut u8) = 2;
+        }
+        __exr_green_progress();
+    }
+}
+
+impl OnceState {
+    pub fn is_poisoned(&self) -> bool {
+        self.__os_poisoned
+    }
+}
+
+impl Debug for Once {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.debug_struct("\x4fnce").finish_non_exhaustive()
+    }
 }
 
 /// `std::cell::LazyCell`: the function makes the value on the first deref / `force`
@@ -10963,6 +11346,12 @@ impl Error for ParseFloatError {
 impl Error for TryFromIntError {
     fn __err_mark(&self) {}
 }
+impl Error for LayoutError {
+    fn __err_mark(&self) {}
+}
+impl Error for Infallible {
+    fn __err_mark(&self) {}
+}
 
 // `Box<dyn Error>`: 変換した時点で表示 ({}) と Debug ({:?}) の文字列にしておく
 pub struct __DynError {
@@ -11026,6 +11415,10 @@ pub trait BorrowMut {
 }
 pub trait FromIterator {
     fn from_iter<I>(iter: I) -> Self;
+}
+// (`impl Extend<bool> for BitVec`: a program's own; Vec's, String's and the collections' `extend` are their own methods)
+pub trait Extend {
+    fn extend<I>(&mut self, iter: I);
 }
 
 pub trait From {

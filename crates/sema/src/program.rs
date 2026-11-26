@@ -1959,12 +1959,24 @@ impl Program {
         // Instances made midway through layout (`RefCell<Node>` in `Node`) were computed with types whose size was
         // not settled yet, so they are redone once everything is settled
         p.relayout_instances();
+        // (a variant of the program's own enum wins over a prelude enum's of the same name: `use ControlFlow::*;` of its
+        // own `enum ControlFlow { Break, .. }`, beside the prelude's that the name brings in. When two of one side share
+        // the name, neither is found)
+        let mut own_names: FxSet<&str> = FxSet::default();
         for sid in 0..p.structs.len() {
             let sd = &p.structs[sid];
             if !sd.is_enum || sd.base.is_some() || sd.name.starts_with('#') {
                 continue;
             }
+            let own = p.struct_item.get(sid).is_some_and(|&i| (i as usize) < user);
             for (vi, v) in sd.variants.iter().enumerate() {
+                if own && own_names.insert(v.name.as_str()) {
+                    p.variant_names.insert(v.name.clone(), Some((sid as u32, vi)));
+                    continue;
+                }
+                if !own && own_names.contains(v.name.as_str()) {
+                    continue;
+                }
                 p.variant_names
                     .entry(v.name.clone())
                     .and_modify(|e| *e = None)
@@ -3551,6 +3563,56 @@ impl Program {
                 return self.impls.contains(&(self.base_of(sid), "AsRef".to_string()));
             }
             return false;
+        }
+        // The built-in AsMut<[T]> of arrays, slices and Vec, AsMut<str> of str and String, and std's `impl AsMut<U>
+        // for &mut T` (through `&mut` only, not `&`). A program's own impls are asked below, by the trait's name
+        if tr.starts_with("AsMut") && tr.contains('<') {
+            let squeeze = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+            let inner = squeeze(&tr["AsMut".len()..]);
+            let mut b = t;
+            while let Ty::Ref(true, i) = b {
+                b = *i;
+            }
+            let name = match b {
+                Ty::Struct(sid) => self.structs[self.base_of(sid) as usize].name.as_str(),
+                _ => "",
+            };
+            let elem = match b {
+                Ty::Array(e, _) | Ty::Slice(e) => Some(*e),
+                Ty::Struct(sid) if name == "Vec" => self.structs[sid as usize].args.first().copied(),
+                _ => None,
+            };
+            if elem.is_some_and(|e| inner == squeeze(&format!("<[{}]>", self.tn(e)))) || ((b == Ty::Str || name == "String") && inner == "<str>") {
+                return true;
+            }
+        }
+        // std's Extend of Vec<T> (`Extend<T>`, and `Extend<&T>` of a Copy T) and of String (`char`, `&char`, `&str`,
+        // `String`), whose own `extend` takes any of them. A program's own impls are asked below, by the trait's name
+        if let Some(x) = tr.strip_prefix("Extend").map(str::trim).and_then(|r| r.strip_prefix('<')).and_then(|r| r.strip_suffix('>')) {
+            if let Ty::Struct(sid) = t {
+                // (the argument's text without lifetimes or white space: `&'a bool` is `&bool`)
+                let mut x2 = String::new();
+                let mut cs = x.chars().peekable();
+                while let Some(c) = cs.next() {
+                    if c == '\'' {
+                        while cs.next_if(|c| c.is_alphanumeric() || *c == '_').is_some() {}
+                    } else if !c.is_whitespace() {
+                        x2.push(c);
+                    }
+                }
+                match self.structs[self.base_of(sid) as usize].name.as_str() {
+                    "Vec" => {
+                        if let Some(&e) = self.structs[sid as usize].args.first() {
+                            let en: String = self.tn(e).chars().filter(|c| !c.is_whitespace()).collect();
+                            if x2 == en || (x2 == format!("&{en}") && self.implements(e, "Copy")) {
+                                return true;
+                            }
+                        }
+                    }
+                    "String" if matches!(x2.as_str(), "char" | "&char" | "&str" | "String") => return true,
+                    _ => {}
+                }
+            }
         }
         // The targets of collect (built-in): String / Vec / HashMap and so on
         if tr.starts_with("FromIterator") {
@@ -8038,6 +8100,17 @@ impl Program {
         }
         if n >= 2 && name(n - 2) == "process" && name(n - 1) == "exit" {
             return self.index.get("__core_process_exit").copied();
+        }
+        // (`alloc::alloc(layout)` after `use std::alloc;`, and the crate's `alloc::alloc::alloc(layout)`: std::alloc's
+        // functions, the prelude's `__core_*`. `alloc` is kept as a path's head above, as it names the crate too; not
+        // a program's own `alloc::f`)
+        if n >= 2
+            && name(0) == "alloc"
+            && (n == 2 || (n == 3 && name(1) == "alloc"))
+            && matches!(name(n - 1), "alloc" | "alloc_zeroed" | "dealloc" | "realloc" | "handle_alloc_error")
+            && !self.index.contains_key(&format!("alloc::{}", name(n - 1)))
+        {
+            return self.index.get(&format!("__core_{}", name(n - 1))).copied();
         }
         // `core::cmp::max` / `core::mem::swap` and the like go to the prelude's `__core_*`
         if n >= 2 && matches!(name(0), "core" | "std") {
