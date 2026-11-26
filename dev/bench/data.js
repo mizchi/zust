@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795695318980,
+  "lastUpdate": 1795695322233,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -86800,6 +86800,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 133.469,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "24729236037da90d17e5119dbdd8f70ed837e29f",
+          "message": "lint: unused_parens under deny (#175) (#244)\n\n* lint: unused_parens under deny (#175)\n\nzustc had no unused_parens: `#[deny(unused_parens)] fn f(x: i32) -> i32 {\nif (x > 3) { .. } }` was accepted, where rustc rejects it at the `(`.\n\nThe flags: denied for the crate as dead_code is (by its name, `unused` or\n`warnings`, by the head's last levels), read only where the head denies\nsomething; or by the attributes an item of the program's starts with\n(`#[deny(unused_parens)] fn f`), unless the crate allows it. The scan runs\nonly then, in analyze before the other lints (it is an early lint in rustc),\nso `zustc check`, the LSP and a build report it alike. unused_var_attrs\nbecomes lint_attrs(text, n), so a statement's `#[allow(unused_parens)]`\ncovers its statement as it does for unused_variables.\n\nThe walk (session/parens.rs) follows rustc's UnusedParens: the places it\nlooks at (`if` / `while` condition, `match` scrutinee and arms, `let`\nscrutinee and value, `for` iterator, `return` / `break` value, assigned\nvalue, index, argument, closure body, block value, a const's or a static's\nvalue), in the order its pass meets them, and is_expr_delims_necessary for\nthe parentheses it keeps (a struct literal before a block, `({ 0 } + 1)`,\n`if (return) {}`, `if (break x) {}`, a lazy `let` scrutinee, `&raw`), kept\ntoo where it is not sure. The parser keeps no place for parentheses: the\n`(` is found back from the first token inside that has one.\n\nWhat a macro's expansion put in parentheses (`({ .. })`, `if (x > 1 )` from\na fragment) is not reported: only a line left as written (equal to the\nsource's) is. An `allow` on a module, an impl or a trait, or an inner one,\nwhich the items' text does not show, leaves the lint off.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\n* lint: unused_parens around `&x`, `if` / `match` / `break`; tests (#175)\n\nThe `(` is now also found before an inner expression with no place of its\nown: back over a `&` / `&mut`, or the `if`, `match`, `return`, `break`,\n`continue` it starts with, and over `/* */` comments. `pub(crate)` consts\nare looked at too.\n\nTests: tests/check.rs unused_parens_under_deny (the issue's five in turn at\nrustc's line:col, each other place, the kept forms, no deny, the allows of\nan item, a statement, the crate and a module, `allow(warnings)` not undoing\na deny, a macro's expansion) and tests/compile_errors/unused_parens_item_deny\n(the build path); both fail without the lint. Every expected place was\nchecked with rustc 1.97.\n\ntests/ui: 6 more compile-fail tests pass (lint/lint-struct-necessary,\nlint/unused/{closure-body-issue-136741, issue-90807-unused-paren-error,\nissue-92751, issue-96606, unused-parens-assign-expr-in-ret-issue-131989}),\neach at rustc's first error; 0 regressions. Baseline rewritten\n(--write-baseline; the ratchet's two compile-fail lines become one).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\n* lint: unused_parens: levels as rustc has them; libraries (#175)\n\nReview of #244, each case checked with rustc 1.97.\n\nThe lint's own level and `warnings` are kept apart, each set by the last\nattribute naming it (parens::Levels, apply): `#[allow(warnings)]` leaves a\ndeny of the lint, `#[warn(unused_parens)]` is an error under\n`#![deny(warnings)]`, a crate's later `#![allow(warnings)]` /\n`#![warn(warnings)]` undoes its `deny(warnings)` (and its forbid), a group's\n`forbid(unused)` lets the lint be allowed. The crate's levels come from its\nhead's inner attributes in order (parens::crate_levels), not from inner\nattributes anywhere in the first 4096 bytes. An item's own deny of the lint\nor `unused` now holds under the crate's allow; its `deny(warnings)` does\nnot, as in rustc. lint_attrs gives each attribute's names (the lint or its\ngroup, `warnings`, a `warn`) beside its level.\n\nlint_attrs skips literals and comments (literal_or_comment_end), so\n`\"#[deny(unused_parens)]\"` or a commented-out attribute sets no level, for\nunused_variables too. An attribute's `]` is found past the literals in it.\n\nThe levels of a module, an impl or a trait, and inner ones (parens::\nlevels_around, replacing allowed_wide), are read from the source as written\nas the lines of the block they cover, so they no longer turn the lint off\nfor the items beside them. `warnings` is read there too: `#[allow(warnings)]\nmod m` under `#![deny(warnings)]` reported the module's parentheses. Only a\n`mod x;` with such an attribute still leaves the lint off.\n\nLibraries are checked (ctx.lib no longer skips the pass); only the crate's\nown lines, not its dependencies' (ctx.own_lines), and a workspace library's\n`pub mod name { .. }` around its text is taken off for its levels.\n\nTests: tests/check.rs unused_parens_levels (25 programs, rustc's first error\nor none, the accepted ones with no error at all) and tests/workspace.rs\nunused_parens_in_a_library_and_not_in_dependencies; both fail before this.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T21:09:43+09:00",
+          "tree_id": "5ce4b5490e3ed7c89b247e03e89c452a6edc8f33",
+          "url": "https://github.com/mizchi/zust/commit/24729236037da90d17e5119dbdd8f70ed837e29f"
+        },
+        "date": 1795695321493,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.108,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.845,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.596,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 11.701,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.387,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.065,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 8.557,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 300.457,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 134.203,
             "unit": "MiB"
           }
         ]
