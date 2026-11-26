@@ -9913,6 +9913,21 @@ impl<T> JoinHandle<T> {
     }
 }
 
+/// `std::os::unix::thread::RawPthread` and JoinHandleExt: a green thread's index stands for its pthread_t
+pub type RawPthread = u64;
+pub trait JoinHandleExt {
+    fn as_pthread_t(&self) -> RawPthread;
+    fn into_pthread_t(self) -> RawPthread;
+}
+impl<T> JoinHandleExt for JoinHandle<T> {
+    fn as_pthread_t(&self) -> RawPthread {
+        self.id as u64
+    }
+    fn into_pthread_t(self) -> RawPthread {
+        self.id as u64
+    }
+}
+
 /// `std::thread::Thread`: a thread's handle, its index among the green threads (0: the main thread)
 #[derive(Clone, Debug)]
 pub struct Thread {
@@ -12045,6 +12060,30 @@ impl<T: 'static> LocalKey<T> {
     pub fn try_with<R, F: FnOnce(&T) -> R>(&'static self, f: F) -> Result<R, ()> {
         Ok(f((self.__get)()))
     }
+}
+
+/// `std::any::Any`: every type's TypeId (`dyn Any`'s `is`; a panic's payload, `Box<dyn Any + Send>`)
+pub trait Any {
+    fn type_id(&self) -> TypeId;
+}
+impl<T: 'static> Any for T {
+    fn type_id(&self) -> TypeId {
+        TypeId::of::<T>()
+    }
+}
+impl dyn Any {
+    pub fn is<T: 'static>(&self) -> bool {
+        self.type_id() == TypeId::of::<T>()
+    }
+}
+
+// `std::panic::catch_unwind` / `resume_unwind`: a panic stops the process (no unwinding), so the closure's value is all
+// catch_unwind gives, and resume_unwind is a panic
+pub fn __core_catch_unwind<F: FnOnce() -> R, R>(f: F) -> Result<R, Box<dyn Any + Send>> {
+    Ok(f())
+}
+pub fn __core_resume_unwind(_payload: Box<dyn Any + Send>) -> ! {
+    panic!("Box<dyn Any>")
 }
 
 /// `std::panic::AssertUnwindSafe` (the value as it is: a type that wraps it, with its own impls, `impl Tr for

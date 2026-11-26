@@ -577,7 +577,7 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "Duration" | "AtomicPtr" | "RangeTo" | "RangeToInclusive" | "Fuse" | "Wrapping" | "Saturating"
                         | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList"
                         | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError"
-                        | "Layout" | "LayoutError" | "Once" | "OnceState" | "Infallible" | "Thread" | "ThreadId" | "Builder" | "Condvar" | "WaitTimeoutResult" | "Instant" | "PoisonError" | "TryLockError" => Some(w),
+                        | "Layout" | "LayoutError" | "Once" | "OnceState" | "Infallible" | "Thread" | "ThreadId" | "Builder" | "Condvar" | "WaitTimeoutResult" | "Instant" | "PoisonError" | "TryLockError" | "JoinHandleExt" => Some(w),
                         // (std::num's NonZero types: their impls only with them)
                         w if w.starts_with("NonZero") => Some(w),
                         // HashMap's iterators (HmIter and so on) only when HashMap is used
@@ -1889,6 +1889,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         need.insert("__exr_panic_fmt");
     }
     let mut dur_ops = false;
+    let mut any_trait = false;
     let mut fmt_write = false;
     loop {
         let mut changed = false;
@@ -1912,6 +1913,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             dur_ops = true;
             op_impls.extend(["Add", "Sub", "Mul", "Div", "AddAssign", "SubAssign"]);
             need.extend(["add", "sub", "mul", "div", "add_assign", "sub_assign"]);
+        }
+        // (`dyn Any` (a JoinHandle's join, a panic's payload): the trait, whose one member is type_id)
+        if !any_trait && need.contains("Any") {
+            any_trait = true;
+            need.extend(["type_id", "TypeId"]);
         }
         for (i, (it, name, core_only)) in all.iter().enumerate() {
             if chosen[i] || matches!(it.kind, ItemKind::ImplHeader | ItemKind::TraitHeader) {
