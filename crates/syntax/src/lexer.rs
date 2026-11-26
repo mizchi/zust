@@ -2577,6 +2577,11 @@ pub fn trait_scopes(src: &str) -> Vec<(u32, u32, Vec<String>)> {
 
 /// trait_scopes, with whether src contains `mod` already known (one search of the text for both uses)
 pub fn trait_scopes_with(src: &str, has_mod: bool) -> Vec<(u32, u32, Vec<String>)> {
+    trait_scopes_in(src, has_mod, None)
+}
+
+/// trait_scopes_with, with src's tokens (`tokenize(src)`) when the caller has them already
+pub fn trait_scopes_in(src: &str, has_mod: bool, src_toks: Option<&[(u8, usize, usize)]>) -> Vec<(u32, u32, Vec<String>)> {
     if !has_mod || !src.contains("trait") {
         return vec![];
     }
@@ -2608,7 +2613,14 @@ pub fn trait_scopes_with(src: &str, has_mod: bool) -> Vec<(u32, u32, Vec<String>
         }
     }
     let s = src.as_bytes();
-    let toks = tokenize(s);
+    let own;
+    let toks: &[(u8, usize, usize)] = match src_toks {
+        Some(t) => t,
+        None => {
+            own = tokenize(s);
+            &own
+        }
+    };
     let tok = |k: usize| -> &[u8] { &s[toks[k].1..toks[k].2] };
     let is_sym = |k: usize, c: u8| toks[k].0 == 1 && s[toks[k].1] == c && toks[k].2 == toks[k].1 + 1;
     let is_id = |k: usize, w: &[u8]| toks[k].0 == 0 && tok(k) == w;
