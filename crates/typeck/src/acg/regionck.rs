@@ -2912,6 +2912,7 @@ impl Cx<'_> {
         let Some(tree) = tree else { return };
         if let Some(a) = ann {
             self.rg_closure_fnptr(a, init);
+            self.rg_closure_passes(init, t, &tree);
         }
         // (a generic fn item whose type arguments the annotation gives (`let f: fn(_, &'a T) -> &'static T = foo;`):
         // its instance's tree, the type arguments' regions fresh)
@@ -4189,9 +4190,12 @@ impl Cx<'_> {
         // (a receiver `&self` / `&mut self`: of the impl's own type; another receiver type leaves the result's
         // elided regions unknown)
         // (or of `impl dyn Tr`'s own object: `fn get(&self) -> &u8` borrows from the receiver, not only its object)
+        // (or a trait's declaration, `&self` of its Self: a call through the vtable, a placeholder's or a default
+        // through `impl Ext for dyn Tr {}`)
         let self_ref = sig0.has_self
             && (matches!((sig0.params.first(), sig0.impl_of), (Some(Ty::Ref(_, Ty::Struct(s))), Some(i)) if prog.base_of(*s) == prog.base_of(i))
-                || matches!(sig0.params.first(), Some(Ty::Ref(_, Ty::Dyn(_)))) && prog.names[id as usize].starts_with("__dyn_"));
+                || matches!(sig0.params.first(), Some(Ty::Ref(_, Ty::Dyn(_)))) && prog.names[id as usize].starts_with("__dyn_")
+                || sig0.trait_of.is_some() && sig0.impl_of.is_none() && matches!(sig0.params.first(), Some(Ty::Ref(_, Ty::Param(0)))) && sig0.generics.first().is_some_and(|g| g.0 == "Self"));
         let self_r = if self_ref { ptrees.first().and_then(|t| t.as_ref()).and_then(|t| t.first().copied()).filter(|v| !substituted.contains(v)) } else { None };
         let other_self = sig0.has_self && !self_ref;
         inputs.dedup();
@@ -4576,6 +4580,42 @@ impl Cx<'_> {
             params.push(t);
         }
         self.rg_closure_ann_bound(c, &codes, &tgts, &params);
+    }
+
+    /// A closure held as a fn pointer (t, its tree) whose value is one of its parameters (`let g: fn(_, _) -> _ =
+    /// |_x, y| y;`): that parameter flows into the result, so the pointer's parameter outlives its result (returned
+    /// as `fn(&'a u32, &'b u32) -> &'a u32`, `'b: 'a`). Only for a body that is the parameter itself: what another
+    /// body returns, the check does not know
+    fn rg_closure_passes(&mut self, init: &Expr, t: Ty, tree: &[u32]) {
+        let (Expr::Closure(_, inputs, None, body, pos), Ty::Fn(f)) = (super::strip_paren(init), t) else { return };
+        if f.params.len() != inputs.len() {
+            return;
+        }
+        let Expr::Path(None, p) = super::strip_paren(body) else { return };
+        if p.segs.len() != 1 {
+            return;
+        }
+        let Some(i) = inputs.iter().position(|(pt, _)| matches!(pt, crate::parse::Pat::Ident(false, _, n, None) if *n == p.segs[0].name)) else { return };
+        let prog = self.prog;
+        if f.params[i] != f.ret {
+            return;
+        }
+        let mut at = 0;
+        let mut offs = vec![];
+        for &pt in f.params.iter().chain([&f.ret]) {
+            let Some(c) = count(prog, pt, 0) else { return };
+            offs.push((at, c));
+            at += c;
+        }
+        if at != tree.len() {
+            return;
+        }
+        let ((pi, pc), (ri, rc)) = (offs[i], offs[f.params.len()]);
+        if pc != rc || pc == 0 {
+            return;
+        }
+        let (ptr, rtr) = (tree[pi..pi + pc].to_vec(), tree[ri..ri + rc].to_vec());
+        self.rg.flow(prog, f.params[i], f.ret, &ptr, &rtr, *pos);
     }
 
     fn rg_closure_ann_bound(&mut self, c: &Expr, codes: &[Vec<u8>], tgts: &[Vec<Option<u32>>], params: &[Ty]) {

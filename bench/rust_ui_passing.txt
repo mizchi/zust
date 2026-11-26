@@ -3887,6 +3887,7 @@ compile-fail	inference/issue-86162-2.rs
 check-pass	inference/iter-ufcs-coercion-type-unification.rs
 run-pass	inference/iterator-sum-array-15673.rs
 run-pass	inference/lambda-infer-unresolved.rs
+run-pass	inference/lub-glb-with-unbound-infer-var.rs
 compile-fail	inference/multiple-impl-apply.rs
 compile-fail	inference/need_type_info/channel.rs
 compile-fail	inference/need_type_info/concrete-impl.rs
@@ -5317,6 +5318,7 @@ check-pass	nll/issue-55651.rs
 check-pass	nll/issue-55825-const-fn.rs
 compile-fail	nll/issue-57100.rs
 compile-fail	nll/issue-57280-1-flipped.rs
+compile-fail	nll/issue-57362-1.rs
 compile-fail	nll/issue-57642-higher-ranked-subtype.rs
 compile-fail	nll/issue-57843.rs
 run-pass	nll/issue-57960.rs
@@ -5350,6 +5352,7 @@ compile-fail	nll/maybe-initialized-drop-with-fragment.rs
 compile-fail	nll/maybe-initialized-drop-with-uninitialized-fragments.rs
 compile-fail	nll/maybe-initialized-drop.rs
 check-pass	nll/member-constraints/non-root-universe-existential-2.rs
+compile-fail	nll/mir_check_cast_closure.rs
 compile-fail	nll/mir_check_cast_reify.rs
 compile-fail	nll/mir_check_cast_unsafe_fn.rs
 compile-fail	nll/mir_check_cast_unsize.rs
@@ -6857,6 +6860,7 @@ run-pass	regions/regions-scope-chain-example.rs
 run-pass	regions/regions-self-impls.rs
 run-pass	regions/regions-self-in-enums.rs
 run-pass	regions/regions-simple.rs
+compile-fail	regions/regions-static-bound-on-type-param.rs
 run-pass	regions/regions-static-bound-rpass.rs
 compile-fail	regions/regions-static-bound.rs
 run-pass	regions/regions-static-closure.rs
@@ -7442,6 +7446,7 @@ compile-fail	span/multiline-span-E0072.rs
 compile-fail	span/multiline-span-simple.rs
 check-pass	span/multispan-import-lint.rs
 compile-fail	span/mut-arg-hint.rs
+compile-fail	span/mut-ptr-cant-outlive-ref.rs
 compile-fail	span/mutability-suggestion-fullwidth-ampersand.rs
 compile-fail	span/pub-struct-field.rs
 compile-fail	span/range-2.rs
