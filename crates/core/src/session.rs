@@ -13527,6 +13527,9 @@ fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem]
             }
         }
     }
+    // (the first declaration of each trait of the program's, by name: built at the first impl of a trait. A search of
+    // every summary for each impl was quadratic in a program of many impls)
+    let mut decl_of: Option<FxMap<&str, usize>> = None;
     for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
         // (an impl's self type and trait arguments: `impl Foo for Option<[u8]>`)
         if let Some(st) = &sm.impl_self_ty {
@@ -13549,7 +13552,16 @@ fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem]
                 // `impl<T: ?Sized> Tr<T> for ()` with `trait Tr<T> {}`)
                 let tr = sm.impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
                 let tr = tr.map(|t| t.rsplit("::").next().unwrap_or(t));
-                if let Some((di, d)) = tr.and_then(|tr| sums[..user.min(sums.len())].iter().enumerate().find(|(_, s)| s.trait_decl.as_deref() == Some(tr))) {
+                let decls = decl_of.get_or_insert_with(|| {
+                    let mut m: FxMap<&str, usize> = FxMap::default();
+                    for (di, d) in sums[..user.min(sums.len())].iter().enumerate() {
+                        if let Some(t) = d.trait_decl.as_deref() {
+                            m.entry(t).or_insert(di);
+                        }
+                    }
+                    m
+                });
+                if let Some((di, d)) = tr.and_then(|tr| decls.get(tr)).map(|&di| (di, &sums[di])) {
                     let tparams: Vec<&String> = d.trait_generics.iter().map(|g| &g.0).filter(|g| !g.starts_with('#') && *g != "Self").collect();
                     // (the arguments written fill the leading parameters: the rest have defaults, `trait Tr<T, U = ()>`)
                     if sm.impl_trait_args.len() <= tparams.len() {
