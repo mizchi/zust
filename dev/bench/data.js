@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795709934684,
+  "lastUpdate": 1795709937345,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -87256,6 +87256,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 134.098,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "70739b91f845a9f1f1b62ed361dbcc9f357f664e",
+          "message": "cratebench/survey: the top crates.io crates by category, CRATES_SUPPORT.md and a dashboard (#247)\n\nSurveys the top 300 crates of crates.io by recent downloads, plus extra.tsv's 16 (tokio with `full`, serde and clap with `derive`, embassy and other embedded crates), each as the only dependency of a probe library in a temporary directory (sources from crates.io, versions from one shared Cargo.lock; nothing vendored). zurgo check gives each package of the graph its errors; zurgo build runs when there are none; --tests compares a crate's own tests under cargo test and zurgo test.\n\nCRATES_SUPPORT.md (generated): statuses with their share of the downloads, a table per category (15), what to fix first, errors by kind, graphs zurgo cannot plan, names zustc cannot find, every crate by category. site/crates/ shows the same with the history. crate-survey.yml runs the survey on main in a read-only job and commits its files from a separate publish job; pages.yml publishes /crates/.\n\nFirst survey (5498281): 38 of 273 probed crates build (13.5% of their downloads); 391 errors in 168 packages.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T01:13:53+09:00",
+          "tree_id": "29968aad16f7ac680effd93b949c9266719b0608",
+          "url": "https://github.com/mizchi/zust/commit/70739b91f845a9f1f1b62ed361dbcc9f357f664e"
+        },
+        "date": 1795709936974,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.052,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.821,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.577,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 11.569,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.376,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.1,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 9.226,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 299.41,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 134.387,
             "unit": "MiB"
           }
         ]
