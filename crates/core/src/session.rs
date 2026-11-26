@@ -12278,24 +12278,38 @@ impl Session {
             self.chk = Some(memo);
         }
         tm.lap("check", format!("{n_memo} from the last check, {n_keys} keys, {n_hit} cached, {n_checked} checked"));
-        // (E0080: each integer constant of the program is evaluated, used or not, as rustc's; not only where a fn
-        // reads it, whose check stops at its first error (`let _ = (A, B);` reports A's only). At the operation, of
+        // (E0080: each integer or bool constant of the program is evaluated, used or not, as rustc's; not only where a
+        // fn reads it, whose check stops at its first error (`let _ = (A, B);` reports A's only). At the operation, of
         // the constant that has it: not of one that reads that constant. The same error found in a fn is one.
-        // One with no operator or call of its own (`= 1;`, `= u8::MAX;`, `= A;`) has none)
+        // One with no operator or call of its own (`= 1;`, `= u8::MAX;`, `= A;`) has none. One that is not placed is
+        // at the constant's line, as before)
         if !self.const_lines.is_empty() {
-            let mut placed = vec![];
+            let (mut placed, mut unplaced) = (vec![], vec![]);
             let own = |c: &crate::program::ConstDef| c.item < a.prog.prelude_from && !a.ext_items.get(c.item as usize).copied().unwrap_or(false) && !c.name.contains("::");
-            for c in a.prog.consts.iter().filter(|c| c.ty.is_int() && own(c) && c.expr.bytes().any(|b| matches!(b, b'+' | b'-' | b'*' | b'/' | b'%' | b'<' | b'>' | b'('))) {
-                if a.prog.const_int(&c.name, 0).is_err_and(|e| e.ends_with("(E0080)")) {
-                    if let Some(m) = const_init_eq(src, &c.name).and_then(|eq| const_op_err(&a.prog, &c.name, src, eq)) {
-                        placed.push(m);
-                    }
+            for c in a.prog.consts.iter().filter(|c| (c.ty.is_int() || c.ty == Ty::Bool) && own(c) && c.expr.bytes().any(|b| matches!(b, b'+' | b'-' | b'*' | b'/' | b'%' | b'<' | b'>' | b'('))) {
+                let Err(e) = a.prog.const_int(&c.name, 0) else { continue };
+                if !e.ends_with("(E0080)") {
+                    continue;
+                }
+                // (at its line in the source, or its item's (one a macro wrote))
+                let eq = const_init_eq(src, &c.name);
+                let at_line = match eq {
+                    Some(eq) => format!("{}:1: in constant `{}`: {e}", src[..eq.min(src.len())].matches('\n').count() + 1, c.name),
+                    None => unhoist_err(&a, format!("{}:1: in constant `{}`: {e}", a.items[c.item as usize].line, c.name)),
+                };
+                match eq.and_then(|eq| const_op_err(&a.prog, &c.name, src, eq)) {
+                    Some(Some(m)) => placed.push(m),
+                    // (in another constant it reads: that one's error, at its operation; at this one only when no
+                    // other has it (an associated constant's))
+                    Some(None) => errs.push(at_line),
+                    None => unplaced.push(at_line),
                 }
             }
             // (and not at a constant that reads one of them, `const X: u8 = Y + 0;`, where a fn read it)
             let msgs: FxSet<&str> = placed.iter().filter_map(|m| m.split_once(": ").map(|x| x.1)).collect();
             errs.retain(|e| !(e.ends_with("(E0080)") && e.split_once(": in constant `").and_then(|x| x.1.split_once("`: ")).is_some_and(|x| msgs.contains(x.1))));
             errs.extend(placed);
+            errs.extend(unplaced);
         }
         self.const_lines.clear();
         if errs.is_empty() {
@@ -12349,8 +12363,8 @@ fn const_err_line(e: String, src: &str, prog: &Program) -> String {
         Some((pos, m)) if pos.split(':').all(|x| !x.is_empty() && x.bytes().all(|c| c.is_ascii_digit())) => m,
         _ => tail,
     };
-    // (at the line, as before, when the operation is in another constant it reads)
-    if let Some(m) = msg.ends_with("(E0080)").then(|| const_op_err(prog, full, src, eq)).flatten() {
+    // (at the line, as before, when the operation is in another constant it reads or is not placed)
+    if let Some(Some(m)) = msg.ends_with("(E0080)").then(|| const_op_err(prog, full, src, eq)).flatten() {
         return m;
     }
     format!("{line}:1: in constant `{name}`: {msg}")
@@ -12381,20 +12395,48 @@ fn const_init_eq(src: &str, name: &str) -> Option<usize> {
 }
 
 /// The E0080 of constant `name`, whose initializer follows the `=` at src[eq], at the operation: the initializer
-/// evaluated again as parsed at its place in the source (`L:C: attempt to compute ..`), or None (no place: the
-/// operation is in another constant it reads)
+/// evaluated again as parsed at its place in the source, Some(Some(`L:C: attempt to compute ..`)). Some(None) when
+/// the operation is in another constant it reads (the error has no place in this one), None when the initializer is
+/// not read back so (no `=`, a text that does not parse, or another result)
 #[cold]
-fn const_op_err(prog: &Program, name: &str, src: &str, eq: usize) -> Option<String> {
+fn const_op_err(prog: &Program, name: &str, src: &str, eq: usize) -> Option<Option<String>> {
     use crate::parse::{parse_expr_at, pos_at, Pos};
     let b = src.as_bytes();
     if b.get(eq) != Some(&b'=') {
         return None;
     }
-    // (to the `;` past brackets; the text's own place)
+    // (to the `;` past brackets, literals (`b';'`) and comments; the text's own place)
     let close = |from: usize, stop: u8| {
         let (mut end, mut depth) = (from, 0i32);
         while end < b.len() {
+            if let Some(e) = literal_end(b, end) {
+                end = e;
+                continue;
+            }
             match b[end] {
+                b'/' if b.get(end + 1) == Some(&b'/') => {
+                    end = b[end..].iter().position(|&c| c == b'\n').map_or(b.len(), |p| end + p);
+                    continue;
+                }
+                // (`/* .. /* .. */ .. */` nests)
+                b'/' if b.get(end + 1) == Some(&b'*') => {
+                    let mut n = 0usize;
+                    while end < b.len() {
+                        if b[end..].starts_with(b"/*") {
+                            n += 1;
+                            end += 2;
+                        } else if b[end..].starts_with(b"*/") {
+                            n -= 1;
+                            end += 2;
+                            if n == 0 {
+                                break;
+                            }
+                        } else {
+                            end += 1;
+                        }
+                    }
+                    continue;
+                }
                 b'[' | b'(' | b'{' => depth += 1,
                 b']' | b')' | b'}' if depth == 0 => break,
                 b']' | b')' | b'}' => depth -= 1,
@@ -12407,10 +12449,10 @@ fn const_op_err(prog: &Program, name: &str, src: &str, eq: usize) -> Option<Stri
     };
     let parse_at = |from: usize, end: usize| parse_expr_at(src.get(from..end)?, pos_at(src, from, Pos { line: 1, col: 0 })).ok();
     let ty = prog.consts[*prog.const_index.get(name)? as usize].ty;
-    let m = prog.eval_const_placed(&parse_at(eq + 1, close(eq + 1, b';'))?, ty).err()?;
-    let (pos, msg) = m.split_once(": ").filter(|_| m.ends_with("(E0080)"))?;
-    let p: Vec<usize> = pos.split(':').map(|x| x.parse().ok()).collect::<Option<_>>()?;
-    let [line, col, al, ac] = p[..] else { return None };
+    let m = prog.eval_const_placed(&parse_at(eq + 1, close(eq + 1, b';'))?, ty).err().filter(|m| m.ends_with("(E0080)"))?;
+    let place = m.split_once(": ").and_then(|(pos, msg)| Some((pos.split(':').map(|x| x.parse().ok()).collect::<Option<Vec<usize>>>()?, msg)));
+    let Some((p, msg)) = place else { return Some(None) };
+    let [line, col, al, ac] = p[..] else { return Some(None) };
     // (the operation's start: its line's start, then col - 1 chars)
     let ls = if line <= 1 { 0 } else { src.match_indices('\n').nth(line - 2)?.0 + 1 };
     let mut start = ls + src[ls..].char_indices().nth(col - 1)?.0;
@@ -12428,13 +12470,13 @@ fn const_op_err(prog: &Program, name: &str, src: &str, eq: usize) -> Option<Stri
             x = *y;
         }
         match x {
-            Expr::Binary(_, _, _, sp) | Expr::Unary(_, _, sp) if sp.at == at => start = o,
+            Expr::Binary(_, _, _, sp) | Expr::Unary(_, _, sp) | Expr::MethodCall(.., sp) if sp.at == at => start = o,
             _ => break,
         }
     }
     let l = src[..start].matches('\n').count() + 1;
     let c = src[..start].rsplit('\n').next().map_or(0, |s| s.chars().count()) + 1;
-    Some(format!("{l}:{c}: {msg}"))
+    Some(Some(format!("{l}:{c}: {msg}")))
 }
 
 /// The line (1-based) in the source of line `line` of the prepared text, past the source's `user_lines`: in the

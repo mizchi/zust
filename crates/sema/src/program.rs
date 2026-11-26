@@ -434,6 +434,34 @@ impl It {
         let (p, a) = (sp.start, sp.at);
         if p.line == 0 { format!("{m} (E0080)") } else { format!("{}:{}:{}:{}: {m} (E0080)", p.line, p.col + 1, a.line, a.col + 1) }
     }
+    /// rustc's E0080 of `v.pow(e)` past this type, at the call sp: the first multiplication that overflows in core's
+    /// pow as a constant evaluates it (`acc * base` for each set bit of e, low to high, then `base * base` until the
+    /// last one: `2u8.pow(8)` is `16_u8 * 16_u8`)
+    #[cold]
+    #[inline(never)]
+    fn pow_err(self, v: i128, mut e: u32, sp: crate::parse::Span) -> String {
+        let mul = |a: i128, b: i128| {
+            if self.bits == 128 && !self.signed { (a as u128).checked_mul(b as u128).map(|x| x as i128) } else { a.checked_mul(b).filter(|&x| self.fits(x)) }
+        };
+        let (mut base, mut acc) = (v, 1);
+        while e != 0 {
+            if e & 1 == 1 {
+                acc = match mul(acc, base) {
+                    Some(x) => x,
+                    None => return self.arith_err("*", acc, base, None, sp),
+                };
+                if e == 1 {
+                    break;
+                }
+            }
+            e /= 2;
+            base = match mul(base, base) {
+                Some(x) => x,
+                None => return self.arith_err("*", base, base, None, sp),
+            };
+        }
+        "overflow in constant".into()
+    }
 }
 
 /// An error of constant evaluation that is rustc's at the constant (E0080): an overflow or a division by zero
@@ -4204,8 +4232,8 @@ impl Program {
     }
 
     /// The part `pick` takes from the value of the constant expression b (through `&`, `*`, parentheses and other
-    /// consts)
-    fn const_part(&self, b: &crate::parse::Expr, depth: u32, pick: &dyn Fn(&crate::parse::Expr) -> Option<crate::parse::Expr>) -> R<crate::parse::Expr> {
+    /// consts), and whether it is another constant's (parsed from that constant's text)
+    fn const_part(&self, b: &crate::parse::Expr, depth: u32, pick: &dyn Fn(&crate::parse::Expr) -> Option<crate::parse::Expr>) -> R<(crate::parse::Expr, bool)> {
         use crate::parse::Expr;
         if depth > 64 {
             return Err("constant is too deeply nested".into());
@@ -4216,9 +4244,9 @@ impl Program {
             Expr::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() => {
                 let ci = *self.const_index.get(p.segs[0].name.as_str()).ok_or("unsupported expression in constant")?;
                 let e = crate::parse::parse_expr(&self.consts[ci as usize].expr)?;
-                self.const_part(&e, depth + 1, pick)
+                Ok((self.const_part(&e, depth + 1, pick)?.0, true))
             }
-            x => pick(x).ok_or_else(|| "unsupported expression in constant".into()),
+            x => Ok((pick(x).ok_or("unsupported expression in constant")?, false)),
         }
     }
 
@@ -4457,7 +4485,8 @@ impl Program {
                     [crate::parse::Stmt::Expr(x, false)] => Some(x.clone()),
                     _ => None,
                 };
-                let c = self.eval_const(c, depth)?;
+                // (of this text: eval_t, which keeps an E0080's place, not eval_const)
+                let c = self.eval_t(c, depth, None)?.0;
                 let x = tail(t).ok_or("unsupported expression in constant")?;
                 // (both arms are one type: `if true { !0 } else { 1u8 }` is a u8's !0; the other arm is not evaluated)
                 let want = want.or_else(|| self.static_ty(&x)).or_else(|| self.static_ty(els));
@@ -4570,8 +4599,8 @@ impl Program {
             }
             // (`X[0]` / `T.1` of a const array, byte string, tuple or struct)
             Expr::Index(b, i, _) => {
-                let i = self.eval_const(i, depth)?;
-                let part = self.const_part(b, depth, &|x| match x {
+                let i = self.eval_t(i, depth, None)?.0;
+                let (part, other) = self.const_part(b, depth, &|x| match x {
                     Expr::Array(xs) => usize::try_from(i).ok().and_then(|i| xs.get(i).cloned()),
                     Expr::Repeat(x, _) => Some((**x).clone()),
                     Expr::Lit(t, p) => {
@@ -4586,11 +4615,13 @@ impl Program {
                     Some(Ty::Array(e, _)) => It::of_ty(*e),
                     _ => self.early_part_ty(b, None),
                 };
-                // (the part's places are in that constant's text)
-                self.eval_t(&part, depth + 1, want.or(et)).map_err(unplaced)
+                // (a part of another constant has its places in that constant's text; one of an array written here,
+                // `[255u8 + 1][0]`, in this one)
+                let r = self.eval_t(&part, depth + 1, want.or(et));
+                if other { r.map_err(unplaced) } else { r }
             }
             Expr::Field(b, f, _) => {
-                let part = self.const_part(b, depth, &|x| match x {
+                let (part, other) = self.const_part(b, depth, &|x| match x {
                     Expr::Tuple(xs) => f.parse::<usize>().ok().and_then(|k| xs.get(k).cloned()),
                     Expr::Struct(_, fs, _) => fs.iter().find(|x| &x.0 == f).map(|x| x.1.clone()),
                     Expr::Call(_, xs) => f.parse::<usize>().ok().and_then(|k| xs.get(k).cloned()),
@@ -4604,7 +4635,8 @@ impl Program {
                     }
                     _ => self.early_part_ty(b, f.parse::<usize>().ok()),
                 };
-                self.eval_t(&part, depth + 1, want.or(ft)).map_err(unplaced)
+                let r = self.eval_t(&part, depth + 1, want.or(ft));
+                if other { r.map_err(unplaced) } else { r }
             }
             // (`-` of a literal is the negative literal: `-128i8` is i8::MIN, and so is `-(128i8)`; `-i8::MIN` overflows)
             Expr::Unary(op, x, _) if op == "-" && matches!(strip_parens(x), Expr::Lit(..)) => {
@@ -4649,11 +4681,11 @@ impl Program {
                 let ow = if cmp { None } else { want };
                 // (`&&` / `||` short-circuit: `true || (u8::MAX + 1 == 0)` is true)
                 if matches!(op, "&&" | "||") {
-                    let lv = self.eval_const(l, depth)?;
+                    let lv = self.eval_t(l, depth, None)?.0;
                     if (op == "&&") == (lv == 0) {
                         return un((op == "||") as i128);
                     }
-                    return un((self.eval_const(r, depth)? != 0) as i128);
+                    return un((self.eval_t(r, depth, None)?.0 != 0) as i128);
                 }
                 // (the operands' common type, read before they are evaluated: in `(4 / ((!0 >> 7) + 1)) & 7u8` the
                 // left one is a u8 too; a shift's right operand is its own)
@@ -4810,7 +4842,7 @@ impl Program {
                 self.prim_const_t(t, &p.segs[1].name)
             }
             // Integer methods (`u128::MAX.ilog10()`): by the receiver type's width and sign (`(-1i8).count_ones()` is 8)
-            Expr::MethodCall(recv, m, _, args, _) => {
+            Expr::MethodCall(recv, m, _, args, sp) => {
                 let (v, t) = self.eval_t(recv, depth, None)?;
                 let bits = t.map_or(128, |it| it.bits);
                 let unsigned = t.is_some_and(|it| !it.signed);
@@ -4836,14 +4868,15 @@ impl Program {
                     ("leading_zeros", []) => ((u.leading_zeros() - (128 - bits)) as i128, u32t),
                     ("pow", [e]) => {
                         // (a u128 as u128: its bit pattern is not a positive i128 past i128::MAX)
-                        let p = if bits == 128 && unsigned {
-                            (v as u128).checked_pow(*e as u32).ok_or("overflow in constant")? as i128
-                        } else {
-                            v.checked_pow(*e as u32).ok_or("overflow in constant")?
-                        };
+                        let p = if bits == 128 && unsigned { (v as u128).checked_pow(*e as u32).map(|p| p as i128) } else { v.checked_pow(*e as u32) };
                         match t {
-                            Some(it) if it.bits < 128 => (it.check(Some(p))?, t),
-                            _ => (p, t),
+                            // (past the receiver's type: rustc's E0080 of the multiplication in core's pow that
+                            // overflows, at the call)
+                            Some(it) => match p.filter(|&p| it.fits(p)) {
+                                Some(p) => (p, t),
+                                None => return Err(it.pow_err(v, *e as u32, *sp)),
+                            },
+                            None => (p.ok_or("overflow in constant")?, t),
                         }
                     }
                     // (a u128 compares as unsigned: its bit pattern past i128::MAX is negative)
@@ -4851,8 +4884,13 @@ impl Program {
                     ("max", [b]) if bits == 128 && unsigned => ((v as u128).max(*b as u128) as i128, t),
                     ("min", [b]) => (v.min(*b), t),
                     ("max", [b]) => (v.max(*b), t),
-                    // (checked at the receiver's width: `i8::MIN.abs()` overflows)
+                    // (checked at the receiver's width: `i8::MIN.abs()` overflows, rustc's E0080 of the `-self` in core's
+                    // abs, at the call)
                     ("abs", []) => match t {
+                        Some(it) if it.signed => match v.checked_abs().filter(|&x| it.fits(x)) {
+                            Some(x) => (x, t),
+                            None => return Err(it.arith_err("neg", v, 0, None, *sp)),
+                        },
                         Some(it) => (it.check(v.checked_abs())?, t),
                         None => (v.checked_abs().ok_or("overflow in constant")?, t),
                     },
