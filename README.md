@@ -220,7 +220,7 @@ Known differences from rust-analyzer are listed in [CONTRIBUTING.md](CONTRIBUTIN
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-26, 1577be0<!-- /measured --> by CI on each push to main. Details:
+Numbers measured <!-- measured -->2026-11-26, bce449f<!-- /measured --> by CI on each push to main. Details:
 [SUPPORT.md](SUPPORT.md) (what is supported) and [PERFORMANCE.md](PERFORMANCE.md) (speed, size, memory, and
 comparisons with rustc and others).
 
@@ -232,10 +232,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2403 | 1915 (79.7%) |
-| check-pass (accepted by `zustc check`) | 1813 | 1557 (85.9%) |
-| build-pass | 135 | 104 (77.0%) |
-| compile-fail (rejected at an annotated line) | 7386 | 5388 (72.9%) |
+| run-pass (builds, runs, same output) | 2403 | 1935 (80.5%) |
+| check-pass (accepted by `zustc check`) | 1813 | 1582 (87.3%) |
+| build-pass | 135 | 105 (77.8%) |
+| compile-fail (rejected at an annotated line) | 7386 | 5475 (74.1%) |
 <!-- /auto:ui -->
 
 [SUPPORT.md](SUPPORT.md) breaks this down by area: the language, the checks, the runtime and std, and what is left.
