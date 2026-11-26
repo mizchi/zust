@@ -29,8 +29,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rust-src
+      # (kache, a rustc wrapper, keeps what each compiler run makes, in the GitHub Actions cache, by its inputs with the
+      # checkout's paths left out: a crate this run compiles as an earlier run did (main, the pull request's last push)
+      # is copied, the test binaries too. rust-cache keeps the registry and the installed tools, not target/)
+      - uses: kunobi-ninja/kache-action@v1
+        with:
+          version: v2.3.1
+          cache-executables: true
       - uses: Swatinem/rust-cache@v2
         with:
+          cache-targets: "false"
           workspaces: |
             . -> target
             formal/connect -> target
@@ -82,7 +90,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # (as in the test job: kache for what rustc makes, rust-cache for the registry and the tools)
+      - uses: kunobi-ninja/kache-action@v1
+        with:
+          version: v2.3.1
+          cache-executables: true
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: "false"
       - name: Install wild
         run: command -v wild || cargo install --locked wild-linker@0.11.0
       - name: Build zustc

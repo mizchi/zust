@@ -3,7 +3,7 @@ use crate::parse::{Expr, GArg};
 use crate::types::{Ty, intern};
 use crate::acg::clif::MemFlagsData;
 
-/// `(x)` (syn の parse_quote! の括弧と同じ形)
+/// `(x)` (the same shape as the parentheses of syn's parse_quote!)
 fn paren(e: &Expr) -> Expr {
     Expr::Paren(Box::new(e.clone()))
 }
@@ -69,7 +69,7 @@ impl Cx<'_> {
     pub(crate) fn unary(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Unary(op, x, _) = e else { unreachable!() };
         let op = op.as_str();
-        // `-v` / `!v` (impl Neg / Not): メソッド呼び出し
+        // `-v` / `!v` (impl Neg / Not): a method call
         if let ("-" | "!", Some(Ty::Struct(sid))) = (op, self.peek(x)) {
             let m = if op == "-" { "neg" } else { "not" };
             if self.prog.method(sid, m).is_some() {
@@ -87,7 +87,7 @@ impl Cx<'_> {
                 return self.expr(ne, expected);
             }
         }
-        // 負のリテラル (`-128i8` / `-2147483648`) はその場で値にする (検査で MIN の符号反転にしない)
+        // A negative literal (`-128i8` / `-2147483648`) becomes a value right here (not a checked negation of MIN)
         if op == "-" {
             if let Expr::Lit(t, _) = strip_paren(x) {
                 // (not `-2f32`: digits with a float's suffix are a float, negated below)
@@ -115,7 +115,7 @@ impl Cx<'_> {
         }
         let (v, mut t) = self.expr(x, expected)?;
         let Some(mut v) = v else { return Ok((None, t)) };
-        // `-&x` / `!&b` (impl Neg for &i32 など): 参照先の数値を読む
+        // `-&x` / `!&b` (impl Neg for &i32 and so on): reads the number behind the reference
         if let Ty::Ref(_, i) = t {
             if i.is_int() || i.is_float() || *i == Ty::Bool {
                 v = self.b.ins().load(clif_ty(*i).unwrap(), mf(), v, 0);
@@ -199,7 +199,7 @@ impl Cx<'_> {
         }
     }
 
-    /// `a op b` (Expr::Binary) と複合代入 `a op= b` (Expr::AssignOp)
+    /// `a op b` (Expr::Binary) and the compound assignment `a op= b` (Expr::AssignOp)
     pub(crate) fn binary(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let (op, left, right, assign) = match e {
             Expr::Binary(op, l, r, _) => (op.as_str(), &**l, &**r, false),
@@ -229,7 +229,7 @@ impl Cx<'_> {
                 return Ok((Some(self.b.ins().iconst(types::I8, v)), Ty::Bool));
             }
         }
-        // 短絡評価
+        // Short-circuit evaluation
         // (a chain of one operator (`a && b && c`) is lowered as one: each operand's short-circuit goes to the end, so
         // the borrow check sees that c runs only after b did, as rustc's control flow does)
         if !assign && (op == "&&" || op == "||") {
@@ -330,7 +330,7 @@ impl Cx<'_> {
                 }
             }
         }
-        // 演算子のオーバーロード (`impl Add for V` / String + &str): `a.add(b)` / `a.add_assign(b)`
+        // Operator overloading (`impl Add for V` / String + &str): `a.add(b)` / `a.add_assign(b)`
         if let Some(Ty::Struct(sid)) = self.peek(left) {
             let m = match (op, assign) {
                 ("+", false) => "add",
@@ -437,7 +437,7 @@ impl Cx<'_> {
                 return self.expr(ne, expected);
             }
         }
-        // 複合代入 a op= b
+        // Compound assignment a op= b
         let compound = match op {
             "+" | "-" | "*" | "/" | "%" | "^" | "&" | "|" | "<<" | ">>" if assign => Some(op),
             _ => None,
@@ -485,7 +485,7 @@ impl Cx<'_> {
                 return Ok((None, Ty::Never));
             };
             let (l, _) = self.read(p);
-            // `acc += x` (x: &i32 / &f32): 数への参照は値にする (core の `AddAssign<&i32>` 相当)
+            // `acc += x` (x: &i32 / &f32): a reference to a number becomes its value (as core's `AddAssign<&i32>`)
             let mut rt = rt;
             while let Ty::Ref(_, i) = rt {
                 if !(i.is_int() || i.is_float() || matches!(i, Ty::Ref(..))) || rt.is_fat() {
@@ -510,9 +510,9 @@ impl Cx<'_> {
         } else {
             self.peek(left).or_else(|| self.peek(right)).or(expected)
         };
-        // 比較は参照で比べるのでムーブしない (一時値は文の終わりまで所有する)
+        // A comparison compares by reference and does not move (temporaries are owned until the end of the statement)
         let cmp = is_cmp(op);
-        // `x * 10` (x: &i64): リテラルの型は参照の中身
+        // `x * 10` (x: &i64): the literal's type is the reference's pointee
         let deref_num = |t: Option<Ty>| match t {
             Some(Ty::Ref(_, i)) if i.is_int() || i.is_float() => Some(*i),
             t => t,
@@ -535,13 +535,13 @@ impl Cx<'_> {
             l = tmp;
         }
         let rhint = if is_shift { self.peek(right) } else { deref_num(Some(lt)) };
-        // (`v < (1, 5)` / `v == 2`: 右辺がリテラルなら、左の型の `PartialOrd<R>` / `PartialEq<R>` の R を期待型にする)
+        // (`v < (1, 5)` / `v == 2`: a literal right side expects R of the left type's `PartialOrd<R>` / `PartialEq<R>`)
         let rhint = match op {
             "<" | "<=" | ">" | ">=" => self.rhs_hint_from_impls(&self.prog.pord.clone(), lt, right).or(rhint),
             "==" | "!=" => self.rhs_hint_from_impls(&self.prog.peq.clone(), lt, right).or(rhint),
             _ => rhint,
         };
-        // (文字列・バイト列のリテラルは自分の型 (`v == b"crate"` の v: Vec<u8> を期待型にしない))
+        // (string / byte string literals keep their own type (`v == b"crate"`: v's Vec<u8> is not the expected type))
         let lit_str = matches!(strip_paren(right), Expr::Lit(t, _) if matches!(lit::lit(t), Some(Lit::ByteStr(_) | Lit::Str(_))));
         let rhint = if lit_str && matches!(self.strip_refs(lt), Ty::Struct(_)) { None } else { rhint.or(Some(lt)) };
         let (r, rt) = self.operand(right, rhint, cmp).map_err(|m| self.int_float_op(e, right, m))?;
@@ -549,9 +549,9 @@ impl Cx<'_> {
             return Ok((None, Ty::Never));
         };
 
-        // `String == &str` / `&str == String`: String を &str にして比べる
+        // `String == &str` / `&str == String`: compares with the String as a &str
         let (mut l, mut lt, mut r, mut rt) = (l, lt, r, rt);
-        // `i32 + &i32` など: 整数への参照は値にしてから計算する (core の `impl Add<&i32> for i32` 相当)
+        // `i32 + &i32` and so on: a reference to an integer becomes its value first (as core's `impl Add<&i32> for i32`)
         if let (Ty::Ref(_, a), Ty::Ref(_, c)) = (lt, rt) {
             if a == c && (a.is_int() || a.is_float() || matches!(a, Ty::Char | Ty::Bool)) && !is_shift {
                 let ct = clif_ty(*a).unwrap();
@@ -574,7 +574,7 @@ impl Cx<'_> {
                 }
             }
         }
-        // (シフトは左右の型が違ってよい: `&u8 >> 4` / `x << &n`)
+        // (the two sides of a shift may differ in type: `&u8 >> 4` / `x << &n`)
         if is_shift {
             if let Ty::Ref(_, i) = lt {
                 if i.is_int() {
@@ -591,10 +591,10 @@ impl Cx<'_> {
         }
         let str_ref = Ty::Ref(false, intern(Ty::Str));
         if matches!(op, "==" | "!=") && lt != rt {
-            // (`&String == &str` / `&&str == &str` も: 参照を外してから)
+            // (`&String == &str` / `&&str == &str` too: after removing the reference)
             if let (Ty::Ref(_, Ty::Struct(_) | Ty::Ref(..)), true) = (lt, rt == str_ref) {
                 if let Ty::Ref(_, i) = lt {
-                    // (`&String` の値は String の場所そのもの。`&&T` は 1 段読む。`&&str` は `&str` の表現と同じ)
+                    // (a `&String` value is the String's place itself. `&&T` reads one level. `&&str` is represented as `&str`)
                     if matches!(i, Ty::Ref(..)) && !i.is_fat() {
                         l = self.b.ins().load(PTR, mf(), l, 0);
                     }
@@ -602,7 +602,7 @@ impl Cx<'_> {
                 }
             } else if let (true, Ty::Ref(_, Ty::Struct(_) | Ty::Ref(..))) = (lt == str_ref, rt) {
                 if let Ty::Ref(_, i) = rt {
-                    // (`&String` の値は String の場所そのもの。`&&T` は 1 段読む。`&&str` は `&str` の表現と同じ)
+                    // (a `&String` value is the String's place itself. `&&T` reads one level. `&&str` is represented as `&str`)
                     if matches!(i, Ty::Ref(..)) && !i.is_fat() {
                         r = self.b.ins().load(PTR, mf(), r, 0);
                     }
@@ -655,7 +655,7 @@ impl Cx<'_> {
             };
             return Ok((Some(v), Ty::Bool));
         }
-        // 型の違う `<` / `<=` / `>` / `>=`: `impl PartialOrd<R> for S` の partial_cmp (None ならどれも false)
+        // `<` / `<=` / `>` / `>=` of different types: partial_cmp of `impl PartialOrd<R> for S` (None makes all false)
         if matches!(op, "<" | "<=" | ">" | ">=") && lt != rt {
             let cands = self.prog.pord.clone();
             if let Some((v, t)) = self.trait_bin(&cands, l, lt, r, rt, SP)? {
@@ -665,7 +665,7 @@ impl Cx<'_> {
                 return Ok((Some(e), Ty::Bool));
             }
         }
-        // `&str` / `String` の大小比較: prelude の __exr_str_cmp
+        // Ordering of `&str` / `String`: the prelude's __exr_str_cmp
         if matches!(op, "<" | "<=" | ">" | ">=") && self.prog.index.contains_key("__exr_str_cmp") {
             let str_ref = Ty::Ref(false, intern(Ty::Str));
             let as_str = |this: &mut Self, v: Value, t: Ty| -> Option<Value> {
@@ -687,12 +687,12 @@ impl Cx<'_> {
                 return Ok((Some(self.b.ins().icmp_imm_s(cc, c.unwrap(), 0)), Ty::Bool));
             }
         }
-        // タプル・struct・enum・配列・スライス・Vec などの大小比較: 型ごとの glue (__exr_cmp)
+        // Ordering of tuples, structs, enums, arrays, slices, Vecs and so on: per-type glue (__exr_cmp)
         if matches!(op, "<" | "<=" | ">" | ">=") && !(lt.is_int() || lt.is_float() || matches!(lt, Ty::Bool | Ty::Char)) {
             self.same(SP, rt, lt)?;
             let (la, t) = self.ord_addr(l, lt);
             let (ra, _) = self.ord_addr(r, rt);
-            // 手書きの partial_cmp (cmp がない): None ならどれも false
+            // A hand-written partial_cmp (no cmp): None makes all of them false
             if let Ty::Struct(sid) = t {
                 if !self.prog.is_tuple(self.prog.base_of(sid))
                     && self.prog.method(sid, "partial_cmp").is_some()
@@ -716,7 +716,7 @@ impl Cx<'_> {
             let e = self.ord_code_test(c, op);
             return Ok((Some(e), Ty::Bool));
         }
-        // (`v == b"crate"` / `&v == b"x"` (v: Vec<u8>): 参照を外して `Vec<T> == [T; N]` に。値の表現は同じ (場所のアドレス))
+        // (`v == b"crate"` / `&v == b"x"` (v: Vec<u8>): peeled to `Vec<T> == [T; N]`, same value (the place's address))
         if matches!(op, "==" | "!=") && lt != rt {
             let is_vec = |this: &Self, t: Ty| matches!(t, Ty::Struct(sid) if this.vec_fields(sid).is_some());
             let peel = |this: &Self, t: Ty| match t {
@@ -729,15 +729,15 @@ impl Cx<'_> {
                 rt = pr;
             }
         }
-        // 型の違う `==` / `!=`: 右辺の型を持つ PartialEq の impl (`impl PartialEq<[T; N]> for Vec<T>` など) を探して eq を呼ぶ
+        // Mixed-type `==` / `!=`: calls eq of a PartialEq impl for the right type (`impl PartialEq<[T; N]> for Vec<T>`)
         if matches!(op, "==" | "!=") && lt != rt {
             if let Some(e) = self.trait_eq(l, lt, r, rt, SP)? {
                 let e = if op == "!=" { self.b.ins().bxor_imm_u(e, 1) } else { e };
                 return Ok((Some(e), Ty::Bool));
             }
         }
-        // `&a == &b` (a, b は struct など): 参照を外して中身を比べる
-        // `&&str == &&str` / `&&[T] == &&[T]`: `&&str` の値は `&str` の置き場所 (= `&str` の表現) なので型だけ外す
+        // `&a == &b` (a, b structs and so on): peel the references and compare the contents
+        // `&&str == &&str` / `&&[T] == &&[T]`: a `&&str` value is where the `&str` is (= a `&str` value): peel the type
         while let (true, Ty::Ref(_, i)) = (lt == rt, lt) {
             if !i.is_fat() {
                 break;
@@ -763,7 +763,7 @@ impl Cx<'_> {
                 return Ok((Some(e), Ty::Bool));
             }
         }
-        // `&&u32 == &&u32` / `&x < &y`: 参照を辿ってスカラーを比べる
+        // `&&u32 == &&u32` / `&x < &y`: follow the references and compare the scalars
         let (mut l, mut r) = (l, r);
         if is_cmp(op) && lt == rt {
             let mut base = lt;
@@ -782,13 +782,13 @@ impl Cx<'_> {
         }
         if is_cmp(op) {
             self.same(SP, rt, lt)?;
-            // 集約型の == / != : 手書きの eq があればそれ、なければ構造的に比べる (derive(PartialEq) 相当)
+            // Aggregate == / !=: a hand-written eq if there is one, else a structural comparison (as derive(PartialEq))
             if matches!(op, "==" | "!=") && lt.is_agg() {
                 let e = self.agg_eq(l, r, lt, SP)?;
                 let e = if op == "!=" { self.b.ins().bxor_imm_u(e, 1) } else { e };
                 return Ok((Some(e), Ty::Bool));
             }
-            // 浮動小数点の比較 (NaN は == / < などで false、!= で true)
+            // Float comparison (NaN is false for == / < and so on, true for !=)
             if lt.is_float() {
                 let cc = match op {
                     "==" => FloatCC::Equal,
@@ -841,16 +841,16 @@ impl Cx<'_> {
         Ok((Some(v), lt))
     }
 
-    /// `l == r` (型が違う) を PartialEq<R> の impl で。self 型 S と右辺 R は、値の型そのものか、
-    /// 参照の先 (`&[T]` と `impl .. for [T]`、`&[T; N]` と `PartialEq<[T; N]>`) で合わせる
+    /// `l == r` (types differ) by an impl of PartialEq<R>. Self type S and right side R match either the value's type
+    /// or its pointee (`&[T]` with `impl .. for [T]`, `&[T; N]` with `PartialEq<[T; N]>`)
     pub(crate) fn trait_eq(&mut self, l: Value, lt: Ty, r: Value, rt: Ty, span: Sp) -> R<Option<Value>> {
         let cands = self.prog.peq.clone();
         Ok(self.trait_bin(&cands, l, lt, r, rt, span)?.and_then(|v| v.0))
     }
 
-    /// cands (`fn m(&self, other: &R)` の候補) から l と r の型に合うものを選んで呼ぶ
+    /// Picks from cands (candidates `fn m(&self, other: &R)`) the one that fits the types of l and r, and calls it
     pub(crate) fn trait_bin(&mut self, cands: &[u32], l: Value, lt: Ty, r: Value, rt: Ty, span: Sp) -> R<Option<V>> {
-        // (値の型 t, 参照を足すか): 値そのものなら &t を、参照なら中身をその型として渡す
+        // (value type t, whether to add a reference): for a value, pass &t; for a reference, its pointee is the type
         let views = |t: Ty| -> Vec<(Ty, bool)> {
             match t {
                 Ty::Ref(_, i) => vec![(t, true), (*i, false)],
@@ -881,13 +881,13 @@ impl Cx<'_> {
         Ok(None)
     }
 
-    /// partial_cmp の結果のコード (-1 / 0 / 1、None は 2) で `<` などを決める
+    /// Decides `<` and so on from partial_cmp's result code (-1 / 0 / 1, None is 2)
     pub(crate) fn ord_code_test(&mut self, c: Value, op: &str) -> Value {
         let is = |this: &mut Self, k: i64| this.b.ins().icmp_imm_s(IntCC::Equal, c, k);
         match op {
             "<" => is(self, -1),
             ">" => is(self, 1),
-            // (<= は -1 か 0、>= は 0 か 1。None (2) はどれも false)
+            // (<= is -1 or 0, >= is 0 or 1. None (2) is false for all)
             "<=" => {
                 let (x, y) = (is(self, -1), is(self, 0));
                 self.b.ins().bor(x, y)
@@ -899,7 +899,7 @@ impl Cx<'_> {
         }
     }
 
-    /// 左の型 lt の比較の impl のうち、右辺の式 (リテラル・タプル・配列) の形に合う R が 1 つだけならそれ
+    /// The R of lt's comparison impls that fits the right side's shape (literal, tuple, array), if exactly one does
     pub(crate) fn rhs_hint_from_impls(&self, cands: &[u32], lt: Ty, rhs: &Expr) -> Option<Ty> {
         if cands.is_empty() {
             return None;
@@ -936,7 +936,7 @@ impl Cx<'_> {
         found
     }
 
-    /// t 型の値 v (集約型ならアドレス) への参照
+    /// A reference to the value v of type t (an address for an aggregate)
     pub(crate) fn addr_of_value(&mut self, v: Value, t: Ty) -> Value {
         if t.is_agg() {
             return v;
@@ -946,13 +946,13 @@ impl Cx<'_> {
         a
     }
 
-    /// a, b (t 型の値。集約型ならアドレス) が等しいか (i8 の 0/1)
+    /// Whether a and b (values of type t; addresses for an aggregate) are equal (an i8 0/1)
     pub(crate) fn agg_eq(&mut self, a: Value, b: Value, t: Ty, span: Sp) -> R<Value> {
         if let Ty::Struct(sid) = t {
             if let Some(id) = self.prog.method(sid, "eq") {
                 let sig0 = self.prog.sigs[id as usize].clone();
                 let (fid, sig) = if sig0.is_generic() {
-                    // ジェネリックな impl の eq (`impl<T: PartialEq> Vec<T>`): インスタンスにする
+                    // eq of a generic impl (`impl<T: PartialEq> Vec<T>`): instantiate it
                     let mut sol = vec![None; sig0.generics.len()];
                     if let Some(st) = sig0.self_ty {
                         self.prog.match_ty(st, t, &mut sol);
@@ -984,7 +984,7 @@ impl Cx<'_> {
             }
             t if t.is_int() || matches!(t, Ty::Bool | Ty::Char | Ty::Ptr(..)) => Ok(self.b.ins().icmp(IntCC::Equal, a, b)),
             t if t.is_float() => Ok(self.b.ins().fcmp(FloatCC::Equal, a, b)),
-            // `&str` / `&[T]`: 長さと中身で比べる
+            // `&str` / `&[T]`: compare by length and contents
             // (`Box<[T]>` / `Box<str>` likewise: the same (pointer, length) pair)
             Ty::Ref(_, Ty::Str | Ty::Slice(_)) | Ty::Box(Ty::Str | Ty::Slice(_)) => {
                 let e = match t {
@@ -1027,13 +1027,13 @@ impl Cx<'_> {
                 self.b.switch_to_block(done);
                 Ok(res)
             }
-            // (Box・参照の先の struct は glue 関数で: 再帰型 (`enum T { R(&'static T) }`) をその場で展開しない)
+            // (a struct behind a Box / reference goes to the glue fn: a recursive `enum T { R(&'static T) }` is not inlined)
             Ty::Box(inner @ Ty::Struct(_)) | Ty::Ref(_, inner @ Ty::Struct(_)) if self.prog.index.contains_key("__exr_eq") => {
                 let r = Ty::Ref(false, intern(*inner));
                 let (v, _) = self.call_named("__exr_eq", vec![*inner], &[(a, r), (b, r)], span)?;
                 Ok(v.unwrap())
             }
-            // 参照と Box は指す先の値で比べる
+            // References and Boxes compare by the pointee's value
             Ty::Ref(_, inner) | Ty::Box(inner) if !t.is_fat() => {
                 let (x, y) = match clif_ty(*inner) {
                     Some(ct) if !inner.is_agg() => (self.b.ins().load(ct, mf(), a, 0), self.b.ins().load(ct, mf(), b, 0)),
@@ -1091,13 +1091,13 @@ impl Cx<'_> {
                     self.b.switch_to_block(done);
                     return Ok(res);
                 }
-                // enum: タグが同じで、そのバリアントのフィールドが等しい
+                // enum: the tags are equal, and so are that variant's fields
                 let (tag, variants) = (sd.tag, sd.variants.iter().map(|v| (v.discr, v.fields.clone())).collect::<Vec<_>>());
                 let ct = clif_ty(tag).unwrap();
                 let ta = self.b.ins().load(ct, mf(), a, 0);
                 let tb = self.b.ins().load(ct, mf(), b, 0);
                 let tag_eq = self.b.ins().icmp(IntCC::Equal, ta, tb);
-                // フィールドが数値だけなら分岐せずに全バリアントを比べる (読んでも安全)
+                // If the fields are all numbers, compare all variants without branching (safe to read)
                 let plain = variants
                     .iter()
                     .all(|(_, fs)| fs.iter().all(|f| f.1.is_int() || f.1.is_float() || matches!(f.1, Ty::Bool | Ty::Char | Ty::Unit)));
@@ -1115,8 +1115,8 @@ impl Cx<'_> {
                     }
                     return Ok(self.b.ins().band(tag_eq, any));
                 }
-                // タグで分岐してから、そのバリアントのフィールドだけを比べる
-                // (ほかのバリアントの場所を読むと、`None` のときの String のポインタなどを辿ってしまう)
+                // Branch on the tag, then compare only that variant's fields
+                // (reading another variant's place would follow a String's pointer when it is `None`, and so on)
                 let done = self.b.create_block();
                 let res = self.b.append_block_param(done, types::I8);
                 let zero = self.b.ins().iconst(types::I8, 0);
@@ -1159,7 +1159,7 @@ impl Cx<'_> {
         if t.is_agg() { self.agg_eq(x, y, t, span) } else { self.eq_at(x, y, t, span) }
     }
 
-    /// a + off / b + off にある t 型の値 (集約型ならアドレス)
+    /// The values of type t at a + off / b + off (addresses for an aggregate)
     pub(crate) fn load_field(&mut self, a: Value, b: Value, t: Ty, off: u32) -> (Value, Value) {
         match clif_ty(t) {
             Some(ct) if !t.is_agg() => (self.b.ins().load(ct, mf(), a, off as i32), self.b.ins().load(ct, mf(), b, off as i32)),
@@ -1167,14 +1167,14 @@ impl Cx<'_> {
         }
     }
 
-    /// b は演算の式全体 (Binary / AssignOp。span のためだけに受ける)、op は `=` を除いた演算子
+    /// b is the whole operation (Binary / AssignOp, taken only for its span), op the operator without `=`
     pub(crate) fn arith(&mut self, b_expr: &Expr, op: &str, l: Value, lt: Ty, r: Value, rt: Ty) -> R<Value> {
         if matches!(op, "<<" | ">>") {
             if !lt.is_int() || !rt.is_int() {
                 return err(SP, "shift of non-integer");
             }
             if self.overflow_checks && !self.iconst_of(r).is_some_and(|k| (0..lt.bits() as i64).contains(&k)) {
-                // 型の幅以上のシフト (負の量も符号なしで大きい)
+                // A shift by the type's width or more (a negative amount is large as unsigned too)
                 let bad = self.b.ins().icmp_imm_u(IntCC::UnsignedGreaterThanOrEqual, r, lt.bits() as i64);
                 self.ovf_panic(bad, if op == "<<" { 7 } else { 8 }, expr_start(b_expr));
             }
@@ -1185,7 +1185,7 @@ impl Cx<'_> {
                 _ => ins.ushr(l, r),
             });
         }
-        // char の範囲 (`'a'..='e'`) の prelude が `v + 1` で次の文字にする
+        // The prelude's char range (`'a'..='e'`) gets the next char with `v + 1`
         if lt == Ty::Char && rt.is_int() && matches!(op, "+" | "-") {
             let r32 = match rt.bits() {
                 32 => r,
@@ -1201,7 +1201,7 @@ impl Cx<'_> {
                 "-" => self.b.ins().fsub(l, r),
                 "*" => self.b.ins().fmul(l, r),
                 "/" => self.b.ins().fdiv(l, r),
-                // (Cranelift に剰余はないので libm の fmod)
+                // (Cranelift has no float remainder, so libm's fmod)
                 "%" => {
                     let f = if lt == Ty::F32 { "__exr_fmodf" } else { "__exr_fmod" };
                     let (v, _) = self.call_named(f, vec![], &[(l, lt), (r, lt)], SP)?;
@@ -1215,11 +1215,11 @@ impl Cx<'_> {
             return err(SP, format!("unsupported operator for `{}`", self.prog.tn(lt)));
         }
         let s = lt.signed();
-        // 128 bit の除算は Cranelift にないので prelude の関数
+        // Cranelift has no 128-bit division, so it is a prelude function
         if lt.bits() == 128 && matches!(op, "/" | "%") {
             return self.div128(l, r, lt, op == "%", SP);
         }
-        // 0 除算と MIN / -1 は (rustc と同じく最適化しても) panic
+        // Division by 0 and MIN / -1 panic (even when optimized, as in rustc)
         if lt.is_int() && matches!(op, "/" | "%") && self.user_code {
             let rem = op == "%";
             let cr = self.iconst_of(r);
@@ -1235,7 +1235,7 @@ impl Cx<'_> {
                 self.ovf_panic(both, if rem { 10 } else { 9 }, expr_start(b_expr));
             }
         }
-        // 足し算・引き算・掛け算のオーバーフロー
+        // Overflow of addition, subtraction and multiplication
         if lt.is_int() && self.overflow_checks && matches!(op, "+" | "-" | "*") {
             let kind = match op {
                 "+" => 0,
@@ -1247,7 +1247,7 @@ impl Cx<'_> {
                 self.ovf_panic(of, kind, expr_start(b_expr));
                 return Ok(v);
             }
-            // (128 bit: 足し算・引き算は結果の符号と大小で見る。掛け算は検査しない)
+            // (128 bit: addition and subtraction check the result's sign and order; multiplication is not checked)
             if kind < 2 {
                 let v = if kind == 0 { self.b.ins().iadd(l, r) } else { self.b.ins().isub(l, r) };
                 let of = if !s {
@@ -1279,8 +1279,8 @@ impl Cx<'_> {
         })
     }
 
-    /// 型だけで決まる条件 (`__exr_int_kind::<T>() == 0` / `needs_drop::<T>()` と `!` / `||` / `&&`) の値。
-    /// prelude の型ごとの分岐を、使わない側をコンパイルせずに済ませる (インスタンスも作らない)
+    /// Value of a type-only condition (`__exr_int_kind::<T>() == 0` / `needs_drop::<T>()` with `!` / `||` / `&&`).
+    /// The prelude's per-type branches then skip compiling the unused side (and make no instances for it)
     pub(crate) fn type_cond(&self, e: &Expr) -> Option<bool> {
         let targ = |c: &Expr| -> Option<(String, Ty)> {
             let Expr::Call(func, _) = c else { return None };
@@ -1372,7 +1372,7 @@ impl Cx<'_> {
         if let Expr::Let(..) = &**cond {
             return self.if_let(e, cond, expected);
         }
-        // (型で決まる条件なら、通る側だけ)
+        // (a condition the types decide: only the side taken)
         match self.type_cond(cond) {
             Some(true) => return self.block(then_branch, expected),
             Some(false) => {
@@ -1466,9 +1466,9 @@ impl Cx<'_> {
 }
 
 impl Cx<'_> {
-    // --- enum の値 ------------------------------------------------------
+    // --- enum values ------------------------------------------------------
 
-    /// 一時領域にタグと各フィールドを書いて enum の値を作る。args は (フィールド番号, 式)
+    /// Builds an enum value by writing the tag and each field to a temporary. args is (field index, expression)
     pub(crate) fn variant_value(&mut self, sid: u32, vi: usize, args: &[(usize, &Expr)], expected: Option<Ty>) -> R<V> {
         let sid = self.cow_of_str(sid, args, expected).unwrap_or(sid);
         let r = self.adt_value(sid, Some(vi), args, expected, SP);
@@ -1502,13 +1502,13 @@ impl Cx<'_> {
         }
     }
 
-    /// struct (vi = None) / enum のバリアント (vi = Some) の値を一時領域に作る。args は (フィールド番号, 式)。
-    /// ジェネリックな定義なら、期待型 → 実引数の型 の順にインスタンスを決める
+    /// Builds a struct (vi = None) / enum variant (vi = Some) value in a temporary. args is (field index,
+    /// expression). A generic definition gets its instance from the expected type, then from the argument types
     pub(crate) fn adt_value(&mut self, base: u32, vi: Option<usize>, args: &[(usize, &Expr)], expected: Option<Ty>, span: Sp) -> R<V> {
         if !self.rg.on && !self.prog.adt_regions.is_empty() {
             self.rg_adt_on(self.prog.base_of(base));
         }
-        // (戻り値を書く先: フィールドの式の中の呼び出しには渡さない)
+        // (where the return value is written: not passed to calls inside the field expressions)
         let hint = self.dst_hint.take();
         let fields_of = |this: &Self, sid: u32| -> Vec<(String, Ty, u32)> {
             let sd = &this.prog.structs[sid as usize];
@@ -1581,7 +1581,7 @@ impl Cx<'_> {
             let Some(&(_, fty, off)) = fields.get(fi) else {
                 return err(sp, format!("internal: `{}` has no field {fi}", self.prog.tn(t)));
             };
-            // (`V(x)` で x: &&T を &T のフィールドに: deref の強制変換)
+            // (`V(x)` with x: &&T into a &T field: deref coercion)
             let (v, vt) = self.deref_coerce(v, vt, fty);
             self.same(sp, vt, fty)?;
             self.write(Place::Mem(a, off as i32, fty), v);
@@ -1589,10 +1589,10 @@ impl Cx<'_> {
         Ok((Some(a), t))
     }
 
-    // --- タプル・配列・スライス ------------------------------------------
+    // --- tuples, arrays, slices ------------------------------------------
 
-    /// `S<[T; N]>` を `S<[T]>` / `S<T>` を `S<dyn Tr>` (最後のフィールドが unsized な struct) に強制変換できるなら、
-    /// 組の後半 (末尾の要素数 N / T の vtable) と unsized な型
+    /// If `S<[T; N]>` can coerce to `S<[T]>` / `S<T>` to `S<dyn Tr>` (a struct whose last field is unsized),
+    /// the pair's second half (the tail's element count N / T's vtable) and the unsized type
     /// (want may be generic (`&Fat<[T]>` for a parameter): it is matched into sol)
     pub(crate) fn unsize_tail_sol(&self, want: Ty, got: Ty, sol: &mut [Option<Ty>]) -> Option<(TailMeta, Ty)> {
         if !want.is_dst_struct() {
@@ -1678,7 +1678,7 @@ impl Cx<'_> {
         self.make_fat_v(ptr, l)
     }
 
-    /// (ポインタ, 長さ) の組を一時領域に作り、そのアドレスを返す
+    /// Builds a (pointer, length) pair in a temporary and returns its address
     pub(crate) fn make_fat_v(&mut self, ptr: Value, len: Value) -> Value {
         let ss = self.b.create_stack_slot(16, 1 << 3);
         let a = self.b.ins().stack_addr(PTR, ss, 0);
@@ -1693,7 +1693,7 @@ impl Cx<'_> {
         self.b.ins().iadd(base, off)
     }
 
-    /// 足し算 (kind 0)・引き算 (1)・掛け算 (2) の (結果, あふれたか)。128 bit は Cranelift の *_overflow がないので組み立てる
+    /// (result, overflowed) of add (kind 0) / sub (1) / mul (2). 128 bit is built by hand (no Cranelift *_overflow)
     pub(crate) fn arith_ovf(&mut self, kind: u8, s: bool, l: Value, r: Value, t: Ty) -> (Value, Value) {
         if t.bits() < 128 {
             let ins = self.b.ins();
@@ -1719,7 +1719,7 @@ impl Cx<'_> {
             };
             return (v, of);
         }
-        // 掛け算: 絶対値の積を 64 bit の半分ずつで調べる
+        // Multiplication: checks the product of the absolute values by 64-bit halves
         let zero = self.int_const(t, 0);
         let (ua, ub, neg) = if s {
             let an = self.b.ins().icmp(IntCC::SignedLessThan, l, zero);
@@ -1749,7 +1749,7 @@ impl Cx<'_> {
         let mag = self.b.ins().imul(ua, ub);
         let v = self.b.ins().imul(l, r);
         if let Some(neg) = neg {
-            // |積| は負なら 2^127 まで、正なら 2^127 - 1 まで
+            // |product| goes up to 2^127 if negative, 2^127 - 1 if positive
             let max = self.int_const(t, i128::MAX);
             let over_pos = self.b.ins().icmp(IntCC::UnsignedGreaterThan, mag, max);
             let one = self.int_const(t, 1);
@@ -1761,7 +1761,7 @@ impl Cx<'_> {
         (v, of)
     }
 
-    /// 型推論の記録がなければ (codegen が作り直したノード)、変数・フィールド・deref・括弧だけの式の型を構文から求める
+    /// No inference record (a codegen-rebuilt node): the syntax types an expression of variables, fields, deref, parens
     pub(crate) fn peek_or_static(&self, e: &Expr) -> Option<Ty> {
         self.peek(e).or_else(|| self.static_ty(e))
     }
@@ -1780,7 +1780,7 @@ impl Cx<'_> {
                 if let Some((t, _)) = self.prog.field(sid, name) {
                     return Some(t);
                 }
-                // (Deref の先のフィールド)
+                // (a field behind Deref)
                 let d = self.prog.method(sid, "deref")?;
                 let Ty::Ref(_, Ty::Struct(ts)) = self.prog.sigs[d as usize].ret else { return None };
                 self.prog.field(*ts, name).map(|(t, _)| t)
@@ -1789,7 +1789,7 @@ impl Cx<'_> {
         }
     }
 
-    /// e が Deref を実装した (Vec・Box・String でない) struct の値なら、`*e.deref_mut()` (なければ `*e.deref()`)
+    /// If e is a value of a struct implementing Deref (not Vec, Box or String), `*e.deref_mut()` (else `*e.deref()`)
     pub(crate) fn user_deref(&self, e: &Expr) -> Option<Expr> {
         let Ty::Struct(sid) = self.peek(e)? else { return None };
         self.user_deref_sid(e, sid)
@@ -1813,18 +1813,18 @@ impl Cx<'_> {
         Some(Expr::Unary("*".into(), Box::new(mcall(paren(e), m, vec![])), crate::parse::Span::default()))
     }
 
-    /// 添字アクセスの対象 (配列 / スライス / それらへの参照) の (先頭アドレス, 長さ, 要素型)
+    /// (start address, length, element type) of an indexed target (array / slice / a reference to one)
     pub(crate) fn indexable(&mut self, e: &Expr) -> R<(Value, Value, Ty)> {
-        // (`g[i]` (g: MutexGuard<Vec<T>> など): `(*g)[i]`)
+        // (`g[i]` (g: MutexGuard<Vec<T>> and so on): `(*g)[i]`)
         if let Some(d) = self.user_deref(e) {
             let d = self.keep_expr(d);
             // (a read through `deref_mut` (a RefMut's) borrows the guard shared, as `*g` does: `let g = ..; g[0]`)
             self.deref_shared(d);
             return self.indexable(d);
         }
-        // (-O: ループの前で読んでおいたもの)
+        // (-O: what was read before the loop)
         if !self.hoisted.is_empty() {
-            // (キーは式の Debug の文字列: syn 版のトークン列の文字列の代わり)
+            // (the key is the expression's Debug string, in place of the syn version's token string)
             let key = format!("{e:?}");
             if let Some(&(_, b, l, t, chk)) = self.hoisted.iter().rev().find(|h| h.0 == key) {
                 if let Some((ok, len, i)) = chk {
@@ -1884,7 +1884,7 @@ impl Cx<'_> {
                     let len = self.b.ins().load(types::I64, mf(), a, o + 8);
                     return Ok((base, len, *t));
                 }
-                // Vec<T>: (ptr, len) フィールド
+                // Vec<T>: the (ptr, len) fields
                 Place::Mem(a, o, Ty::Struct(sid)) if self.vec_fields(sid).is_some() => {
                     let (po, lo, t) = self.vec_fields(sid).unwrap();
                     let base = self.b.ins().load(PTR, mf(), a, o + po as i32);
@@ -1906,10 +1906,10 @@ impl Cx<'_> {
         }
     }
 
-    /// `&a[lo..hi]` / `&a[..]` / `&a[lo..=hi]` (rg は Expr::Range)
+    /// `&a[lo..hi]` / `&a[..]` / `&a[lo..=hi]` (rg is an Expr::Range)
     pub(crate) fn slice_range(&mut self, base: &Expr, rg: &Expr, m: bool) -> R<V> {
         let Expr::Range(start, end, inclusive) = rg else { unreachable!() };
-        // `&s[a..b]` (String / &str): バイト位置で切り、文字の境界でなければ panic
+        // `&s[a..b]` (String / &str): cuts at byte positions, panics if not on a char boundary
         let bt = self.peek(base).map(|t| self.strip_refs(t));
         let is_string = matches!(bt, Some(Ty::Struct(sid))
             if self.prog.structs[sid as usize].base.is_none() && self.prog.structs[sid as usize].name == "String");
@@ -1979,7 +1979,7 @@ impl Cx<'_> {
         let Expr::Array(elems) = e else { unreachable!() };
         let mut elem = match expected {
             Some(Ty::Array(t, _)) | Some(Ty::Slice(t)) => Some(*t),
-            // (`v == []` / `v == [1, 2]`: 比べる相手の Vec の要素の型)
+            // (`v == []` / `v == [1, 2]`: the element type of the Vec it is compared with)
             Some(Ty::Struct(sid)) if self.prog.structs[self.prog.base_of(sid) as usize].name == "Vec" => {
                 self.prog.structs[sid as usize].args.first().copied()
             }
@@ -2003,9 +2003,9 @@ impl Cx<'_> {
                 return r;
             }
         }
-        // (Vec から取った要素の型は目安: 要素の型が違えばそちらにする (`v == ["a"]` で v: Vec<String>))
+        // (a Vec's element type is only a hint: if the elements differ, theirs wins (`v == ["a"]` with v: Vec<String>))
         let mut soft = matches!(expected, Some(Ty::Struct(_)));
-        // `[&a as &dyn Tr, &b]`: 要素のどれかが `&dyn` なら全体をそれに揃える
+        // `[&a as &dyn Tr, &b]`: if any element is `&dyn`, all of them become that
         if !matches!(elem, Some(Ty::Ref(_, Ty::Dyn(_)))) {
             if let Some(d) = elems.iter().find_map(|e| match e {
                 Expr::Cast(_, ty) => match self.parse_ty(ty) {
@@ -2055,7 +2055,7 @@ impl Cx<'_> {
         Ok((Some(base), t))
     }
 
-    /// 配列の長さ (リテラルか const)
+    /// An array's length (a literal or a const)
     pub(crate) fn array_len(&self, e: &Expr) -> R<u32> {
         match e {
             Expr::Lit(l, _) if matches!(lit::lit(l), Some(Lit::Int(_))) => {
@@ -2068,7 +2068,7 @@ impl Cx<'_> {
                 Err(self.at(p.pos, "attempt to use a non-constant value in a constant (E0435)".to_string()))
             }
             Expr::Path(_, p) if ident_of(p).is_some() || self.const_of(e).is_some() => {
-                // (関連定数 `S::N` は const の名前 `S::N` で引く)
+                // (an associated constant `S::N` is looked up by its const name `S::N`)
                 let name = match self.const_of(e) {
                     Some(ci) => self.prog.consts[ci as usize].name.clone(),
                     None => ident_of(p).unwrap().to_string(),
@@ -2150,9 +2150,9 @@ impl Cx<'_> {
         let t = Ty::Array(intern(elem), n);
         let base = self.temp(t);
         let (size, _) = self.prog.size_align(elem);
-        // (定数の整数の配列 (`[0u8; 24]`): 値を並べた 8 byte ずつ書く)
-        // (小さい配列は要素ごと: 要素の幅で読み書きするので、スロットの要素を変数にできる (SROA))
-        // (大きいもの (256 byte を超える) はループ: `[0u8; 4_000_000_000]` を書き込みの列にしない)
+        // (an array of a constant integer (`[0u8; 24]`): written 8 bytes at a time, the values side by side)
+        // (small arrays per element: accessed at the element width, so the slot's elements can become variables (SROA))
+        // (large ones (over 256 bytes) loop: `[0u8; 4_000_000_000]` does not become a sequence of writes)
         if let (Some(c), true) = (v.and_then(|v| self.iconst_of(v)), elem.is_int() && size <= 4 && size * n >= 8 && n > 16 && (size as u64) * (n as u64) <= 256) {
             let mask = if size == 8 { u64::MAX } else { (1u64 << (size * 8)) - 1 };
             let mut pat = 0u64;
@@ -2177,7 +2177,7 @@ impl Cx<'_> {
                 self.write(Place::Mem(base, (i * size) as i32, elem), v);
             }
         } else {
-            // 大きい配列はループで埋める
+            // A large array is filled by a loop
             let i = self.b.declare_var(types::I64);
             let z = self.b.ins().iconst(types::I64, 0);
             self.b.def_var(i, z);

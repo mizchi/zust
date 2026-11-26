@@ -285,6 +285,13 @@ fn split_items(src: &str) -> Result<Vec<SrcItem>, String> {
                     i += 1;
                 }
             }
+            // (the file ends in it: rustc's E0758 at its start, also after the last item, where no item is left
+            // unsplit to report it. An unterminated literal before it is the error instead, as in rustc's lexer)
+            if d != 0 {
+                if let Some(e) = unterminated_literal(s) {
+                    return Err(e);
+                }
+            }
             if s[st0..].starts_with(b"/**") && !s[st0..].starts_with(b"/***") && !s[st0..].starts_with(b"/**/") {
                 docs.push((st0, i));
             }
@@ -649,7 +656,10 @@ pub fn unterminated_literal(s: &[u8]) -> Option<String> {
             let (st, mut d) = (i, 0u32);
             loop {
                 if i + 1 >= n {
-                    return at(st, "unterminated block comment (E0758)");
+                    // (`/**` and `/*!` open a doc comment, which rustc names so; `/***` and `/**/` do not)
+                    let t = &s[st..];
+                    let doc = t.starts_with(b"/*!") || (t.starts_with(b"/**") && !t.starts_with(b"/***") && !t.starts_with(b"/**/"));
+                    return at(st, if doc { "unterminated block doc-comment (E0758)" } else { "unterminated block comment (E0758)" });
                 }
                 if s[i] == b'/' && s[i + 1] == b'*' {
                     d += 1;
@@ -2320,7 +2330,8 @@ pub fn expand_thread_local(src: &str) -> Option<String> {
     let s = src.as_bytes();
     let toks = tokenize(s);
     let is_sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && s[toks[k].1] == c && toks[k].2 == toks[k].1 + 1;
-    let text = |a: usize, b: usize| -> String { String::from_utf8_lossy(&s[toks[a].1..toks[b - 1].2]).into_owned() };
+    // (the tokens a..b; none when b <= a: `thread_local! { static X: ]` has no type before its end)
+    let text = |a: usize, b: usize| -> String { if b <= a { String::new() } else { String::from_utf8_lossy(&s[toks[a].1..toks[b - 1].2]).into_owned() } };
     let mut out = String::new();
     let mut last = 0;
     let mut k = 0;

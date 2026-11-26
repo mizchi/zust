@@ -1,0 +1,3 @@
+// expect: unterminated string
+wasm {
+    const S: &str = "abc

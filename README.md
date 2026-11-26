@@ -220,7 +220,7 @@ Known differences from rust-analyzer are listed in [CONTRIBUTING.md](CONTRIBUTIN
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-25, d838a6e<!-- /measured --> by CI on each push to main. Details:
+Numbers measured <!-- measured -->2026-11-25, c8d7b59<!-- /measured --> by CI on each push to main. Details:
 [SUPPORT.md](SUPPORT.md) (what is supported) and [PERFORMANCE.md](PERFORMANCE.md) (speed, size, memory, and
 comparisons with rustc and others).
 
@@ -248,9 +248,9 @@ table, with instruction counts, cache and binary sizes and memory, is in [PERFOR
 <!-- auto:kpi-summary -->
 | | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 126 ms | 569 ms |
+| cold build | 126 ms | 571 ms |
 | no-op build | 0.6 ms | 0.6 ms |
-| build after editing one function | 16.6 ms | 63.6 ms |
+| build after editing one function | 16.4 ms | 66.3 ms |
 | `check` | 40 ms | 181 ms |
 <!-- /auto:kpi-summary -->
 
