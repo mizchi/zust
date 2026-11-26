@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795709939812,
+  "lastUpdate": 1795709942288,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -141482,6 +141482,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/022713c58a345dd0bef7cd9734befab41a8f1471"
         },
         "date": 1795696121480,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.73,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1916,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.88,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1557,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 73.59,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5435,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "70739b91f845a9f1f1b62ed361dbcc9f357f664e",
+          "message": "cratebench/survey: the top crates.io crates by category, CRATES_SUPPORT.md and a dashboard (#247)\n\nSurveys the top 300 crates of crates.io by recent downloads, plus extra.tsv's 16 (tokio with `full`, serde and clap with `derive`, embassy and other embedded crates), each as the only dependency of a probe library in a temporary directory (sources from crates.io, versions from one shared Cargo.lock; nothing vendored). zurgo check gives each package of the graph its errors; zurgo build runs when there are none; --tests compares a crate's own tests under cargo test and zurgo test.\n\nCRATES_SUPPORT.md (generated): statuses with their share of the downloads, a table per category (15), what to fix first, errors by kind, graphs zurgo cannot plan, names zustc cannot find, every crate by category. site/crates/ shows the same with the history. crate-survey.yml runs the survey on main in a read-only job and commits its files from a separate publish job; pages.yml publishes /crates/.\n\nFirst survey (5498281): 38 of 273 probed crates build (13.5% of their downloads); 391 errors in 168 packages.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T01:13:53+09:00",
+          "tree_id": "29968aad16f7ac680effd93b949c9266719b0608",
+          "url": "https://github.com/mizchi/zust/commit/70739b91f845a9f1f1b62ed361dbcc9f357f664e"
+        },
+        "date": 1795709941910,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
