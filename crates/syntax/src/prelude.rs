@@ -1386,8 +1386,12 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     // (for a method name that integers, Option or iterators share, only when the program seems to use strings:
     //  String appears, or a string literal is the receiver (`"ab".repeat(3)`))
     // (or a `&str` / `&'static str` written: `NAME.to_ascii_lowercase()` with `static NAME: &'static str`)
+    // (a written `&str` counts for the ASCII ones only: `replace` / `repeat` are `mem::replace`'s, `Option::replace`'s
+    // too; and not in a no_std program, which has no String for them to give and uses them of bytes)
     let mut str_evidence = |n: &str| -> bool {
-        need.contains("String") || sc.has(&format!("\".{n}("))
+        need.contains("String")
+            || sc.has(&format!("\".{n}("))
+            || matches!(n, "to_ascii_uppercase" | "to_ascii_lowercase" | "eq_ignore_ascii_case") && (sc.has("&str") || sc.has("&'static str")) && !sc.has("no_std")
     };
     let found: Vec<&'static str> = need
         .iter()

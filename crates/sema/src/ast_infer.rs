@@ -49,6 +49,13 @@ fn is_builtin_scalar_method(n: &str) -> bool {
             | "overflowing_mul"
             | "rem_euclid"
             | "div_euclid"
+            | "checked_div_euclid"
+            | "checked_rem_euclid"
+            | "saturating_mul"
+            | "wrapping_div_euclid"
+            | "wrapping_rem_euclid"
+            | "overflowing_div_euclid"
+            | "overflowing_rem_euclid"
             | "next_multiple_of"
             | "next_power_of_two"
             | "isqrt"
@@ -3008,19 +3015,19 @@ impl Inf<'_> {
             };
         }
         match name {
-            "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "min" | "max" | "saturating_add" | "saturating_sub" => {
+            "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "min" | "max" | "saturating_add" | "saturating_sub" | "saturating_mul" => {
                 for a in avs {
                     self.unify(a, rv);
                 }
                 rv
             }
-            "rem_euclid" | "div_euclid" | "next_multiple_of" => {
+            "rem_euclid" | "div_euclid" | "next_multiple_of" | "wrapping_div_euclid" | "wrapping_rem_euclid" => {
                 for a in avs {
                     self.unify(a, rv);
                 }
                 rv
             }
-            "overflowing_add" | "overflowing_sub" | "overflowing_mul" | "overflowing_pow" => {
+            "overflowing_add" | "overflowing_sub" | "overflowing_mul" | "overflowing_pow" | "overflowing_div_euclid" | "overflowing_rem_euclid" => {
                 for a in avs {
                     let k = if name == "overflowing_pow" { self.known(Ty::U32) } else { rv };
                     self.unify(a, k);
@@ -3083,7 +3090,7 @@ impl Inf<'_> {
                 }
                 rv
             }
-            "checked_add" | "checked_sub" | "checked_mul" | "checked_div" | "checked_rem" => {
+            "checked_add" | "checked_sub" | "checked_mul" | "checked_div" | "checked_rem" | "checked_div_euclid" | "checked_rem_euclid" => {
                 for a in avs {
                     self.unify(a, rv);
                 }

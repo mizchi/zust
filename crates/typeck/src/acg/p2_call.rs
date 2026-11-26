@@ -1001,6 +1001,13 @@ impl Cx<'_> {
             };
             return self.expr(&e, expected);
         }
+        // (`a.eq(&b)` / `a.lt(&b)` .. of a type whose PartialEq / PartialOrd is derived: the comparison `a == b`, which the
+        // derive gives; not when the type has a method of the name)
+        if margs.len() == 1 && matches!(&*method, "eq" | "ne" | "lt" | "le" | "gt" | "ge") {
+            if let Some(r) = self.derived_cmp_method(recv, method, &margs[0], expected)? {
+                return Ok(r);
+            }
+        }
         // `x.into()`: 期待型の `T::from(x)` (String は String::from、整数は広げるキャスト)
         if method == "into" && margs.is_empty() {
             let recv_own = match self.peek(recv) {
@@ -2104,6 +2111,38 @@ impl Cx<'_> {
         }
         let target = target.unwrap_or_else(|| if seq { "[T]".into() } else { "str".into() });
         Some((target, is_string, seq))
+    }
+
+    /// `a.eq(&b)` (and ne / lt / le / gt / ge) with a's type a struct or enum whose PartialEq (PartialOrd for the
+    /// orderings) is derived and which has no method of the name: `a == b` (b the argument through its `&`)
+    #[cold]
+    #[inline(never)]
+    fn derived_cmp_method(&mut self, recv: &Expr, method: &str, arg: &Expr, expected: Option<Ty>) -> R<Option<V>> {
+        let Some(Ty::Struct(sid)) = self.peek(recv).map(|t| self.strip_refs(t)) else { return Ok(None) };
+        let base = self.prog.base_of(sid);
+        let want = if matches!(method, "eq" | "ne") { "PartialEq" } else { "PartialOrd" };
+        if self.prog.method(sid, method).is_some() || !self.prog.derived.get(&base).is_some_and(|d| d.iter().any(|x| x == want)) {
+            return Ok(None);
+        }
+        let op = match method {
+            "eq" => "==",
+            "ne" => "!=",
+            "lt" => "<",
+            "le" => "<=",
+            "gt" => ">",
+            _ => ">=",
+        };
+        let rhs = match strip_paren(arg) {
+            Expr::Ref(_, x) => (**x).clone(),
+            a => Expr::Unary("*".into(), Box::new(paren(a.clone())), crate::parse::Span::default()),
+        };
+        let lhs = match self.peek(recv) {
+            Some(Ty::Ref(..)) => Expr::Unary("*".into(), Box::new(paren(recv.clone())), crate::parse::Span::default()),
+            _ => recv.clone(),
+        };
+        let e = self.keep_expr(Expr::Binary(op.into(), Box::new(paren(lhs)), Box::new(paren(rhs)), crate::parse::Span::default()));
+        let _ = expected;
+        self.expr(e, Some(Ty::Bool)).map(Some)
     }
 
     /// プリミティブ型への trait 実装のメソッド (`impl Tr for u32` の `x.m()`)

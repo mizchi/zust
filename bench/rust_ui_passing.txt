@@ -1982,6 +1982,7 @@ run-pass	consts/const-fn-val.rs
 build-pass	consts/const-fn-zst-args.rs
 run-pass	consts/const-fn.rs
 run-pass	consts/const-index-feature-gate.rs
+run-pass	consts/const-int-arithmetic.rs
 run-pass	consts/const-int-conversion-rpass.rs
 compile-fail	consts/const-int-conversion.rs
 run-pass	consts/const-int-overflowing-rpass.rs
@@ -4162,6 +4163,7 @@ check-pass	lifetimes/lifetime-inference-miss-15735.rs
 compile-fail	lifetimes/lifetime-mismatch-between-trait-and-impl.rs
 compile-fail	lifetimes/lifetime-no-keyword.rs
 run-pass	lifetimes/lifetime-param-in-fn-coercion.rs
+run-pass	lifetimes/matcher-trait-equality-13323.rs
 compile-fail	lifetimes/mismatched-lifetime-syntaxes-details/example-from-issue48686.rs
 compile-fail	lifetimes/mismatched-lifetime-syntaxes-details/mismatched-lifetime-syntaxes.rs
 compile-fail	lifetimes/mismatched-lifetime-syntaxes-details/missing-lifetime-kind.rs
@@ -4314,6 +4316,7 @@ check-pass	lint/expr-field.rs
 check-pass	lint/fn-ptr-comparisons-134345.rs
 check-pass	lint/fn-ptr-comparisons-no_std.rs
 check-pass	lint/fn-ptr-comparisons.rs
+check-pass	lint/fn_must_use.rs
 check-pass	lint/forbid-group-member.rs
 check-pass	lint/forgetting_copy_types.rs
 check-pass	lint/forgetting_references.rs
@@ -6420,6 +6423,7 @@ compile-fail	pattern/pattern-match-invalid-variant.rs
 compile-fail	pattern/pattern-tyvar-2.rs
 compile-fail	pattern/pattern-tyvar.rs
 check-pass	pattern/patterns-dont-match-nt-statement.rs
+run-pass	pattern/premature-match-scrutinee-temporary-drop-10683.rs
 compile-fail	pattern/range-pattern-meant-to-be-slice-rest-pattern.rs
 check-pass	pattern/rest-pat-syntactic.rs
 compile-fail	pattern/rfc-3627-match-ergonomics-2024/experimental/feature-gate-ref_pat_eat_one_layer_2024.rs
