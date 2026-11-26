@@ -46,18 +46,22 @@ jobs:
       head: ${{ steps.keys.outputs.head }}
       base_hit: ${{ steps.base_cache.outputs.cache-hit }}
       parts: ${{ steps.parts.outputs.parts }}
+      env: ${{ steps.keys.outputs.env }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
-      # (the measuring jobs install valgrind from these packages: its version is the one of the package kept)
+      # (valgrind as the measuring jobs install it, from the packages ci.yml keeps or else from the mirror: the key
+      # names the version installed, which each measuring job checks it has too)
       - name: Restore valgrind's packages
         uses: actions/cache/restore@v4
         with:
           path: ~/apt-debs
           key: apt-valgrind-ubuntu-24.04-v1
+      - name: Install valgrind
+        run: bash scripts/ci_install_valgrind.sh
       # (the key of a commit's KPIs: the files they are measured from (not the documents, nor the KPI log that main's
       # commits append to; submodules by their commits), and what moves the counts besides them: the toolchain,
       # valgrind, the runner's image and its C library (cachegrind counts its instructions too). A commit that changes
@@ -65,11 +69,10 @@ jobs:
       - name: Find the merge base and the cache keys
         id: keys
         run: |
-          # (none kept: "from the mirror". `|| true`: the job's shell has -e and pipefail)
-          valgrind_v=$(cd ~/apt-debs 2>/dev/null && ls valgrind_*.deb 2>/dev/null | sed -n 1p || true)
+          env_now="$(rustc -V) | $(valgrind --version) | ${ImageOS:-} ${ImageVersion:-} | $(ldd --version 2>&1 | sed -n 1p)"
+          echo "env=$env_now" | tee -a "$GITHUB_OUTPUT"
           kpi_key() {
-            { rustc -V; echo "valgrind ${valgrind_v:-from the mirror}"; echo "${ImageOS:-} ${ImageVersion:-}"
-              ldd --version 2>&1 | sed -n 1p
+            { echo "$env_now"
               git ls-tree -r "$1" -- crates src cratebench Cargo.toml Cargo.lock build.rs .cargo bench \
                 | grep -v -e '\.md$' -e 'bench/kpi_log\.'
             } | sha256sum | cut -c1-24
@@ -157,12 +160,14 @@ jobs:
           path: ~/apt-debs
           key: apt-valgrind-ubuntu-24.04-v1
       - name: Install wild, and valgrind in the background
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           command -v wild || cargo install --locked wild-linker@0.11.0
-          # (as in ci.yml: the build does not need valgrind; nothing of the step's output stays open in the background)
-          # (a base from before scripts/ci_install_valgrind.sh: from the mirror)
-          install() { if [ -f scripts/ci_install_valgrind.sh ]; then bash scripts/ci_install_valgrind.sh; else sudo apt-get update && sudo apt-get install -y valgrind; fi; }
-          { install >~/valgrind-install.log 2>&1 </dev/null && echo 0 || echo 1; } >~/valgrind-install.done 2>/dev/null &
+          # (as in ci.yml: the build does not need valgrind; nothing of the step's output stays open in the background.
+          # The head's script, for the base too, as plan installed it)
+          git show "$HEAD_SHA:scripts/ci_install_valgrind.sh" > ~/ci_install_valgrind.sh
+          { bash ~/ci_install_valgrind.sh >~/valgrind-install.log 2>&1 </dev/null && echo 0 || echo 1; } >~/valgrind-install.done 2>/dev/null &
       - name: Build
         run: cargo build --release --workspace
       - name: Wait for valgrind
@@ -171,8 +176,17 @@ jobs:
           cat ~/valgrind-install.log
           [ "$(cat ~/valgrind-install.done)" = 0 ] || { echo "valgrind's install failed"; exit 1; }
           valgrind --version
+      # (what the key names: a part measured on another toolchain, valgrind or image than plan's is not kept)
+      - name: Check the environment against the plan's
+        env:
+          PLANNED: ${{ needs.plan.outputs.env }}
+        run: |
+          env_now="$(rustc -V) | $(valgrind --version) | ${ImageOS:-} ${ImageVersion:-} | $(ldd --version 2>&1 | sed -n 1p)"
+          echo "planned: $PLANNED"; echo "here:    $env_now"
+          [ "$env_now" = "$PLANNED" ] || { echo "::error::this runner's environment is not the one plan keyed the KPIs by"; exit 1; }
       - name: Measure
         env:
+          PLANNED: ${{ needs.plan.outputs.env }}
           PART: ${{ matrix.part }}
           OUT: ${{ runner.temp }}/kpi/${{ matrix.side }}-${{ strategy.job-index }}.txt
         run: |
@@ -184,8 +198,8 @@ jobs:
           else
             python3 bench/kpi_track.py "$PART" --dry-run --jobs 4 --only "$PART" | tee "$OUT"
           fi
-          # (what measured it, which report compares across the parts: no KPI's name, so kpi_pr.py skips the line)
-          echo "measured-with: $(valgrind --version)" | tee -a "$OUT"
+          # (what measured it, which report compares with the plan's: no KPI's name, so kpi_pr.py skips the line)
+          echo "measured-with: $PLANNED" | tee -a "$OUT"
       - uses: actions/upload-artifact@v4
         with:
           name: kpi-${{ matrix.side }}-${{ strategy.job-index }}
@@ -212,6 +226,8 @@ jobs:
           path: ${{ runner.temp }}/parts
           merge-multiple: true
       - name: Put the parts together
+        env:
+          PLANNED: ${{ needs.plan.outputs.env }}
         run: |
           mkdir -p ~/kpi
           ls -l "$RUNNER_TEMP/parts"
@@ -219,15 +235,18 @@ jobs:
           if ls "$RUNNER_TEMP"/parts/base-*.txt >/dev/null 2>&1; then
             cat "$RUNNER_TEMP"/parts/base-*.txt > ~/kpi/base.txt
           fi
-          # (every KPI once, and one valgrind for all the parts: a base kept in the cache is compared with later heads)
+          # (every KPI once, and every part measured where plan keyed it: a base kept in the cache is compared with
+          # later heads)
           for f in ~/kpi/head.txt ~/kpi/base.txt; do
             [ -f "$f" ] || continue
             python3 -c "import sys; sys.path.insert(0, 'bench'); import kpi_pr; got = kpi_pr.parse(sys.argv[1]); miss = [k for k in kpi_pr.KPIS if k not in got]; sys.exit(f'{sys.argv[1]}: no {miss}' if miss else 0)" "$f"
           done
-          if [ "$(cat "$RUNNER_TEMP"/parts/*.txt | grep '^measured-with:' | sort -u | wc -l)" -gt 1 ]; then
-            echo "::error::the parts were measured with different valgrind versions:"; grep -h '^measured-with:' "$RUNNER_TEMP"/parts/*.txt | sort | uniq -c
-            exit 1
-          fi
+          for f in "$RUNNER_TEMP"/parts/*.txt; do
+            if [ "$(grep '^measured-with:' "$f" || true)" != "measured-with: $PLANNED" ]; then
+              echo "::error::$(basename "$f") was not measured in the planned environment ($PLANNED)"; grep '^measured-with:' "$f" || true
+              exit 1
+            fi
+          done
       - name: Restore the base's KPIs
         if: github.event_name == 'pull_request' && needs.plan.outputs.base_hit == 'true'
         uses: actions/cache/restore@v4
