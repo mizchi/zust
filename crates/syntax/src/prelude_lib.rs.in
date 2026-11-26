@@ -11130,6 +11130,14 @@ impl Error for ParseIntError {
 impl Error for LayoutError {
     fn __err_mark(&self) {}
 }
+impl Error for Infallible {
+    fn __err_mark(&self) {}
+}
+impl Display for Infallible {
+    fn fmt(&self, _f: &mut Formatter) -> Result<(), __FmtError> {
+        Ok(())
+    }
+}
 impl Display for LayoutError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
         f.pad("invalid parameters to Layout::from_size_align")

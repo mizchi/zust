@@ -577,7 +577,7 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "Duration" | "AtomicPtr" | "RangeTo" | "RangeToInclusive" | "Fuse" | "Wrapping" | "Saturating"
                         | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList"
                         | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError"
-                        | "Layout" | "LayoutError" | "Once" | "OnceState" => Some(w),
+                        | "Layout" | "LayoutError" | "Once" | "OnceState" | "Infallible" => Some(w),
                         // (std::num's NonZero types: their impls only with them)
                         w if w.starts_with("NonZero") => Some(w),
                         // HashMap's iterators (HmIter and so on) only when HashMap is used
