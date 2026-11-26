@@ -191,9 +191,18 @@ fn plan_keeping(g: &Graph, o: &BuildOpts, mut errs: Option<&mut Vec<(String, Str
     // (build scripts, dependencies first)
     let mut bs = Runner::new(g, &r, &target, &host, out_dir(g, o), o.release, o.bs_compiler, o.jobs, o.verbose);
     let mut bs_out: BTreeMap<Node, build_script::Output> = BTreeMap::new();
+    // (a check: a build script that fails is the error of its package's crates (below))
+    let mut bs_err: BTreeMap<Node, String> = BTreeMap::new();
     for &n in &order {
-        if let Some(x) = bs.run(n)? {
-            bs_out.insert(n, x);
+        match bs.run(n) {
+            Ok(Some(x)) => {
+                bs_out.insert(n, x);
+            }
+            Ok(None) => {}
+            Err(e) if errs.is_some() => {
+                bs_err.insert(n, e);
+            }
+            Err(e) => return Err(e),
         }
     }
     let mut crates: Vec<CrateSpec> = vec![];
@@ -224,7 +233,21 @@ fn plan_keeping(g: &Graph, o: &BuildOpts, mut errs: Option<&mut Vec<(String, Str
             let stub = stub_dir.join(format!("{}.rs", lib.name));
             // (its macros run when rustc builds it and the toolchain's proc-macro server is there: zustc asks the
             //  server. Otherwise its uses are errors, below)
-            let dylib = if run_pm { Some(bs.proc_macro_dylib(pn)?) } else { None };
+            // (a check: one that does not build is its crate's error; it is not a stub then, whose uses would be
+            //  errors of their own)
+            let mut failed = false;
+            let dylib = match run_pm.then(|| bs.proc_macro_dylib(pn)) {
+                Some(Ok(d)) => Some(d),
+                Some(Err(e)) => match errs.as_mut() {
+                    Some(v) => {
+                        v.push((lib.name.clone(), e));
+                        failed = true;
+                        None
+                    }
+                    None => return Err(e),
+                },
+                None => None,
+            };
             let text = match &dylib {
                 Some(_) => format!("// (zurgo: `{}` is a proc-macro crate: rustc builds it, the toolchain's proc-macro server runs its macros)\n", pk.name),
                 None => proc_macro_stub::stub_text(&pk.name, &m),
@@ -252,7 +275,7 @@ fn plan_keeping(g: &Graph, o: &BuildOpts, mut errs: Option<&mut Vec<(String, Str
                 proc_macro: dylib.clone(),
                 test: false,
             });
-            if dylib.is_none() {
+            if dylib.is_none() && !failed {
                 pm_macros.push((p, m));
             }
         }
@@ -486,6 +509,13 @@ fn plan_keeping(g: &Graph, o: &BuildOpts, mut errs: Option<&mut Vec<(String, Str
                         None => return Err(format!("`{}` {why}", c.name)),
                     }
                 }
+            }
+        }
+    }
+    if let Some(v) = errs.as_mut() {
+        for (c, n) in crates[n_stubs..].iter().zip(&node_of) {
+            if let Some(e) = bs_err.get(n) {
+                v.push((c.name.clone(), e.clone()));
             }
         }
     }

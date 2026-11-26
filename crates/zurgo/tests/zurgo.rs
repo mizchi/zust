@@ -457,6 +457,31 @@ fn check_goes_on_past_a_crate_the_plan_cannot_take() {
     for want in &rest {
         assert!(err.contains(want.as_str()), "missing `{want}`:\n{err}");
     }
+    // (a build script that fails)
+    sc.write(&[("util/src/lib.rs", "pub fn one() -> u32 {\n    1\n}\n"), ("util/build.rs", "fn main() {\n    panic!(\"no\");\n}\n")]);
+    let (ok, _, err) = zurgo_no_pm(&["build"], &m, &t);
+    assert!(!ok && !err.contains("mismatched"), "{err}");
+    let (ok, _, err) = zurgo_no_pm(&["check"], &m, &t);
+    assert!(!ok && err.contains("error: crate `util`: "), "{err}");
+    for want in &rest {
+        assert!(err.contains(want.as_str()), "missing `{want}`:\n{err}");
+    }
+    std::fs::remove_file(d.join("util/build.rs")).unwrap();
+    // (with the proc-macro server: a proc-macro crate that does not build; the crates that reach it are not checked)
+    sc.write(&[
+        ("util/src/lib.rs", "#[pm::traced]\npub fn one() -> u32 {\n    1\n}\n"),
+        ("pm/src/lib.rs", "extern crate proc_macro;\nuse proc_macro::TokenStream;\n#[proc_macro_attribute]\npub fn traced(_a: TokenStream, i: TokenStream) -> TokenStream {\n    let x: u8 = \"no\";\n    i\n}\n"),
+    ]);
+    let (ok, _, err) = zurgo(&["check"], &m, &t);
+    for want in [
+        "error: crate `pm`: ".to_string(),
+        rest[0].clone(),
+        "warning: crate `util` not checked: its dependency `pm` could not be read or expanded".to_string(),
+        "warning: crate `app` not checked".to_string(),
+        "error: 2 errors in 2 crates".to_string(),
+    ] {
+        assert!(!ok && err.contains(&want), "missing `{want}`:\n{err}");
+    }
 }
 
 #[test]
