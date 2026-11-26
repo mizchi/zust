@@ -1413,6 +1413,9 @@ impl Session {
         }
         for &j in deps {
             h.add(&crates[j].name);
+            // (the names it gives its dependencies: a path in its generic code, which this crate compiles, means
+            // another crate when they change, the text the same)
+            h.add(&crates[j].aliases);
             for f in &loaded[j].as_ref().unwrap().1.files {
                 h.add(f);
             }

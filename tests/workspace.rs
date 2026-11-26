@@ -321,24 +321,8 @@ fn renamed_dependencies_match_rustc() {
     let out = dir.join("target");
     let mut s = zustc::session::Session::new(zustc::session::Options { jobs: 1, ..Default::default() });
     s.build_workspace(&crates, &out).unwrap();
-    // (rustc, with the same names: `--extern common=libcrypto_common.rlib`)
     let rs = dir.join("target_rustc");
-    std::fs::create_dir_all(&rs).unwrap();
-    let rlib = |n: &str| rs.join(format!("lib{n}.rlib"));
-    for c in &crates {
-        let mut cmd = Command::new("rustc");
-        cmd.args(["--edition", "2021", "-Awarnings", "--crate-name", &c.name]).arg(&c.root).arg("-L").arg(&rs);
-        if c.lib {
-            cmd.args(["--crate-type", "rlib"]).arg("-o").arg(rlib(&c.name));
-        } else {
-            cmd.arg("-o").arg(rs.join(&c.name));
-        }
-        for (a, n) in &c.aliases {
-            cmd.arg("--extern").arg(format!("{a}={}", rlib(n).display()));
-        }
-        let o = cmd.output().unwrap();
-        assert!(o.status.success(), "rustc {}: {}", c.name, String::from_utf8_lossy(&o.stderr));
-    }
+    rustc_build(&crates, &rs);
     let a = run(&out.join("app"), &dir, 0);
     assert_eq!(a, run(&rs.join("app"), &dir, 0));
     assert_eq!(a.0, "hello 7 st 2 (101, 7) 10 hello 10\n");
@@ -346,5 +330,131 @@ fn renamed_dependencies_match_rustc() {
     put("bad.txt", "lib crypto_common cc/lib.rs\nlib dig dig/lib.rs extern=common\n");
     let e = zustc::session::read_workspace(&dir.join("bad.txt")).err().unwrap_or_default();
     assert!(e.contains("expected `extern=ALIAS=NAME`"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A workspace's crates built by rustc into rs, as zustc builds them: `--extern` for each dependency, a renamed one
+/// under its name (`--extern common=libcrypto_common.rlib`)
+fn rustc_build(crates: &[zustc::session::CrateSpec], rs: &Path) {
+    std::fs::create_dir_all(rs).unwrap();
+    let rlib = |n: &str| rs.join(format!("lib{n}.rlib"));
+    for c in crates {
+        let mut cmd = Command::new("rustc");
+        cmd.args(["--edition", "2021", "-Awarnings", "--crate-name", &c.name]).arg(&c.root).arg("-L").arg(rs);
+        if c.lib {
+            cmd.args(["--crate-type", "rlib"]).arg("-o").arg(rlib(&c.name));
+        } else {
+            cmd.arg("-o").arg(rs.join(&c.name));
+        }
+        for d in c.deps.iter().filter(|d| !c.aliases.iter().any(|x| x.1 == **d)) {
+            cmd.arg("--extern").arg(format!("{d}={}", rlib(d).display()));
+        }
+        for (a, n) in &c.aliases {
+            cmd.arg("--extern").arg(format!("{a}={}", rlib(n).display()));
+        }
+        let o = cmd.output().unwrap();
+        assert!(o.status.success(), "rustc {}: {}", c.name, String::from_utf8_lossy(&o.stderr));
+    }
+}
+
+/// The files (with `ws.txt`) built by zustc and by rustc: what the bin `app` prints in each
+fn zustc_and_rustc(name: &str, files: &[(&str, &str)]) -> (String, String) {
+    let dir = std::env::temp_dir().join(format!("zustc_ws_{name}_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (p, t) in files {
+        let f = dir.join(p);
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(f, t).unwrap();
+    }
+    let crates = zustc::session::read_workspace(&dir.join("ws.txt")).unwrap();
+    let out = dir.join("target");
+    let mut s = zustc::session::Session::new(zustc::session::Options { jobs: 1, ..Default::default() });
+    let built = s.build_workspace(&crates, &out);
+    rustc_build(&crates, &dir.join("target_rustc"));
+    let want = run(&dir.join("target_rustc/app"), &dir, 0).0;
+    let got = match built {
+        Ok(_) => run(&out.join("app"), &dir, 0).0,
+        Err(e) => format!("zustc: {e}"),
+    };
+    let _ = std::fs::remove_dir_all(&dir);
+    (got, want)
+}
+
+/// `::common::..` is the renamed dependency past a module `common` of the crate's own (edition 2018 on): in a `use` of an
+/// item, of the crate itself (`as c`) and of its module (`as i`), and in an expression; `common::..` is the module
+#[test]
+fn renamed_dependency_absolute_paths_past_a_module_of_its_name() {
+    let (got, want) = zustc_and_rustc(
+        "renamed_abs",
+        &[
+            ("cc.rs", "pub fn make() -> u32 {\n    1\n}\npub mod inner {\n    pub fn hi() -> u32 {\n        3\n    }\n}\n"),
+            (
+                "dig.rs",
+                "mod common {\n    pub fn make() -> u32 {\n        2\n    }\n}\nuse ::common::make;\nuse ::common as c;\nuse ::common::inner as i;\npub fn f() -> u32 {\n    i::hi() * 10000 + make() * 1000 + ::common::make() * 100 + c::make() * 10 + common::make()\n}\n",
+            ),
+            ("app.rs", "fn main() {\n    println!(\"{}\", dig::f());\n}\n"),
+            ("ws.txt", "lib cc cc.rs\nlib dig dig.rs extern=common=cc\nbin app app.rs dig\n"),
+        ],
+    );
+    assert_eq!(want, "31112\n");
+    assert_eq!(got, want);
+}
+
+/// A fn of the renamed dependency's name does not hide it: the fn is a value, `common::..` a path from a type or module
+#[test]
+fn renamed_dependency_beside_a_fn_of_its_name() {
+    let (got, want) = zustc_and_rustc(
+        "renamed_fn",
+        &[
+            ("cc.rs", "pub fn make() -> u32 {\n    1\n}\n"),
+            ("dig.rs", "fn common() -> u32 {\n    5\n}\npub fn f() -> u32 {\n    common::make() * 10 + common()\n}\n"),
+            ("app.rs", "fn main() {\n    println!(\"{}\", dig::f());\n}\n"),
+            ("ws.txt", "lib cc cc.rs\nlib dig dig.rs extern=common=cc\nbin app app.rs dig\n"),
+        ],
+    );
+    assert_eq!(want, "15\n");
+    assert_eq!(got, want);
+}
+
+/// A module of the renamed dependency's name shadows it where it is in scope, also for a path through the module's
+/// re-export (`common::inner` with `pub use crate::local::inner;` in it); a module beneath does not see it
+#[test]
+fn renamed_dependency_shadowed_by_a_module_that_reexports() {
+    let (got, want) = zustc_and_rustc(
+        "renamed_shadow",
+        &[
+            ("cc.rs", "pub mod inner {\n    pub fn make() -> u32 {\n        1\n    }\n}\n"),
+            (
+                "dig.rs",
+                "mod local {\n    pub mod inner {\n        pub fn make() -> u32 {\n            2\n        }\n    }\n}\nmod common {\n    pub use crate::local::inner;\n}\nmod sub {\n    pub fn g() -> u32 {\n        common::inner::make()\n    }\n}\npub fn f() -> u32 {\n    common::inner::make() * 10 + sub::g()\n}\n",
+            ),
+            ("app.rs", "fn main() {\n    println!(\"{}\", dig::f());\n}\n"),
+            ("ws.txt", "lib cc cc.rs\nlib dig dig.rs extern=common=cc\nbin app app.rs dig\n"),
+        ],
+    );
+    assert_eq!(want, "21\n");
+    assert_eq!(got, want);
+}
+
+/// Only a dependency's renamed dependency changes (`chosen=a` to `chosen=b`, the texts the same): its generic fn, which
+/// the bin instantiates, names the other crate now, so the bin is compiled again though the items it reaches are the same
+#[test]
+fn a_dependency_renaming_another_crate_recompiles_its_users() {
+    let dir = std::env::temp_dir().join(format!("zustc_ws_renamed_fp_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let put = |p: &str, t: &str| std::fs::write(dir.join(p), t).unwrap();
+    put("a.rs", "pub fn val() -> u32 {\n    1\n}\n");
+    put("b.rs", "pub fn val() -> u32 {\n    2\n}\n");
+    put("middle.rs", "pub fn get<T>() -> u32 {\n    chosen::val()\n}\n");
+    put("app.rs", "fn main() {\n    println!(\"{}\", middle::get::<u8>());\n}\n");
+    let out = dir.join("target");
+    for (alias, want) in [("a", "1\n"), ("b", "2\n"), ("a", "1\n")] {
+        put("ws.txt", &format!("lib a a.rs\nlib b b.rs\nlib middle middle.rs a b extern=chosen={alias}\nbin app app.rs middle\n"));
+        let crates = zustc::session::read_workspace(&dir.join("ws.txt")).unwrap();
+        let mut s = zustc::session::Session::new(zustc::session::Options { jobs: 1, ..Default::default() });
+        s.build_workspace(&crates, &out).unwrap();
+        assert_eq!(run(&out.join("app"), &dir, 0).0, want, "chosen={alias}");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
