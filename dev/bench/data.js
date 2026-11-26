@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795679410575,
+  "lastUpdate": 1795679760417,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -59624,6 +59624,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 80.558,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9724f2b9c6d1dbe941e9c03f5e48055e1f633f5b",
+          "message": "typeck: E0408 for or-pattern alternatives that do not bind the same names (#174) (#236)\n\nThe bug: an or-pattern with an alternative that does not bind a name the\nothers bind (`E::A(x) | E::B(_, _)`) got zustc's own \"`|` alternatives bind\ndifferent types\", reported at the scrutinee or the statement. rustc rejects\nit with E0408 \"variable `x` is not bound in all patterns\", at the first\nalternative that does not bind the name. When a variable of that name\nexisted outside the pattern, zustc accepted the program and read that outer\nvariable. When the arm had a guard, zustc reported \"cannot find value\" in\nthe arm's body.\n\nCause: pat_bind lowered `Pat::Or` by taking the names of the first\nalternative and looking each one up after binding each of the other\nalternatives. A name that an alternative did not bind was found in an outer\nscope, or not found at all, and the only check left compared the types it\nfound. An arm with a guard is split into one arm per alternative before\nthat, so nothing compared its names. The alternatives also had no position\nof their own.\n\nThe fix: the parser now records where each alternative of an or-pattern\nstarts (`Pat::Or(alternatives, starts)`). or_pat_names collects the names a\npattern binds, leaving out names that pat_bind treats as a unit variant, a\nconstant or a unit struct. It checks each or-pattern the way rustc's\nresolver does: first the or-patterns inside the alternatives, then the\nfirst alternative that lacks a name another alternative binds, reported at\nthat alternative. A match runs this check on its arms before lowering them,\nso it comes before E0004 and before guarded arms are split. pat_bind runs\nit for the or-patterns of `let`, `if let`, `while let`, `for` and\nparameters. When the names agree but their types differ, the error now\nuses rustc's E0308 wording (\"mismatched types: expected `u8`, found `u16`\")\nand points at the alternative.\n\nTests: tests/check.rs or_pattern_missing_bindings, with each position taken\nfrom rustc 1.100. It covers the issue's match; an outer variable of the same\nname; several alternatives that lack the name; `let`; a `_` as the first\nalternative; `if let`; `while let` with the or-pattern nested in `Some`;\n`for`; or-patterns nested in alternatives; a guarded arm; constants, unit\nvariants and a unit struct that bind nothing; and the E0308 case.\n\ntests/ui: 11 more compile-fail tests pass, with 0 regressions. Eight are\nE0408 at rustc's exact position (error-codes/E0408.rs,\nor-patterns/binding-typo.rs, binding-typo-2.rs,\npattern/or-pattern-binding-mismatch.rs,\nor-pattern-mismatched-variable-and-variant.rs,\nresolve/resolve-inconsistent-names.rs and span/issue-39698.rs) or\nE0308 on the annotated line (or-patterns-binding-type-mismatch.rs). Three\nare E0409 tests (mismatched_types/E0409.rs,\nsuggest-adding-or-removing-ref-for-binding-pattern.rs and\nresolve/resolve-inconsistent-binding-mode.rs). For these, zustc reports the\nE0308 that rustc reports next on the same line. The baseline and the ratchet\nare rewritten (compile-fail 5327 -> 5338).\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T16:49:07+09:00",
+          "tree_id": "fc4d51b2a97c48de2281c5c285d1672b1ae90270",
+          "url": "https://github.com/mizchi/zust/commit/9724f2b9c6d1dbe941e9c03f5e48055e1f633f5b"
+        },
+        "date": 1795679759846,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 164.664,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.953,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 25.066,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 66.878,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.422,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 133.062,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 800.436,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 719.428,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 1.004,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 89.229,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 306.554,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 56.27,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 630.548,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3940.391,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 72.708,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 111.586,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 49.207,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 91.501,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 94.137,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 232.952,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 80.313,
             "unit": "ms"
           }
         ]
