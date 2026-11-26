@@ -12483,7 +12483,7 @@ impl Session {
                                         errs.push(format!("{l}:1: {}", &e[m..]));
                                     }
                                 }
-                                None => errs.push(const_err_line(e, src)),
+                                None => errs.push(const_err_line(e, src, &a.prog)),
                             }
                             ok = false;
                             Some(vec![])
@@ -12536,6 +12536,44 @@ impl Session {
             self.chk = Some(memo);
         }
         tm.lap("check", format!("{n_memo} from the last check, {n_keys} keys, {n_hit} cached, {n_checked} checked"));
+        // (E0080: each integer or bool constant of the program is evaluated, used or not, as rustc's; not only where a
+        // fn reads it, whose check stops at its first error (`let _ = (A, B);` reports A's only). At the operation, of
+        // the constant that has it: not of one that reads that constant. The same error found in a fn is one.
+        // One with no operator or call of its own (`= 1;`, `= u8::MAX;`, `= A;`) has none. One that is not placed is
+        // at the constant's line, as before)
+        if !self.const_lines.is_empty() {
+            let mut placed = vec![];
+            // (each one's error, and whether it is placed at its operation; the others' at their lines)
+            let mut errs_of: FxMap<&str, (String, bool)> = FxMap::default();
+            let mut at_lines: Vec<(&str, String)> = vec![];
+            let own = |c: &crate::program::ConstDef| c.item < a.prog.prelude_from && !a.ext_items.get(c.item as usize).copied().unwrap_or(false) && !c.name.contains("::");
+            // (an operator, `<<` and `==` too, or a call: `T::W & 1` reads a failing associated constant)
+            let ops = |e: &str| e.bytes().any(|b| matches!(b, b'+' | b'-' | b'*' | b'/' | b'%' | b'<' | b'>' | b'(' | b'&' | b'|' | b'^' | b'!')) || e.contains("==");
+            for c in a.prog.consts.iter().filter(|c| (c.ty.is_int() || c.ty == Ty::Bool) && own(c) && ops(&c.expr)) {
+                let Err(e) = a.prog.const_int(&c.name, 0) else { continue };
+                if !e.ends_with("(E0080)") {
+                    continue;
+                }
+                // (at its line in the source, or its item's (one a macro wrote))
+                let eq = const_init_eq(src, &c.name);
+                let at_line = match eq {
+                    Some(eq) => format!("{}:1: in constant `{}`: {e}", src[..eq.min(src.len())].matches('\n').count() + 1, c.name),
+                    None => unhoist_err(&a, format!("{}:1: in constant `{}`: {e}", a.items[c.item as usize].line, c.name)),
+                };
+                let at_op = eq.and_then(|eq| const_op_err(&a.prog, &c.name, src, eq)).flatten();
+                errs_of.insert(&c.name, (e, at_op.is_some()));
+                match at_op {
+                    Some(m) => placed.push(m),
+                    None => at_lines.push((&c.name, at_line)),
+                }
+            }
+            // (and not at a constant whose error is that of a constant it reads that has it placed, `const X: u8 = Y +
+            // 0;` (where a fn read it too); one that reads an associated constant has it at its line)
+            let reads_placed = |n: &str, m: &str| const_reads(&a.prog, n).iter().any(|r| const_err_placed(&a.prog, &errs_of, r, m, 0));
+            errs.retain(|e| !(e.ends_with("(E0080)") && e.split_once(": in constant `").and_then(|x| x.1.split_once("`: ")).is_some_and(|(n, m)| reads_placed(n, m))));
+            errs.extend(placed);
+            errs.extend(at_lines.into_iter().filter(|(n, e)| !e.split_once("`: ").is_some_and(|(_, m)| reads_placed(n, m))).map(|x| x.1));
+        }
         self.const_lines.clear();
         if errs.is_empty() {
             errs.extend(a.late_err.clone());
@@ -12581,24 +12619,87 @@ impl Session {
 
 /// An error of a constant's evaluation that has no place (`0:1: in constant `X`: overflow in constant`): at the line
 /// of its initializer in the source (`const X: u8 = ..`, the `=`), as rustc's E0080; a position inside the message is
-/// left out
-fn const_err_line(e: String, src: &str) -> String {
+/// left out. rustc's E0080 of an operation (`attempt to compute ..`) is at the operation, without the constant's name
+fn const_err_line(e: String, src: &str, prog: &Program) -> String {
     let Some(rest) = e.strip_prefix("0:1: in constant `") else { return e };
-    let Some((name, tail)) = rest.split_once("`: ") else { return e };
+    let Some((full, tail)) = rest.split_once("`: ") else { return e };
     // (what rustc reports at the constant: an overflow, a transmute of sizes, mismatched types; not what zustc does
     // not evaluate)
-    if !["overflow in constant", "cannot transmute between types of different sizes", "mismatched types"].iter().any(|m| tail.contains(m)) {
+    if !["overflow in constant", "cannot transmute between types of different sizes", "mismatched types"].iter().any(|m| tail.contains(m)) && !tail.ends_with("(E0080)") {
         return e;
     }
-    let name = name.rsplit("::").next().unwrap_or(name);
+    let name = full.rsplit("::").next().unwrap_or(full);
+    let Some(eq) = const_init_eq(src, name) else { return e };
+    let line = src[..eq.min(src.len())].matches('\n').count() + 1;
+    // (a position inside: `21:2: overflow in constant`)
+    let msg = match tail.split_once(": ") {
+        Some((pos, m)) if pos.split(':').all(|x| !x.is_empty() && x.bytes().all(|c| c.is_ascii_digit())) => m,
+        _ => tail,
+    };
+    // (at the line, as before, when the operation is in another constant it reads or is not placed)
+    if let Some(Some(m)) = msg.ends_with("(E0080)").then(|| const_op_err(prog, full, src, eq)).flatten() {
+        return m;
+    }
+    format!("{line}:1: in constant `{name}`: {msg}")
+}
+
+/// Where the literal or comment at b[i] ends (past it): a string or char literal (literal_end), `//` to the line's
+/// end, `/* .. */` (nested); None for anything else
+fn literal_or_comment_end(b: &[u8], i: usize) -> Option<usize> {
+    if let Some(e) = literal_end(b, i) {
+        return Some(e);
+    }
+    if b[i] != b'/' {
+        return None;
+    }
+    match b.get(i + 1) {
+        Some(b'/') => Some(b[i..].iter().position(|&c| c == b'\n').map_or(b.len(), |p| i + p)),
+        // (`/* .. /* .. */ .. */` nests)
+        Some(b'*') => {
+            let (mut end, mut n) = (i, 0usize);
+            while end < b.len() {
+                if b[end..].starts_with(b"/*") {
+                    n += 1;
+                    end += 2;
+                } else if b[end..].starts_with(b"*/") {
+                    n -= 1;
+                    end += 2;
+                    if n == 0 {
+                        break;
+                    }
+                } else {
+                    end += 1;
+                }
+            }
+            Some(end)
+        }
+        _ => None,
+    }
+}
+
+/// Where the `=` of the initializer of the constant or static `name` is in the source (`const X: u8 = ..`; not one
+/// inside its type's brackets, `[u8; N]`), or its `;` when it has none
+fn const_init_eq(src: &str, name: &str) -> Option<usize> {
     let b = src.as_bytes();
     let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
-    let at = src.match_indices(name).map(|(i, _)| i).find(|&i| {
-        let before = src[..i].trim_end();
-        (i == 0 || !word(b[i - 1])) && b.get(i + name.len()).is_none_or(|&c| !word(c)) && (before.ends_with("const") || before.ends_with("static"))
-    });
-    let Some(at) = at else { return e };
-    // (the `=` of its initializer: not one inside its type's brackets, `[u8; N]`)
+    // (outside comments and literals: not `// const A: u8 = 1 / 0;`)
+    let mut at = 0;
+    loop {
+        if at >= b.len() {
+            return None;
+        }
+        if let Some(e) = literal_or_comment_end(b, at) {
+            at = e;
+            continue;
+        }
+        if b[at..].starts_with(name.as_bytes()) && (at == 0 || !word(b[at - 1])) && b.get(at + name.len()).is_none_or(|&c| !word(c)) {
+            let before = src[..at].trim_end();
+            if before.ends_with("const") || before.ends_with("static") {
+                break;
+            }
+        }
+        at += 1;
+    }
     let mut eq = at + name.len();
     let mut depth = 0i32;
     while eq < b.len() {
@@ -12611,13 +12712,107 @@ fn const_err_line(e: String, src: &str) -> String {
         }
         eq += 1;
     }
-    let line = src[..eq.min(b.len())].matches('\n').count() + 1;
-    // (a position inside: `21:2: overflow in constant`)
-    let msg = match tail.split_once(": ") {
-        Some((pos, m)) if pos.split(':').all(|x| !x.is_empty() && x.bytes().all(|c| c.is_ascii_digit())) => m,
-        _ => tail,
+    Some(eq)
+}
+
+/// The constants constant `n`'s initializer names (`A`, `T::W`)
+#[cold]
+fn const_reads(prog: &Program, n: &str) -> Vec<String> {
+    use crate::parse::TokKind;
+    let Some(ts) = prog.const_index.get(n).and_then(|&ci| crate::parse::tokenize(&prog.consts[ci as usize].expr).ok()) else { return vec![] };
+    let mut out = vec![];
+    let colons = |k: usize| ts.get(k).is_some_and(|t| t.text == ":") && ts.get(k + 1).is_some_and(|t| t.text == ":");
+    for (k, t) in ts.iter().enumerate().filter(|(_, t)| t.kind == TokKind::Ident) {
+        // (`T::W`: an associated constant's two names; not `T` alone)
+        if colons(k + 1) {
+            continue;
+        }
+        let x = if k >= 3 && colons(k - 2) && ts[k - 3].kind == TokKind::Ident { format!("{}::{}", ts[k - 3].text, t.text) } else { t.text.clone() };
+        // (once each: `C1 + C1` is followed once)
+        if prog.const_index.contains_key(x.as_str()) && !out.contains(&x) {
+            out.push(x);
+        }
+    }
+    out
+}
+
+/// Whether the E0080 `msg` of a constant that reads constant `n` is n's, placed at n's operation, or that of a
+/// constant n reads, placed so (errs_of: the error of each constant of the unused-constant pass, and whether it is
+/// placed): so that it is not reported again at the constant that reads it
+#[cold]
+fn const_err_placed(prog: &Program, errs_of: &FxMap<&str, (String, bool)>, n: &str, msg: &str, depth: u32) -> bool {
+    if depth > 16 {
+        return false;
+    }
+    match errs_of.get(n) {
+        Some((m, true)) => m == msg,
+        Some((m, false)) if m != msg => false,
+        // (one the pass does not take, an associated constant: its error must be msg too)
+        None if !prog.const_int(n, 0).is_err_and(|e| e == msg) => false,
+        _ => const_reads(prog, n).iter().any(|r| const_err_placed(prog, errs_of, r, msg, depth + 1)),
+    }
+}
+
+/// The E0080 of constant `name`, whose initializer follows the `=` at src[eq], at the operation: the initializer
+/// evaluated again as parsed at its place in the source, Some(Some(`L:C: attempt to compute ..`)). Some(None) when
+/// the operation is in another constant it reads (the error has no place in this one), None when the initializer is
+/// not read back so (no `=`, a text that does not parse, or another result)
+#[cold]
+fn const_op_err(prog: &Program, name: &str, src: &str, eq: usize) -> Option<Option<String>> {
+    use crate::parse::{parse_expr_at, pos_at, Pos};
+    let b = src.as_bytes();
+    if b.get(eq) != Some(&b'=') {
+        return None;
+    }
+    // (to the `;` past brackets, literals (`b';'`) and comments; the text's own place)
+    let close = |from: usize, stop: u8| {
+        let (mut end, mut depth) = (from, 0i32);
+        while end < b.len() {
+            if let Some(e) = literal_or_comment_end(b, end) {
+                end = e;
+                continue;
+            }
+            match b[end] {
+                b'[' | b'(' | b'{' => depth += 1,
+                b']' | b')' | b'}' if depth == 0 => break,
+                b']' | b')' | b'}' => depth -= 1,
+                c if c == stop && depth == 0 => break,
+                _ => {}
+            }
+            end += 1;
+        }
+        end
     };
-    format!("{line}:1: in constant `{name}`: {msg}")
+    let parse_at = |from: usize, end: usize| parse_expr_at(src.get(from..end)?, pos_at(src, from, Pos { line: 1, col: 0 })).ok();
+    let ty = prog.consts[*prog.const_index.get(name)? as usize].ty;
+    let m = prog.eval_const_placed(&parse_at(eq + 1, close(eq + 1, b';'))?, ty).err().filter(|m| m.ends_with("(E0080)"))?;
+    let place = m.split_once(": ").and_then(|(pos, msg)| Some((pos.split(':').map(|x| x.parse().ok()).collect::<Option<Vec<usize>>>()?, msg)));
+    let Some((p, msg)) = place else { return Some(None) };
+    let [line, col, al, ac] = p[..] else { return Some(None) };
+    // (the operation's start: its line's start, then col - 1 chars)
+    let ls = if line <= 1 { 0 } else { src.match_indices('\n').nth(line - 2)?.0 + 1 };
+    let mut start = ls + src[ls..].char_indices().nth(col - 1)?.0;
+    // (rustc's place of a parenthesized operation is its `(`, `1 + (255 + 1)`: a `(` before it whose text is that
+    // operation (its operator at the same place), not a call's (`f(255 + 1)`))
+    let at = Pos { line: al as u32, col: ac as u32 - 1 };
+    loop {
+        let before = src[..start].trim_end();
+        let Some(o) = before.strip_suffix('(').map(str::len) else { break };
+        if src[..o].trim_end().ends_with(|c: char| c.is_alphanumeric() || matches!(c, '_' | ')' | ']' | '>' | '!')) {
+            break;
+        }
+        let Some(mut x) = parse_at(o + 1, close(o + 1, 0)) else { break };
+        while let Expr::Paren(y) = x {
+            x = *y;
+        }
+        match x {
+            Expr::Binary(_, _, _, sp) | Expr::Unary(_, _, sp) | Expr::MethodCall(.., sp) if sp.at == at => start = o,
+            _ => break,
+        }
+    }
+    let l = src[..start].matches('\n').count() + 1;
+    let c = src[..start].rsplit('\n').next().map_or(0, |s| s.chars().count()) + 1;
+    Some(Some(format!("{l}:{c}: {msg}")))
 }
 
 /// The line (1-based) in the source of line `line` of the prepared text, past the source's `user_lines`: in the

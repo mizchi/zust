@@ -3155,6 +3155,96 @@ fn extern_statics_in_a_static_value() {
     assert_eq!(first("extern \"C\" {\n    static Q: u32;\n}\npub static B: u32 = *&Q;\nfn main() {}\n").map(|d| d.0), Some(4), "a read through its address");
 }
 
+/// #176: an overflow or a division by zero in a constant is rustc's E0080, with its text, at the operation (its
+/// parentheses included): each constant's, used or not, not only the first one a fn reads; one that reads such a
+/// constant has no error of its own
+#[test]
+fn const_overflow_and_division_by_zero_are_e0080_at_the_operation() {
+    let all = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, edition: 2024, ..Options::default() });
+        s.check(src).into_iter().map(|d| (d.line, d.col, d.msg)).collect::<Vec<_>>()
+    };
+    let e = |l: usize, c: usize, m: &str| (l, c, format!("{m} (E0080)"));
+    let over = |l: usize, c: usize, op: &str| e(l, c, &format!("attempt to compute `{op}`, which would overflow"));
+    // (rustc 1.97's errors and places)
+    assert_eq!(all("const A: u8 = u8::MAX + 1;\nconst B: i32 = 1 / 0;\nfn main() { let _ = (A, B); }\n"), vec![over(1, 15, "u8::MAX + 1_u8"), e(2, 16, "attempt to divide `1_i32` by zero")], "the issue's");
+    let src = "const C: u8 = 200 + 100;\nconst D: i32 = i32::MIN / -1;\nconst E: u32 = 5 % 0;\nconst F: i8 = 0 - 1 - 127 - 1;\nfn main() { let _ = (C, D, E, F); }\n";
+    assert_eq!(all(src), vec![over(1, 15, "200_u8 + 100_u8"), over(2, 16, "i32::MIN / -1_i32"), e(3, 16, "attempt to calculate the remainder of `5_u32` with a divisor of zero"), over(4, 15, "i8::MIN - 1_i8")]);
+    // (unused; MIN and MAX by name, usize's too; u128's MAX; a shift's right operand of its own type; `-`)
+    let src = "const A: u8 = 0 - 255;\nconst B: usize = usize::MAX + 1;\nconst C: u128 = u128::MAX + 1;\nconst D: i16 = -5 / 0;\nconst E: u8 = 1 << 9;\nconst F: u8 = 1u8 << 9u32;\nconst G: i32 = 1 >> 40;\nconst H: i8 = -i8::MIN;\nstatic S: u32 = (1 + 2) * u32::MAX;\nfn main() {}\n";
+    assert_eq!(
+        all(src),
+        vec![
+            over(1, 15, "0_u8 - u8::MAX"),
+            over(2, 18, "usize::MAX + 1_usize"),
+            over(3, 17, "u128::MAX + 1_u128"),
+            e(4, 16, "attempt to divide `-5_i16` by zero"),
+            e(5, 15, "attempt to shift left by `9_i32`, which would overflow"),
+            e(6, 15, "attempt to shift left by `9_u32`, which would overflow"),
+            e(7, 16, "attempt to shift right by `40_i32`, which would overflow"),
+            e(8, 15, "attempt to negate `i8::MIN`, which would overflow"),
+            over(9, 17, "3_u32 * u32::MAX"),
+        ]
+    );
+    // (inside parentheses: at the `(` when they hold just the operation, not a call's; over lines; in a module and a
+    // fn body)
+    let src = "const A: u8 = 1 + (255 + 1);\nconst B: u8 = ((255 + 1));\nconst C: u8 = (255 + 1 + 0);\nconst D: u8 = id(255 + 1);\nconst E: u16 =   3\n    / 0;\nconst fn id(x: u8) -> u8 { x }\nmod m {\n    pub const Z: i32 = 1 / 0;\n}\nfn main() {\n    const V: i16 = i16::MAX * 2;\n}\n";
+    assert_eq!(
+        all(src),
+        vec![over(1, 19, "u8::MAX + 1_u8"), over(2, 15, "u8::MAX + 1_u8"), over(3, 16, "u8::MAX + 1_u8"), over(4, 18, "u8::MAX + 1_u8"), e(5, 18, "attempt to divide `3_u16` by zero"), e(9, 24, "attempt to divide `1_i32` by zero"), over(12, 20, "i16::MAX * 2_i16")]
+    );
+    // (in a const fn: at the call; `<<` keeps the bits, so `-` overflows)
+    let src = "const fn f(x: u8) -> u8 {\n    x + 1\n}\nconst CF: u8 = 1 + f(255);\nconst N: i32 = -(1 << 31);\nconst OK1: u64 = 1 << 40;\nconst OK2: u8 = !(1 << 7);\nconst OK3: u8 = b'z' - b'a' + f(3);\nfn main() {}\n";
+    assert_eq!(all(src), vec![over(4, 20, "u8::MAX + 1_u8"), e(5, 16, "attempt to negate `i32::MIN`, which would overflow")]);
+    // (an initializer with a `;` in a literal or a comment)
+    let src = "const A: u8 = b';' + 255;\nconst B: u8 = 255 /* ; */ + 1;\nconst C: u8 = 255 // ;\n    + 1;\nconst D: u8 = '\\'' as u8 + 255;\nconst E: u8 = b\"a;b\"[1] + 255;\nfn main() {}\n";
+    assert_eq!(all(src), vec![over(1, 15, "59_u8 + u8::MAX"), over(2, 15, "u8::MAX + 1_u8"), over(3, 15, "u8::MAX + 1_u8"), over(5, 15, "39_u8 + u8::MAX"), over(6, 15, "59_u8 + u8::MAX")]);
+    // (in a condition, an index, `&&` / `||`, and an array, a tuple or a struct written in the initializer)
+    let src = "const C: u8 = if 1u8 / 0 == 0 { 1 } else { 2 };\nconst D: u8 = [1u8, 2][(255u8 + 1) as usize];\nconst E: bool = 1u8 / 0 == 0 && true;\nconst F: bool = false || 255u8 + 1 == 0;\nconst G: u8 = [255u8 + 1][0];\nconst H: u8 = (255u8 + 1,).0;\nstruct S { x: u8 }\nconst I: u8 = S { x: 255u8 + 1 }.x;\nfn main() {}\n";
+    let div = |l: usize, c: usize| e(l, c, "attempt to divide `1_u8` by zero");
+    let max1 = |l: usize, c: usize| over(l, c, "u8::MAX + 1_u8");
+    assert_eq!(all(src), vec![div(1, 18), max1(2, 24), div(3, 17), max1(4, 26), max1(5, 16), max1(6, 16), max1(8, 22)]);
+    // (one zustc cannot place is still an error, at its constant's line: through an associated constant (rustc's is
+    // at that constant), from a macro (rustc's is in its body))
+    let src = "struct T;\nimpl T {\n    const W: u8 = 0 - 1;\n}\nconst X: u8 = T::W + 0;\nmacro_rules! k {\n    ($n:ident) => {\n        const $n: u8 = 255 + 1;\n    };\n}\nk!(M);\nfn main() {}\n";
+    let d = all(src);
+    assert_eq!(d.iter().map(|d| d.0).collect::<Vec<_>>(), vec![5, 11], "{d:?}");
+    assert!(d[0].2.ends_with("attempt to compute `0_u8 - 1_u8`, which would overflow (E0080)") && d[1].2.ends_with("attempt to compute `u8::MAX + 1_u8`, which would overflow (E0080)"), "{d:?}");
+    // (not when another constant has the same error placed and this one does not read it: A's and T::W's (at X's
+    // line, zustc's place; rustc's is at W, 4:19))
+    let src = "const A: u8 = 200 + 100;\nstruct T;\nimpl T {\n    const W: u8 = 200 + 100;\n}\nconst X: u8 = T::W + 0;\nfn main() {}\n";
+    assert_eq!(all(src), vec![over(1, 15, "200_u8 + 100_u8"), (6, 1, "in constant `X`: attempt to compute `200_u8 + 100_u8`, which would overflow (E0080)".to_string())]);
+    // (one a macro writes that reads a constant whose error is placed: that one's only)
+    let src = "const Y: u8 = 200 + 100;\nmacro_rules! k {\n    ($n:ident) => {\n        const $n: u8 = Y + 0;\n    };\n}\nk!(X);\nfn main() {}\n";
+    assert_eq!(all(src), vec![over(1, 15, "200_u8 + 100_u8")]);
+    // (through `&`, `==`, `^` / `|` and `!` of an associated constant that fails: at each one's line (zustc's place;
+    // rustc's is at W, 3:19, with a note at each))
+    let src = "struct T;\nimpl T {\n    const W: u8 = 255 + 1;\n}\nconst X: u8 = T::W & 1;\nconst B: bool = T::W == 0;\nconst C: u8 = T::W ^ 1 | 0;\nconst D: u8 = !T::W;\nfn main() {}\n";
+    let at = |l: usize, n: &str| (l, 1, format!("in constant `{n}`: attempt to compute `u8::MAX + 1_u8`, which would overflow (E0080)"));
+    assert_eq!(all(src), vec![at(5, "X"), at(6, "B"), at(7, "C"), at(8, "D")]);
+    // (the declaration, not one in a comment or a string)
+    let src = "// const A: u8 = 1 / 0;\n/* const A: u8 = 1 / 0; */\nconst S: &str = \"const A: u8 = 1 / 0;\";\nconst A: u8 = 255 + 1;\nfn main() {}\n";
+    assert_eq!(all(src), vec![max1(4, 15)]);
+    // (`pow` and `abs`: the operation in core that overflows, at the call)
+    let src = "const P: u8 = 2u8.pow(8);\nconst Q: i8 = i8::MIN.abs();\nconst V: i32 = (3i32.pow(21));\nconst W: u64 = 10u64.pow(20);\nconst X: i16 = (-2i16).pow(15) - 1;\nconst Y: u8 = 3u8.pow(5) + 2u8.pow(7);\nconst OK: u32 = 2u32.pow(31) + 7i8.abs() as u32;\nfn main() {}\n";
+    assert_eq!(
+        all(src),
+        vec![
+            over(1, 15, "16_u8 * 16_u8"),
+            e(2, 15, "attempt to negate `i8::MIN`, which would overflow"),
+            over(3, 16, "243_i32 * 43046721_i32"),
+            over(4, 16, "10000_u64 * 10000000000000000_u64"),
+            over(5, 16, "i16::MIN - 1_i16"),
+            over(6, 15, "243_u8 + 128_u8"),
+        ]
+    );
+    // (a constant that reads one: rustc's error is the one it reads, used or not)
+    let src = "const Y: u8 = 200 + 100;\nconst X: u8 = Y + 0;\nfn main() { let _ = X; }\n";
+    assert_eq!(all(src), vec![over(1, 15, "200_u8 + 100_u8")]);
+    assert_eq!(all("const Y: u8 = 200 + 100;\nconst X: u8 = Y + 0;\nfn main() {}\n"), vec![over(1, 15, "200_u8 + 100_u8")]);
+    assert_eq!(all("const A: u8 = 255;\nconst B: i8 = -128;\nconst C: u32 = !0 >> 1;\nconst D: usize = usize::MAX / 2 + 1;\nfn main() { let _ = (A, B, C, D); }\n"), vec![], "no overflow");
+}
+
 #[test]
 fn macro_parameters_no_matcher_binds() {
     // (rustc 1.100, where the rule is used: at the `$name` in its body; an inner `macro_rules!`'s own `$x` is fine)
