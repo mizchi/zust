@@ -21,7 +21,7 @@ fn diagnostics_roundtrip() {
     send(json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}));
     let r: Value = serde_json::from_str(&read_msg(&mut stdout).unwrap().unwrap()).unwrap();
     assert_eq!(r["id"], 1);
-    assert_eq!(r["result"]["capabilities"]["textDocumentSync"], 1);
+    assert_eq!(r["result"]["capabilities"]["textDocumentSync"], 2);
     send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
 
     // Open a version with a type error
@@ -55,6 +55,53 @@ fn diagnostics_roundtrip() {
     stdin.flush().ok();
     drop(stdin);
     assert!(child.wait().unwrap().success());
+}
+
+/// didChange with ranges (incremental sync): each change edits the text the one before it left, at UTF-16 columns;
+/// one without a range is the full text
+#[test]
+fn incremental_changes() {
+    use zust_analyzer::Server;
+    let mut srv = Server::new();
+    let uri = "file:///inc.rs";
+    let diags = |r: Vec<String>| -> Vec<Value> {
+        let d: Value = serde_json::from_str(&r[0]).unwrap();
+        assert_eq!(d["method"], "textDocument/publishDiagnostics");
+        d["params"]["diagnostics"].as_array().unwrap().clone()
+    };
+    let change = |srv: &mut Server, v: u32, changes: Value| {
+        srv.handle(&json!({"jsonrpc": "2.0", "method": "textDocument/didChange",
+            "params": {"textDocument": {"uri": uri, "version": v}, "contentChanges": changes}}).to_string())
+    };
+    let range = |l0: u32, c0: u32, l1: u32, c1: u32| json!({"start": {"line": l0, "character": c0}, "end": {"line": l1, "character": c1}});
+    let names = |srv: &mut Server| -> Vec<String> {
+        let r = srv.handle(&json!({"jsonrpc": "2.0", "id": 9, "method": "textDocument/documentSymbol", "params": {"textDocument": {"uri": uri}}}).to_string());
+        let r: Value = serde_json::from_str(&r[0]).unwrap();
+        r["result"].as_array().unwrap().iter().map(|s| s["name"].as_str().unwrap().to_string()).collect()
+    };
+    // (`𝄞` is two UTF-16 units and four bytes, `é` one and two: `i64` starts at column 21)
+    let text = "fn f() -> u8 {\n    let _s = \"𝄞é\"; 1i64\n}\nfn main() {}\n";
+    let r = srv.handle(&json!({"jsonrpc": "2.0", "method": "textDocument/didOpen",
+        "params": {"textDocument": {"uri": uri, "languageId": "rust", "version": 1, "text": text}}}).to_string());
+    assert_eq!(diags(r).len(), 1);
+    // Deleting `i64` fixes the type error
+    let r = change(&mut srv, 2, json!([{"range": range(1, 21, 1, 24), "text": ""}]));
+    assert_eq!(diags(r).len(), 0, "{}", names(&mut srv).join(","));
+    // Two changes in one message: the second's positions are in the text after the first
+    let r = change(&mut srv, 3, json!([
+        {"range": range(0, 0, 0, 0), "text": "fn added_a() {}\n"},
+        {"range": range(5, 0, 5, 0), "text": "fn added_b() {}\n"},
+    ]));
+    assert_eq!(diags(r).len(), 0);
+    assert_eq!(names(&mut srv), ["added_a", "f", "main", "added_b"]);
+    // A replacement across lines, and an end past the end of its line (the line's end)
+    let r = change(&mut srv, 4, json!([{"range": range(1, 3, 3, 99), "text": "g() {}"}]));
+    assert_eq!(diags(r).len(), 0);
+    assert_eq!(names(&mut srv), ["added_a", "g", "main", "added_b"]);
+    // The full text, then a range in it
+    let r = change(&mut srv, 5, json!([{"text": "fn main() {}\n"}, {"range": range(0, 0, 0, 0), "text": "fn h() -> u8 { 1i64 }\n"}]));
+    assert_eq!(diags(r).len(), 1);
+    assert_eq!(names(&mut srv), ["h", "main"]);
 }
 
 /// documentSymbol (the tree of an open document) and workspace/symbol (search by name in the open documents and the workspace's .rs files)
