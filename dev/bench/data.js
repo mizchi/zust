@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795679767836,
+  "lastUpdate": 1795680622907,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -59783,6 +59783,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 80.313,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5220e10a97bbb7ccd881e46f2b6f3f065af7b8b1",
+          "message": "Macro, parser and type-mismatch errors at rustc's places, E0412/E0255/E0599, unreachable literal and slice patterns (#186)\n\n* Macro matchers rustc rejects as it reads them, and a doc comment the source ends in\n\nrustc reads a macro_rules! matcher when the definition is read, used or not, and rejects:\n- a `$name` with no fragment specifier (`($a) => {}`): \"missing fragment specifier\", at the `$`. `$crate` is fine;\n- a `$( .. )` with no `*` / `+` / `?` after it (`(($($b:tt))*)`): \"expected one of: `*`, `+`, or `?`\", at the `(` of\n  `$(`. A delimiter after the group is no separator: in `($($b:tt))*` the `)` closes the outer group;\n- a repetition with no separator that can match nothing (`$()*`, `$($v:vis)*`): \"repetition matches empty token\n  tree\", at the `(` of `$(`.\nThe expansion notes such a definition as it parses the rules, and the driver places it in the source, as the other\ndefinition errors (a name bound twice is found by the same walk now).\n\nA doc comment the source ends in (`fn main() {}\\n/// hi`) is rustc's \"expected item after doc comment\", at the\nlast doc comment (`///`, not `////`, or `/** */`), past plain comments; it was accepted. It is read from the source as\nwritten, from its end: the expansion takes `macro_rules!` definitions out of the text, which would leave their doc\ncomments last (cfg-if, itoa).\n\nThe ratchet is the baseline's count (compile-fail 5286).\n\ntests/ui: five more compile-fail tests pass (macros/issue-39404.rs, macros/macro-missing-fragment.rs,\nmacros/issue-39388.rs, macros/repetition-matches-empty-token-tree.rs, parser/doc-before-eof.rs), each with the\nannotation's message on its line; no regressions. tests/check.rs has the cases at rustc 1.100's line and column.\n\nKPI (cachegrind, check -j 1, against main c99f215d): pat -0.010%, g5k -0.0009%, globs -0.0097%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* E0412 for a type nothing declares, at the impl header or the type alias rustc points at\n\n- A type an impl's header names that nothing declares, in an impl with or without members (`impl A<B> {}`):\n  \"cannot find type `B` in this scope\" (E0412), at the name. Read from the header's tokens: a capitalized name in\n  the self type or the trait's arguments; not the trait itself, a path's segment, an associated type's name\n  (`Item = ..`), a bound (after `dyn`, `impl`, `:`, `+`), a macro, `Self`, one of the impl's parameters, std's\n  types and traits, or a const (a const generic argument, `impl Tr for V<L>`). A single file's, with no glob `use`.\n  Only a header with a capitalized name none of those gives is tokenized (the header's identifiers are read first).\n- The type check's \"cannot find type `X`\" of an impl's member whose impl writes X (`impl Core<XXX> { fn spawn }`)\n  is at the impl header, and of a fn that names X through a type alias (`type Foo = Bar;`) at the alias, as rustc.\n\ntests/ui: three more compile-fail tests pass (fn/trait-fn-generic-mismatch.rs, typeck/apit-with-error-type-in-sig.rs,\nmissing/undeclared-generic-parameter.rs), each on the annotation's line; no regressions. The first versions rejected\nseven check-pass tests (`Box`, const generic arguments, `->` in a bound's `Fn`) and one compile-fail test passed by\nan error on `Fn` after `dyn for<'x>`; tests/check.rs has those cases.\n\nKPI (cachegrind, check -j 1, against the commit before): pat -0.0055%, g5k -0.0001%, globs +0.0053%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* \"cannot find value\" of a name a macro call passes, at the argument\n\n`foo!(\\n    x\\n)` of `($id:ident) => { $id }` with no `x` in scope was reported at the call (the expansion puts the name at\nthe call's start), where rustc reports it at the argument the call passes: the place of the name as a word in the\ncall's arguments, when the error is at a macro call. A name the macro's body writes, not its arguments, keeps the\ncall's place.\n\ntests/ui: macros/macro-parameter-span.rs passes, at the annotation's line (compile-fail 5307); no regressions.\n\nKPI (cachegrind, check -j 1, against main 38243714, with the commits before): pat -0.0086%, g5k -0.0066%,\nglobs +0.0029%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* Literal patterns as the scrutinee's type holds them: `256` of a `u8` is `0`\n\nWith overflowing_literals allowed, rustc compares an unsigned integer literal pattern by the value the type holds,\nso `256 => .., 512 => ..` of a `u8` are one value and the second arm is unreachable pattern under\ndeny(unreachable_patterns). The usefulness check compared the literals' decimal values; an unsigned literal is\nnow taken modulo its type's width.\n\ntests/ui: pattern/usefulness/issue-13727.rs passes, at the annotation's line (compile-fail 5308); no regressions.\n\nKPI (cachegrind, check -j 1, against main 38243714, with the commits before): pat -0.0084%, g5k -0.0065%,\nglobs +0.0027%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* \"no rules expected `!`\" at the furthest token a macro's rules reach\n\nA call no rule of a `macro_rules!` matches was \"no rules of `outer!` matched this call\" at the call. rustc reports\nthe token past the furthest any rule gets: \"no rules expected `!`\" at the `//!` (`#![doc = ..]`) a\n`(#[$outer:meta])` rule cannot take. Each rule's leading literal tokens, delimited groups (not looked into) and\n`$x:tt` are walked over the call's tokens; a fragment of another kind or a repetition stops the walk, as its length\nis not known. When no rule gets past the first token, the message is as before.\n\ntests/ui: parser/macro/macro-doc-comments-1.rs and -2.rs pass, at the annotations' lines (compile-fail 5310); no\nregressions.\n\nKPI (cachegrind, check -j 1, against main 38243714, with the commits before): pat -0.0040%, g5k -0.0052%,\nglobs +0.0040%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* Unreachable slice patterns: the arms' reachability reads `[T]` patterns by length\n\nThe usefulness check gave up on a slice pattern of `[T]` (arrays of a known length it read), so\ndeny(unreachable_patterns) found no arm a slice pattern covers. A slice's column is now one per length: up to one\npast the longest fixed-length pattern and at least the longest prefix and suffix of a `..` one, the last length\nstanding for every longer one (Maranget's split of slice constructors). `[x, ..]` covers every length from 1 on;\nreferences are looked through. Only the reachability of arms reads them: the witnesses of E0004 give up as before.\n\nThe pattern's payload is boxed: unboxed, N grew and every match's check copied and grew larger rows (g5k +0.018%,\npat +0.029%, in RawVec<N>::grow_one and the clones and drops of N); boxed, the KPIs are where they were.\n\ntests/ui: pattern/usefulness/match-vec-unreachable.rs, slice-patterns-reachability.rs and issue-12369.rs pass, at the\nannotations' lines (compile-fail 5314); no regressions.\n\nKPI (cachegrind, check -j 1, against main 597b5fde, with the commits before): pat -0.0006%, g5k -0.0038%,\nglobs +0.0021%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* E0255: a #[macro_export] macro beside a crate-root re-export of std's macro of that name\n\n`pub use std::panic;` re-exports the module and the macro `panic!`, so `#[macro_export] macro_rules! panic` at the\ncrate root is \"the name `panic` is defined multiple times\" (E0255), at the `macro_rules!`. Only a std / core /\nalloc path whose last segment is one of std's macros counts (a fn or a module of the name is in another\nnamespace). The expansion notes the names of the exported macros it reads (macros::EXPORTED), so a source with\nnone pays nothing: a first version searched every source for `#[macro_export]` and `pub use` (g5k +0.029%).\n\ntests/ui: duplicate/duplicate-check-macro-exports.rs passes, at the annotation's line (compile-fail 5315); no\nregressions.\n\nKPI (cachegrind, check -j 1, against the commit before): pat +0.026%, g5k -0.049%, globs -0.11%, all in malloc's\ninternals (the heap's layout: the same calls, by cg_annotate's diff).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* use paths: a lone `:` for `::`, and a token in a braced list that cannot follow a name\n\n- `use std:fs::File;` is rustc's \"expected `::`, found `:`\", at the `:` (a `:` that is not half of a `::`).\n- `use x::{A. B};` is \"expected one of `,`, `::`, `as`, or `}`, found `.`\", at the `.`: in a braced list, after a\n  name, only `,`, `::`, `as`, `}` (or a nested `{` / `*`) follow.\nBoth were accepted.\n\ntests/ui: parser/use-colon-as-mod-sep.rs and parser/similar-tokens.rs pass, at the annotations' lines and rustc's\ncolumns (compile-fail 5317); no regressions.\n\nKPI (cachegrind, check -j 1, against the commit before): pat -0.001%, g5k +0.0003%, globs -0.003%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* A binding mode's shorthand with a pattern after it, and `$[` in a macro rule's body\n\n- `Foo { ref x: ref x }`: a field with a binding mode is the shorthand, so no `:` follows it; rustc's\n  \"expected `,`\" at the `:`. It was read as `x: ref x`.\n- `$[count($i)]` in a `macro_rules!` rule's body: a meta-variable expression is `${..}`; rustc's \"expected `(`\n  or `{`, found `[`\" at the `[`, as the definition is read, used or not.\n\ntests/ui: parser/bind-struct-early-modifiers.rs and macros/paren-or-brace-expected.rs pass, at the annotations'\nlines and rustc's columns (compile-fail 5319); no regressions.\n\nKPI (cachegrind, check -j 1, against the commit before): pat +0.0025% (each rule body is walked once for `$[`),\ng5k -0.0014%, globs -0.0017%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* Type mismatches at rustc's places: a value keeps the type argument it was made with, E0599 for another instance's method\n\n- solver: two instances of one generic type whose type arguments certainly differ (a struct, a reference, an array,\n  a slice and a scalar are each another kind; an integer literal is no `()`) are not unified, so\n  `let foo = Foo(1u8); takes_foo(foo);` is a mismatch at the call, not at the `let`, and a closure's first\n  `return Foo(0)` gives its type before a later `Foo(())`\n- a method only in impls for other instances of the receiver's type (`impl Point<f64> { fn distance(&self) }` and\n  a `Point<i32>`): rustc's E0599 \"no method named .. found for struct `Point<i32>`\"\n- a block-like statement without `;` that is not `()`: at the tail of its first branch that is a block with a value\n  (`match 3 { 3 => { foo() } .. }`)\n- `let _: i32 = 'a: loop { break };` at the `break` (also of a labeled loop); a function's tail `&mut if ..` at\n  the `&`\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* Narrow the type-argument clash; `if let` guard patterns and int/float literals at rustc's places\n\n- the clash of two instances' type arguments is only what inference never guesses: two scalars, a scalar and a\n  struct, structs of two definitions, an integer literal's type and a scalar that is no integer or a struct. A\n  reference, a box or a pointer against another type is left to unify, as before: inference guesses those\n  (`v.clone()` of a `&Vec<T>` that is not Clone is the reference, `(*p).clone()` of a `Box<i32>` the box) and a later\n  use corrects the guess (box/unit/unique-in-vec-copy.rs, tests/acg/ref_clone_and_shift.rs)\n- a type a turbofish writes is the type, whatever the value's arguments are (`Foo::<u8> { value: 300u16 }` is a\n  mismatch at the field)\n- an `if let` guard's pattern of another type than its value: at the pattern\n- an integer literal's type and a float literal's are not unified: `let mut x = 2; x = 5.0;` is a mismatch at the\n  assignment\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* Cheaper clash checks: the arguments' clash in one place, early exits, and no E0599 check for impls of every instance\n\n- solver: one adt_args_clash for two instances of a struct (the unsized-tail clash as before, also under a\n  turbofish; the type-argument clash only without one), with the unsized-params lookup once a unification rather than\n  once an argument; arg_clash returns early when a side is not known yet, and looks up struct definitions only for two\n  structs\n- other_instances_only: only for an instance of a generic type, and not for an impl whose self type is the impl's\n  own (`impl<T> Vec<T>`: every instance) or the receiver's type itself\n\nCachegrind `check -j 1` against main f4c5e2fe, the whole branch: pat +0.32% -> +0.17%, g5k +0.06%, globs +0.10%\n(memcpy and the allocator's layout only).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* `macro_rules ! m { .. }`: whitespace before the `!`, as rustc accepts\n\nzustc read only `macro_rules!` written together, and `macro_rules ! m { () => { 1 } }` was \"unsupported item\".\nexpand_with now writes the `!` right after `macro_rules` and the whitespace after it, so the text keeps its length,\nits lines and every position past the `!`; the text's candidates are confirmed by the tokens, so a string or a\ncomment that holds the words is left as is. A source with no macro still costs one scan for `macro_rules`.\nFound by CodeRabbit on #183.\n\nCachegrind `check -j 1` against the commit before: pat +0.025% (one more scan of a source with macros), g5k\n+0.0007%, globs 0.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* Review fixes: trailing docs by tokens and in crate files, :: in nested repetitions, impl-header lifetimes and fn-pointer names, macro arguments by tokens\n\n- doc_at_end reads the comments after the last token whole: a `/**` in a line\n  comment or a block comment opens no doc, and a plain block comment after a\n  doc is whitespace. A crate built from files is checked too, each file as read.\n- empty_inner finds a nested repetition's operator as the matcher check does,\n  past a `::` separator.\n- The impl-header scan skips a lifetime's name and a name before `:`\n  (fn-pointer parameter names, associated type bounds).\n- macro_arg_at matches delimiters and the name by tokens, and leaves the error\n  at the call when the macro's definition writes the name itself.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9faiARzdoAsBU7fDd8\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T17:04:37+09:00",
+          "tree_id": "69e72526ccac55e2c6f9295f47076c7068148504",
+          "url": "https://github.com/mizchi/zust/commit/5220e10a97bbb7ccd881e46f2b6f3f065af7b8b1"
+        },
+        "date": 1795680622343,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 130.231,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.688,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 18.571,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 41.533,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.621,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 133.282,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 800.585,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 579.511,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.678,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 68.557,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 188.773,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.688,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 632.049,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3940.172,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.112,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 87.114,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 42.288,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 52.443,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 92.599,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 142.663,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 37.99,
             "unit": "ms"
           }
         ]
