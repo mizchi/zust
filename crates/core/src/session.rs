@@ -26,6 +26,7 @@ pub type R<T> = Result<T, String>;
 mod build;
 mod dead;
 mod dyncompat;
+mod parens;
 #[cfg(feature = "build")]
 pub use build::*;
 
@@ -1662,6 +1663,11 @@ impl Session {
         let mut deny_unused_alloc = false;
         let mut deny_bare = false;
         let mut deny_unused_mut = false;
+        // (unused_parens denied for the crate; or only by the attributes of items of the program's (marked); the
+        // crate's levels (parens::denied))
+        let mut deny_unused_parens = false;
+        let mut marked_parens = false;
+        let mut parens_levels = (1u8, false);
         let mut deny_trivial_casts = (false, false);
         let mut deny_unused_lifetimes = (false, false);
         let mut deny_mismatched_lts = false;
@@ -1670,6 +1676,10 @@ impl Session {
         let mut deny_ctypes = (false, false);
         // (non_snake_case, non_camel_case_types, non_upper_case_globals)
         let mut deny_style = [false; 3];
+        // (the crate's own text as written, for unused_parens' levels: a library of a workspace is in `pub mod name { .. }`
+        // (ws_source), on lines of its own)
+        let lib_wrap = self.ctx.lib.as_ref().map(|n| format!("pub mod {n} {{ "));
+        let own_src0 = lib_wrap.as_deref().and_then(|w| src0.strip_prefix(w)).unwrap_or(src0);
         let lib_attr = {
             let mut end = src.len().min(4096);
             while !src.is_char_boundary(end) {
@@ -1793,11 +1803,43 @@ impl Session {
             deny_unused_alloc = lint("unused_allocation")
                 || (!levels.contains(&"unused_allocation") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
             deny_unused_mut = lint("unused_mut") || (!levels.contains(&"unused_mut") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
+            // (unused_parens: the crate's level of it and whether `warnings` is denied, which makes it an error while it
+            // is at warn (parens::crate_levels, from the head's inner attributes in order). Read where the head denies
+            // something, or the attributes an item of the program's starts with do (`#[deny(unused_parens)] fn f`):
+            // those items are checked then, under the crate's levels)
+            let marked = || {
+                items[..user_src].iter().any(|it| {
+                    src.as_bytes().get(it.start) == Some(&b'#')
+                        && src.get(it.start..it.end).is_some_and(|t| {
+                            let head = leading_attrs(t);
+                            (head.contains("deny") || head.contains("forbid")) && (head.contains("unused") || head.contains("warnings"))
+                        })
+                })
+            };
+            if !levels.is_empty() || marked() {
+                parens_levels = parens::crate_levels(own_src0);
+                deny_unused_parens = parens::denied(parens_levels);
+                marked_parens = !deny_unused_parens && marked();
+            }
             for (k, n) in ["non_snake_case", "non_camel_case_types", "non_upper_case_globals"].iter().enumerate() {
                 deny_style[k] = levels.iter().any(|l| l == n || *l == "nonstandard_style" || *l == "warnings") && !c.contains(&format!("#![allow({n}"));
             }
             ["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"].iter().any(|k| c.contains(&format!("#![crate_type=\"{k}\"]")))
         };
+        // (unused_parens: the first parentheses rustc finds unnecessary in the crate's own fns and consts (not its
+        // dependencies', after its own lines), where the lint is denied; an early lint, reported before the others.
+        // The levels the items' text does not show, of the modules, impls and traits around them, are read from the
+        // source as written)
+        if deny_unused_parens || marked_parens {
+            let ol = self.ctx.own_lines as usize;
+            let own0 = if ol == 0 { own_src0 } else { own_src0.match_indices('\n').nth(ol - 1).map_or(own_src0, |(k, _)| &own_src0[..k]) };
+            let own0 = if lib_wrap.is_some() { own0.trim_end().strip_suffix('}').unwrap_or(own0) } else { own0 };
+            if let Some(around) = parens::levels_around(own0) {
+                if let Some(e) = parens::first_unused(&src, src0, &items[..user_src], ol, parens_levels, &around) {
+                    return Err(e);
+                }
+            }
+        }
         // (dead_code, in a binary: the first fn / struct / enum / const / static / trait of the program's whose name
         // appears nowhere but in its own definition and in `impl` headers)
         if deny_dead_code && self.ctx.lib.is_none() {
@@ -1897,7 +1939,7 @@ impl Session {
             && items[..user_src].iter().any(|it| {
                 src.as_bytes().get(it.start) == Some(&b'#') && src.get(it.start..it.end).is_some_and(|t| t.starts_with("#[")) && {
                     let head = leading_attrs(&src[it.start..it.end]);
-                    (head.contains("deny") || head.contains("forbid")) && unused_var_attrs(head).iter().any(|a| a.2 > 0)
+                    (head.contains("deny") || head.contains("forbid")) && lint_attrs(head, "unused_variables").iter().any(|a| a.2 > 0)
                 }
             });
         if deny_unused_vars || scoped_vars {
@@ -1906,14 +1948,14 @@ impl Session {
                 if !text.contains("fn ") || text.contains("#[cfg") {
                     continue;
                 }
-                let attrs = if text.contains("unused") || text.contains("warnings") { unused_var_attrs(text) } else { vec![] };
+                let attrs = if text.contains("unused") || text.contains("warnings") { lint_attrs(text, "unused_variables") } else { vec![] };
                 if !deny_unused_vars && !attrs.iter().any(|a| a.2 > 0) {
                     continue;
                 }
                 // (the level at a place of the item's text: the crate's, then each attribute that covers it, in order)
                 let denied = |o: usize| {
                     let (mut on, mut forbid) = (deny_unused_vars, forbid_unused_vars);
-                    for &(_, _, l) in attrs.iter().filter(|a| a.0 <= o && o < a.1) {
+                    for &(_, _, l, _) in attrs.iter().filter(|a| a.0 <= o && o < a.1) {
                         if l == 2 {
                             on = true;
                             forbid = true;
@@ -9981,36 +10023,75 @@ fn leading_attrs(t: &str) -> &str {
     &t[..i]
 }
 
-/// The lint attributes of an item's text that name `unused_variables` (or `unused`, `warnings`), in order: where each
-/// starts, the end of what it covers (all of the item for one of the item's own, before its first other token; the
-/// statement, arm or field for one inside), and its level: 0 allow / expect / warn, 1 deny, 2 forbid
-fn unused_var_attrs(text: &str) -> Vec<(usize, usize, u8)> {
+/// The lint attributes of an item's text that name the lint n of the `unused` group (`unused_variables`; or `unused`,
+/// `warnings`), in order, past literals and comments: where each starts, the end of what it covers (all of the item for
+/// one of the item's own, before its first other token; the statement, arm or field for one inside), and its level
+/// and names (lint_attr)
+fn lint_attrs(text: &str, n: &str) -> Vec<(usize, usize, u8, u8)> {
     let b = text.as_bytes();
     let mut out = vec![];
-    let (mut from, mut outer) = (0, true);
-    while let Some(k) = text[from..].find("#[") {
-        let at = from + k;
-        outer = outer && text[from..at].trim().is_empty();
-        let Some(close) = (at + 1..b.len()).scan(0i32, |d, j| {
-            *d += match b[j] { b'[' => 1, b']' => -1, _ => 0 };
-            Some((j, *d))
-        }).find(|&(_, d)| d == 0).map(|(j, _)| j) else { break };
-        from = close + 1;
+    let (mut i, mut outer) = (0, true);
+    while i < b.len() {
+        // (a literal ends the item's own attributes; a comment does not)
+        if let Some(e) = literal_or_comment_end(b, i) {
+            outer = outer && b[i] == b'/';
+            i = e.max(i + 1);
+            continue;
+        }
+        if !(b[i] == b'#' && b.get(i + 1) == Some(&b'[')) {
+            outer = outer && b[i].is_ascii_whitespace();
+            i += 1;
+            continue;
+        }
+        let at = i;
+        let Some(close) = attr_close(b, at + 1) else { break };
+        i = close + 1;
         let attr: String = text[at + 2..close].chars().filter(|c| !c.is_whitespace()).collect();
-        let Some((name, rest)) = attr.split_once('(') else { continue };
-        let lints: Vec<&str> = rest.trim_end_matches(')').split(',').filter(|l| matches!(*l, "unused_variables" | "unused" | "warnings")).collect();
-        // (only a `forbid` of the lint itself is not undone by an `allow`: a group's lets a member be allowed)
-        let level = match name {
-            _ if lints.is_empty() => continue,
-            "allow" | "expect" | "warn" => 0,
-            "deny" => 1,
-            "forbid" if lints.contains(&"unused_variables") => 2,
-            "forbid" => 1,
-            _ => continue,
-        };
-        out.push((at, if outer { b.len() } else { scope_end(b, from) }, level));
+        if let Some((level, names)) = lint_attr(&attr, n) {
+            out.push((at, if outer { b.len() } else { scope_end(b, i) }, level, names));
+        }
     }
     out
+}
+
+/// The `]` of the attribute whose `[` is at b[i], past the literals inside (`#[doc = "]"]`)
+fn attr_close(b: &[u8], mut i: usize) -> Option<usize> {
+    let mut d = 0i32;
+    while i < b.len() {
+        if let Some(e) = literal_or_comment_end(b, i) {
+            i = e.max(i + 1);
+            continue;
+        }
+        d += match b[i] {
+            b'[' => 1,
+            b']' => -1,
+            _ => 0,
+        };
+        if d == 0 {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+/// A lint attribute's level for the lint n of the `unused` group (its text inside `#[..]`, without spaces), when it
+/// names n, `unused` or `warnings`: 0 allow / expect / warn, 1 deny, 2 forbid (only a `forbid` of the lint itself is
+/// not undone by an `allow`: a group's lets a member be allowed); and what it names, as bits: 1 n or `unused`, 2
+/// `warnings`, 4 (a level 0 that is `warn`)
+fn lint_attr(attr: &str, n: &str) -> Option<(u8, u8)> {
+    let (name, rest) = attr.split_once('(')?;
+    let lints: Vec<&str> = rest.trim_end_matches(')').split(',').filter(|l| *l == n || matches!(*l, "unused" | "warnings")).collect();
+    let level = match name {
+        _ if lints.is_empty() => return None,
+        "allow" | "expect" | "warn" => 0,
+        "deny" => 1,
+        "forbid" if lints.contains(&n) => 2,
+        "forbid" => 1,
+        _ => return None,
+    };
+    let names = lints.iter().any(|l| *l != "warnings") as u8 | (lints.contains(&"warnings") as u8) << 1 | ((name == "warn") as u8) << 2;
+    Some((level, names))
 }
 
 /// The end of the statement, arm or field that starts at `i`: its `;` or `,`, the end of the block it ends with
