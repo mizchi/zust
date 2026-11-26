@@ -3554,7 +3554,19 @@ impl Cx<'_> {
             // (`E3::pick(x)` takes only E3's impl's method, not an inherent one of `impl dyn O3` (E3's default then))
             let of_trait = |t: &str, n: &str| t.split('<').next().unwrap_or(t).trim().rsplit("::").next() == n.rsplit("::").next();
             let mine = |id: u32| named.as_ref().is_none_or(|n| self.prog.sigs[id as usize].impl_trait.as_deref().is_some_and(|t| of_trait(t, n)));
-            if let Some(&id) = self.prog.index.get(&format!("__dyn_{base}::{name}")).filter(|&&id| mine(id)) {
+            // (of one name in `impl dyn O` and in `impl Ext for dyn O`, the others are overloads: a named trait's
+            // takes its impl's, an unnamed call the inherent one, as rustc's lookup does)
+            let key = format!("__dyn_{base}::{name}");
+            let cands: Vec<u32> = match self.prog.overloads.get(&key) {
+                Some(cs) => cs.clone(),
+                None => self.prog.index.get(&key).copied().into_iter().collect(),
+            };
+            let pick = if named.is_some() {
+                cands.iter().copied().find(|&c| mine(c))
+            } else {
+                cands.iter().copied().find(|&c| self.prog.sigs[c as usize].impl_trait.is_none()).or(cands.first().copied())
+            };
+            if let Some(id) = pick {
                 let s = &self.prog.sigs[id as usize];
                 if let (true, Some(&Ty::Ref(m, _))) = (s.has_self, s.params.first()) {
                     // (the receiver as the object it is, so the impl's parameters are solved from its arguments:

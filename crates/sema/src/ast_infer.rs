@@ -2507,6 +2507,32 @@ impl Inf<'_> {
                 if let (false, Some(&p0 @ Ty::Ref(m, _))) = (sol.is_empty(), sig.params.first()) {
                     self.prog.match_ty(p0, Ty::Ref(m, crate::types::intern(Ty::Dyn(tr))), &mut sol);
                 }
+                // (a default's trait parameters from the one impl for the object: `impl<T> Get<T> for dyn Obj<T>`
+                // through `dyn Obj<u8>`, T u8)
+                if let (Some(trn), true) = (sig.trait_of.as_deref(), sol.iter().skip(1).any(|x| x.is_none())) {
+                    let prog = self.prog;
+                    let fits: Vec<Vec<Ty>> = prog
+                        .impl_targs
+                        .get(trn)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|(ist, args, ng)| {
+                            let mut isol = vec![None; *ng];
+                            if !prog.match_ty(*ist, Ty::Dyn(tr), &mut isol) {
+                                return None;
+                            }
+                            let a: Vec<Ty> = args.iter().map(|&a| prog.partial_subst(a, &isol)).collect();
+                            a.iter().all(|&t| !prog.has_param(t)).then_some(a)
+                        })
+                        .collect();
+                    if let [a] = fits.as_slice() {
+                        for (i, &t) in a.iter().enumerate() {
+                            if let Some(x @ None) = sol.get_mut(1 + i) {
+                                *x = Some(t);
+                            }
+                        }
+                    }
+                }
                 let (ps, ret) = (sig.params[1..].to_vec(), sig.ret);
                 for (a, p) in avs.into_iter().zip(ps) {
                     let p = self.prog.partial_subst(p, &sol);

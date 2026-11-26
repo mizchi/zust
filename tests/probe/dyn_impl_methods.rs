@@ -36,8 +36,38 @@ impl<T: Default> Get<T> for dyn O<T> + '_ {
         T::default()
     }
 }
+// (an inherent `pick` and an override of Ext's in `impl Ext for dyn O5`: `Ext5::pick(v)` the override, `v.pick()` the
+// inherent one; a generic trait's default through `impl<T> Get6<T> for dyn O6<T>`, T from the object's arguments)
+trait O5 {}
+impl dyn O5 {
+    fn pick(&self) -> u8 {
+        3
+    }
+}
+trait Ext5 {
+    fn pick(&self) -> u8 {
+        2
+    }
+}
+impl Ext5 for dyn O5 {
+    fn pick(&self) -> u8 {
+        7
+    }
+}
+trait O6<T> {}
+trait Get6<T> {
+    fn value(&self) -> Option<T> {
+        None
+    }
+}
+impl<T> Get6<T> for dyn O6<T> + '_ {}
+fn shown6(x: &dyn O6<u8>) -> impl std::fmt::Debug {
+    x.value()
+}
 struct S;
 impl O3 for S {}
+impl O5 for S {}
+impl O6<u8> for S {}
 impl O4 for S {}
 impl O<u8> for S {}
 fn shown(x: &dyn O<u8>) -> impl std::fmt::Display {
@@ -54,4 +84,7 @@ fn main() {
     let z: &dyn O<u8> = &s;
     let g = z.get();
     println!("{} {}", g + 1, shown(z));
+    let v: &(dyn O5 + 'static) = &s;
+    println!("{} {}", Ext5::pick(v), v.pick());
+    println!("{:?}", shown6(&s));
 }
