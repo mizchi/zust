@@ -46,6 +46,7 @@ fn is_ident_cont(c: char) -> bool {
 pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
     let b = src.as_bytes();
     let mut out: Vec<Tok> = Vec::new();
+    let mut raws: Vec<usize> = Vec::new();
     let mut i = 0;
     let mut line: u32 = 1;
     let mut line_start = 0;
@@ -226,6 +227,7 @@ pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
             kind = TokKind::Lit;
         } else if is_ident_start(ch) {
             if c == b'r' && b.get(i + 1) == Some(&b'#') {
+                raws.push(out.len());
                 i += 2;
                 // (`r#self` / `r#_`: a name no raw identifier can be)
                 if let Some(w) = reserved_raw(src, i) {
@@ -268,7 +270,31 @@ pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
         let joint = kind == TokKind::Punct && i < b.len() && is_punct_byte(b[i]);
         out.push(Tok { kind: kind, text: src[start..i].to_string(), joint: joint, line: tline, col: col, lo: start as u32 });
     }
+    // (`r#foo` is the name `foo`: only a keyword's raw form, `r#struct`, stays marked as one. Afterwards, so that the
+    // other tokens take no test for it)
+    if !raws.is_empty() {
+        unraw(&mut out, &raws);
+    }
     Ok(out)
+}
+
+/// The raw identifiers at `raws` (token indices) without their `r#`, but a keyword's (raw_kept)
+#[cold]
+#[inline(never)]
+fn unraw(out: &mut [Tok], raws: &[usize]) {
+    for &k in raws {
+        if let Some(t) = out.get_mut(k) {
+            if let Some(n) = t.text.strip_prefix("r#").filter(|n| !raw_kept(n)) {
+                t.text = n.to_string();
+            }
+        }
+    }
+}
+
+/// A raw identifier's name that keeps its `r#`: a keyword of any edition, reserved or weak (`r#struct`, `r#async`,
+/// `r#union`), which would read as the keyword without it
+fn raw_kept(n: &str) -> bool {
+    reserved_kw(n, true) || unused_kw(n) || matches!(n, "async" | "await" | "dyn" | "try" | "gen" | "union" | "macro_rules" | "default" | "auto" | "raw" | "safe")
 }
 
 /// The name after `r#` at src[i..] when it is one no raw identifier can be, `r#self` / `r#_`

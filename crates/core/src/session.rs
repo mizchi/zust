@@ -2057,7 +2057,10 @@ impl Session {
             while let Some(d) = rest[k..].find("::") {
                 let end = k + d;
                 let start = rest[..end].rfind(|c: char| !(c.is_alphanumeric() || c == '_')).map_or(0, |i| i + 1);
-                if start < end && b[start].is_ascii_uppercase() {
+                // (a lowercase enum's too, `use color::{red, green};`: only an enum's, not a module's, which a program
+                // with many `use`s has many of)
+                let lower_enum = || prog.struct_index.get(&rest[start..end]).is_some_and(|&id| prog.structs[id as usize].is_enum);
+                if start < end && (b[start].is_ascii_uppercase() || lower_enum()) {
                     prog.use_prefixes.push(rest[start..end].to_string());
                 }
                 k = end + 2;

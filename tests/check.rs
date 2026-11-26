@@ -3670,3 +3670,19 @@ fn a_turbofish_collect_s_elements_a_ref_array_s_and_an_unimported_collection_bes
     let e = errs("use std::collections::HashMap;\nfn main() {\n    let mut m = HashMap::new();\n    m.insert(1u8, 2u8);\n    let _: () = 1;\n}\n");
     assert!(!e.iter().any(|(_, m)| m.contains("E0433")), "{e:?}");
 }
+
+#[test]
+fn a_raw_identifier_s_name_an_imported_lowercase_variant_and_self_as_a_constructor() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (`r#foo` is `foo`; `r#struct` stays a name of its own)
+    assert!(errs("fn main() {\n    let foo = 2;\n    assert_eq!(2, r#foo);\n    let r#bar = 3;\n    assert_eq!(3, bar);\n    let r#struct = 1;\n    assert_eq!(1, r#struct);\n}\n").is_empty());
+    // (a lowercase variant a `use` brings: a value, and a pattern that is no binding (no E0170))
+    let src = "#![allow(non_camel_case_types)]\nuse color::{red, green};\n#[derive(Clone, Copy, PartialEq)]\nenum color {\n    red = 1,\n    green = 2,\n}\nfn name(c: color) -> u8 {\n    match c {\n        red => 1,\n        green => 2,\n    }\n}\nfn main() {\n    assert_eq!(name(red), 1);\n    let _ = green;\n}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+    // (`Self` passed as the constructor of the impl's tuple struct, also through a type alias)
+    let src = "struct W(u8);\ntype T = W;\nimpl T {\n    fn f(o: Option<u8>) -> Option<Self> {\n        o.map(Self)\n    }\n}\nfn main() {\n    let _ = W::f(None);\n}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+}

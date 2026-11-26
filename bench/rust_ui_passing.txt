@@ -7131,6 +7131,8 @@ compile-fail	rfcs/rfc-2126-extern-absolute-paths/non-existent-1.rs
 compile-fail	rfcs/rfc-2126-extern-absolute-paths/non-existent-2.rs
 compile-fail	rfcs/rfc-2126-extern-absolute-paths/non-existent-3.rs
 compile-fail	rfcs/rfc-2126-extern-absolute-paths/not-allowed.rs
+run-pass	rfcs/rfc-2151-raw-identifiers/attr.rs
+run-pass	rfcs/rfc-2151-raw-identifiers/basic.rs
 run-pass	rfcs/rfc-2175-or-if-while-let/basic.rs
 check-pass	rfcs/rfc-2294-if-let-guard/drop-scope-let-chains.rs
 compile-fail	rfcs/rfc-2294-if-let-guard/exhaustive.rs
@@ -7145,6 +7147,7 @@ run-pass	rfcs/rfc-2294-if-let-guard/run-pass.rs
 check-pass	rfcs/rfc-2294-if-let-guard/shadowing.rs
 check-pass	rfcs/rfc-2294-if-let-guard/type-inference.rs
 compile-fail	rfcs/rfc-2294-if-let-guard/typeck.rs
+run-pass	rfcs/rfc-2302-self-struct-ctor/rfc-2302-self-struct-ctor.rs
 compile-fail	rfcs/rfc-2361-dbg-macro/dbg-macro-move-semantics.rs
 compile-fail	rfcs/rfc-2361-dbg-macro/dbg-macro-requires-debug.rs
 check-pass	rfcs/rfc-2396-target_feature-11/check-pass.rs
@@ -7555,6 +7558,7 @@ run-pass	structs-enums/tag-align-u64.rs
 run-pass	structs-enums/tag-disr-val-shape.rs
 run-pass	structs-enums/tag-exports.rs
 check-pass	structs-enums/tag-in-block.rs
+run-pass	structs-enums/tag-variant-disr-val.rs
 run-pass	structs-enums/tag.rs
 run-pass	structs-enums/tuple-struct-constructor-pointer.rs
 run-pass	structs-enums/tuple-struct-destructuring.rs

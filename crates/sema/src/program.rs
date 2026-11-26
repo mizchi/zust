@@ -7617,6 +7617,16 @@ impl Program {
                     }
                     return v;
                 }
+                // (a lowercase one too, `use color::{red, green};` of `enum color { red, green }`: a variant of an enum
+                // of the program's that a `use` goes through (the prelude's own `a` / `b` are its locals), when no fn,
+                // constant or struct has the name)
+                _ if !self.use_prefixes.is_empty() => {
+                    let v = self.variant_names.get(n).copied().flatten()?;
+                    let user = self.struct_item.get(v.0 as usize).is_some_and(|&ii| ii < self.prelude_from);
+                    let used = self.use_prefixes.iter().any(|u| *u == self.structs[v.0 as usize].name);
+                    let other = self.index.contains_key(n) || self.const_index.contains_key(n) || self.struct_index.contains_key(n);
+                    return (user && used && !other).then_some(v);
+                }
                 _ => return None,
             };
             let sid = *self.struct_index.get(en)?;
