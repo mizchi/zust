@@ -9874,6 +9874,7 @@ pub struct JoinHandle<T> {
     // (where the thread leaves its value: a block of its own, read and freed by join)
     slot: *mut Option<T>,
     id: usize,
+    __jh_th: Thread,
 }
 
 impl<T> JoinHandle<T> {
@@ -9900,6 +9901,86 @@ impl<T> JoinHandle<T> {
     pub fn is_finished(&self) -> bool {
         __exr_green_done(self.id)
     }
+    pub fn thread(&self) -> &Thread {
+        &self.__jh_th
+    }
+}
+
+/// `std::thread::Thread`: a thread's handle, its index among the green threads (0: the main thread)
+#[derive(Clone, Debug)]
+pub struct Thread {
+    __th_id: usize,
+}
+/// `std::thread::ThreadId`
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ThreadId(u64);
+
+// (each thread's park token, made only when a Thread is used)
+static mut __EXR_PARK: *mut Vec<bool> = 0usize as *mut Vec<bool>;
+fn __exr_park_tok(id: usize) -> *mut bool {
+    unsafe {
+        if __EXR_PARK.is_null() {
+            let p = __exr_green_alloc(core::mem::size_of::<Vec<bool>>()) as *mut Vec<bool>;
+            p.write(Vec::new());
+            __EXR_PARK = p;
+        }
+        while (*__EXR_PARK).len() <= id {
+            (*__EXR_PARK).push(false);
+        }
+        (*__EXR_PARK).as_mut_ptr().add(id)
+    }
+}
+
+impl Thread {
+    pub fn id(&self) -> ThreadId {
+        ThreadId(self.__th_id as u64 + 1)
+    }
+    pub fn name(&self) -> Option<&str> {
+        if self.__th_id == 0 { Some("main") } else { None }
+    }
+    pub fn unpark(&self) {
+        unsafe {
+            *__exr_park_tok(self.__th_id) = true;
+            (*__exr_green()).epoch += 1;
+        }
+    }
+}
+
+// `thread::current()` / `park()` / `park_timeout(d)`: a park waits for the thread's token (an unpark), or returns when
+// no thread can run any more (a spurious wakeup, which std allows)
+pub fn __core_current() -> Thread {
+    Thread { __th_id: unsafe { (*__exr_green()).cur } }
+}
+pub fn __core_park() {
+    let me = unsafe { (*__exr_green()).cur };
+    if !unsafe { *__exr_park_tok(me) } {
+        let _ = __exr_green_wait(|| unsafe { *__exr_park_tok(me) });
+    }
+    unsafe {
+        *__exr_park_tok(me) = false;
+    }
+}
+pub fn __core_park_timeout(_dur: Duration) {
+    __core_park()
+}
+
+/// `std::thread::Builder`: a name and a stack size are kept for nothing (a green thread's stack is of one size)
+pub struct Builder {
+    __b_name: Option<String>,
+}
+impl Builder {
+    pub fn new() -> Builder {
+        Builder { __b_name: None }
+    }
+    pub fn name(self, name: String) -> Builder {
+        Builder { __b_name: Some(name) }
+    }
+    pub fn stack_size(self, _size: usize) -> Builder {
+        self
+    }
+    pub fn spawn<F: FnOnce() -> T, T>(self, f: F) -> Result<JoinHandle<T>, IoError> {
+        Ok(__core_spawn(f))
+    }
 }
 
 pub fn __core_spawn<T, F: FnOnce() -> T>(f: F) -> JoinHandle<T> {
@@ -9917,7 +9998,7 @@ pub fn __core_spawn<T, F: FnOnce() -> T>(f: F) -> JoinHandle<T> {
         }
     });
     let id = __exr_green_start(run);
-    JoinHandle { slot: slot, id: id }
+    JoinHandle { slot: slot, id: id, __jh_th: Thread { __th_id: id } }
 }
 
 pub fn __core_yield_now() {
