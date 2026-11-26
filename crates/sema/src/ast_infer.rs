@@ -2501,13 +2501,21 @@ impl Inf<'_> {
                 });
             if let Some(d) = decl {
                 let sig = &self.prog.sigs[d as usize];
+                // (an impl's parameters solved from the receiver's object: `impl<T> Get<T> for dyn O<T>` through `dyn
+                // O<u8>`, T u8)
+                let mut sol = vec![None; sig.generics.len()];
+                if let (false, Some(&p0 @ Ty::Ref(m, _))) = (sol.is_empty(), sig.params.first()) {
+                    self.prog.match_ty(p0, Ty::Ref(m, crate::types::intern(Ty::Dyn(tr))), &mut sol);
+                }
                 let (ps, ret) = (sig.params[1..].to_vec(), sig.ret);
                 for (a, p) in avs.into_iter().zip(ps) {
+                    let p = self.prog.partial_subst(p, &sol);
                     if !self.prog.has_param(p) {
                         let k = self.known(p);
                         self.unify(a, k);
                     }
                 }
+                let ret = self.prog.partial_subst(ret, &sol);
                 if !self.prog.has_param(ret) {
                     return self.known(ret);
                 }

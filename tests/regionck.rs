@@ -5827,4 +5827,20 @@ fn g(b: &Box<dyn Tr>) -> &u8 { (*b).get() }
 fn h(b: &Box<dyn Tr>) -> &u8 { (**b).get() }
 fn main() {}
 "#, &[(2, "E0515")], "rv7");
+    // (#237's second review, accepted by rustc 1.97: an object among a user type's arguments takes that type's bound
+    // (`impl<'a> W<'a, dyn Obj>` with `T: ?Sized + 'a`), not `'static`; a result type solved from the type expected
+    // and, in an `impl Trait` body's inference, from the object's arguments)
+    errors_at(r#"struct W<'a, T: ?Sized + 'a>(&'a T);
+trait Obj {}
+impl<'a> W<'a, dyn Obj> { fn get(&self) -> u8 { 1 } }
+fn f<'a>(w: W<'a, dyn Obj + 'a>) -> u8 { w.get() }
+trait Tr {}
+impl dyn Tr { fn make<T: Default>(&self) -> T { T::default() } }
+fn g(x: &(dyn Tr + 'static)) -> u8 { x.make() }
+trait O<T> {}
+trait Get<T> { fn get(&self) -> T; }
+impl<T: Default> Get<T> for dyn O<T> + '_ { fn get(&self) -> T { T::default() } }
+fn h(x: &dyn O<u8>) -> impl std::fmt::Display { x.get() }
+fn main() {}
+"#, &[], "rv8");
 }

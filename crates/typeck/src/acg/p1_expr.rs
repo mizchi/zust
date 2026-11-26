@@ -3501,7 +3501,7 @@ impl Cx<'_> {
     /// the region check. late: the callee requires 'static, so the region check starts here; need_static: the impl
     /// is for `dyn Tr + 'static`, which the receiver's object must outlive
     #[allow(clippy::too_many_arguments)]
-    fn dyn_impl_call(&mut self, id: u32, m: bool, st: Ty, mc: &Expr, recv_ty: Option<Ty>, fat: Value, late: bool, need_static: bool) -> R<V> {
+    fn dyn_impl_call(&mut self, id: u32, m: bool, st: Ty, mc: &Expr, recv_ty: Option<Ty>, fat: Value, late: bool, need_static: bool, expected: Option<Ty>) -> R<V> {
         let Expr::MethodCall(recv, _, tf, margs, _) = mc else { return err(SP, "internal: expected a method call") };
         self.check_unsafe_call(id, super::borrowck::pos(mc))?;
         if let (Some(rt), true, true) = (recv_ty, self.user_code, m) {
@@ -3522,7 +3522,8 @@ impl Cx<'_> {
         }
         let args: Vec<&Expr> = margs.iter().collect();
         let tf = (!tf.is_empty()).then_some(tf.as_slice());
-        let r = self.call_fn(id, Some((fat, st)), &args, tf, None, SP);
+        // (the type expected of the result: a parameter only it names is solved from it (`let v: u8 = x.make()`))
+        let r = self.call_fn(id, Some((fat, st)), &args, tf, expected, SP);
         // (the result's tree, for the expression: `b.get()` returned)
         self.rg_took_call(mc);
         r
@@ -3532,10 +3533,10 @@ impl Cx<'_> {
     /// `recv.m(..)` through the vtable of `dyn tr`. `recv_ty` is the receiver's type as evaluated, when the caller has
     /// it: a `&mut self` method through a shared `&dyn` / `*const dyn` is E0596
     pub(crate) fn dyn_method_call(&mut self, fat: Value, tr: &str, mc: &Expr) -> R<V> {
-        self.dyn_method_call_on(fat, tr, mc, None)
+        self.dyn_method_call_on(fat, tr, mc, None, None)
     }
 
-    pub(crate) fn dyn_method_call_on(&mut self, fat: Value, tr: &str, mc: &Expr, recv_ty: Option<Ty>) -> R<V> {
+    pub(crate) fn dyn_method_call_on(&mut self, fat: Value, tr: &str, mc: &Expr, recv_ty: Option<Ty>, expected: Option<Ty>) -> R<V> {
         let Expr::MethodCall(_, name, _, margs, _) = mc else { return err(SP, "internal: expected a method call") };
         let tr_full = tr;
         let (trn, targs) = self.dyn_trait_args(tr);
@@ -3549,14 +3550,17 @@ impl Cx<'_> {
             // (not in the vtable: an inherent method of `impl dyn Tr { .. }`, or one of another trait's impl for the
             // object, `impl X for dyn Tr`: `__dyn_Tr::m`, called with the pair as its `&self`)
             let base = tr.rsplit("::").next().unwrap_or(tr);
-            if let Some(&id) = self.prog.index.get(&format!("__dyn_{base}::{name}")) {
+            // (`E3::pick(x)` takes only E3's impl's method, not an inherent one of `impl dyn O3` (E3's default then))
+            let of_trait = |t: &str, n: &str| t.split('<').next().unwrap_or(t).trim().rsplit("::").next() == n.rsplit("::").next();
+            let mine = |id: u32| named.as_ref().is_none_or(|n| self.prog.sigs[id as usize].impl_trait.as_deref().is_some_and(|t| of_trait(t, n)));
+            if let Some(&id) = self.prog.index.get(&format!("__dyn_{base}::{name}")).filter(|&&id| mine(id)) {
                 let s = &self.prog.sigs[id as usize];
                 if let (true, Some(&Ty::Ref(m, _))) = (s.has_self, s.params.first()) {
                     // (the receiver as the object it is, so the impl's parameters are solved from its arguments:
                     // `dyn ObjectTrait<u8>` for `impl<T> MyTrait<T> for dyn ObjectTrait<T>`)
                     let st = Ty::Ref(m, intern(Ty::Dyn(crate::types::intern_str(tr_full))));
                     let late = s.regions.as_deref().is_some_and(Self::callee_needs_static);
-                    return self.dyn_impl_call(id, m, st, mc, recv_ty, fat, late, false);
+                    return self.dyn_impl_call(id, m, st, mc, recv_ty, fat, late, false, expected);
                 }
             }
             // (a default method of a trait the object implements, `impl MyTrait for dyn Tr {}`: with Self the object.
@@ -3585,7 +3589,7 @@ impl Cx<'_> {
             if let Some((t2, d)) = dflts.pop() {
                 let Some(&Ty::Ref(m, _)) = self.prog.sigs[d as usize].params.first() else { return err(SP, "internal: a default method's receiver") };
                 let need_static = !self.prog.dyn_impl_writes_lt(&t2, tr_full);
-                return self.dyn_impl_call(d, m, Ty::Ref(m, intern(obj)), mc, recv_ty, fat, need_static, need_static);
+                return self.dyn_impl_call(d, m, Ty::Ref(m, intern(obj)), mc, recv_ty, fat, need_static, need_static, expected);
             }
             return err(SP, format!("no method named `{name}` found for `dyn {tr}`"));
         };

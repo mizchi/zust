@@ -923,9 +923,19 @@ fn bare_dyn(t: &PTy, behind: bool) -> bool {
                 && !bs.iter().any(|b| matches!(b, Bound::Trait(_, p) if p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Lifetime(_))))))
         }
         PTy::Ref(_, _, i) => bare_dyn(i, true),
-        PTy::Path(None, p) => p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Ty(t) if bare_dyn(t, false)))),
+        PTy::Path(None, p) if unbounded_params(p) => p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Ty(t) if bare_dyn(t, false)))),
         _ => false,
     }
+}
+
+/// p is a std type whose type parameters take no lifetime bound (`Box<dyn Tr>`), so a trait object among its
+/// arguments defaults to `'static`. Another type's (`struct W<'a, T: ?Sized + 'a>`, `impl<'a> W<'a, dyn Obj>`) may
+/// take its bound, which the header does not see
+fn unbounded_params(p: &crate::parse::Path) -> bool {
+    matches!(
+        p.segs.last().map(|s| s.name.as_str()),
+        Some("Box" | "Vec" | "Rc" | "Arc" | "Option" | "Result" | "Cell" | "RefCell" | "Mutex" | "RwLock" | "VecDeque" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet")
+    )
 }
 
 /// t with `+ 'static` on each trait object bare_dyn finds
@@ -939,7 +949,7 @@ fn static_dyn(t: &mut PTy, behind: bool) {
             }
         }
         PTy::Ref(_, _, i) => static_dyn(i, true),
-        PTy::Path(None, p) => {
+        PTy::Path(None, p) if unbounded_params(p) => {
             for s in &mut p.segs {
                 for a in &mut s.args {
                     if let GArg::Ty(t) = a {
