@@ -1655,6 +1655,36 @@ fn brace_close(s: &[u8], toks: &[(u8, usize, usize)], k: usize) -> usize {
     toks.len().saturating_sub(1)
 }
 
+/// Whether the delimiters of src (`(` / `[` / `{`, by tokens: not those in strings, chars or comments) match:
+/// hoist_parts_at moves nothing out of a source whose do not
+pub fn delims_match(src: &str) -> bool {
+    delims_match_toks(src.as_bytes(), &tokenize(src.as_bytes()))
+}
+
+fn delims_match_toks(s: &[u8], toks: &[(u8, usize, usize)]) -> bool {
+    let mut open: Vec<u8> = vec![];
+    for t in toks {
+        if t.0 != 1 {
+            continue;
+        }
+        match s[t.1] {
+            c @ (b'(' | b'[' | b'{') => open.push(c),
+            c @ (b')' | b']' | b'}') => {
+                let want = match c {
+                    b')' => b'(',
+                    b']' => b'[',
+                    _ => b'{',
+                };
+                if open.pop() != Some(want) {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    open.is_empty()
+}
+
 /// depth: 名前を変えてやり直した回数 (壊れたソースで名前の変更が止まらないときは 8 回で止める)
 fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)> {
     // (速く飛ばす: 字下げした行頭の `fn ` などがなければ入れ子のアイテムはない)
@@ -1679,6 +1709,12 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     }
     let s = src.as_bytes();
     let toks = tokenize(s);
+    // (nor a source whose delimiters do not match, `fn f() { fn g() {} pub f<`: the lexer reports where, at a line of
+    // the source's own, which an item moved past its last line would move the error away from (#188); and the
+    // renames of such a source's items, thousands of `fn`s in one unclosed body, could take seconds)
+    if !delims_match_toks(s, &toks) {
+        return None;
+    }
     let tok = |k: usize| -> &[u8] { &s[toks[k].1..toks[k].2] };
     // (記号のトークンは 1 byte)
     let is_sym = |k: usize, c: &[u8]| toks[k].0 == 1 && s[toks[k].1] == c[0];

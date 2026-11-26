@@ -216,3 +216,17 @@ fn prep_inc_keeps_from_the_first_call() {
     // (without it, as a build: the first call keeps nothing)
     assert_eq!(through_memo(&srcs), vec![false]);
 }
+
+/// An item in a const's initializer (`const F: fn() -> u8 = { fn inner() .. inner };`) is moved out as a fn body's,
+/// and its name counts with the other moved items' (`inner__h0`, `inner__h1`): the skeleton keeps such an
+/// initializer, so an edit in another body (`other`) leaves the names as the full preparation gives them (once two
+/// `fn inner__h0`)
+#[test]
+fn prep_inc_item_in_a_const_initializer() {
+    let base = "fn inner() -> u8 { 0 }\nconst F: fn() -> u8 = { fn inner() -> u8 { 1 } inner };\nfn other() -> u8 { fn inner() -> u8 { 2 } inner() }\nfn main() { let _ = (F(), other()); }\n";
+    let edited = base.replace("inner() }\nfn main", "inner() + 1 }\nfn main");
+    let again = edited.replace("inner() + 1", "inner() + 2");
+    assert!(base != edited && edited != again);
+    let srcs = vec![base.to_string(), edited, again];
+    assert_eq!(through_memo(&srcs), vec![false, true]);
+}

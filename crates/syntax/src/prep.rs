@@ -262,6 +262,8 @@ pub struct PrepMemo {
     fp: u64,
     /// Chunk hash → names of the macros defined in it
     names: FxMap<u64, Vec<String>>,
+    /// Chunk hash → whether its delimiters match (lexer::delims_match)
+    delims: FxMap<u64, bool>,
     /// (chunk hash, hash of the set of macro names) → (skeleton, its hash)
     skel: FxMap<(u64, u64), (String, u64)>,
     /// The previous input and the chunk start positions (position, hash of what encloses it, levels)
@@ -733,8 +735,21 @@ fn skeleton(t: &str, names: &[String]) -> (String, u64) {
                         }
                         e += 1;
                     }
-                    init_start = eq + 1;
-                    init_end = e;
+                    // (an initializer that holds an item, `const F: fn() = { fn inner() {..} inner };`, is kept as written:
+                    // hoist_parts_at moves its items as a fn body's, and their names count with the others')
+                    let holds_item = (eq + 1..e).any(|m| {
+                        toks[m].0 == 0
+                            && m > 0
+                            && (is_sym(m - 1, b'{') || is_sym(m - 1, b'}') || is_sym(m - 1, b';'))
+                            && matches!(
+                                &s[toks[m].1..toks[m].2],
+                                b"fn" | b"struct" | b"enum" | b"const" | b"use" | b"static" | b"impl" | b"trait" | b"type" | b"mod" | b"union" | b"macro_rules" | b"pub" | b"unsafe" | b"async" | b"extern"
+                            )
+                    });
+                    if !holds_item {
+                        init_start = eq + 1;
+                        init_end = e;
+                    }
                 }
             }
         }
@@ -1332,6 +1347,21 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
     for j in 0..nchunk {
         hs.push(fnv(FNV0, text_of(j).as_bytes()));
     }
+    // (a source whose delimiters do not match is preprocessed whole, which moves no item out of a body
+    // (hoist_parts_at): a source of the changed chunks and the others' skeletons might match where it does not.
+    // They match when each chunk's do, which is looked at once per chunk)
+    let mut new_delims: FxMap<u64, bool> = FxMap::default();
+    for j in 0..nchunk {
+        let ok = match memo.delims.get(&hs[j]) {
+            Some(&ok) => ok,
+            None => lexer::delims_match(text_of(j)),
+        };
+        new_delims.insert(hs[j], ok);
+        if !ok {
+            return Ok(None);
+        }
+    }
+    memo.delims = new_delims;
     // Macro names
     let mut names: Vec<String> = vec![];
     let mut new_names: FxMap<u64, Vec<String>> = FxMap::default();
