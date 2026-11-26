@@ -62,7 +62,12 @@ pub struct Analysis {
     pub src: String,
     pub items: Vec<SrcItem>,
     pub prog: Program,
+    /// Each fn's references to fns: the groups of the names it refers to (Program::ref_groups), sorted
     pub refs: Vec<Vec<u32>>,
+    /// Each group's fns (ascending)
+    pub ref_groups: Vec<Vec<u32>>,
+    /// Each group's part of a cache key, per kind of key (fn_key_r's GroupKeyOf): computed once per analysis
+    pub group_keys: Mutex<FxMap<(u32, u64), Key>>,
     /// 関数ごとの、名前で現れる struct と const / static (キャッシュのキー用)
     pub srefs: Vec<Vec<u32>>,
     pub crefs: Vec<Vec<u32>>,
@@ -439,6 +444,14 @@ fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>,
 const CHECK_SALT: Key = 0x5eed_c4ec_0000_0000_0000_0000_0000_0001;
 
 impl Analysis {
+    /// The fns fn id refers to (the fns of the names it refers to), ascending and once each
+    pub fn ref_fns(&self, id: usize) -> Vec<u32> {
+        let mut v: Vec<u32> = self.refs[id].iter().flat_map(|&g| self.ref_groups[g as usize].iter().copied()).collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
+
     /// アイテム ii が依存するクレートのものなら、その dep_ranges の番号
     /// シグネチャのハッシュ (覚えておく)
     pub fn sig_key(&self, id: u32) -> Key {
@@ -2454,14 +2467,16 @@ impl Session {
         let mut srefs = Vec::with_capacity(prog.item_of.len());
         let mut crefs = Vec::with_capacity(prog.item_of.len());
         let names = prog.ref_names();
+        let (group_of, ref_groups) = prog.ref_groups();
         for ii in &prog.item_of {
-            let (f, st, c) = ii.map(|ii| prog.refs_in(&src, &items[ii as usize], Some(&names))).unwrap_or_default();
+            let (f, st, c) = ii.map(|ii| prog.refs_in(&src, &items[ii as usize], Some(&names), &group_of)).unwrap_or_default();
             refs.push(f);
             srefs.push(st);
             crefs.push(c);
         }
+        drop(group_of);
         tm.lap("refs", String::new());
-        let mut a = Analysis { late_err, iface_fp, src, items, prog, refs, srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()), assoc_keys: (0, vec![]) };
+        let mut a = Analysis { late_err, iface_fp, src, items, prog, refs, ref_groups, group_keys: Mutex::new(FxMap::default()), srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()), assoc_keys: (0, vec![]) };
         a.assoc_keys = a.assoc_keys();
         if self.opts.opt && std::env::var_os("ZUSTC_NO_INLINE").is_none() {
             a.inl = inline_bodies(&a);
@@ -9596,10 +9611,17 @@ impl Session {
             h.add(&(self.opts.backend_id()));
             h.add(&a.items[ii].hash);
             h.add(&a.sig_key(id as u32));
-            for &r in &a.refs[id] {
-                if in_u(a.prog.item_of[r as usize]) {
-                    h.add(&a.sig_key(r));
-                }
+            let uk = {
+                let mut uh = KeyHasher::new();
+                uh.add(u);
+                uh.finish() as u64 | 1 << 63
+            };
+            for &g in &a.refs[id] {
+                h.add(&self.group_key(a, g, uk, &|r, h| {
+                    if in_u(a.prog.item_of[r as usize]) {
+                        h.add(&a.sig_key(r));
+                    }
+                }));
             }
             for &st in &a.srefs[id] {
                 let b = a.prog.base_of(st);
@@ -9667,9 +9689,9 @@ impl Session {
             h.add(&a.prog.names[id]);
         }
         h.add(&a.sig_key(id as u32));
-        for &r in &a.refs[id] {
+        let each = |r: u32, h: &mut KeyHasher| {
             if closed && a.prog.item_of[r as usize].is_some_and(|ri| (ri as usize) < pf) {
-                continue;
+                return;
             }
             h.add(&a.sig_key(r));
             // (展開しうるユーザの関数は、本体と行も効く)
@@ -9683,7 +9705,7 @@ impl Session {
                         if let Some(vis) = a.prog.traits_at_item(ri) {
                             h.add(&vis.join(","));
                         }
-                        for &r2 in &a.refs[r as usize] {
+                        for r2 in a.ref_fns(r as usize) {
                             if a.inl.user_lines.contains_key(&r2) {
                                 if let Some(vis) = a.prog.item_of[r2 as usize].and_then(|ri2| a.prog.traits_at_item(ri2)) {
                                     h.add(&vis.join(","));
@@ -9693,6 +9715,9 @@ impl Session {
                     }
                 }
             }
+        };
+        for &g in &a.refs[id] {
+            h.add(&self.group_key(a, g, closed as u64, &each));
         }
         for &st in &a.srefs[id] {
             if closed && !a.prog.is_prelude_ty(Ty::Struct(st)) {
@@ -9712,6 +9737,23 @@ impl Session {
         // changes what `<() as Foo>::Out` is with the body the same)
         h.add(&a.assoc_keys.0);
         h.finish()
+    }
+
+    /// A group's part of a fn's cache key (fn_key_r): what `each` adds of each of its fns, in their order. The same for
+    /// every fn that refers to the group, so it is made once per analysis and `kind` (which fns `each` keeps: 0 or 1 for
+    /// a key that keeps the prelude's or not, a universe's hash with the top bit for a closed crate's)
+    fn group_key(&self, a: &Analysis, g: u32, kind: u64, each: &dyn Fn(u32, &mut KeyHasher)) -> Key {
+        if let Some(&k) = a.group_keys.lock().unwrap().get(&(g, kind)) {
+            return k;
+        }
+        // (made outside the lock: each takes the sig keys' own)
+        let mut h = KeyHasher::new();
+        for &r in &a.ref_groups[g as usize] {
+            each(r, &mut h);
+        }
+        let k = h.finish();
+        a.group_keys.lock().unwrap().insert((g, kind), k);
+        k
     }
 
     /// 関数かインスタンスのキー (インスタンスは元の関数のキー + 型引数)

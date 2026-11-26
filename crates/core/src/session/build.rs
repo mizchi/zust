@@ -135,7 +135,7 @@ impl Session {
 
     /// Makes the .o of an analyzed program (looks up the cache; if missing, compiles and puts it in the cache)
     fn compile_object(&mut self, a: &Analysis, rep: &mut BuildReport, tm: Option<&mut Timer>) -> R<Vec<u8>> {
-        let mut live = a.prog.reachable(&a.refs);
+        let mut live = a.prog.reachable(&a.refs, &a.ref_groups);
         // (a function only a static points to (`static F: fn() = f;`) is compiled too)
         for c in &a.prog.consts {
             if c.stat.is_some() && c.ty_has_fn() {
@@ -231,7 +231,9 @@ impl Session {
                 let g = insts.lock().unwrap();
                 wave.iter().map(|&id| g.body_of(id)).collect()
             };
-            let mut stack: Vec<u32> = starts.iter().flat_map(|&b| a.refs[b as usize].iter().copied()).collect();
+            // (the fns referred to, in the order of their ids, as before the groups (#188): the order they are pushed in is
+            // the order of the functions in the object)
+            let mut stack: Vec<u32> = starts.iter().flat_map(|&b| a.ref_fns(b as usize)).collect();
             if starts.iter().any(|&b| matches!(a.prog.names[b as usize].as_str(), "__exr_display" | "__exr_debug")) {
                 stack.extend((0..a.prog.names.len() as u32).filter(|&i| matches!(a.prog.sigs[i as usize].impl_trait.as_deref(), Some("Display" | "Debug"))));
             }
@@ -242,7 +244,7 @@ impl Session {
                 if a.is_ext(i) {
                     continue;
                 }
-                stack.extend(a.refs[i as usize].iter().copied());
+                stack.extend(a.ref_fns(i as usize));
                 if concrete(&a.prog, i as usize) && !blobs.contains_key(&i) {
                     user_live.push(i);
                     wave.push(i);
