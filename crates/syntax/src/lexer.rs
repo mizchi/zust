@@ -309,7 +309,8 @@ fn split_items(src: &str) -> Result<Vec<SrcItem>, String> {
         }
         let start = i;
         // 文字列系リテラル (接頭辞 b / r / br / c / cr を含む)
-        if let Some(end) = string_lit(s, i) {
+        // (looked for only where one can start: most tokens start with another byte)
+        if let Some(end) = string_lit_at(s, i) {
             i = end;
             tok!(start, i, 1u8);
             continue;
@@ -733,6 +734,13 @@ pub fn unterminated_literal(s: &[u8]) -> Option<String> {
         }
     }
     None
+}
+
+/// string_lit, looked for only at the bytes a string, byte or C string literal starts with (`"`, `b`, `r`, `c`): the
+/// others are most tokens, and string_lit is not inlined
+#[inline(always)]
+fn string_lit_at(s: &[u8], i: usize) -> Option<usize> {
+    if matches!(s.get(i), Some(b'"' | b'b' | b'r' | b'c')) { string_lit(s, i) } else { None }
 }
 
 /// 位置 i から文字列リテラルが始まっていればその終端を返す。
@@ -1377,7 +1385,7 @@ pub fn tokenize(s: &[u8]) -> Vec<(u8, usize, usize)> {
             }
             continue;
         }
-        if let Some(end) = string_lit(s, i) {
+        if let Some(end) = string_lit_at(s, i) {
             toks.push((2, i, end));
             i = end;
             continue;
