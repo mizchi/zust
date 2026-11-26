@@ -3543,3 +3543,13 @@ fn associated_type_bounds_in_generics_and_trait_arguments_they_do_not_give() {
     assert_eq!(errs("trait Tr<A> {}\nfn f<T: Tr<u8, u16>>() {}\nfn main() {}\n").first().map(|e| e.0), Some(2));
     assert!(errs("trait Tr<A, B = u8> { type O; type G<'a>; }\nfn f<T: Tr<u8>>() {}\nfn g<T: Tr<u8, u16, O = u8>>() {}\nfn h<'r, T>() where T: Tr<i32, O: Copy, G<'r> = ()> {}\nfn main() {}\n").is_empty());
 }
+
+#[test]
+fn a_raw_pointer_s_drop_in_place() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (`p.drop_in_place()`, also of a temporary pointer `(&raw mut s)`)
+    assert!(errs("struct S;\nfn main() {\n    unsafe {\n        let mut s = std::mem::ManuallyDrop::new(S);\n        let p: *mut S = &mut *s;\n        p.drop_in_place();\n        let mut t = S;\n        (&raw mut t).drop_in_place();\n        std::mem::forget(t);\n    }\n}\n").is_empty());
+}

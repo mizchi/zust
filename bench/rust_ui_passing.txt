@@ -4280,6 +4280,8 @@ compile-fail	lint/dead-code/unused-variant.rs
 compile-fail	lint/dead-code/with-core-crate.rs
 run-pass	lint/dead-code/with-impl.rs
 compile-fail	lint/deny-overflowing-literals.rs
+check-pass	lint/dropping_copy_types.rs
+check-pass	lint/dropping_references.rs
 check-pass	lint/empty-lint-attributes.rs
 check-pass	lint/expect-future_breakage-crash-issue-126521.rs
 check-pass	lint/expect-unused-imports.rs

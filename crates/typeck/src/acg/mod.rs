@@ -3090,6 +3090,8 @@ impl Cx<'_> {
 
     pub fn peek_syn(&self, e: &Expr) -> Option<Ty> {
         match e {
+            // (`(&raw mut s).drop_in_place()`: a raw pointer to what the place is)
+            Expr::RawRef(m, x) => Some(Ty::Ptr(*m, intern(self.peek(x)?))),
             // `f64::NAN` / `std::f64::consts::PI`
             Expr::Path(None, p)
                 if p.segs.len() >= 2
