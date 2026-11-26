@@ -64,8 +64,9 @@ pub struct Analysis {
     pub prog: Program,
     /// Each fn's references to fns: the groups of the names it refers to (Program::ref_groups), sorted
     pub refs: Vec<Vec<u32>>,
-    /// Each group's part of a cache key (Session::group_key), once per analysis: of the keys that keep the prelude's
-    /// fns and of those that do not, by group (0: not yet), and of a closed crate's (by group and universe)
+    /// Each group's part of a cache key (Session::group_key), once per analysis: of the keys that keep every fn and of
+    /// those that leave out the fns before the prelude's (the program's own), by group (0: not yet), and of a closed
+    /// crate's (by group and universe)
     pub group_keys: Mutex<(Vec<[Key; 2]>, FxMap<(u32, u64), Key>)>,
     /// 関数ごとの、名前で現れる struct と const / static (キャッシュのキー用)
     pub srefs: Vec<Vec<u32>>,
@@ -9754,8 +9755,8 @@ impl Session {
 
     /// A group's part of a fn's cache key (fn_key_r): what `each` adds of each of its fns, in their order, or None when
     /// it adds nothing of any (each says whether it added). The same for every fn that refers to the group, so it is
-    /// made once per analysis and `kind` (which fns `each` keeps: 0 or 1 for a key that keeps the prelude's or not, a
-    /// universe's hash with the top bit for a closed crate's)
+    /// made once per analysis and `kind` (which fns `each` keeps: 0 for a key that keeps every fn, 1 for one that leaves
+    /// out the fns before the prelude's (the program's own), a universe's hash with the top bit for a closed crate's)
     fn group_key(&self, a: &Analysis, g: u32, kind: u64, each: &dyn Fn(u32, &mut KeyHasher) -> bool) -> Option<Key> {
         // (0: not made yet; a made key is never 0, see below)
         let got = {
