@@ -1189,6 +1189,46 @@ mod tests {
         assert!(out.contains("unsafe impl Send for a__DIR") && out.contains("unsafe impl Send for b__DIR"), "{out}");
     }
 
+    /// An attribute's names and a macro's are no items (#251): typenum's `#[derive(Eq, ..)]` beside the `pub type Eq<A,
+    /// B>` of `pub use crate::operator_aliases::*;` became `typenum__operator_aliases__Eq`. Nor do `#[repr(C)]` beside a
+    /// `struct C`, `#[default]` beside a `fn default` and `write!` beside a `fn write` change; a macro's arguments and the
+    /// alias in a type's place are still renamed
+    #[test]
+    fn attributes_and_macro_names_are_not_items() {
+        let src = "mod typenum {\n    pub mod operator_aliases {\n        pub type Eq<A, B> = (A, B);\n        pub struct C;\n        pub fn write() {}\n        pub fn default() {}\n    }\n    pub use crate::operator_aliases::*;\n    #[derive(Eq, PartialEq, Clone, core::cmp::Ord, Debug, Default)]\n    #[repr(C)]\n    pub struct Greater;\n    #[derive(Default)]\n    pub enum E { #[default] A }\n    pub fn f(out: &mut String, e: Eq<u8, u16>) {\n        write!(out, \"{}\", default()).unwrap();\n        write![out, \"{:?}\", e].unwrap();\n    }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["typenum".to_string()]).unwrap();
+        assert!(out.contains("#[derive(Eq, PartialEq, Clone, core::cmp::Ord, Debug, Default)]\n    #[repr(C)]\n    pub struct typenum__Greater;"), "{out}");
+        assert!(out.contains("pub enum typenum__E { #[default] A }"), "{out}");
+        assert!(out.contains("e: typenum__operator_aliases__Eq<u8, u16>)"), "{out}");
+        assert!(out.contains("{\n        write!(out, \"{}\", typenum__operator_aliases__default()).unwrap();\n        write![out, \"{:?}\", e].unwrap();"), "{out}");
+    }
+
+    /// Review of #272: only a macro's name is in the macro namespace; the modules of its path are a path's. Two fn
+    /// bodies' `mod m`, renamed for hoisting, take the `m` of their `m::say!(..)` with them
+    #[test]
+    fn a_macro_path_keeps_its_hoisted_module() {
+        let src = "fn a() {\n    mod m {\n        pub use std::println as say;\n    }\n    m::say!(\"hello a\");\n}\nfn b() {\n    mod m {\n        pub use std::println as say;\n    }\n    m::say!(\"hello b\");\n}\nfn main() {}\n";
+        let out = hoist_nested_items(src).unwrap();
+        for (call, name) in [("hello a", "m__h0"), ("hello b", "m__h1")] {
+            assert!(out.contains(&format!("    {name}::say!(\"{call}\");")), "{out}");
+            assert!(out.contains(&format!("mod {name} {{")), "{out}");
+        }
+    }
+
+    /// Review of #272: a macro's path names its module as any path does, and the macro's name is what the module
+    /// imports as a macro: std's `println` that m brings as `say`, not m's `fn say` beside it (a value, renamed for
+    /// n's `fn say`)
+    #[test]
+    fn a_macro_path_names_the_module_s_macro() {
+        let src = "mod m {\n    pub use std::println as say;\n    pub fn say() -> u8 { 1 }\n}\nmod n {\n    pub fn say() -> u8 { 2 }\n}\nfn main() {\n    m::say!(\"{} {}\", m::say(), n::say());\n    crate::m::say![\"x\"];\n}\n";
+        let out = rename_module_collisions_in(src, &[]).unwrap();
+        assert!(out.contains("    std::println!(\"{} {}\", m__say(), n__say());\n    std::println![\"x\"];"), "{out}");
+        // (in a crate module, through `crate::` and `self::` too)
+        let src = "mod d {\n    pub mod m {\n        pub use std::println as say;\n        pub fn say() {}\n    }\n    pub fn f() {\n        m::say!(\"x\");\n        crate::m::say!(\"y\");\n        self::m::say! { \"z\" }\n    }\n}\nfn main() {}\n";
+        let out = ren(src);
+        assert!(out.contains("        std::println!(\"x\");\n        std::println!(\"y\");\n        std::println! { \"z\" }"), "{out}");
+    }
+
     #[test]
     fn formatting_and_comments_do_not_change_hash() {
         let a = hashes("fn f(x: u32) -> u32 { x + 1 }\nfn g() {}");
@@ -2312,10 +2352,13 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
             }
         }
         let mut at: Vec<(usize, usize)> = vec![]; // (トークン, renames の番号)
+        // (not an attribute's tokens or a macro's name: `#[derive(Debug)]` / `write!(..)` beside a nested `struct Debug` /
+        // `fn write`)
+        let no_item = macro_ns_toks(&toks, s);
         for (ri, r) in renames.iter().enumerate() {
             let mut k = r.0 + 1;
             while k < r.1 {
-                if toks[k].0 == 0 && &s[toks[k].1..toks[k].2] == r.2.as_slice() && !number_suffix(s, toks[k].1) {
+                if toks[k].0 == 0 && !no_item[k] && &s[toks[k].1..toks[k].2] == r.2.as_slice() && !number_suffix(s, toks[k].1) {
                     at.push((k, ri));
                 }
                 k += 1;
@@ -3581,8 +3624,11 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 continue;
             }
             let (mpath, name) = path.split_at(path.len() - 1);
-            // (an item of std under another name, `use std::cell::LazyCell as Lazy;`: the name is its path)
-            if matches!(mpath[0].as_slice(), b"std" | b"core" | b"alloc") && local != name[0] && local.as_slice() != b"_" && !def_set.contains(&(sc, local.clone())) {
+            // (an item of std under another name, `use std::cell::LazyCell as Lazy;`: the name is its path. A macro
+            // too, `pub use std::println as say;`: what `m::say!(..)` names, a macro only beside the module's own
+            // `fn say`. Not in a block that way: there its bare `say()` would take the import)
+            let own = def_set.contains(&(sc, local.clone()));
+            if matches!(mpath[0].as_slice(), b"std" | b"core" | b"alloc") && local != name[0] && local.as_slice() != b"_" && !(own && in_block.is_some()) {
                 let mut full = vec![];
                 for (i, seg) in path.iter().enumerate() {
                     if i > 0 {
@@ -3590,7 +3636,12 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                     }
                     full.extend_from_slice(seg);
                 }
-                add(local, full, want);
+                // (a `self` entry, `use std::io::{self as sio};`, the module only: no macro)
+                let ns = if own { NS_MACRO } else { NS_ANY | NS_MACRO };
+                let ns = if want == NS_TYPE { ns & NS_TYPE } else { ns };
+                if ns != 0 {
+                    add(local, full, ns);
+                }
                 continue;
             }
             // (none when the name is only a value, beside the module a `self` entry names)
@@ -3696,6 +3747,12 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     }
     for &v in &variant_toks {
         skip[v] = true;
+    }
+    // (nor an attribute's tokens or a macro's name: `#[derive(Eq)]` / `write!(..)` beside a module's `type Eq` /
+    // `fn write`. The modules of a macro's path are a path's, `m::say!(..)`'s m)
+    let macro_ns = macro_ns_toks(&toks, s);
+    for (sk, &m) in skip.iter_mut().zip(&macro_ns) {
+        *sk |= m;
     }
     let mut def_tok: Vec<bool> = vec![false; toks.len()];
     for d in &defs {
@@ -4054,7 +4111,15 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                     // (its item, what it imports, or what its globs pass on, globs of globs too: libc's root
                     //  `pub use unix::*;` then unix's `pub use self::linux::*;` give `crate::gid_t` / `libc::passwd`)
                     // (a segment a path goes on after names a type or module: `m::E::V(..)`'s E is no call)
-                    let w = if cut + 1 < segs.len() { NS_TYPE } else { want };
+                    // (and a macro's name, the last of `m::say!(..)`, a macro: std's that m imports, never m's
+                    // `fn say`)
+                    let w = if cut + 1 < segs.len() {
+                        NS_TYPE
+                    } else if macro_ns[j] {
+                        NS_MACRO
+                    } else {
+                        want
+                    };
                     if let Some(nn) = names.lookup_from(sc, m, &segs[cut], w) {
                         // segs[..=cut] を新しい名前にする (`::re::label`: the leading `::` too, as the name is the item's)
                         repl.push((if leading { k - 2 } else { k }, k + 3 * cut, nn));
@@ -4663,6 +4728,9 @@ fn number_suffix(s: &[u8], at: usize) -> bool {
 const NS_TYPE: u8 = 1;
 const NS_VALUE: u8 = 2;
 const NS_ANY: u8 = 3;
+/// Macros, which no item of a module is: only what a `use` imports from std under another name (`pub use std::println
+/// as say;`) is one, and a macro's name (`m::say!(..)`) looks only at those
+const NS_MACRO: u8 = 4;
 
 /// What a name is through a module's globs: an item renamed (its new name, its namespaces), an item that keeps its name
 /// (the module that defines it), nothing, or more than one (ambiguous, E0659: left as written, rustc reports it)
@@ -4892,10 +4960,49 @@ impl<'a> Names<'a> {
         let _ = viewer;
         match self.item_at(m, m, n, want) {
             GlobHit::Item(nn, _) => Some(nn),
-            GlobHit::None if want != NS_ANY => self.lookup_from(m, m, n, NS_ANY),
+            // (a macro's name takes nothing else)
+            GlobHit::None if want != NS_ANY && want != NS_MACRO => self.lookup_from(m, m, n, NS_ANY),
             _ => None,
         }
     }
+}
+
+/// The tokens (lexer tokens, s their text) that name no item, which renaming an item leaves as they are: an
+/// attribute's, `#[derive(Eq, Debug)]` / `#[repr(C)]` / `#![allow(x)]` (its path and a derive's names are macros, the
+/// rest its own arguments), and a macro call's name, `write!(..)` / the `mac` of `m::mac![..]` (the macro namespace,
+/// where no item is). typenum's `#[derive(Eq, ..)]` took the `pub type Eq<A, B>` that `operator_aliases::*` brings,
+/// `typenum__operator_aliases__Eq`: no derive has that name. The modules before a macro's name are a path's, renamed
+/// with their module: two fn bodies' `mod m` hoisted as `m__h0` / `m__h1` have `m__h0::say!(..)` / `m__h1::say!(..)`
+fn macro_ns_toks(toks: &[(u8, usize, usize)], s: &[u8]) -> Vec<bool> {
+    let sym = |k: usize, c: u8| toks[k].0 == 1 && toks[k].2 == toks[k].1 + 1 && s[toks[k].1] == c;
+    let mut out = vec![false; toks.len()];
+    let mut k = 0;
+    while k + 2 < toks.len() {
+        if sym(k, b'#') && (sym(k + 1, b'[') || (sym(k + 1, b'!') && sym(k + 2, b'['))) {
+            let open = if sym(k + 1, b'[') { k + 1 } else { k + 2 };
+            let mut d = 0usize;
+            let mut e = open;
+            while e < toks.len() {
+                if sym(e, b'[') {
+                    d += 1;
+                } else if sym(e, b']') {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                e += 1;
+            }
+            out[open..e.min(toks.len())].fill(true);
+            k = e + 1;
+            continue;
+        }
+        if toks[k].0 == 0 && sym(k + 1, b'!') && (sym(k + 2, b'(') || sym(k + 2, b'[') || sym(k + 2, b'{')) {
+            out[k] = true;
+        }
+        k += 1;
+    }
+    out
 }
 
 /// Whether the item, `mod` or `use` whose keyword is at token kw is written `pub` (`pub`, `pub(crate)`, ..; past
