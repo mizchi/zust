@@ -1304,13 +1304,14 @@ impl Cx<'_> {
             }
             Expr::Unary(..) => self.unary(e, expected),
             // (`&*s` / `&**r` with s: String or Vec<T> (through Deref): `s.as_str()` / `&s[..]`)
+            // (also `&**s` with s: `Rc<String>`, whose `*s` has no type of its own recorded: the Rc's content)
             Expr::Ref(m, x)
                 if matches!(strip_paren(x), Expr::Unary(op, _, _) if op == "*")
-                    && matches!(strip_paren(x), Expr::Unary(_, y, _) if matches!(self.peek(y), Some(Ty::Struct(sid))
+                    && matches!(strip_paren(x), Expr::Unary(_, y, _) if matches!(self.peek_through_deref(y), Some(Ty::Struct(sid))
                         if matches!(self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), "String" | "Vec"))) =>
             {
                 let Expr::Unary(_, y, _) = strip_paren(x) else { unreachable!() };
-                let Some(Ty::Struct(sid)) = self.peek(y) else { unreachable!() };
+                let Some(Ty::Struct(sid)) = self.peek_through_deref(y) else { unreachable!() };
                 let yb = Expr::Paren(Box::new((**y).clone()));
                 let ne = if self.prog.structs[self.prog.base_of(sid) as usize].name == "String" {
                     mcall(yb, if *m { "as_mut_str" } else { "as_str" }, vec![])
@@ -4901,5 +4902,29 @@ impl Cx<'_> {
             let Some(args) = sol.into_iter().collect::<Option<Vec<Ty>>>() else { return false };
             self.prog.fn_pred_error(i as u32, &args).is_some()
         })
+    }
+}
+
+impl Cx<'_> {
+    /// e's type, or for `*z` with none recorded, what z (a reference, a Box, std's Rc / Arc or a guard of a RefCell /
+    /// Mutex / RwLock) points to
+    pub(crate) fn peek_through_deref(&self, e: &Expr) -> Option<Ty> {
+        if let Some(t) = self.peek(e) {
+            return Some(t);
+        }
+        let Expr::Unary(op, z, _) = strip_paren(e) else { return None };
+        if op != "*" {
+            return None;
+        }
+        match self.peek(z)? {
+            Ty::Ref(_, i) | Ty::Box(i) => Some(*i),
+            Ty::Struct(sid) => {
+                let base = self.prog.base_of(sid);
+                let std = self.prog.struct_item.get(base as usize).is_none_or(|&ii| ii >= self.prog.prelude_from);
+                let ptr = matches!(self.prog.structs[base as usize].name.as_str(), "Rc" | "Arc" | "Ref" | "RefMut" | "MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard");
+                (std && ptr).then(|| self.prog.structs[sid as usize].args.first().copied()).flatten()
+            }
+            _ => None,
+        }
     }
 }

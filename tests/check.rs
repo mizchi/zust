@@ -3714,3 +3714,16 @@ fn a_reference_cast_to_a_raw_pointer_tells_what_it_refers_to() {
     // (not when what it refers to is known: `&x as *const u8` with x a u32 stays an error)
     assert!(!errs("fn main() {\n    let x = 1u32;\n    let _ = &x as *const u8;\n}\n").is_empty());
 }
+
+#[test]
+fn a_raw_method_name_in_an_impl_and_a_string_behind_an_rc() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (`fn r#trait` of an impl is the trait's `r#trait`, not a method `r` (E0407))
+    assert!(errs("trait Trait {\n    fn r#trait(&self) -> u32;\n}\nstruct G;\nimpl Trait for G {\n    fn r#trait(&self) -> u32 {\n        1\n    }\n}\nfn main() {\n    assert_eq!(G.r#trait(), 1);\n}\n").is_empty());
+    // (`&**s` with s: `Rc<String>` / a RefCell's guard of one: its `str`)
+    let src = "use std::cell::RefCell;\nuse std::rc::Rc;\nfn main() {\n    let s = Rc::new(\"foo\".to_string());\n    assert_eq!(&**s, \"foo\");\n    let m = Rc::new(RefCell::new(String::from(\"x\")));\n    assert_eq!(&**m.borrow(), \"x\");\n}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+}

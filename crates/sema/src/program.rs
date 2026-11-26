@@ -2754,7 +2754,8 @@ impl Program {
                 }
                 // (the internal names of overloads `get#1` and of impls for references `__ref_foo`: the method's own)
                 let m = p.names[fi].rsplit("::").next().unwrap_or("");
-                let m = m.split('#').next().unwrap_or(m);
+                // (only a number's `#`: `r#trait` is a raw name)
+                let m = m.rsplit_once('#').filter(|(_, n)| !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit())).map_or(m, |(a, _)| a);
                 // (`__ref_foo` is the generated name of an impl for a reference; a method the trait declares with that
                 // name matches as written)
                 let mut bare = m;

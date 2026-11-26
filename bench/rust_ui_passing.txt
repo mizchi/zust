@@ -5519,6 +5519,7 @@ run-pass	or-patterns/struct-like.rs
 compile-fail	or-patterns/while-parsing-this-or-pattern.rs
 run-pass	overloaded/fixup-deref-mut.rs
 run-pass	overloaded/overloaded-autoderef-vtable.rs
+run-pass	overloaded/overloaded-autoderef.rs
 run-pass	overloaded/overloaded-calls-object-one-arg.rs
 run-pass	overloaded/overloaded-calls-object-two-args.rs
 run-pass	overloaded/overloaded-calls-object-zero-args.rs
@@ -7142,6 +7143,7 @@ compile-fail	rfcs/rfc-2126-extern-absolute-paths/non-existent-3.rs
 compile-fail	rfcs/rfc-2126-extern-absolute-paths/not-allowed.rs
 run-pass	rfcs/rfc-2151-raw-identifiers/attr.rs
 run-pass	rfcs/rfc-2151-raw-identifiers/basic.rs
+run-pass	rfcs/rfc-2151-raw-identifiers/items.rs
 run-pass	rfcs/rfc-2175-or-if-while-let/basic.rs
 check-pass	rfcs/rfc-2294-if-let-guard/drop-scope-let-chains.rs
 compile-fail	rfcs/rfc-2294-if-let-guard/exhaustive.rs
