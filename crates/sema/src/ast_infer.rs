@@ -1308,7 +1308,13 @@ impl Inf<'_> {
                     // (not of a trait implemented for `[T]` / `str` whose method has a name they have one of their
                     // own: `It::iter(s)` is the impl's, which `s.iter()` would not be. The path call is typed by the
                     // trait's method)
-                    let on_seq = || self.prog.prim_impls.iter().any(|(pt, t)| t == tr && matches!(pt, Ty::Slice(_) | Ty::Str) && Program::std_inherent(*pt, ms));
+                    let on_seq = || {
+                        (Program::std_inherent(Ty::Slice(intern(Ty::U8)), ms) || Program::std_inherent(Ty::Str, ms))
+                            && self.prog.sigs.iter().any(|s| {
+                                matches!(s.self_ty, Some(Ty::Slice(_) | Ty::Str))
+                                    && s.impl_trait.as_deref().is_some_and(|it| it.split('<').next().unwrap_or(it).trim() == tr.as_str())
+                            })
+                    };
                     if selfm && !matches!(tr.as_str(), "Ord" | "PartialOrd" | "PartialEq" | "Eq") && !on_seq() {
                         let recv = match &args[0] {
                             Expr::Ref(_, e) => (**e).clone(),

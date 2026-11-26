@@ -37,7 +37,7 @@ invariants.
 |---|---|
 | `rt_box_move_out` | `let x = *b;` moves the value but never frees the Box's block (a leak; valgrind) |
 | `rt_box_move_patterns` | the same leak through patterns (`let Pair { a, b } = *b`, `match *b`); no double free (valgrind) |
-| `rt_pattern_partial_move` | what a pattern leaves to `_` / `..` of a temporary (`let (a, _) = pair();`, `match pair() { (a, _) => .. }`) is never dropped (a leak); a local's parts are, but not those of a local partly moved out of in a loop it outlives (`rt_partial_move_in_loop`: the rest leaks, no part is dropped twice) |
+| `rt_pattern_partial_move` | what a pattern leaves to `_` / `..` of a temporary (`let (a, _) = pair();`, `match pair() { (a, _) => .. }`) is never dropped (a leak); a local's parts are, in a loop it outlives too (`rt_partial_move_in_loop`) |
 
 ## Trait solving (`crates/sema/src/traits.rs`, `formal/lean/`)
 

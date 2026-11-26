@@ -1464,6 +1464,7 @@ impl Cx<'_> {
                 if self.prog.opt {
                     self.hoist_index_bases(wbody, None, Some(cond))?;
                 }
+                self.presplit_loop(Some(cond), wbody);
                 self.b.ins().jump(header, &[]);
                 self.b.switch_to_block(header);
                 let t0 = self.temps.len();
@@ -1525,6 +1526,7 @@ impl Cx<'_> {
                 self.pending_label = label.as_deref().map(label_name);
                 let body = self.b.create_block();
                 let exit = self.b.create_block();
+                self.presplit_loop(None, lbody);
                 self.b.ins().jump(body, &[]);
                 self.b.switch_to_block(body);
                 self.loops.push(Loop {

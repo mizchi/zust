@@ -349,6 +349,15 @@ impl Cx<'_> {
                 Ok(Some((Some(out), ot)))
             }
             "get" | "get_mut" | "first" | "last" | "first_mut" | "last_mut" => {
+                // (E0596: a `&mut` of an element through a `&[T]`; a mutable borrow of an array local, for its `mut`)
+                if name.ends_with("_mut") {
+                    if matches!(self.peek(&*mc_recv), Some(Ty::Ref(false, _))) {
+                        return Err(self.at(expr_start(&mc_recv), MUT_THROUGH_SHARED.to_string()));
+                    }
+                    if is_place_expr(&*mc_recv) && !matches!(rt, Ty::Ref(..)) {
+                        self.bk_mut_use(&*mc_recv);
+                    }
+                }
                 let (base, len, elem) = self.indexable(&*mc_recv)?;
                 let i = match name.as_str() {
                     "first" | "first_mut" => self.b.ins().iconst(types::I64, 0),

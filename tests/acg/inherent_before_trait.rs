@@ -1,6 +1,6 @@
 // A method `[T]` / `str` has of its own is taken before a trait's of the name on a `&[T]` / `&str` receiver, also in
 // that trait's impl for `[T]` (`self.iter()` there is the slice's, not a call of itself); through the trait's path,
-// the trait's
+// the trait's. Also with the trait's impl for `&[T]` (`s.iter()` the slice's, `Tr::iter(s)` the impl's)
 trait It {
     fn iter(&self) -> usize;
     fn count_all(&self) -> usize;
@@ -21,6 +21,18 @@ impl Shout for str {
         format!("<{}>", self.trim())
     }
 }
+trait Tr {
+    fn iter(self) -> usize;
+    fn len(self) -> u8;
+}
+impl Tr for &[u8] {
+    fn iter(self) -> usize {
+        self.len() * 10
+    }
+    fn len(self) -> u8 {
+        7
+    }
+}
 const BIG: [u8; 4096] = [7; 4096];
 fn main() {
     let v = [1u8, 2, 3];
@@ -28,4 +40,8 @@ fn main() {
     println!("{} {} {}", s.iter().count(), It::iter(s), s.count_all());
     println!("{} {}", "  a b  ".trim(), Shout::trim("  a b  "));
     println!("{} {}", BIG.len(), BIG.is_empty());
+    let n = Tr::iter(s) + 1;
+    let m = <&[u8] as Tr>::iter(s);
+    let c = s.iter().map(|x| *x as usize).sum::<usize>();
+    println!("{n} {m} {} {} {c}", Tr::len(s), s.len());
 }

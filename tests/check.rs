@@ -3918,3 +3918,21 @@ fn a_transmute_of_fn_pointers_that_pass_differently_and_a_constant_array_s_len()
     let src = "const DATA: [u8; 32 * 1024 * 1024] = [42; 32 * 1024 * 1024];\nfn main() {\n    assert_eq!(DATA.len(), 32 << 20);\n    assert!(!DATA.is_empty());\n}\n";
     assert_eq!(first(src), None);
 }
+
+#[test]
+fn a_mut_accessor_through_a_shared_slice_and_a_macro_call_after_a_string_with_slashes() {
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    // (`first_mut` / `last_mut` / `get_mut` of a `&[T]`: E0596 at the receiver, as rustc; of a `&mut [T]`, none)
+    for m in ["first_mut()", "last_mut()", "get_mut(0)"] {
+        let src = format!("fn main() {{\n    let a = [1, 2, 3];\n    let s: &[i32] = &a;\n    let _ = s.{m};\n}}\n");
+        assert_eq!(first(&src).map(|x| (x.0, x.1, x.2.contains("E0596"))), Some((4, 13, true)), "{m}");
+        let src = format!("fn main() {{\n    let mut a = [1, 2, 3];\n    let s: &mut [i32] = &mut a;\n    let _ = s.{m};\n}}\n");
+        assert_eq!(first(&src), None, "{m}");
+    }
+    // (a parse error in a macro's expansion, at the rule's token: also when a string before the call has `//`)
+    let src = "macro_rules! bad { () => { let x = ; } }\nfn main() { let _ = \"https://host\"; bad!{} }\n";
+    assert_eq!(first(src).map(|x| (x.0, x.1)), Some((1, 36)));
+}

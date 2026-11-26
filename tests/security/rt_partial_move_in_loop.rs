@@ -1,9 +1,9 @@
 //! A local declared before a loop, partly moved out of in it (`let a = x.0;`) and assigned in it (`x = ..`,
-//! `x.0 = ..`): code lowered before the move runs again after it on the loop's next pass, and knows none of the flags a
-//! split of the local would make. zustc does not split such a local (split_moved): what is left of it leaks, and no
-//! part is dropped twice.
+//! `x.0 = ..`): code lowered before the move runs again after it on the loop's next pass. zustc makes the flags a
+//! split of the local needs before the loop (presplit_loop), so that code knows them: each value is dropped once, as
+//! rustc's build drops it (the counts printed), none twice and none leaked.
 //@ pattern: drops
-//@ expect: safe
+//@ expect: run
 use std::cell::Cell;
 struct D<'a>(usize, &'a Vec<Cell<u32>>);
 impl Drop for D<'_> {
@@ -18,7 +18,11 @@ fn check(n: &Vec<Cell<u32>>) {
             println!("{i} dropped {} times", c.get());
         }
     }
-    println!("ok");
+    let mut counts = String::new();
+    for c in n.iter() {
+        counts.push(char::from(b'0' + c.get() as u8));
+    }
+    println!("{counts}");
 }
 fn main() {
     let n: Vec<Cell<u32>> = (0..64).map(|_| Cell::new(0)).collect();

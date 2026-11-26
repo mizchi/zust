@@ -12480,9 +12480,17 @@ fn macro_body_at(src: &str, line: usize, col: usize, t: &str) -> Option<(usize, 
     let mut i = 0;
     while i < text.len() {
         let tx = text.as_bytes();
-        // (not in a comment after the code, `//~ NOTE in this expansion of m!`)
+        // (not in a comment after the code, `//~ NOTE in this expansion of m!`; a string's `//` is none)
         if tx[i..].starts_with(b"//") {
             break;
+        }
+        if tx[i] == b'"' {
+            i += 1;
+            while i < tx.len() && tx[i] != b'"' {
+                i += if tx[i] == b'\\' { 2 } else { 1 };
+            }
+            i += 1;
+            continue;
         }
         if !id(tx[i]) || (i > 0 && id(tx[i - 1])) {
             i += 1;

@@ -399,6 +399,7 @@ impl Cx<'_> {
                 let blk = self.keep_expr(blk);
                 return self.expr(blk, None);
             }
+            self.presplit_loop(None, fbody);
         }
         let mut temp = None;
         let mut items = None;

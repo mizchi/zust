@@ -1,5 +1,5 @@
 use super::*;
-use crate::parse::{Block as PBlock, Expr, Pat, Path};
+use crate::parse::{Block as PBlock, Expr, Pat, Path, Stmt};
 use crate::types::{Ty, intern};
 use crate::acg::clif::{AbiParam, Signature, TrapCode, types};
 use crate::ir::{Block, IntCC, StackSlot, Value};
@@ -606,6 +606,7 @@ impl Cx<'_> {
         let Expr::Let(pat, e) = &**cond else {
             unreachable!()
         };
+        self.presplit_loop(Some(e), body);
         self.while_let_parts(pat, e, body, "while")
     }
 
@@ -2598,11 +2599,6 @@ impl Cx<'_> {
             return false;
         }
         let Some(depth) = self.owned.iter().rev().find(|o| o.flag == f).map(|o| o.depth) else { return false };
-        // (not in a loop the local outlives: code lowered before the split, which knows none of the parts' flags, runs
-        // again after it on the loop's next pass)
-        if self.in_loop_since(depth) {
-            return false;
-        }
         let Some((off, pt, whole)) = self.local_part(e, t) else { return false };
         let mut vars = vec![];
         let moved: Vec<(i32, Ty)> = match parts {
@@ -2626,6 +2622,12 @@ impl Cx<'_> {
             }
         }
         self.part_vars = vars;
+        // (not in a loop the local outlives, unless the flags of the parts are there from before it (presplit_loop):
+        // code lowered before the split, which knows no flag the split makes, runs again after it on the next pass)
+        if self.in_loop_since(depth) && !self.parts_ready(f, t, &moved, true) {
+            self.part_vars.clear();
+            return false;
+        }
         self.split_part((f, loc, depth), f, 0, t, &moved, true);
         self.part_vars.clear();
         true
@@ -2634,6 +2636,146 @@ impl Cx<'_> {
     /// Whether a loop entered after scope depth `depth` is being lowered (a local of that depth outlives its passes)
     fn in_loop_since(&self, depth: usize) -> bool {
         self.loops.iter().any(|l| !l.is_block && l.depth > depth)
+    }
+
+    /// Whether split_part of the local of type t whose flag is f, for moved, makes no flag that is not there yet
+    fn parts_ready(&self, f: StackSlot, t: Ty, moved: &[(i32, Ty)], clear: bool) -> bool {
+        let mut need = vec![];
+        let _ = self.part_plan(f, 0, t, moved, clear, &mut need);
+        need.is_empty()
+    }
+
+    /// The flags (offset, type) split_part of the part (off, t) of the local whose flag is f would make (those not
+    /// made yet, into need), or None where it splits nothing (and clears the flag of what is left)
+    fn part_plan(&self, f: StackSlot, off: i32, t: Ty, moved: &[(i32, Ty)], clear: bool, need: &mut Vec<(i32, Ty)>) -> Option<()> {
+        let kids = self.part_kids(t, off, moved)?;
+        let exact = |o: i32, k: Ty| moved.iter().any(|&(mo, mt)| mo == o && mt == k);
+        if kids.iter().all(|&(o, k)| exact(o, k) && clear) {
+            return Some(());
+        }
+        for &(o, k) in &kids {
+            if exact(o, k) && clear {
+                continue;
+            }
+            if !self.parts.iter().any(|p| p.0 == f && p.1 == o && p.2 == k) && !need.contains(&(o, k)) {
+                need.push((o, k));
+            }
+            if exact(o, k) {
+                continue;
+            }
+            let size = self.prog.size_align(k).0 as i32;
+            let inner: Vec<(i32, Ty)> = moved.iter().copied().filter(|&(mo, _)| o <= mo && mo < o + size).collect();
+            if !inner.is_empty() {
+                self.part_plan(f, o, k, &inner, clear, need)?;
+            }
+        }
+        Some(())
+    }
+
+    /// Before a loop (its condition, its body): the flags of the parts of the locals it outlives that a field of one
+    /// moved out of or assigned in it would split them into, made now (split_part does not make one in such a loop,
+    /// in_loop_since). They are zero (each use of a part splits the local's flag at run time, as outside a loop)
+    #[inline]
+    pub(crate) fn presplit_loop(&mut self, cond: Option<&Expr>, body: &PBlock) {
+        if !self.owned.is_empty() {
+            self.presplit_owned(cond, body);
+        }
+    }
+
+    #[inline(never)]
+    fn presplit_owned(&mut self, cond: Option<&Expr>, body: &PBlock) {
+        // (only with a local that can be split: a tuple or a struct of the program's, without a `Drop` of its own,
+        // with a part to drop)
+        let splittable = |o: &Owned| {
+            let Ty::Struct(sid) = o.ty else { return false };
+            let b = self.prog.base_of(sid);
+            matches!(o.loc, Loc::Slot(_) | Loc::Ptr(_))
+                && !self.prog.structs[sid as usize].is_enum
+                && self.prog.struct_item.get(b as usize).is_none_or(|&i| i < self.prog.prelude_from)
+                && !self.prog.drop_impls.contains(&b)
+                && self.needs_drop(o.ty)
+        };
+        if !self.owned.iter().any(splittable) {
+            return;
+        }
+        if let Some(c) = cond {
+            self.presplit_scan(c);
+        }
+        self.presplit_block(body);
+    }
+
+    fn presplit_block(&mut self, b: &PBlock) {
+        for s in &b.stmts {
+            match s {
+                Stmt::Let(_, _, init, els, ..) => {
+                    if let Some(e) = init {
+                        self.presplit_scan(e);
+                    }
+                    if let Some(b) = els {
+                        self.presplit_block(b);
+                    }
+                }
+                Stmt::Expr(e, _) => self.presplit_scan(e),
+                Stmt::Item(_) => {}
+            }
+        }
+    }
+
+    /// The fields of locals in e that may be moved out of or assigned (not a method's receiver, what `&` borrows, an
+    /// index's base, a comparison's operand, what `*` or `+=` takes)
+    fn presplit_scan(&mut self, e: &Expr) {
+        let field = |x: &Expr| matches!(strip_paren(x), Expr::Field(..));
+        match e {
+            Expr::Field(b, _, _) => {
+                let mut cur = strip_paren(b);
+                while let Expr::Field(x, _, _) = cur {
+                    cur = strip_paren(x);
+                }
+                match cur {
+                    Expr::Path(..) => self.presplit_field(e),
+                    _ => self.presplit_scan(cur),
+                }
+            }
+            Expr::MethodCall(r, _, _, args, _) => {
+                if !field(r) {
+                    self.presplit_scan(r);
+                }
+                for a in args {
+                    self.presplit_scan(a);
+                }
+            }
+            Expr::Ref(_, x) | Expr::RawRef(_, x) | Expr::Unary(_, x, _) if field(x) => {}
+            Expr::Index(x, i, _) | Expr::AssignOp(_, x, i, _) if field(x) => self.presplit_scan(i),
+            Expr::Binary(op, l, r, _) if matches!(op.as_str(), "==" | "!=" | "<" | "<=" | ">" | ">=") => {
+                for x in [l, r] {
+                    if !field(x) {
+                        self.presplit_scan(x);
+                    }
+                }
+            }
+            Expr::Closure(..) | Expr::Macro(..) => {}
+            _ => crate::ast_closure::each_child_pub(e, &mut |c| self.presplit_scan(c)),
+        }
+    }
+
+    /// presplit_loop of a field e (`x.a`, `x.a.b`) of a local
+    fn presplit_field(&mut self, e: &Expr) {
+        let Some((loc, t, f)) = self.moved_root(e) else { return };
+        if !matches!(loc, Loc::Slot(_) | Loc::Ptr(_)) {
+            return;
+        }
+        let Some(depth) = self.owned.iter().rev().find(|o| o.flag == f).map(|o| o.depth) else { return };
+        let Some((off, pt, false)) = self.local_part(e, t) else { return };
+        if (off == 0 && pt == t) || !self.needs_drop(pt) {
+            return;
+        }
+        let mut need = vec![];
+        if self.part_plan(f, 0, t, &[(off, pt)], false, &mut need).is_none() {
+            return;
+        }
+        for (o, k) in need {
+            self.part_flag((f, loc, depth), o, k);
+        }
     }
 
     /// The offset and type of the place e (a local, or its fields `x.a.b`) in the local of type t, and whether it is
@@ -3119,8 +3261,9 @@ impl Cx<'_> {
         if !self.needs_drop(pt) {
             return None;
         }
-        // (in a loop the local outlives, only a part split out before: no flag is made there (split_moved))
-        if self.in_loop_since(depth) && !self.parts.iter().any(|p| p.0 == f && p.1 == off && p.2 == pt) {
+        // (in a loop the local outlives, only parts whose flags are there from before it: no flag is made there
+        // (split_moved))
+        if self.in_loop_since(depth) && !self.parts_ready(f, t, &[(off, pt)], false) {
             return None;
         }
         self.split_part((f, loc, depth), f, 0, t, &[(off, pt)], false);

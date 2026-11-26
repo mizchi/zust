@@ -2164,9 +2164,10 @@ impl Cx<'_> {
             }
         }
         // `impl Tr for &[T]` のメソッド (`__slice::__ref_m`、self は &[T]): 受け手の型が &[T] のとき
+        // (not one of a name the slice has a method of its own: `s.iter()` is the slice's, as rustc picks it first)
         if let Ty::Ref(false, Ty::Slice(_)) = t {
             let f = format!("__slice::__ref_{method}");
-            if let Some(&id) = self.prog.index.get(&f) {
+            if let Some(&id) = self.prog.index.get(&f).filter(|_| !crate::program::Program::std_inherent(self.strip_refs(t), method)) {
                 let a0 = match self.prog.sigs[id as usize].params.first() {
                     Some(Ty::Ref(m, Ty::Ref(..))) => Expr::Ref(*m, Box::new(recv.clone())),
                     _ => recv.clone(),
@@ -4383,9 +4384,31 @@ impl Cx<'_> {
                         if let Some(t) = self.peek(&recv).map(|t| self.strip_refs(t)) {
                             // (`It::iter(s)` with s: &[u8] and `impl It for [u8]`: that impl's, not the slice's own
                             // `iter`, which `s.iter()` is)
+                            // (only for an impl for `[T]` / `str` itself: `impl Tr for &[u8]` is the reference's)
+                            let own_impl = || {
+                                self.prog.prim_self_method(t, &ms).is_some_and(|id| {
+                                    self.prog.sigs[id as usize].impl_trait.as_deref().is_some_and(|it| it.split('<').next().unwrap_or(it).trim() == tr)
+                                })
+                            };
                             if matches!(t, Ty::Slice(_) | Ty::Str) && crate::program::Program::std_inherent(t, &ms) {
-                                if let Ok(Expr::Path(q, qp)) = crate::parse::parse_expr(&format!("<{} as {tr}>::{ms}", self.prog.tn(t))) {
-                                    return Some(Expr::Call(Box::new(Expr::Path(q, qp)), cargs.clone()));
+                                // (or `impl Tr for &[u8]`'s (`__slice::__ref_m`): `<&[u8] as Tr>::m`)
+                                let ref_impl = || {
+                                    matches!(t, Ty::Slice(_))
+                                        && self.prog.index.get(&format!("__slice::__ref_{ms}")).is_some_and(|&id| {
+                                            self.prog.sigs[id as usize].impl_trait.as_deref().is_some_and(|it| it.split('<').next().unwrap_or(it).trim() == tr)
+                                        })
+                                };
+                                let amp = if own_impl() {
+                                    Some("")
+                                } else if ref_impl() {
+                                    Some("&")
+                                } else {
+                                    None
+                                };
+                                if let Some(amp) = amp {
+                                    if let Ok(Expr::Path(q, qp)) = crate::parse::parse_expr(&format!("<{amp}{} as {tr}>::{ms}", self.prog.tn(t))) {
+                                        return Some(Expr::Call(Box::new(Expr::Path(q, qp)), cargs.clone()));
+                                    }
                                 }
                             }
                             if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) {

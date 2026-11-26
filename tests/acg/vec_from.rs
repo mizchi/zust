@@ -36,6 +36,14 @@ fn main() {
     println!("{:?}", rep);
     let v2 = Vec::from(vec![1, 2]);
     println!("{:?}", v2);
+    // (a literal beside a block: of the block's type; the elements in order)
+    let v3 = Vec::from([1, { 2u8 }]);
+    let mut n = 1;
+    let v4 = Vec::from([n, {
+        n = 2;
+        n
+    }]);
+    println!("{:?} {:?} {n}", v3, v4);
     drop(ds);
     println!("end");
 }

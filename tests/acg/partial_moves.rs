@@ -202,7 +202,43 @@ fn loop_whole() {
     }
     println!("end loop_whole");
 }
+// (a part moved out and assigned in loops the local outlives: none of it leaks)
+fn loop_parts() {
+    let mut x = (S(191), S(192));
+    loop {
+        drop(x.0);
+        for k in 0..2 {
+            x.1 = S(193 + k);
+        }
+        break;
+    }
+    println!("end loop_parts");
+}
+struct P {
+    a: S,
+    b: (S, S),
+    c: u8,
+}
+fn loop_nested_parts() {
+    let mut p = P { a: S(201), b: (S(202), S(203)), c: 0 };
+    let mut i = 0;
+    while i < 3 {
+        if i == 2 {
+            p.b.1 = S(204);
+            break;
+        }
+        let t = p.b.0;
+        drop(t);
+        p.b.0 = S(205 + i);
+        p.a = S(208 + i);
+        i += 1;
+        p.c += 1;
+    }
+    println!("end loop_nested_parts {}", p.c);
+}
 fn main() {
+    loop_parts();
+    loop_nested_parts();
     arm_assigns(E2::A(S(121), S(122)));
     whole_after_part();
     nested_assign();

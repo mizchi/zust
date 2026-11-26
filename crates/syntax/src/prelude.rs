@@ -1154,6 +1154,15 @@ fn has_cstr_literal(src: &str) -> bool {
     false
 }
 
+/// An array's or a slice's first / last / get, which codegen makes without the prelude's fns of the names, return
+/// Option (out of select_with, whose code it would change)
+#[inline(never)]
+fn seq_accessor_option(need: &mut crate::fxhash::FxSet<&str>) {
+    if ["first", "last", "get", "get_mut", "first_mut", "last_mut"].iter().any(|n| need.contains(n)) {
+        need.insert("Option");
+    }
+}
+
 pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCache) -> String {
     let all = items();
     // Collect only the user's identifiers that match a name the prelude defines (or a related name).
@@ -1512,6 +1521,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if sc.has("checked_") || sc.has("overflowing_") {
         need.insert("Option");
     }
+    seq_accessor_option(&mut need);
     // In `vec![x; n]` with an x that seems not to be Copy (not a literal), fill with resize
     if need.contains("vec") && sc.any_pre("vec_repeat_nonliteral", &["vec!["], &vec_repeat_nonliteral) {
         need.extend(["resize", "new", "__exr_clone"]);
