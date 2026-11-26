@@ -91,3 +91,32 @@ fn outputs_match_expected() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(bad.is_empty(), "{ok} same\n{}", bad.join("\n"));
 }
+
+/// tests/editions/NAME.rs, built at each edition E that tests/expected/editions.NAME.E.stdout is given for, prints that
+/// (rustc's output at that edition)
+#[test]
+fn edition_dependent_programs_print_rustc_s_output_at_each_edition() {
+    let dir = private_dir("zust_editions");
+    let mut bad = vec![];
+    let mut n = 0;
+    for ent in std::fs::read_dir("tests/editions").unwrap() {
+        let p = ent.unwrap().path();
+        let name = p.file_stem().unwrap().to_string_lossy().to_string();
+        let src = std::fs::read_to_string(&p).unwrap();
+        for edition in [2015u16, 2018, 2021, 2024] {
+            let Ok(want) = std::fs::read(format!("tests/expected/editions.{name}.{edition}.stdout")) else { continue };
+            n += 1;
+            let exe = dir.join(format!("{name}_{edition}"));
+            let mut s = zustc::session::Session::new(zustc::session::Options { no_cache: true, jobs: 1, edition, ..Default::default() });
+            if let Err(e) = s.build(&src, &exe) {
+                bad.push(format!("{name} ({edition}): {}", e.lines().next().unwrap_or("")));
+                continue;
+            }
+            let a = std::process::Command::new(&exe).output().unwrap();
+            if a.stdout != want || !a.status.success() {
+                bad.push(format!("{name} ({edition}): stdout differs (exit {:?})", a.status.code()));
+            }
+        }
+    }
+    assert!(n >= 2 && bad.is_empty(), "{n} runs\n{}", bad.join("\n"));
+}

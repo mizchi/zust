@@ -2396,6 +2396,7 @@ run-pass	drop/for-expr-temporary-drop-scope.rs
 run-pass	drop/generic-drop-trait-bound-15858.rs
 check-pass	drop/issue-17718-const-destructors.rs
 run-pass	drop/issue-21486.rs
+run-pass	drop/issue-23338-ensure-param-drop-order.rs
 run-pass	drop/issue-23611-enum-swap-in-drop.rs
 run-pass	drop/issue-2734.rs
 run-pass	drop/issue-2735-2.rs

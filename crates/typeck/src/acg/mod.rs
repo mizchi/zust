@@ -2371,6 +2371,9 @@ impl Cx<'_> {
             return self.block_stmts(nb, expected);
         }
         self.scopes.push(vec![]);
+        // (before edition 2024, the tail's temporaries outlive the block's locals: dropped after them, at the block's end.
+        // A plain block that is another's tail still drops them at its own end, where rustc leaves them to the outer one)
+        let mut tail_t0: Option<usize> = None;
         let mut diverged = false;
         let mut result: V = (None, Ty::Unit);
         // (`let Foo { value } = Foo::<&'static u32> { value: &x };`: a destructuring let of a literal whose type
@@ -2897,7 +2900,11 @@ impl Cx<'_> {
                     }
                     if last && !*semi {
                         result = self.detach_tail(r, t0, None);
-                        self.drop_tail_temps(t0, result);
+                        if self.prog.edition >= 2024 {
+                            self.drop_tail_temps(t0, result);
+                        } else {
+                            tail_t0 = Some(t0);
+                        }
                     } else {
                         self.drop_temps(t0);
                     }
@@ -3035,7 +3042,11 @@ impl Cx<'_> {
                     }
                     if last && !*semi {
                         result = self.detach_tail(r, t0, exp);
-                        self.drop_tail_temps(t0, result);
+                        if self.prog.edition >= 2024 {
+                            self.drop_tail_temps(t0, result);
+                        } else {
+                            tail_t0 = Some(t0);
+                        }
                     } else {
                         // (a block-like statement, `if .. {}` / `const { 2 }` without `;`, has the type `()`: rustc's
                         // E0308)
@@ -3109,6 +3120,9 @@ impl Cx<'_> {
             }
         }
         self.pop_scope();
+        if let Some(t0) = tail_t0 {
+            self.drop_tail_temps(t0, result);
+        }
         self.dead_stmt = dead0;
         if diverged && result.1 == Ty::Unit {
             result = (None, Ty::Never);
