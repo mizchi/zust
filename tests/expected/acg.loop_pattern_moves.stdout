@@ -16,6 +16,41 @@ drop y2'
 drop z1
 drop z0
 drop v
+got wa
+drop wb
+drop wa
+got wc
+drop wd
+drop wc
+got wc
+drop wc
+got 0 ya
+drop ya
+got 0 yr
+drop yr
+drop yb
+got 1 yr
+drop yr
+got 1 yr
+drop yr
+drop yb'
+got qa
+drop qa
+got qa'
+drop qa'
+drop qc1
+got qa'
+drop qa'
+got qa'
+drop qa'
+- qb qc0
+drop qa'
+drop qb
+drop qc0
+drop qc1'
+drop yr
+drop yb'
+drop wd
 end
 drop z2
 drop y0
