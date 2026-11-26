@@ -1843,6 +1843,14 @@ impl Inf<'_> {
     }
 
     fn call(&mut self, f: &Expr, args: &[Expr]) -> u32 {
+        // (`std::clone::Clone::clone(&x)`, `std::fmt::Write::write_str(&mut s, ..)`: as the call its last two segments
+        // make, `Clone::clone(&x)` (#153))
+        if let Expr::Path(None, p) = f {
+            if let Some(k) = self.prog.std_trait_path_skip(p) {
+                let tail = Expr::Path(None, crate::parse::Path { global: false, segs: p.segs[k..].to_vec(), pos: p.pos });
+                return self.call(&tail, args);
+            }
+        }
         // `HashMap::from([(1, 2), ..])`: 配列を Vec<要素> として `from(Vec)` を呼ぶ (syn 版は `vec![..]` に書き換える)
         if let (Expr::Path(None, p), [Expr::Array(es)]) = (f, args) {
             if p.segs.len() == 2
