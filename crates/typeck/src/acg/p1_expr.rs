@@ -1170,8 +1170,10 @@ impl Cx<'_> {
                         if let Some(id) = ident_of(rp) {
                             if let Some(c) = self.caps.iter().find(|c| c.0 == id) {
                                 // Taking out of a capture held by value (FnOnce): save it and make the environment's side "empty" (0)
-                                // (the environment is still dropped, but a 0 Vec / String / Box frees nothing)
-                                if let (false, Expr::Path(..), Place::Mem(a, o, t), Some(v)) = (c.2, strip_paren(e), p, r.0) {
+                                // (the environment is still dropped, but a 0 Vec / String / Box frees nothing). Also a field of it
+                                // (`let t = s.1;`, the 2021 edition's capture of `s.1` by value): that field is emptied, and dropping the
+                                // rest of the capture frees nothing of it
+                                if let (false, Expr::Path(..) | Expr::Field(..), Place::Mem(a, o, t), Some(v)) = (c.2, strip_paren(e), p, r.0) {
                                     if self.zeroable(t) {
                                         let v = if t.is_agg() {
                                             let tmp = self.temp(t);

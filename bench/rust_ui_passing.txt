@@ -1452,6 +1452,8 @@ run-pass	closures/drop-glue-for-closure-with-captures.rs
 check-pass	closures/explicit-closure-lifetime-issue-87290.rs
 run-pass	closures/explicit-return-in-closure-and-outer-fn.rs
 run-pass	closures/fn-sugar-in-boxed-trait-object.rs
+compile-fail	closures/fnmut-shared-reference-requires-fn.rs
+compile-fail	closures/fnmut-shared-reference-suggestion-issue-118843.rs
 compile-fail	closures/hrtb-closure-in-recursive-enum-type-error.rs
 compile-fail	closures/hrtb-closure-suggest-type-annotation.rs
 check-pass	closures/issue-101696.rs
@@ -1668,7 +1670,10 @@ run-pass	collections/hashmap/hashmap-path-key.rs
 run-pass	collections/hashset-connected-border-12860.rs
 run-pass	collections/vecdeque-append-operation-54477.rs
 compile-fail	compare-method/bad-self-type.rs
+compile-fail	compare-method/proj-outlives-region.rs
 compile-fail	compare-method/region-extra-2.rs
+compile-fail	compare-method/region-extra.rs
+compile-fail	compare-method/region-unrelated.rs
 compile-fail	compare-method/trait-bound-on-type-parameter.rs
 compile-fail	compare-method/traits-misc-mismatch-1.rs
 check-pass	compiletest-self-test/dir.with.dots/test.rs
@@ -6300,6 +6305,7 @@ check-pass	pattern/move-ref-patterns/by-move-sub-pat-unreachable.rs
 check-pass	pattern/move-ref-patterns/issue-53840.rs
 compile-fail	pattern/move-ref-patterns/move-ref-patterns-closure-captures-inside.rs
 check-pass	pattern/move-ref-patterns/move-ref-patterns-closure-captures-pass.rs
+compile-fail	pattern/move-ref-patterns/move-ref-patterns-closure-captures.rs
 compile-fail	pattern/move-ref-patterns/move-ref-patterns-default-binding-modes-fixable.rs
 compile-fail	pattern/move-ref-patterns/move-ref-patterns-default-binding-modes.rs
 compile-fail	pattern/move-ref-patterns/pattern-ref-bindings-reassignment.rs
