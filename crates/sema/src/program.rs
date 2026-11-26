@@ -7576,7 +7576,7 @@ impl Program {
     /// The path without its leading module part (`crate::` / `self::` / `super::` / a lowercase module name)
     /// `std::fmt::Write::write_str` / `core::clone::Clone::clone`: a path through std's modules to a fn of a trait, which
     /// its last two segments `Trait::m` name as a two-segment path does (#153). The trait is one the program knows (the
-    /// prelude's or its own) or one of std's the lowering takes without a declaration (STD_PATH_TRAITS). strip_mods_p
+    /// prelude's) or one of std's the lowering takes without a declaration (STD_PATH_TRAITS). strip_mods_p
     /// leaves std paths alone, so that `std::mem::swap` is not a `swap` of the program's: here the segment before the
     /// fn must be such a trait. The number of leading segments to leave out
     pub fn std_trait_path_skip(&self, p: &crate::parse::Path) -> Option<usize> {
@@ -7591,7 +7591,10 @@ impl Program {
             return None;
         }
         let tr = &p.segs[n - 2];
-        (plain(tr) && (self.traits.contains_key(&tr.name) || STD_PATH_TRAITS.contains(&tr.name.as_str()))).then_some(n - 2)
+        // (not a name the program declares a trait of: `Trait::m` would be the program's trait, where the std path names
+        // std's (`std::string::ToString::to_string` beside a program's `trait ToString`). That call stays unread)
+        let known = self.traits.contains_key(&tr.name) || STD_PATH_TRAITS.contains(&tr.name.as_str());
+        (plain(tr) && known && !self.user_traits.contains(&tr.name)).then_some(n - 2)
     }
 
     pub fn strip_mods_p(&self, p: &PPath) -> Option<PPath> {

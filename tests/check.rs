@@ -2999,6 +2999,19 @@ fn items_of_one_name_in_two_blocks_of_a_fn() {
 }
 
 #[test]
+fn std_trait_path_beside_a_program_trait_of_its_name() {
+    // (from #153's review: `std::string::ToString::to_string(&42u8)` names std's trait, and rustc prints 42. Read as
+    // its last two segments it was the program's own `trait ToString`, which printed "local". zustc leaves such a std
+    // path unread, an error, rather than calling the other trait; the unqualified `ToString::to_string` is the
+    // program's, as in rustc)
+    let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
+    let src = "trait ToString {\n    fn to_string(&self) -> String;\n}\nimpl ToString for u8 {\n    fn to_string(&self) -> String {\n        \"local\".into()\n    }\n}\nfn main() {\n    println!(\"{}\", std::string::ToString::to_string(&42u8));\n    println!(\"{}\", ToString::to_string(&42u8));\n}\n";
+    let d = s.check(src);
+    assert_eq!(d.first().map(|d| (d.line, d.col, d.msg.clone())), Some((10, 20, "cannot find value (unsupported path)".to_string())));
+    assert_eq!(d.len(), 1, "{:?}", d.iter().map(|d| &d.msg).collect::<Vec<_>>());
+}
+
+#[test]
 fn literals_and_comments_a_file_ends_in() {
     // (rustc 1.100's lexer errors at the literal's or the comment's start, before the delimiters it leaves open)
     let first = |src: &str| {
