@@ -6749,7 +6749,9 @@ impl Program {
         if self.sigs[id as usize].impl_trait.is_some() || !self.sigs[id as usize].has_self {
             return id;
         }
-        let Some(group) = self.overloads.get(&self.names[id as usize]) else { return id };
+        // (by the group's name: self_method may give an overload, `W::f#1`)
+        let name = &self.names[id as usize];
+        let Some(group) = self.overloads.get(name.split('#').next().unwrap_or(name)) else { return id };
         let fit: Vec<u32> = group
             .iter()
             .copied()

@@ -12,3 +12,5 @@ Some(4) Some(3) None
 3 2 9
 Some(Less) Some(Greater) true false 3
 Greater Q(3) 7
+305 206 1
+Cnt([1, 1, 1, 1])

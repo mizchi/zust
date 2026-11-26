@@ -7,7 +7,12 @@
 // associated function beside the method of what the type derefs to (`m.val()` is the target's): also a trait's default
 // one (`d.val()`), and with a `DerefMut` to a `&mut self` method (`e.edit()` goes through the user's `deref_mut`). A
 // type with an associated `partial_cmp` / `cmp` and a derived PartialOrd / Ord compares by its fields (`a.partial_cmp(&b)`,
-// `a < b`).
+// `a < b`). An associated function registered before inherent methods of the name in impls for two instances (`impl Mk2
+// for V<bool> { fn f() }`, `V<u8>`'s `unsafe fn f(&self)`, `V<u16>`'s `fn f(&self)`): `a.f()` on a `V<u16>` is its own,
+// safe one. A closure that calls a trait's default `&mut self` method on what it captures mutates it (`unused_mut` does
+// not fire on `cnt`).
+
+#![deny(unused_mut)]
 
 use std::ops::{Deref, DerefMut};
 
@@ -113,6 +118,35 @@ impl Q {
     fn cmp(x: i32) -> i32 { x }
 }
 
+// (an associated function first, then inherent methods of the name for two instances, one of them unsafe)
+struct V<T>(T);
+trait Mk2 {
+    fn f() -> i32;
+}
+impl Mk2 for V<bool> {
+    fn f() -> i32 { 1 }
+}
+impl V<u8> {
+    unsafe fn f(&self) -> i32 { self.0 as i32 + 200 }
+}
+impl V<u16> {
+    fn f(&self) -> i32 { self.0 as i32 + 300 }
+}
+
+// (a trait's default `&mut self` method called in a closure)
+trait Bump {
+    fn inc(&mut self);
+    fn bump(&mut self) {
+        self.inc();
+        self.inc();
+    }
+}
+#[derive(Debug)]
+struct Cnt(Vec<i32>);
+impl Bump for Cnt {
+    fn inc(&mut self) { self.0.push(1) }
+}
+
 fn total(v: &Vec<u8>) -> u32 {
     let mut t = 0;
     let mut i = 0;
@@ -172,4 +206,12 @@ fn main() {
     let (a, b) = (P(1, 2), P(1, 3));
     println!("{:?} {:?} {} {} {}", a.partial_cmp(&b), b.partial_cmp(&a), a < b, a >= b, P::partial_cmp());
     println!("{:?} {:?} {}", Q(4).cmp(&Q(2)), Q(1).max(Q(3)), Q::cmp(7));
+
+    let (x, y) = (V(5u16), V(6u8));
+    println!("{} {} {}", x.f(), unsafe { y.f() }, <V<bool> as Mk2>::f());
+    let mut cnt = Cnt(vec![]);
+    let mut bump = || cnt.bump();
+    bump();
+    bump();
+    println!("{:?}", cnt);
 }

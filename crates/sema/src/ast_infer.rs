@@ -2223,7 +2223,9 @@ impl Inf<'_> {
     /// tell them apart yet
     fn pick_inherent_overload(&mut self, id: u32, rv: u32) -> Option<u32> {
         let p = self.prog;
-        let Some(group) = p.overloads.get(&p.names[id as usize]) else { return Some(id) };
+        // (by the group's name: self_method may give an overload, `W::f#1`)
+        let name = &p.names[id as usize];
+        let Some(group) = p.overloads.get(name.split('#').next().unwrap_or(name)) else { return Some(id) };
         let inh: Vec<u32> = group.iter().copied().filter(|&c| p.sigs[c as usize].has_self && p.sigs[c as usize].impl_trait.is_none() && p.sigs[c as usize].self_ty.is_some()).collect();
         if inh.len() < 2 || !inh.contains(&id) {
             // (impls of one trait for instances of the type (the prelude's `impl Read for Cursor<Vec<u8>>` and `.. for
