@@ -470,6 +470,37 @@ pub struct Arm {
     pub body: Expr,
 }
 
+/// Where an expression starts, when it or its first part has a position (else none): for an error the syntax crate
+/// finds in it, an array length's or a discriminant's (typeck's expr_start for what it lowers)
+pub fn expr_pos(e: &Expr) -> Pos {
+    let first = |s: &Span, x: &Expr| if s.start.line != 0 { s.start } else { expr_pos(x) };
+    match e {
+        Expr::Lit(_, p) | Expr::Break(_, _, p) | Expr::Continue(_, p) | Expr::Closure(.., p) => *p,
+        Expr::Path(_, pa) | Expr::Struct(pa, ..) => pa.pos,
+        Expr::Unary(_, x, s) | Expr::Binary(_, x, _, s) | Expr::AssignOp(_, x, _, s) | Expr::MethodCall(x, _, _, _, s) | Expr::Index(x, _, s) | Expr::Field(x, _, s) => first(s, x),
+        Expr::Macro(_, _, s) => s.start,
+        Expr::Call(x, _) | Expr::Cast(x, _) | Expr::Try(x) | Expr::Paren(x) | Expr::Assign(x, _) | Expr::Ref(_, x) | Expr::RawRef(_, x) | Expr::Repeat(x, _) => expr_pos(x),
+        Expr::Let(_, x) | Expr::Match(x, _) | Expr::If(x, ..) | Expr::While(_, x, _) | Expr::For(_, _, x, _) | Expr::Return(Some(x)) | Expr::Range(Some(x), ..) => expr_pos(x),
+        Expr::Tuple(xs) | Expr::Array(xs) => xs.first().map(expr_pos).unwrap_or_default(),
+        // (a block's: its first statement's)
+        Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => match b.stmts.first() {
+            Some(Stmt::Let(.., p)) => *p,
+            Some(Stmt::Expr(x, _)) => Some(expr_pos(x)).filter(|p| p.line != 0).or_else(|| b.spos.get(0)).unwrap_or_default(),
+            _ => b.spos.get(0).unwrap_or_default(),
+        },
+        _ => Pos::default(),
+    }
+}
+
+/// An error at e (`line:col: msg`, the line in the item's own text, which the caller places), or with no position
+/// when e has none
+pub fn err_at_expr(e: &Expr, msg: &str) -> String {
+    match expr_pos(e) {
+        p if p.line != 0 => format!("{}:{}: {msg}", p.line, p.col + 1),
+        _ => msg.to_string(),
+    }
+}
+
 /// Where a pattern starts, when it has a path or holds one (else no position)
 pub fn pat_pos(p: &Pat) -> Pos {
     match p {

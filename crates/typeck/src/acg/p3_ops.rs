@@ -2112,7 +2112,7 @@ impl Cx<'_> {
                 Err(_) => {
                     // (an expression over other consts: Program evaluates its text)
                     let ts = crate::ast_types::tysyn(&crate::parse::Ty::Array(Box::new(crate::parse::Ty::Path(None, path_of("u8"))), Box::new(e.clone())), None)
-                        .or_else(|er| err(SP, er))?;
+                        .or_else(|er| err(SP, self.item_line_err(er)))?;
                     match self.prog.resolve(&ts) {
                         Ok(Ty::Array(_, n)) => Ok(n),
                         Ok(_) => err(SP, "array length must be a literal or a const"),

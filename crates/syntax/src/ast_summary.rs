@@ -3326,7 +3326,8 @@ fn summarize_enum(item: &Item, sm: &mut Summary, sn: &String, g: &Generics, vars
                             _ => break,
                         };
                     }
-                    discr_src = crate::ast_types::const_expr_text(x).ok_or(er)?;
+                    // (at the discriminant, as rustc: `A = || {}` on the variant's line)
+                    discr_src = crate::ast_types::const_expr_text(x).ok_or_else(|| crate::parse::err_at_expr(x, &er))?;
                     Some(0)
                 }
             },

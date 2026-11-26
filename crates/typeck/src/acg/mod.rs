@@ -1566,7 +1566,7 @@ impl Cx<'_> {
 
     /// 書かれた型 (`Self` と型パラメータは env から)
     pub fn parse_ty(&self, t: &crate::parse::Ty) -> R<Ty> {
-        let ts = crate::ast_types::tysyn(t, Some(&crate::types::TySyn::Named("Self".into())))?;
+        let ts = crate::ast_types::tysyn(t, Some(&crate::types::TySyn::Named("Self".into()))).map_err(|e| self.item_line_err(e))?;
         let r = self.prog.resolve_env(&ts, &self.env).map_err(|e| self.local_len_err(t, e))?;
         // (E0277: a type written in the program's code that puts a maybe-unsized type where only a sized one may be:
         // `Foo<T>` of a `T: ?Sized` with `struct Foo<T>`, `Vec<str>`, `[[u8]; 2]`)
@@ -2218,6 +2218,16 @@ impl Cx<'_> {
     }
 
     /// エラーのメッセージに場所 (ファイルの中の `行:桁: `) を付ける。もう付いているか、位置が分からなければそのまま
+    /// An error the syntax crate placed in the item's own text (`line:col: msg`, ast_types::tysyn's): at its line in
+    /// the file
+    pub fn item_line_err(&self, e: String) -> String {
+        let Some((l, rest)) = e.split_once(':') else { return e };
+        match l.parse::<u32>() {
+            Ok(l) if has_loc(&e) => format!("{}:{rest}", self.line_base + l),
+            _ => e,
+        }
+    }
+
     pub fn at(&self, sp: Sp, m: String) -> String {
         if sp.line == 0 || has_loc(&m) {
             return m;

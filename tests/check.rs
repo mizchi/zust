@@ -3635,3 +3635,18 @@ fn an_or_pattern_whose_alternatives_bind_differently_is_reported_at_the_alternat
     let e = errs("fn main() {\n    let x = Some(1);\n    match x {\n        Some(y) | None => {}\n    }\n}\n");
     assert!(e.iter().any(|(l, m)| *l == 4 && m.contains("`|` alternatives bind different types")), "{e:?}");
 }
+
+#[test]
+fn an_array_length_or_a_discriminant_zustc_cannot_evaluate_is_reported_where_it_is_written() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| (d.line, d.msg)).collect::<Vec<_>>()
+    };
+    // (at the length or the discriminant, not the item's first line: a field's type, a `let`'s, a repeat's, a variant)
+    let e = errs("fn main() {}\n\nstruct Bar {\n    a: u8,\n    b: [u8; || 1],\n}\n");
+    assert!(e.iter().any(|(l, m)| *l == 5 && m.contains("array length")), "{e:?}");
+    let e = errs("fn main() {\n    let _ = 1;\n    let _ = [0u8;\n        || 1];\n}\n");
+    assert!(e.iter().any(|(l, m)| *l == 4 && m.contains("array length")), "{e:?}");
+    let e = errs("enum E {\n    A,\n    B = || {},\n}\nfn main() {}\n");
+    assert!(e.iter().any(|(l, _)| *l == 3), "{e:?}");
+}

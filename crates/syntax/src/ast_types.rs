@@ -299,11 +299,12 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
                 x => match crate::ast_summary::const_int(x) {
                     Ok(v) if (0..=u32::MAX as i64).contains(&v) => ArrLen::Lit(v as u64),
                     // (an expression over other consts, `[u8; N * 2]` / `[T; ARR[0]]`: its text, for Program to evaluate)
+                    // (at the length, its line in the item's text: tysyn's only error with a position)
                     Err(_) => match const_expr_text(x) {
                         Some(t) => ArrLen::Const(t),
-                        None => return Err("array length must be a literal or a const".to_string()),
+                        None => return Err(crate::parse::err_at_expr(x, "array length must be a literal or a const")),
                     },
-                    _ => return Err("array length must be a literal or a const".to_string()),
+                    _ => return Err(crate::parse::err_at_expr(x, "array length must be a literal or a const")),
                 },
             };
             TySyn::Array(Box::new(tysyn(e, self_ty)?), len)
