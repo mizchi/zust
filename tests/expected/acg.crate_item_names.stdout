@@ -1,0 +1,6 @@
+Ok(5) Some(2)
+3 A
+Some(2) Some(4)
+(InputEmpty, 1) (OutputFull, 0)
+Ok(()) Ok(2)
+3 2

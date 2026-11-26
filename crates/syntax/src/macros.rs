@@ -901,8 +901,10 @@ fn body_lets(body: &[Pt], out: &mut Vec<String>) {
                 if matches!(body.get(j), Some(Pt::Tok(TokenTree::Ident(m))) if m == "mut") {
                     j += 1;
                 }
-                // (a plain binding only: `let x = ..` / `let x: T` / `let x;`, not `if let Some(..) =`)
-                let plain = matches!(body.get(j + 1), Some(Pt::Tok(TokenTree::Punct(p))) if matches!(p.as_char(), '=' | ':' | ';'));
+                // (a plain binding only: `let x = ..` / `let x: T` / `let x;`, not `if let Some(..) =`, nor a path's `::`,
+                // `if let DecoderResult::InputEmpty = r` (encoding_rs))
+                let path = matches!((body.get(j + 1), body.get(j + 2)), (Some(Pt::Tok(TokenTree::Punct(a))), Some(Pt::Tok(TokenTree::Punct(b)))) if a.as_char() == ':' && b.as_char() == ':');
+                let plain = !path && matches!(body.get(j + 1), Some(Pt::Tok(TokenTree::Punct(p))) if matches!(p.as_char(), '=' | ':' | ';'));
                 if let (Some(Pt::Tok(TokenTree::Ident(n))), true) = (body.get(j), plain) {
                     let n = n.to_string();
                     if n != "_" && !out.contains(&n) {
@@ -910,13 +912,16 @@ fn body_lets(body: &[Pt], out: &mut Vec<String>) {
                     }
                 }
             }
-            // (a match arm binding just a name, `_x => ..`)
+            // (a match arm binding just a name, `_x => ..`: at an arm's start, the group's first token or after a `,`,
+            // a `|` or an arm's block. Not `*self => $i` in a macro call's arguments (num-traits' `float_to_int_unchecked!`))
             Pt::Tok(TokenTree::Ident(n))
                 if matches!((body.get(i + 1), body.get(i + 2)), (Some(Pt::Tok(TokenTree::Punct(a))), Some(Pt::Tok(TokenTree::Punct(b)))) if a.as_char() == '=' && b.as_char() == '>')
-                    && !(i > 0 && matches!(&body[i - 1], Pt::Tok(TokenTree::Punct(c)) if c.as_char() == ':' || c.as_char() == '\'')) =>
+                    && (i == 0
+                        || matches!(&body[i - 1], Pt::Tok(TokenTree::Punct(c)) if c.as_char() == ',' || c.as_char() == '|')
+                        || matches!(&body[i - 1], Pt::Group(Delimiter::Brace, _))) =>
             {
                 let n = n.to_string();
-                if !matches!(n.as_str(), "_" | "true" | "false") && n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && !out.contains(&n) {
+                if !matches!(n.as_str(), "_" | "true" | "false" | "self" | "super" | "crate") && n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && !out.contains(&n) {
                     out.push(n);
                 }
             }

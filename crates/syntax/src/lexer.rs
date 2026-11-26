@@ -3484,6 +3484,11 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             if let Some(m) = resolve_path(sc, mpath, k, &use_names) {
                 let ns = def_ns.get(&(m, name[0].clone())).copied().unwrap_or(NS_ANY);
                 if let Some(nn) = renamed_in(m, &name[0]) {
+                    // (and the item of the other namespace the name has there: libc's `fn sigaction` beside the
+                    //  `struct sigaction` a glob brings, under `name#t` / `name#v`, which a lookup of that namespace reads)
+                    if let Some((n2, other)) = other_ns_item(&use_names, m, &name[0], ns, &nn) {
+                        add(ns_key(&local, other), n2, other);
+                    }
                     add(local, nn, ns);
                 } else if !def_set.contains(&(m, name[0].clone())) {
                     // (`pub use` で取り込み直した名前かもしれない: 後で解く)
@@ -3514,7 +3519,10 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             for p in std::mem::take(&mut pending) {
                 // (as module p.2 sees it: what its globs bring is what it imports)
                 match names.item_at(p.2, p.2, &p.3, NS_ANY) {
-                    GlobHit::Item(nn, ns) => found_any.push((p, nn, ns)),
+                    GlobHit::Item(nn, ns) => {
+                        let second = other_ns_item(&names, p.2, &p.3, ns, &nn);
+                        found_any.push((p, nn, ns, second))
+                    }
                     _ => rest.push(p),
                 }
             }
@@ -3523,10 +3531,15 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         if found_any.is_empty() {
             break;
         }
-        for (p, nn, ns) in found_any {
+        for (p, nn, ns, second) in found_any {
             match p.4 {
                 Some((o, c)) => block_imports.push((o, c, p.1, nn, p.0)),
                 None => {
+                    if let Some((n2, other)) = second {
+                        let k2 = ns_key(&p.1, other);
+                        import_ns.insert((p.0, k2.clone()), other);
+                        imports.push((p.0, k2, n2));
+                    }
                     import_ns.insert((p.0, p.1.clone()), ns);
                     imports.push((p.0, p.1, nn));
                 }
@@ -3892,7 +3905,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         // (nor a method's `fn find(&self ..)` in an impl / trait beside a module's `fn find`: only the item is renamed.
         // A fn nested in a body is renamed with its calls, as before)
         let method_def = k >= 1 && is_id(k - 1, b"fn") && !def_tok[k] && assoc_body[k];
-        if prev_dot || prev_path || assoc_def || method_def {
+        // (nor a number literal's suffix, `0u8` / `1.5f32`, which the tokens split after the digit: fastrand's `fn u8`)
+        let suffix = k >= 1 && toks[k - 1].0 == 1 && toks[k - 1].2 == toks[k].1 && s[toks[k - 1].1].is_ascii_digit();
+        if prev_dot || prev_path || assoc_def || method_def || suffix {
             k += 1;
             continue;
         }
@@ -3991,8 +4006,24 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             // (the scope's own item, its import, or what its globs pass on, globs of globs too, all of them compared
             //  (two distinct is ambiguous): libc's unix sees `time_t` of linux_like/linux/gnu/b64; a definition is its own)
             // (the first segment of a path that goes on is a type or module: `E::V(..)`)
+            // (a primitive type's name that is no call is the type, not a fn or const of the name: getrandom's
+            //  `pub fn u32() -> Result<u32, Error>`, chrono's `fn char` beside `|c: char|`)
+            let prim = want != NS_VALUE
+                && matches!(
+                    n,
+                    b"u8" | b"u16" | b"u32" | b"u64" | b"u128" | b"usize" | b"i8" | b"i16" | b"i32" | b"i64" | b"i128" | b"isize" | b"f32"
+                        | b"f64" | b"bool" | b"char" | b"str"
+                );
             let w = if j > k { NS_TYPE } else { want };
-            let nn = in_block().or_else(|| if is_def { renamed_in(sc, n) } else { names.lookup(sc, n, w) });
+            let nn = in_block().or_else(|| {
+                if is_def {
+                    renamed_in(sc, n)
+                } else if prim {
+                    names.lookup_only(sc, n, NS_TYPE)
+                } else {
+                    names.lookup(sc, n, w)
+                }
+            });
             // (not a macro's name: `use core::panic as p;` then `p!()` stays as it is written)
             let std_path = |nn: &[u8]| [&b"std::"[..], b"core::", b"alloc::"].iter().any(|p| nn.starts_with(p));
             // (a name before a `:` only when it is no field: the walk back to a `where` is for a name that is renamed)
@@ -4488,6 +4519,26 @@ fn add_hit(found: &mut GlobHit, r: GlobHit) -> bool {
 /// `mod linux` in libc's unix/linux_like does not collide with new's `pub(crate) mod linux`. Each (viewer, module,
 /// name, namespaces) and (viewer, module, segment) is worked out once (a graph whose routes meet is not walked once
 /// per route); one in progress is nothing, which stops a cycle (`pub use super::dsl::*;` back and forth)
+/// The key of an import of the name's item of namespace ns only (`sigaction#t`): no identifier has a `#`
+fn ns_key(n: &[u8], ns: u8) -> Vec<u8> {
+    let mut k = n.to_vec();
+    k.extend_from_slice(if ns == NS_TYPE { b"#t" } else { b"#v" });
+    k
+}
+
+/// The item of the other namespace than ns that module m's name n is, when it is another than nn (one namespace's
+/// item found first): libc's `fn sigaction` and the `struct sigaction` a glob of the same module brings
+fn other_ns_item(names: &Names, m: usize, n: &[u8], ns: u8, nn: &[u8]) -> Option<(Vec<u8>, u8)> {
+    if ns != NS_TYPE && ns != NS_VALUE {
+        return None;
+    }
+    let other = NS_ANY ^ ns;
+    match names.item_at(m, m, n, other) {
+        GlobHit::Item(n2, ns2) if n2 != nn && ns2 & other != 0 => Some((n2, other)),
+        _ => None,
+    }
+}
+
 struct Names<'a> {
     mods: &'a [(Vec<Vec<u8>>, usize, usize)],
     /// whether each module is declared `pub` (in any form)
@@ -4621,6 +4672,14 @@ impl<'a> Names<'a> {
                 };
             }
         }
+        // (an import of one namespace's item, beside another's of the name: other_ns_item)
+        if want == NS_TYPE || want == NS_VALUE {
+            if let Some((nn, ns)) = self.imports.get(&(t, ns_key(n, want))) {
+                if inner || self.vis.imports.contains(&key) {
+                    return GlobHit::Item(nn.clone(), *ns);
+                }
+            }
+        }
         if let Some((nn, ns)) = self.imports.get(&key) {
             if ns & want != 0 && (inner || self.vis.imports.contains(&key)) {
                 return GlobHit::Item(nn.clone(), *ns);
@@ -4663,6 +4722,15 @@ impl<'a> Names<'a> {
     /// type's place that finds no type takes any item (an item zustc does not classify)
     fn lookup(&self, m: usize, n: &[u8], want: u8) -> Option<Vec<u8>> {
         self.lookup_from(m, m, n, want)
+    }
+
+    /// lookup of an item of the namespace want only, with no fallback to the other (a primitive type's name is the
+    /// type unless the program defines a type of the name)
+    fn lookup_only(&self, m: usize, n: &[u8], want: u8) -> Option<Vec<u8>> {
+        match self.item_at(m, m, n, want) {
+            GlobHit::Item(nn, _) => Some(nn),
+            _ => None,
+        }
     }
 
     /// lookup, of module m's n as viewer (where the path is written) sees it
