@@ -802,11 +802,29 @@ impl Cx<'_> {
             }
         }
         // `[T; N]::as_slice()` / `as_mut_slice()`: `&a[..]` / `&mut a[..]`
+        // (and a slice's `as_mut()` (`T: AsMut<[u8]> + ?Sized` at `[u8]`), a Vec's where it is its AsMut<[T]>, or
+        // its AsMut<Vec<T>>, the Vec itself: as_mut_of_vec)
         if margs.is_empty() && matches!(method, "as_slice" | "as_mut_slice" | "as_mut") {
-            if let Some(Ty::Array(..)) = self.peek(recv).map(|t| self.strip_refs(t)) {
+            let array = match self.peek(recv).map(|t| self.strip_refs(t)) {
+                Some(Ty::Array(..)) => true,
+                Some(Ty::Slice(_)) => method == "as_mut",
+                _ => false,
+            };
+            let of_vec = if method == "as_mut" && !array { self.as_mut_of_vec(recv, expected) } else { None };
+            if array || matches!(of_vec, Some((true, _))) {
                 let ix = Expr::Index(Box::new(paren(recv.clone())), Box::new(full_range()), crate::parse::Span::default());
                 let e = Expr::Ref(method != "as_slice", Box::new(ix));
                 return self.expr(&e, expected);
+            }
+            if of_vec.is_some() {
+                // (`&mut *v` through the receiver's references: `&mut **r` of an `r: &mut Vec<T>`)
+                let mut e = paren(recv.clone());
+                let mut t = self.peek(recv);
+                while let Some(Ty::Ref(_, i)) = t {
+                    e = paren(Expr::Unary("*".into(), Box::new(e), crate::parse::Span::default()));
+                    t = Some(*i);
+                }
+                return self.expr(&Expr::Ref(true, Box::new(e)), expected);
             }
         }
         // `x.hash(state)` (x: タプル / Option で Hash の impl がない): std と同じく要素を順に (Option は判別子 (isize) と中身)
@@ -2177,6 +2195,46 @@ impl Cx<'_> {
         } else {
             Expr::Ref(false, Box::new(Expr::Index(Box::new(r), Box::new(Expr::Range(None, None, false)), Default::default())))
         })
+    }
+
+    /// Which of a Vec's two built-in AsMut impls `recv.as_mut()` is (the receiver a Vec, through references):
+    /// `(true, T)` for AsMut<[T]>, `(false, Vec<T>)` for AsMut<Vec<T>>. The expected type tells (`&mut [T]` /
+    /// `&mut Vec<T>`; another `&mut X` is neither), or else the bounds of the function on the receiver's type
+    /// parameter (`S: AsMut<[u8]>`), when they name one of the two. None otherwise: no method, as before (rustc's
+    /// ambiguity is not told apart)
+    pub(crate) fn as_mut_of_vec(&self, recv: &Expr, expected: Option<Ty>) -> Option<(bool, Ty)> {
+        let t = self.peek(recv)?;
+        let base = self.strip_refs(t);
+        let Ty::Struct(sid) = base else { return None };
+        if self.prog.structs[self.prog.base_of(sid) as usize].name != "Vec" {
+            return None;
+        }
+        let elem = self.vec_fields(sid)?.2;
+        match expected {
+            Some(Ty::Ref(true, Ty::Slice(e))) if **e == elem => return Some((true, elem)),
+            Some(Ty::Ref(true, x)) if *x == base => return Some((false, base)),
+            Some(Ty::Ref(true, _)) => return None,
+            _ => {}
+        }
+        let (mut slice, mut itself) = (false, false);
+        for (pn, bs) in &self.prog.sigs[self.root as usize].generics {
+            let pt = self.env.params.iter().find(|(n, _)| n == pn).map(|p| p.1);
+            if !pt.is_some_and(|p| p == t || self.strip_refs(p) == base) {
+                continue;
+            }
+            for b in bs {
+                let b: String = b.chars().filter(|c| !c.is_whitespace()).collect();
+                if let Some(x) = b.strip_prefix("AsMut<") {
+                    slice |= x.starts_with('[');
+                    itself |= x.starts_with("Vec<");
+                }
+            }
+        }
+        match (slice, itself) {
+            (true, false) => Some((true, elem)),
+            (false, true) => Some((false, base)),
+            _ => None,
+        }
     }
 
     /// 組み込みの AsRef の結果の型

@@ -521,6 +521,9 @@ pub struct Program {
     pub struct_index: FxMap<String, u32>,
     /// Variant name → (enum, index): finds variants from `use E::*;` by short name (not when several share it)
     pub variant_names: FxMap<String, Option<(u32, usize)>>,
+    /// The prelude enums' variants a variant of the program's own enum took the short name from, (name, (enum,
+    /// index)): the session gives the name back to the prelude's where the program imports that and not its own
+    pub variant_shadowed: Vec<(String, (u32, usize))>,
     /// The fns whose `impl Trait` return type their body determines
     pub opaque: Vec<u32>,
     /// The items from here on are the prelude's (no overflow checks)
@@ -1528,6 +1531,7 @@ impl Program {
             structs: AdtTable::new(),
             struct_index: FxMap::default(),
             variant_names: FxMap::default(),
+            variant_shadowed: vec![],
             opaque: vec![],
             prelude_from: u32::MAX,
             fn_preds: FxMap::default(),
@@ -1995,12 +1999,28 @@ impl Program {
         // Instances made midway through layout (`RefCell<Node>` in `Node`) were computed with types whose size was
         // not settled yet, so they are redone once everything is settled
         p.relayout_instances();
+        // (a variant of the program's own enum wins over a prelude enum's of the same name: `use ControlFlow::*;` of its
+        // own `enum ControlFlow { Break, .. }`, beside the prelude's that the name brings in. The prelude's it took the
+        // name from are kept in variant_shadowed, for the imports to decide (session). When two of one side share the
+        // name, neither is found)
+        let mut own_names: FxSet<&str> = FxSet::default();
         for sid in 0..p.structs.len() {
             let sd = &p.structs[sid];
             if !sd.is_enum || sd.base.is_some() || sd.name.starts_with('#') {
                 continue;
             }
+            let own = p.struct_item.get(sid).is_some_and(|&i| (i as usize) < user);
             for (vi, v) in sd.variants.iter().enumerate() {
+                if own && own_names.insert(v.name.as_str()) {
+                    if let Some(Some(prev)) = p.variant_names.insert(v.name.clone(), Some((sid as u32, vi))) {
+                        p.variant_shadowed.push((v.name.clone(), prev));
+                    }
+                    continue;
+                }
+                if !own && own_names.contains(v.name.as_str()) {
+                    p.variant_shadowed.push((v.name.clone(), (sid as u32, vi)));
+                    continue;
+                }
                 p.variant_names
                     .entry(v.name.clone())
                     .and_modify(|e| *e = None)
@@ -3587,6 +3607,69 @@ impl Program {
                 return self.impls.contains(&(self.base_of(sid), "AsRef".to_string()));
             }
             return false;
+        }
+        // The built-in AsMut<[T]> of arrays, slices and Vec, AsMut<str> of str and String, and std's `impl AsMut<U>
+        // for &mut T` (through `&mut` only, not `&`). A program's own impls are asked below, by the trait's name
+        if tr.starts_with("AsMut") && tr.contains('<') {
+            let squeeze = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+            let inner = squeeze(&tr["AsMut".len()..]);
+            let mut b = t;
+            while let Ty::Ref(true, i) = b {
+                b = *i;
+            }
+            let name = match b {
+                Ty::Struct(sid) => self.structs[self.base_of(sid) as usize].name.as_str(),
+                _ => "",
+            };
+            let elem = match b {
+                Ty::Array(e, _) | Ty::Slice(e) => Some(*e),
+                Ty::Struct(sid) if name == "Vec" => self.structs[sid as usize].args.first().copied(),
+                _ => None,
+            };
+            // (and a Vec's AsMut<Vec<T>>)
+            if elem.is_some_and(|e| inner == squeeze(&format!("<[{}]>", self.tn(e))))
+                || ((b == Ty::Str || name == "String") && inner == "<str>")
+                || (name == "Vec" && inner == squeeze(&format!("<{}>", self.tn(b))))
+            {
+                return true;
+            }
+        }
+        // std's Extend of Vec<T> (`Extend<T>`, and `Extend<&T>` of a Copy T) and of String (`char`, `&char`, `&str`,
+        // `String`), whose own `extend` takes any of them; a program's own impls by their argument (a type with none is
+        // asked below, by the trait's name)
+        if let Some(x) = tr.strip_prefix("Extend").map(str::trim).and_then(|r| r.strip_prefix('<')).and_then(|r| r.strip_suffix('>')) {
+            if let Ty::Struct(sid) = t {
+                // (the argument's text without lifetimes or white space: `&'a bool` is `&bool`)
+                let mut x2 = String::new();
+                let mut cs = x.chars().peekable();
+                while let Some(c) = cs.next() {
+                    if c == '\'' {
+                        while cs.next_if(|c| c.is_alphanumeric() || *c == '_').is_some() {}
+                    } else if !c.is_whitespace() {
+                        x2.push(c);
+                    }
+                }
+                match self.structs[self.base_of(sid) as usize].name.as_str() {
+                    "Vec" => {
+                        if let Some(&e) = self.structs[sid as usize].args.first() {
+                            let en: String = self.tn(e).chars().filter(|c| !c.is_whitespace()).collect();
+                            if x2 == en || (x2 == format!("&{en}") && self.implements(e, "Copy")) {
+                                return true;
+                            }
+                        }
+                    }
+                    "String" if matches!(x2.as_str(), "char" | "&char" | "&str" | "String") => return true,
+                    _ => {}
+                }
+                // (a program's own impls for the type: one whose argument is the bound's (`impl Extend<u8> for Bits`
+                // is no `Extend<bool>`), or one with the impl's parameters in it, which is taken to fit)
+                let own: Vec<&(Ty, Vec<Ty>, usize)> =
+                    self.impl_targs.get("Extend").map_or(vec![], |v| v.iter().filter(|(s, _, n)| self.match_ty(*s, t, &mut vec![None; *n])).collect());
+                if !own.is_empty() {
+                    let squeeze = |s: String| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+                    return own.iter().any(|(_, a, _)| a.len() != 1 || self.has_param(a[0]) || squeeze(self.tn(a[0])) == x2);
+                }
+            }
         }
         // The targets of collect (built-in): String / Vec / HashMap and so on
         if tr.starts_with("FromIterator") {
@@ -8087,6 +8170,17 @@ impl Program {
         }
         if n >= 2 && name(n - 2) == "process" && name(n - 1) == "exit" {
             return self.index.get("__core_process_exit").copied();
+        }
+        // (`alloc::alloc(layout)` after `use std::alloc;`, and the crate's `alloc::alloc::alloc(layout)`: std::alloc's
+        // functions, the prelude's `__core_*`. `alloc` is kept as a path's head above, as it names the crate too; not
+        // a program's own `alloc::f`)
+        if n >= 2
+            && name(0) == "alloc"
+            && (n == 2 || (n == 3 && name(1) == "alloc"))
+            && matches!(name(n - 1), "alloc" | "alloc_zeroed" | "dealloc" | "realloc" | "handle_alloc_error")
+            && !self.index.contains_key(&format!("alloc::{}", name(n - 1)))
+        {
+            return self.index.get(&format!("__core_{}", name(n - 1))).copied();
         }
         // `core::cmp::max` / `core::mem::swap` and the like go to the prelude's `__core_*`
         if n >= 2 && matches!(name(0), "core" | "std") {
