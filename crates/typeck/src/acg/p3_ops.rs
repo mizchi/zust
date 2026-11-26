@@ -520,6 +520,10 @@ impl Cx<'_> {
         let hint = deref_num(hint);
         let (l, lt) = self.operand(left, hint, cmp).map_err(|m| self.int_float_op(e, left, m))?;
         let Some(mut l) = l else {
+            // (a `()` has no value either, but it does not diverge: `() + 1` has no `Add` (E0369))
+            if lt == Ty::Unit && self.user_code && !cmp {
+                return err(self.op_pos(e), self.cannot_op(op, lt, right));
+            }
             return Ok((None, Ty::Never));
         };
         // (E0369: `X == X` for a struct of the program that is not PartialEq (`<` and the others: PartialOrd), also as an
@@ -546,6 +550,13 @@ impl Cx<'_> {
         let rhint = if lit_str && matches!(self.strip_refs(lt), Ty::Struct(_)) { None } else { rhint.or(Some(lt)) };
         let (r, rt) = self.operand(right, rhint, cmp).map_err(|m| self.int_float_op(e, right, m))?;
         let Some(r) = r else {
+            // (`1 + x` with `x: ()`: not a value that diverges, one that no number adds (E0277), or compares with (E0308))
+            if rt == Ty::Unit && lt != Ty::Unit && self.user_code {
+                if cmp {
+                    return err(self.op_pos(e), format!("mismatched types: expected `{}`, found `()`", self.prog.tn(lt)));
+                }
+                return err(self.op_pos(e), self.cannot_op(op, lt, right).replace("(E0369)", "(E0277)"));
+            }
             return Ok((None, Ty::Never));
         };
 
@@ -559,6 +570,18 @@ impl Cx<'_> {
                 r = self.b.ins().load(ct, mf(), r, 0);
                 lt = *a;
                 rt = *a;
+            }
+        }
+        // (`a == b` with `a: &i32, b: i32`: no `PartialEq<i32>` for `&i32`, nor `PartialOrd` (E0277); `+` and the others
+        // have their `&i32 + i32` impls)
+        if cmp && self.user_code {
+            let num = |t: Ty| t.is_int() || t.is_float() || matches!(t, Ty::Char | Ty::Bool);
+            let one_ref = match (lt, rt) {
+                (Ty::Ref(_, i), t) | (t, Ty::Ref(_, i)) => *i == t && num(t),
+                _ => false,
+            };
+            if one_ref {
+                return err(self.op_pos(e), format!("can't compare `{}` with `{}` (E0277)", self.prog.tn(lt), self.prog.tn(rt)));
             }
         }
         if !matches!(op, "==" | "!=") || !lt.is_agg() {

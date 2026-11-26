@@ -3438,3 +3438,18 @@ fn reference_patterns_breaks_and_destructuring_of_another_type() {
     assert_eq!(line("fn main() {\n    let mut x = &0;\n    let mut y = &0;\n    (x, y) = &(1, 2);\n    let _ = (x, y);\n}\n"), Some(4));
     assert_eq!(first("fn main() {\n    let (mut a, mut b) = (1, 2);\n    (a, b) = (b, a);\n    [a, b] = [5, 6];\n    let r = &(7, 8);\n    (a, b) = *r;\n    let _ = (a, b);\n}\n"), None);
 }
+
+#[test]
+fn operators_on_a_unit_or_a_reference_to_a_number() {
+    // (a `()` operand is a value that does not diverge: no number adds it (E0277), and `()` adds nothing (E0369); a
+    // reference to a number compares with no number (no `PartialEq<i32>` for `&i32`, E0277), though `+` has its impl)
+    let line = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| d.line)
+    };
+    assert_eq!(line("fn main() {\n    let x = ();\n    let _y = 1 +\n        x;\n}\n"), Some(3));
+    assert_eq!(line("fn main() {\n    let _y = () + ();\n}\n"), Some(2));
+    assert_eq!(line("fn f(a: &i32, b: i32) -> bool {\n    a == b\n}\nfn main() {}\n"), Some(2));
+    assert_eq!(line("fn f(a: &u8, b: u8) -> bool {\n    a < b\n}\nfn main() {}\n"), Some(2));
+    assert_eq!(line("fn f(a: &i32, b: i32) -> i32 {\n    let _ = *a == b;\n    let _ = a == &b;\n    a + b\n}\nfn main() {\n    let _ = () == ();\n    let _ = f(&1, 2);\n}\n"), None);
+}

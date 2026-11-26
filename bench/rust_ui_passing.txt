@@ -3098,6 +3098,7 @@ run-pass	for-loop-while/for-loop-mut-ref-element.rs
 run-pass	for-loop-while/for-loop-no-std.rs
 run-pass	for-loop-while/for-loop-panic.rs
 compile-fail	for-loop-while/for-loop-refutable-pattern-error-message.rs
+compile-fail	for-loop-while/for-loop-type-error.rs
 run-pass	for-loop-while/for-loop-unconstrained-element-type-i32-fallback.rs
 compile-fail	for-loop-while/for-loop-unconstrained-element-type.rs
 run-pass	for-loop-while/foreach-external-iterators-break.rs
@@ -7346,6 +7347,7 @@ compile-fail	span/macro-ty-params.rs
 compile-fail	span/missing-unit-argument.rs
 compile-fail	span/move-closure.rs
 compile-fail	span/multiline-span-E0072.rs
+compile-fail	span/multiline-span-simple.rs
 check-pass	span/multispan-import-lint.rs
 compile-fail	span/mut-arg-hint.rs
 compile-fail	span/mutability-suggestion-fullwidth-ampersand.rs
@@ -8264,6 +8266,7 @@ compile-fail	traits/object/with-self-in-projection-output-bad.rs
 run-pass	traits/objects-owned-object-borrowed-method-headerless.rs
 compile-fail	traits/param-without-lifetime-constraint.rs
 run-pass	traits/parameterized-with-bounds.rs
+compile-fail	traits/partialeq-ref-mismatch-diagnostic.rs
 check-pass	traits/polymorphic-trait-creation-7673.rs
 compile-fail	traits/projection-no-progress-cycle-issue-159750.rs
 compile-fail	traits/question-mark-span-144304.rs
@@ -8490,6 +8493,7 @@ compile-fail	typeck/call-unit-struct-as-fn.rs
 compile-fail	typeck/check-args-on-fn-err-2.rs
 compile-fail	typeck/check-args-on-fn-err.rs
 compile-fail	typeck/closure-ty-mismatch-issue-128561.rs
+compile-fail	typeck/coercion-check-for-addition-issue-40610.rs
 compile-fail	typeck/coercion-check-for-indexing-expression-issue-40861.rs
 compile-fail	typeck/consider-borrowing-141810-1.rs
 compile-fail	typeck/consider-borrowing-141810-2.rs
@@ -8642,6 +8646,7 @@ compile-fail	typeck/typeck_type_placeholder_mismatch.rs
 run-pass	typeck/ufcs-type-params.rs
 compile-fail	typeck/unconstrained-impl-extra-parameter.rs
 run-pass	typeck/unify-return-ty.rs
+compile-fail	typeck/unit-type-add-error-11771.rs
 compile-fail	typeck/unused-type-parameter-span-30236.rs
 compile-fail	typeck/while-loop-block-cond.rs
 compile-fail	typeck/while-type-error.rs
