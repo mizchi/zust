@@ -1252,7 +1252,7 @@ impl Cx<'_> {
                         // (a copy of the pair: an argument that reassigns the pointer must not change the receiver)
                         let tmp = self.temp(vt);
                         self.copy(tmp, v, vt);
-                        return self.dyn_method_call_on(tmp, tr, e, Some(vt));
+                        return self.dyn_method_call_on(tmp, tr, e, Some(vt), expected);
                     }
                 }
             }
@@ -1368,12 +1368,12 @@ impl Cx<'_> {
                     Place::Mem(a, o, Ty::Struct(sid)) => break (a, o, sid),
                     Place::Mem(a, o, rt @ (Ty::Ref(_, Ty::Dyn(tr)) | Ty::Box(Ty::Dyn(tr)))) => {
                         let fat = self.addr_plus(a, o);
-                        return self.dyn_method_call_on(fat, tr, e, Some(rt));
+                        return self.dyn_method_call_on(fat, tr, e, Some(rt), expected);
                     }
                     // (a `dyn Tr` place (the tail of a struct, `x.inner.get()`): its place is its pair)
                     Place::Mem(a, o, t @ Ty::Dyn(tr)) => {
                         let fat = self.addr_plus(a, o);
-                        return self.dyn_method_call_on(fat, tr, e, Some(Ty::Ref(true, intern(t))));
+                        return self.dyn_method_call_on(fat, tr, e, Some(Ty::Ref(true, intern(t))), expected);
                     }
                     // (a reference to a struct with an unsized tail: the place of its pair, as struct_base takes it)
                     Place::Mem(a, o, Ty::Ref(_, i) | Ty::Box(i)) if i.is_dst_struct() => {

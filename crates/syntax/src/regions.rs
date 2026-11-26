@@ -911,8 +911,50 @@ pub fn adt_regions(g: &Generics, tys: &[&PTy]) -> Option<Box<RAdtSyn>> {
     Some(Box::new(RAdtSyn { lts: s.lts, fields, outlives, ty_outlives }))
 }
 
+/// Whether t has a trait object with no lifetime bound that is not behind a reference (behind: t is a reference's
+/// referent)
+fn bare_dyn(t: &PTy, behind: bool) -> bool {
+    match t {
+        // (not one whose trait takes lifetimes (`dyn Obj<'a>`): the trait's own bound, `trait Obj<'a>: 'a`, may be
+        // its default, which the header does not see)
+        PTy::Dyn(bs) => {
+            !behind
+                && !bs.iter().any(|b| matches!(b, Bound::Lifetime(_)))
+                && !bs.iter().any(|b| matches!(b, Bound::Trait(_, p) if p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Lifetime(_))))))
+        }
+        PTy::Ref(_, _, i) => bare_dyn(i, true),
+        // (not one among a path's arguments: the type's parameter may take a lifetime bound that is its default
+        // (`struct W<'a, T: ?Sized + 'a>`, `impl<'a> W<'a, dyn Obj>`), and the header cannot tell a std type
+        // (`Box<dyn Tr>`, 'static) from a user's of the same name)
+        _ => false,
+    }
+}
+
+/// t with `+ 'static` on each trait object bare_dyn finds
+fn static_dyn(t: &mut PTy, behind: bool) {
+    match t {
+        PTy::Dyn(_) => {
+            if bare_dyn(t, behind) {
+                if let PTy::Dyn(bs) = t {
+                    bs.push(Bound::Lifetime("'static".to_string()));
+                }
+            }
+        }
+        PTy::Ref(_, _, i) => static_dyn(i, true),
+        _ => {}
+    }
+}
+
 /// The regions of an impl / trait header
 pub fn hdr_regions(g: &Generics, self_ty: Option<&PTy>) -> Option<Box<RImplSyn>> {
+    // (the self type a trait object, `impl dyn Tr` / `impl X for dyn Tr`, is `dyn Tr + 'static`: its default is
+    // decided by the header, not by the `&self` that later holds Self)
+    let static_obj = self_ty.filter(|t| bare_dyn(t, false)).map(|t| {
+        let mut t = t.clone();
+        static_dyn(&mut t, false);
+        t
+    });
+    let self_ty = static_obj.as_ref().or(self_ty);
     // (`impl S<'_>`: each `'_` in the self type is a lifetime parameter of the impl of its own, named `'_0`, `'_1`, ..)
     let mut anon = vec![];
     let named = self_ty.filter(|t| has_anon(t)).map(|t| {

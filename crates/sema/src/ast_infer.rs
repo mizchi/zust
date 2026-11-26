@@ -2503,22 +2503,84 @@ impl Inf<'_> {
             dt = Some(*i);
         }
         if let Some(Ty::Dyn(tr)) = dt {
+            // (the trait's method, else one of `impl dyn Tr { .. }` / `impl X for dyn Tr`: `__dyn_Tr::m`)
             let decl = self
                 .prog
                 .traits
                 .get(tr)
-                .and_then(|ds| ds.iter().copied().find(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(n)));
+                .and_then(|ds| ds.iter().copied().find(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(n)))
+                .or_else(|| self.prog.prim_method(Ty::Dyn(tr), n).filter(|&d| self.prog.sigs[d as usize].has_self))
+                // (or a default method of a trait the object implements, `impl MyTrait for dyn Tr {}`)
+                .or_else(|| {
+                    self.prog.dyn_impl_traits(tr).into_iter().filter(|t2| self.prog.implements(Ty::Dyn(tr), t2)).find_map(|t2| {
+                        self.prog.traits.get(t2)?.iter().copied().find(|&d| {
+                            let s = &self.prog.sigs[d as usize];
+                            s.has_body && s.has_self && self.prog.names[d as usize].rsplit("::").next() == Some(n)
+                        })
+                    })
+                });
             if let Some(d) = decl {
                 let sig = &self.prog.sigs[d as usize];
+                // (an impl's parameters solved from the receiver's object: `impl<T> Get<T> for dyn O<T>` through `dyn
+                // O<u8>`, T u8)
+                let mut sol = vec![None; sig.generics.len()];
+                if let (false, Some(&p0 @ Ty::Ref(m, _))) = (sol.is_empty(), sig.params.first()) {
+                    self.prog.match_ty(p0, Ty::Ref(m, crate::types::intern(Ty::Dyn(tr))), &mut sol);
+                }
+                // (a default's trait parameters from the one impl for the object: `impl<T> Get<T> for dyn Obj<T>`
+                // through `dyn Obj<u8>`, T u8)
+                if let (Some(trn), true) = (sig.trait_of.as_deref(), sol.iter().skip(1).any(|x| x.is_none())) {
+                    let prog = self.prog;
+                    let fits: Vec<Vec<Ty>> = prog
+                        .impl_targs
+                        .get(trn)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|(ist, args, ng)| {
+                            let mut isol = vec![None; *ng];
+                            if !prog.match_ty(*ist, Ty::Dyn(tr), &mut isol) {
+                                return None;
+                            }
+                            let a: Vec<Ty> = args.iter().map(|&a| prog.partial_subst(a, &isol)).collect();
+                            a.iter().all(|&t| !prog.has_param(t)).then_some(a)
+                        })
+                        .collect();
+                    if let [a] = fits.as_slice() {
+                        for (i, &t) in a.iter().enumerate() {
+                            if let Some(x @ None) = sol.get_mut(1 + i) {
+                                *x = Some(t);
+                            }
+                        }
+                    }
+                }
                 let (ps, ret) = (sig.params[1..].to_vec(), sig.ret);
                 for (a, p) in avs.into_iter().zip(ps) {
+                    let p = self.prog.partial_subst(p, &sol);
                     if !self.prog.has_param(p) {
                         let k = self.known(p);
                         self.unify(a, k);
                     }
                 }
+                let ret = self.prog.partial_subst(ret, &sol);
                 if !self.prog.has_param(ret) {
                     return self.known(ret);
+                }
+                // (the method's own parameters from its turbofish, the last ones: `x.make::<u8>()`)
+                let tys: Vec<&PTy> = tf.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None }).collect();
+                let ng = sol.len();
+                if !tys.is_empty() && tys.len() <= ng {
+                    let mut pv: Vec<Option<u32>> = vec![None; ng];
+                    for (i, t) in sol.into_iter().enumerate() {
+                        pv[i] = t.map(|t| self.known(t));
+                    }
+                    for (k, t) in tys.into_iter().enumerate() {
+                        let v = self.ty_var(t);
+                        let i = (ng + k).wrapping_sub(tf.len());
+                        if i < ng && pv[i].is_none() {
+                            pv[i] = Some(v);
+                        }
+                    }
+                    return self.known_g(ret, &mut pv);
                 }
             }
             return self.var();

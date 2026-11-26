@@ -7683,6 +7683,7 @@ compile-fail	suggestions/ignore-nested-field-binding.rs
 compile-fail	suggestions/imm-ref-trait-object-literal-bound-regions.rs
 compile-fail	suggestions/imm-ref-trait-object-literal.rs
 compile-fail	suggestions/imm-ref-trait-object.rs
+compile-fail	suggestions/impl-on-dyn-trait-with-implicit-static-bound.rs
 compile-fail	suggestions/impl-trait-return-trailing-semicolon.rs
 compile-fail	suggestions/import-trait-for-method-call.rs
 compile-fail	suggestions/import-visible-path-39175.rs
@@ -8238,6 +8239,7 @@ run-pass	traits/normalize/normalize-associated-type-in-where-clause.rs
 compile-fail	traits/not-suggest-non-existing-fully-qualified-path.rs
 compile-fail	traits/object-does-not-impl-trait.rs
 compile-fail	traits/object/auto-dedup-in-impl.rs
+run-pass	traits/object/auto-dedup.rs
 check-pass	traits/object/bounds-cycle-1.rs
 check-pass	traits/object/bounds-cycle-2.rs
 check-pass	traits/object/bounds-cycle-3.rs

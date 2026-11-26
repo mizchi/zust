@@ -656,6 +656,9 @@ pub struct Program {
     /// And the ones with no parameters, `impl Marker for dyn Obj<u8>`: (trait, the object's first trait as written,
     /// without spaces), which only that object implements (not `dyn Obj<u16>`)
     pub dyn_impls_exact: FxSet<(String, String)>,
+    /// Of both, the ones whose object writes a lifetime (`impl Tr for dyn Obj + '_`), by the trait and the object's
+    /// trait's name: the others are for `dyn Obj + 'static` only
+    pub dyn_impls_lt: FxSet<(String, String)>,
     /// traits implemented for fn pointers (`impl Tr for fn(A) -> B`; generic ones count for every fn pointer)
     pub fnptr_impls: HashSet<(Option<Ty>, String)>,
     /// Supertraits (`trait Bar: Foo`)
@@ -1518,6 +1521,7 @@ impl Program {
             ref_impl_pats: vec![],
             dyn_impls: FxSet::default(),
             dyn_impls_exact: FxSet::default(),
+            dyn_impls_lt: FxSet::default(),
             fnptr_impls: Default::default(),
             deny_unreachable: false,
             deny_must_use: false,
@@ -2438,12 +2442,21 @@ impl Program {
             // parameters by the object as written)
             if sn.starts_with("__dyn_") {
                 if let Some(TySyn::Dyn(d)) = &sm.impl_self_ty {
+                    // (whether its object writes a lifetime other than 'static: the header's regions say, as the
+                    // text the summary keeps of the object does not)
+                    let any_lt = !sm.hdr_regions.as_deref().is_some_and(|r| r.self_slots.first() == Some(&crate::types::R_STATIC));
                     if sm.impl_generics.is_empty() {
                         p.dyn_impls_exact.insert((tr.clone(), dyn_first(d)));
+                        if any_lt {
+                            p.dyn_impls_lt.insert((tr.clone(), dyn_first(d)));
+                        }
                     } else {
                         let first = d.split('+').next().unwrap_or(d).trim();
                         let name = first.split(|c: char| c == '(' || c == '<').next().unwrap_or(first).trim();
                         p.dyn_impls.insert((tr.clone(), name.rsplit("::").next().unwrap_or(name).to_string()));
+                        if any_lt {
+                            p.dyn_impls_lt.insert((tr.clone(), name.rsplit("::").next().unwrap_or(name).to_string()));
+                        }
                     }
                 }
             }
@@ -2458,6 +2471,20 @@ impl Program {
                     let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
                     if let Some(t) = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok()) {
                         p.ref_impl_pats.push((t, tr.clone(), gn.len(), sm.impl_generics.iter().map(|g| g.1.clone()).collect()));
+                    }
+                }
+                // (`impl Ext<u8> for dyn Obj {}` of a generic trait of the program's: its arguments, for a default
+                // method's parameters through the object (`x.value()` with `fn value(&self) -> Option<T>`))
+                if sn.starts_with("__dyn_") && !sm.impl_trait_args.is_empty() && p.traits.contains_key(tr) {
+                    let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+                    let st = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok());
+                    let args: Option<Vec<Ty>> = sm.impl_trait_args.iter().map(|a| p.resolve_g(a, &gn).ok()).collect();
+                    if let (Some(st), Some(args)) = (st, args) {
+                        if sm.impl_trait_lts {
+                            p.impl_targs_lts.insert((tr.clone(), st));
+                        }
+                        p.impl_targs.entry(tr.clone()).or_default().push((st, args, gn.len()));
+                        p.impl_targ_bounds.entry(tr.clone()).or_default().push(sm.impl_generics.iter().map(|g| g.1.clone()).collect());
                     }
                 }
                 continue;
@@ -3871,7 +3898,8 @@ impl Program {
         // (`impl dyn Tr { fn m(&self) }`: `__dyn_Tr::m`)
         if let Ty::Dyn(s) = t {
             let p = s.split('+').next().unwrap_or("").trim();
-            let p = p.split('<').next().unwrap_or(p).rsplit("::").next().unwrap_or(p);
+            // (`ObjectTrait < u8 >` as the object's text spaces it: the name alone)
+            let p = p.split('<').next().unwrap_or(p).rsplit("::").next().unwrap_or(p).trim();
             if let Some(&id) = self.index.get(&format!("__dyn_{p}::{name}")) {
                 return Some(id);
             }
@@ -8211,6 +8239,29 @@ fn dyn_first(d: &str) -> String {
     match first[..cut].rfind("::") {
         Some(i) => first[i + 2..].to_string(),
         None => first,
+    }
+}
+
+impl Program {
+    /// Whether the program's impl of trait t for the object `dyn tr` (its text) writes the object's lifetime (`impl X
+    /// for dyn Obj<u8> + '_`): by the object as written for an impl with no parameters, by its trait's name for a
+    /// generic one. Else it is for `dyn Obj + 'static`
+    pub fn dyn_impl_writes_lt(&self, t: &str, tr: &str) -> bool {
+        let first = dyn_first(tr);
+        let name = first.split(|c: char| c == '(' || c == '<').next().unwrap_or(&first).trim().to_string();
+        let key = |o: String| (t.to_string(), o);
+        (self.dyn_impls_exact.contains(&key(first.clone())) && self.dyn_impls_lt.contains(&key(first))) || (self.dyn_impls.contains(&key(name.clone())) && self.dyn_impls_lt.contains(&key(name)))
+    }
+
+    /// The traits the program implements for the trait object `dyn tr` (its text) by an impl of its own (`impl
+    /// MyTrait for dyn Tr {}`, generic or not): the candidates for a default method called through the object
+    pub fn dyn_impl_traits(&self, tr: &str) -> Vec<&String> {
+        if self.dyn_impls_exact.is_empty() && self.dyn_impls.is_empty() {
+            return vec![];
+        }
+        let first = dyn_first(tr);
+        let name = first.split(|c: char| c == '(' || c == '<').next().unwrap_or(&first).trim().to_string();
+        self.dyn_impls_exact.iter().filter(|(_, o)| *o == first).chain(self.dyn_impls.iter().filter(|(_, o)| *o == name)).map(|(t, _)| t).collect()
     }
 }
 
