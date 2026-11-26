@@ -91,9 +91,11 @@ fn expand_in(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>, modules: &
                 Some(Item::Fn { name, .. }) if m.effects.get(name).is_some_and(|e| !e.is_empty()) => {
                     errs.push(TsError { file: None, pos: *npos, msg: format!("`{n}` performs an effect (a generator in JS): it cannot be imported yet") });
                 }
-                Some(Item::Fn { name, generics, args, ret, .. }) => {
+                Some(Item::Fn { name, generics, args, ret, is_async, .. }) => {
                     let args: Vec<TyS> = args.iter().map(|(_, t)| t.clone()).collect();
                     let ret = ret.clone().unwrap_or(TyS::Unit);
+                    // (an `async fn`'s callers get a `Promise` of its result)
+                    let ret = if *is_async { TyS::Name("Promise".into(), vec![ret], *npos) } else { ret };
                     for t in args.iter().chain([&ret]) {
                         uses(t, generics, &mut types);
                     }

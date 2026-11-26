@@ -332,7 +332,7 @@ pub fn pat_idents(p: &Pat, out: &mut Vec<String>) {
                 pat_idents(s, out);
             }
         }
-        Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Or(v) | Pat::Slice(v) => {
+        Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Or(v, _) | Pat::Slice(v) => {
             for x in v {
                 pat_idents(x, out);
             }
@@ -1378,7 +1378,7 @@ pub fn binds_ref_mut(p: &Pat) -> bool {
     match p {
         Pat::Ident(by_ref, m, _, sub) => (*by_ref && *m) || sub.as_deref().is_some_and(binds_ref_mut),
         Pat::Ref(_, q) => binds_ref_mut(q),
-        Pat::Or(v) | Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Slice(v) => v.iter().any(binds_ref_mut),
+        Pat::Or(v, _) | Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Slice(v) => v.iter().any(binds_ref_mut),
         Pat::Struct(_, fs, _) => fs.iter().any(|f| binds_ref_mut(&f.1)),
         _ => false,
     }
@@ -1390,7 +1390,7 @@ pub fn binds_by_value(p: &Pat) -> bool {
             (!*by_ref && n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && n != "_") || sub.as_deref().is_some_and(binds_by_value)
         }
         Pat::Ref(_, q) => binds_by_value(q),
-        Pat::Or(v) | Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Slice(v) => v.iter().any(binds_by_value),
+        Pat::Or(v, _) | Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Slice(v) => v.iter().any(binds_by_value),
         Pat::Struct(_, fs, _) => fs.iter().any(|f| binds_by_value(&f.1)),
         _ => false,
     }
@@ -1412,7 +1412,7 @@ pub fn unused_bindings(params: &[&Pat], body: &Block) -> Vec<(Option<Pos>, Strin
             Pat::Ref(_, q) => names(q, out),
             Pat::Struct(_, fs, _) => fs.iter().for_each(|(_, q)| names(q, out)),
             // (an or-pattern binds the same names in every alternative: the first's)
-            Pat::Or(ps) => ps.iter().take(1).for_each(|q| names(q, out)),
+            Pat::Or(ps, _) => ps.iter().take(1).for_each(|q| names(q, out)),
             _ => {}
         }
     }

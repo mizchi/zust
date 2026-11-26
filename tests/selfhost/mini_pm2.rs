@@ -68,6 +68,13 @@ pub mod proc_macro2 {
         }
     }
 
+    // (`i == "doc"` on an `Ident`: proc_macro2 takes any `AsRef<str>`; macros.rs only compares with `&str`)
+    impl<'a> PartialEq<&'a str> for Ident {
+        fn eq(&self, o: &&'a str) -> bool {
+            self.name == *o
+        }
+    }
+
     impl fmt::Display for Ident {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             write!(f, "{}", self.name)
@@ -82,6 +89,9 @@ pub mod proc_macro2 {
     }
 
     impl Punct {
+        pub fn new(ch: char, spacing: Spacing) -> Punct {
+            Punct { ch: ch, spacing: spacing, span: Span::call_site() }
+        }
         pub fn as_char(&self) -> char {
             self.ch
         }
@@ -149,6 +159,51 @@ pub mod proc_macro2 {
                 TokenTree::Punct(p) => p.span,
                 TokenTree::Literal(l) => l.span,
             }
+        }
+    }
+
+    // (Printing as proc_macro2 does: tokens apart by one space, none after a joint punct, `{ .. }` with spaces inside)
+    impl fmt::Display for Punct {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{}", self.ch)
+        }
+    }
+
+    impl fmt::Display for Group {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            let (open, close) = match self.delim {
+                Delimiter::Parenthesis => ("(", ")"),
+                Delimiter::Brace => ("{ ", "}"),
+                Delimiter::Bracket => ("[", "]"),
+                Delimiter::None => ("", ""),
+            };
+            let pad = if self.delim == Delimiter::Brace && !self.stream.toks.is_empty() { " " } else { "" };
+            write!(f, "{}{}{}{}", open, self.stream, pad, close)
+        }
+    }
+
+    impl fmt::Display for TokenTree {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            match self {
+                TokenTree::Group(g) => write!(f, "{}", g),
+                TokenTree::Ident(i) => write!(f, "{}", i),
+                TokenTree::Punct(p) => write!(f, "{}", p),
+                TokenTree::Literal(l) => write!(f, "{}", l),
+            }
+        }
+    }
+
+    impl fmt::Display for TokenStream {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            let mut joint = false;
+            for (i, t) in self.toks.iter().enumerate() {
+                if i != 0 && !joint {
+                    write!(f, " ")?;
+                }
+                joint = matches!(t, TokenTree::Punct(p) if p.spacing == Spacing::Joint);
+                write!(f, "{}", t)?;
+            }
+            Ok(())
         }
     }
 

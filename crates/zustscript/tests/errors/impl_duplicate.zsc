@@ -1,0 +1,2 @@
+// expect: `P::f` is already defined at
+type P = { x: i32 } impl P { fn f(self) -> i32 { 1 } } impl P { fn f() -> i32 { 2 } } fn g(p: P) -> i32 { p.f() }

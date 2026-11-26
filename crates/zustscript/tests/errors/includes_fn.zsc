@@ -1,0 +1,2 @@
+// expect: `==` compares values
+fn f(xs: Array<fn(i32) -> i32>, g: fn(i32) -> i32) -> bool { xs.includes(g) }

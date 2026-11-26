@@ -820,7 +820,7 @@ impl Inf<'_> {
                 };
                 self.pat(p, i, None);
             }
-            Pat::Or(cs) => {
+            Pat::Or(cs, _) => {
                 for c in cs {
                     self.pat(c, v, mode);
                 }

@@ -1,0 +1,2 @@
+// expect: `self` is a parameter of a function in an `impl`
+fn f(self) -> i32 { 1 }

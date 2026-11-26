@@ -1,6 +1,7 @@
 """Bundles zustc's own crates/syntax/src/parse.rs and crates/syntax/src/ast_closure.rs (closure analysis on our own syntax tree) into a single-file program.
 usage: python3 tests/selfhost/build_ast_closure.py > out/selfhost/ast_closure_main.rs
-For each file given as an argument, main prints the free variables of the closures in fn bodies and whether each capture is used by value."""
+For each file given as an argument, main prints the free variables of the closures in fn bodies and whether each capture is used by value.
+(parse.rs calls regions::mentions_lt; regions.rs uses types, so both come along)"""
 
 parse = open("crates/syntax/src/parse.rs").read()
 clo = open("crates/syntax/src/ast_closure.rs").read()
@@ -14,6 +15,12 @@ mod ast_closure {
 
 mod fxhash {
 """ + fx + """}
+
+mod regions {
+""" + open("crates/syntax/src/regions.rs").read() + """}
+
+mod types {
+""" + open("crates/syntax/src/types.rs").read() + """}
 
 use parse::{Block, Item, ItemKind, parse_file};
 

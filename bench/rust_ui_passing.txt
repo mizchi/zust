@@ -2666,6 +2666,7 @@ compile-fail	error-codes/E0403.rs
 compile-fail	error-codes/E0404.rs
 compile-fail	error-codes/E0405.rs
 compile-fail	error-codes/E0407.rs
+compile-fail	error-codes/E0408.rs
 compile-fail	error-codes/E0411.rs
 compile-fail	error-codes/E0412.rs
 compile-fail	error-codes/E0415.rs
@@ -4940,6 +4941,7 @@ run-pass	mir/simplify-branch-same.rs
 compile-fail	mir/static-by-value-slice.rs
 compile-fail	mir/static-by-value-str.rs
 compile-fail	mismatched_types/E0053.rs
+compile-fail	mismatched_types/E0409.rs
 compile-fail	mismatched_types/abridged.rs
 compile-fail	mismatched_types/array-arg-expected-usize.rs
 compile-fail	mismatched_types/array-len-is-closure.rs
@@ -4990,6 +4992,7 @@ compile-fail	mismatched_types/ref-pat-suggestions.rs
 compile-fail	mismatched_types/show_module.rs
 compile-fail	mismatched_types/starts-with-stringify-type-mismatch-48364.rs
 compile-fail	mismatched_types/string-clone-mismatch-61106.rs
+compile-fail	mismatched_types/suggest-adding-or-removing-ref-for-binding-pattern.rs
 compile-fail	mismatched_types/suggest-boxed-trait-objects-instead-of-impl-trait.rs
 compile-fail	mismatched_types/suggest-extra-borrow-issue-78613.rs
 compile-fail	mismatched_types/suggest-option-asderef-inference-var.rs
@@ -5449,6 +5452,8 @@ compile-fail	on-unimplemented/suggest_tuple_wrap_root_obligation.rs
 compile-fail	or-patterns/already-bound-name.rs
 run-pass	or-patterns/basic-switch.rs
 run-pass	or-patterns/basic-switchint.rs
+compile-fail	or-patterns/binding-typo-2.rs
+compile-fail	or-patterns/binding-typo.rs
 run-pass	or-patterns/bindings-runpass-1.rs
 run-pass	or-patterns/bindings-runpass-2.rs
 compile-fail	or-patterns/exhaustiveness-non-exhaustive.rs
@@ -5468,6 +5473,7 @@ compile-fail	or-patterns/mismatched-bindings-async-fn.rs
 compile-fail	or-patterns/missing-bindings.rs
 run-pass	or-patterns/mix-with-wild.rs
 compile-fail	or-patterns/multiple-pattern-typo.rs
+compile-fail	or-patterns/or-patterns-binding-type-mismatch.rs
 compile-fail	or-patterns/or-patterns-syntactic-fail.rs
 run-pass	or-patterns/or-patterns-syntactic-pass-2021.rs
 check-pass	or-patterns/or-patterns-syntactic-pass.rs
@@ -6336,6 +6342,8 @@ compile-fail	pattern/move-ref-patterns/pattern-ref-bindings-reassignment.rs
 compile-fail	pattern/multiple-bindings-on-var.rs
 compile-fail	pattern/mut-pattern-of-immutable-borrow.rs
 compile-fail	pattern/no-patterns-in-args.rs
+compile-fail	pattern/or-pattern-binding-mismatch.rs
+compile-fail	pattern/or-pattern-mismatched-variable-and-variant.rs
 compile-fail	pattern/pat-struct-field-expr-has-type.rs
 compile-fail	pattern/pat-tuple-overfield.rs
 compile-fail	pattern/pat-tuple-underfield.rs
@@ -6945,6 +6953,8 @@ compile-fail	resolve/resolve-conflict-item-vs-import.rs
 compile-fail	resolve/resolve-conflict-type-vs-import.rs
 compile-fail	resolve/resolve-dont-hint-macro.rs
 compile-fail	resolve/resolve-hint-macro.rs
+compile-fail	resolve/resolve-inconsistent-binding-mode.rs
+compile-fail	resolve/resolve-inconsistent-names.rs
 run-pass	resolve/resolve-issue-2428.rs
 compile-fail	resolve/resolve-primitive-fallback.rs
 run-pass	resolve/resolve-pseudo-shadowing.rs
@@ -7324,6 +7334,7 @@ compile-fail	span/issue-29595.rs
 compile-fail	span/issue-34264.rs
 compile-fail	span/issue-36537.rs
 compile-fail	span/issue-39018.rs
+compile-fail	span/issue-39698.rs
 compile-fail	span/issue-40157.rs
 compile-fail	span/issue-42234-unknown-receiver-type.rs
 compile-fail	span/issue-43927-non-ADT-derive.rs

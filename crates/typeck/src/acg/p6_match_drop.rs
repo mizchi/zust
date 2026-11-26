@@ -173,6 +173,13 @@ impl Cx<'_> {
             self.lub_fnptr -= 1;
             return r;
         }
+        // (E0408: before anything of the arms' types, as rustc's resolver checks it, and before an arm with a guard
+        // becomes one arm per alternative)
+        if self.user_code {
+            for a in arms.iter().filter(|a| has_or(&a.pat)) {
+                self.or_pat_names(&a.pat, &mut vec![])?;
+            }
+        }
         // (an arm with a guard and an or-pattern: the guard runs for each alternative that matches, left to right.
         // The arm becomes one arm per alternative)
         if arms.iter().any(|a| a.guard.is_some() && has_or(&a.pat)) {
@@ -928,7 +935,7 @@ impl Cx<'_> {
                 }
                 _ => push(out, place),
             },
-            Pat::Or(ps) => {
+            Pat::Or(ps, _) => {
                 for q in ps {
                     self.tested_places(q, place, t, out, depth + 1);
                 }
@@ -1300,7 +1307,7 @@ impl Cx<'_> {
                 }
                 Ok(())
             }
-            Pat::Or(cases) => {
+            Pat::Or(cases, _) => {
                 let ok = self.b.create_block();
                 let n = cases.len();
                 for (i, case) in cases.iter().enumerate() {
@@ -1557,7 +1564,7 @@ impl Cx<'_> {
             fn wild(p: &Pat) -> bool {
                 match p {
                     Pat::Wild => true,
-                    Pat::Or(ps) => ps.iter().all(wild),
+                    Pat::Or(ps, _) => ps.iter().all(wild),
                     _ => false,
                 }
             }
@@ -1577,6 +1584,72 @@ impl Cx<'_> {
         let Ty::Struct(sid) = t else { return false };
         let sd = &self.prog.structs[self.prog.base_of(sid) as usize];
         sd.name == n && sd.fields.is_empty() && sd.variants.is_empty() && !self.prog.is_tuple(sid)
+    }
+
+    /// A bare name of a pattern that pat_bind takes for a unit variant, a constant or a unit struct, whatever the
+    /// value's type: no binding
+    fn pat_ident_names_item(&self, p: &Pat) -> bool {
+        let Pat::Ident(false, false, n, None) = p else { return false };
+        unit_variant_ident(self.prog, p).is_some()
+            || const_lit_pat(self.prog, p).is_some()
+            || ((self.prog.lower_consts || n.trim_start_matches('_').starts_with(|c: char| c.is_uppercase()))
+                && self.prog.const_index.get(n.as_str()).is_some_and(|&ci| self.prog.consts[ci as usize].stat.is_none())
+                && self.lookup(n).is_none())
+            || self.prog.struct_by_p(&PPath::of(&path_of(n)), self.self_sid).is_some_and(|sid| {
+                let sd = &self.prog.structs[sid as usize];
+                !sd.is_enum && sd.fields.is_empty() && sd.variants.is_empty() && !self.prog.is_tuple(sid)
+            })
+    }
+
+    /// E0408: the alternatives of each or-pattern in p bind the same names, checked as rustc's resolver does before
+    /// any type (an or-pattern inside an alternative first, then the alternatives). The names p binds go to out,
+    /// each once, in the order rustc's binding map has them
+    pub(crate) fn or_pat_names(&self, p: &Pat, out: &mut Vec<String>) -> R<()> {
+        match p {
+            Pat::Ident(_, _, n, sub) => {
+                if !self.pat_ident_names_item(p) && !out.contains(n) {
+                    out.push(n.clone());
+                }
+                if let Some(s) = sub {
+                    self.or_pat_names(s, out)?;
+                }
+            }
+            Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Slice(ps) => {
+                for q in ps {
+                    self.or_pat_names(q, out)?;
+                }
+            }
+            Pat::Struct(_, fs, _) => {
+                for (_, q) in fs {
+                    self.or_pat_names(q, out)?;
+                }
+            }
+            Pat::Ref(_, q) => self.or_pat_names(q, out)?,
+            Pat::Or(alts, at) => {
+                let mut each = Vec::with_capacity(alts.len());
+                for a in alts {
+                    let mut v = vec![];
+                    self.or_pat_names(a, &mut v)?;
+                    each.push(v);
+                }
+                // (rustc's first error: the first alternative that lacks a name another binds, with the first such
+                // name of the others in order)
+                for (i, v) in each.iter().enumerate() {
+                    let mut others = each.iter().enumerate().filter(|&(j, _)| j != i).flat_map(|(_, w)| w);
+                    if let Some(n) = others.find(|n| !v.contains(n)) {
+                        let sp = at.get(i).copied().unwrap_or_default();
+                        return Err(self.at(sp, format!("variable `{n}` is not bound in all patterns (E0408)")));
+                    }
+                }
+                for n in each.into_iter().flatten() {
+                    if !out.contains(&n) {
+                        out.push(n);
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     /// 判定に通った後で、パターン中の名前を束縛する
@@ -1711,9 +1784,13 @@ impl Cx<'_> {
                 self.bk.pat_path = saved;
                 r
             }
-            Pat::Or(cases) => {
+            Pat::Or(cases, at) => {
                 if !cases.iter().any(has_bindings) {
                     return Ok(());
+                }
+                // (E0408 of a `let`, an `if let`, a `for` ..; a match checks its arms before it lowers them)
+                if self.user_code {
+                    self.or_pat_names(pat, &mut vec![])?;
                 }
                 // (the bindings of `|` alternatives are not followed)
                 self.rg.pat = None;
@@ -1722,7 +1799,7 @@ impl Cx<'_> {
                 crate::ast_closure::pat_idents(&cases[0], &mut names);
                 let merge = self.b.create_block();
                 let mut tys: Option<Vec<(String, Ty)>> = None;
-                for case in cases {
+                for (k, case) in cases.iter().enumerate() {
                     let next = self.b.create_block();
                     self.pat_test(case, p, next)?;
                     let o0 = self.owned.len();
@@ -1752,8 +1829,15 @@ impl Cx<'_> {
                             tys = Some(tl);
                         }
                         Some(t0) => {
-                            if t0.len() != tl.len() || t0.iter().zip(tl.iter()).any(|(a, b)| a.1 != b.1) {
+                            // (E0308: a name has the first alternative's type in each; at the alternative, a binding
+                            // having no position of its own)
+                            if t0.len() != tl.len() {
                                 return err(SP, "`|` alternatives bind different types");
+                            }
+                            if let Some((a, b)) = t0.iter().zip(tl.iter()).find(|(a, b)| a.1 != b.1) {
+                                let (want, got) = (self.prog.tn(a.1), self.prog.tn(b.1));
+                                let sp = at.get(k).copied().unwrap_or_default();
+                                return Err(self.at(sp, format!("mismatched types: expected `{want}`, found `{got}`")));
                             }
                         }
                     }
@@ -2443,7 +2527,7 @@ impl Cx<'_> {
         let sd = &self.prog.structs[sid as usize];
         let fields: Vec<(&Pat, Ty)> = match pat {
             Pat::Ident(_, _, _, Some(sub)) => return self.drop_pat_check(sub, t, sp, owner),
-            Pat::Or(ps) => {
+            Pat::Or(ps, _) => {
                 for p in ps {
                     self.drop_pat_check(p, t, sp, owner)?;
                 }
@@ -2958,7 +3042,7 @@ impl Cx<'_> {
 
 fn has_or(p: &Pat) -> bool {
     match p {
-        Pat::Or(_) => true,
+        Pat::Or(_, _) => true,
         Pat::Ident(_, _, _, Some(q)) | Pat::Ref(_, q) => has_or(q),
         Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Slice(v) => v.iter().any(has_or),
         Pat::Struct(_, fs, _) => fs.iter().any(|f| has_or(&f.1)),
@@ -2989,7 +3073,7 @@ fn or_alts(p: &Pat) -> Vec<Pat> {
         out
     }
     match p {
-        Pat::Or(v) => v.iter().flat_map(or_alts).collect(),
+        Pat::Or(v, _) => v.iter().flat_map(or_alts).collect(),
         Pat::Ident(r, m, n, Some(q)) => or_alts(q).into_iter().map(|a| Pat::Ident(*r, *m, n.clone(), Some(Box::new(a)))).collect(),
         Pat::Ref(m, q) => or_alts(q).into_iter().map(|a| Pat::Ref(*m, Box::new(a))).collect(),
         Pat::Tuple(v) => product(v).into_iter().map(Pat::Tuple).collect(),
@@ -3050,7 +3134,7 @@ fn ref_mut_names(p: &Pat, out: &mut Vec<String>) {
             }
         }
         Pat::Ref(_, q) => ref_mut_names(q, out),
-        Pat::Or(v) | Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Slice(v) => v.iter().for_each(|q| ref_mut_names(q, out)),
+        Pat::Or(v, _) | Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Slice(v) => v.iter().for_each(|q| ref_mut_names(q, out)),
         Pat::Struct(_, fs, _) => fs.iter().for_each(|f| ref_mut_names(&f.1, out)),
         _ => {}
     }

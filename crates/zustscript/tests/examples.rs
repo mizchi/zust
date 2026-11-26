@@ -508,6 +508,21 @@ fn modules_import_types_and_functions() {
 /// another directory is imported from that module's JS as seen from the importer, a lowercase type comes in with the
 /// function that uses it, an imported component takes a generic record of props, and a component whose JS has
 /// another name is written by that name
+/// an imported `async fn` gives its callers a Promise; a match whose nested patterns cover every value needs no `_`;
+/// `\u{..}` in strings and templates
+#[test]
+fn modules_async_patterns_escapes() {
+    let d = out_dir("modules_async");
+    for f in ["asynclib", "asyncmain"] {
+        let o = zsc(&root().join(format!("tests/modules/{f}.zsc")), &d, &[]);
+        assert!(o.status.success(), "{f}: {}", String::from_utf8_lossy(&o.stderr));
+    }
+    let out = node(&d, "const m = await import('./asyncmain.js'); console.log(JSON.stringify(await m.run()));");
+    assert_eq!(out, "{\"TAG\":\"Ok\",\"_0\":\"6 not positive 4,-1,0,3,-1,-2,3 tff_ \u{1F600}\u{e9}\"}\n");
+    let dts = std::fs::read_to_string(d.join("asyncmain.d.ts")).unwrap();
+    assert!(dts.contains("export declare function run(): Promise<Result<string, string>>;"), "{dts}");
+}
+
 #[test]
 fn modules_diamond_and_directories() {
     let d = out_dir("modules_diamond");
@@ -843,6 +858,257 @@ fn options_same_in_js_and_wasm() {
     }
     assert_eq!(outs[0], outs[1], "wasm and JS differ");
     assert_eq!(outs[0], "[{\"TAG\":\"Ok\",\"_0\":2},{\"TAG\":\"Err\",\"_0\":\"ByZero\"},{\"TAG\":\"Some\",\"_0\":2},{\"TAG\":\"None\"},{\"TAG\":\"None\"},-1,4,2,-1]\n");
+}
+
+/// tests/control.zsc: `return` (from a loop, a `match` arm in a `let`, an argument, a block's value) and `loop`
+/// (left by `break` or by `return`), lowered to Rust and run as wasm, and run as JS
+#[test]
+fn control_same_in_js_and_wasm() {
+    let src = root().join("tests/control.zsc");
+    let mut outs = vec![];
+    for (name, flags) in [("control-wasm", &[][..]), ("control-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = compare_build(&src, &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        assert_eq!(d.join("control.wasm").exists(), flags.is_empty());
+        outs.push(node(&d, "const m = await import('./control.js'); console.log(m.run().join(' '));"));
+    }
+    assert_eq!(outs[0], outs[1], "wasm and JS differ");
+    assert_eq!(outs[0], "-1 0 1 4 8 2 -1 6 -100 5 7 2 99 1 -1 2\n");
+    let rs = std::fs::read_to_string(root().join("target/test-out/control-wasm/control.wasm.rs")).unwrap();
+    assert!(rs.contains("loop {\nif (i >= (ps.len() as i32)) {\nreturn out;\n};"), "{rs}");
+}
+
+/// tests/control_js.zsc: `return` and `loop` in the JS layer: in closures (from the closure), async functions and
+/// closures, functions that perform effects (direct and generators), next to `?`, and after the operands before it
+#[test]
+fn control_flow_in_js() {
+    let d = out_dir("control_js");
+    let o = zsc(&root().join("tests/control_js.zsc"), &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let out = node(
+        &d,
+        "const l = []; globalThis.note = (s) => l.push(s); const m = await import('./control_js.js'); \
+         console.log(m.run() + ' | ' + l.join(' ') + ' | ' + [await m.early_async(-1), await m.early_async(1), await m.early_async(500)].join(' '));",
+    );
+    assert_eq!(out, "big small 10,0,30 [hi] [-] 6 -2 3 over none 3 -1 0 2 2 -1 | pos nonpos too big past 3 t1 t1 t2 | neg fine huge\n");
+    let js = std::fs::read_to_string(d.join("control_js.js")).unwrap();
+    // (a `return` in an operand: the operands before it are kept first, and the `match` is statements)
+    assert!(js.contains("  const $t1 = tick(1);\n  let $t2;\n  if (o.TAG === \"Some\") {"), "{js}");
+    assert!(js.contains("return xs.map((x) => {\n    if (x < 0) {\n      return 0;\n    }\n    return Math.imul(x, 10);\n  });"), "{js}");
+}
+
+/// tests/stdlib.zsc: the standard library's methods give the same results lowered to Rust and run as wasm (zustc;
+/// the math functions are JS's Math, handed to it by the glue) and run as JS; and as standard Rust (--emit-rust)
+#[test]
+fn stdlib_same_in_js_and_wasm() {
+    let src = root().join("tests/stdlib.zsc");
+    let mut outs = vec![];
+    for (name, flags) in [("stdlib-wasm", &[][..]), ("stdlib-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = compare_build(&src, &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        assert_eq!(d.join("stdlib.wasm").exists(), flags.is_empty());
+        let r = Command::new("node").arg(root().join("tests/stdlib_driver.mjs")).arg(d.join("stdlib.js")).output().unwrap();
+        assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+        outs.push(String::from_utf8_lossy(&r.stdout).to_string());
+    }
+    assert_eq!(outs[0], outs[1], "wasm and JS differ");
+    assert_eq!(outs[0], std::fs::read_to_string(root().join("tests/stdlib_expected.json")).unwrap());
+    // (standard Rust: the same functions, called from a Rust program)
+    let d = out_dir("stdlib-rust");
+    let plain = d.join("stdlib.zsc");
+    let source = std::fs::read_to_string(&src).unwrap();
+    std::fs::write(&plain, source.lines().map(|l| l.strip_prefix("@wasm ").unwrap_or(l)).collect::<Vec<_>>().join("\n")).unwrap();
+    let o = zsc(&plain, &d, &["--emit-rust", "--zustc", "unused-zustc"]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let driver = d.join("driver.rs");
+    std::fs::write(
+        &driver,
+        "mod stdlib;\nfn main() {\n    assert_eq!(stdlib::zs_ints(-7), vec![7, -7, 3, -343, i32::MIN, i32::MIN]);\n    assert_eq!(stdlib::zs_bigs(-9), vec![9, -9, 2, -2611284305020221001]);\n    \
+         assert_eq!(stdlib::zs_arrays(vec![5, 3, 8, 1])[..10], [3, -1, -1, 5, 1, 0, 3, 8, 8, 1]);\n    \
+         assert_eq!(stdlib::zs_strings(\"  Hello, World  \")[4..10], [\" Hell\", \"d  \", \"\", \"  HeLLo, WorLd  \", \"-a-b-\", \"ababab\"]);\n    \
+         assert_eq!(stdlib::zs_parsef(&[\"-2e3\".to_string(), \" 1\".into()]), vec![-2000.0, -12345.0]);\n}\n",
+    )
+    .unwrap();
+    let binary = d.join("run");
+    let build = Command::new("rustc").arg("--edition=2024").arg(&driver).arg("-o").arg(&binary).output().unwrap();
+    assert!(build.status.success(), "{}", String::from_utf8_lossy(&build.stderr));
+    assert!(Command::new(binary).status().unwrap().success());
+}
+
+/// tests/collections.zsc: generic functions bounded by Eq / Ord, and Map / Set, give the same results lowered to Rust
+/// and run as wasm, and run as JS
+#[test]
+fn collections_same_in_js_and_wasm() {
+    let src = root().join("tests/collections.zsc");
+    let mut outs = vec![];
+    for (name, flags) in [("collections-wasm", &[][..]), ("collections-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = compare_build(&src, &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        assert_eq!(d.join("collections.wasm").exists(), flags.is_empty());
+        outs.push(node(
+            &d,
+            "const m = await import('./collections.js'); console.log(JSON.stringify([m.generic(), m.words('a b a  c b a'), m.persistent(), m.order(), m.ids([1n, 2n, 1n])]));",
+        ));
+    }
+    assert_eq!(outs[0], outs[1], "wasm and JS differ");
+    assert_eq!(outs[0], "[[3,2,2,1,9,1,2],[\"a=3\",\"b=2\",\"c=1\"],[2,2,1,0,5,2,2,0,1,2,3,1,2],[\"b\",\"a\",\"3\",\"4\"],2]\n");
+}
+
+/// tests/collections_js.zsc: Map / Set are JS's own; `m = m.insert(k, f(m.get(k)))` changes a local no one else sees
+/// in place, and copies one that another local holds
+#[test]
+fn collections_in_js() {
+    let d = out_dir("collections_js");
+    let o = zsc(&root().join("tests/collections_js.zsc"), &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let out = node(&d, "const m = await import('./collections_js.js'); console.log(m.words('a b a  c b a'), '|', m.shared(), '|', m.grouped());");
+    assert_eq!(out, "a=3,b=2,c=1 | 2 3 three - | a:apple/avocado b:banana/blueberry c:cherry 3,1,2\n");
+    let js = std::fs::read_to_string(d.join("collections_js.js")).unwrap();
+    assert!(js.contains("counts = counts.set(w, ($o_unwrap_or($m_get(counts, w), 0) + 1) | 0);"), "{js}");
+    assert!(js.contains("b = new Map(b).set(3, \"three\");"), "{js}");
+}
+
+/// tests/json.zsc: `json_decode` reads JSON as the type says, or gives where it is not; `json_encode` writes the same
+/// JSON back (an `Option` as `null`, a `Map<String, _>` as an object, a `Set` as an array, extra fields dropped)
+#[test]
+fn json_checked_by_type() {
+    let d = out_dir("json");
+    let o = zsc(&root().join("tests/json.zsc"), &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let out = node(
+        &d,
+        r#"const m = await import('./json.js');
+const doc = {todos:[{id:1,title:"a",done:false,tags:["x"],due:null},{id:2,title:"b",done:true,tags:[],extra:9}], status:"Open", shapes:[{TAG:"Circle",_0:1.5},{TAG:"Rect",_0:2,_1:3}], meta:{a:1,b:2}, ids:[3,1,3], pair:[7,"s"]};
+console.log(m.roundtrip(JSON.stringify(doc)));
+for (const bad of ['{"todos":[{"id":1.5}]}', '{"todos":[], "status":"Half"}', "[]", JSON.stringify({...doc, shapes:[{TAG:"Tri"}]}), JSON.stringify({...doc, pair:[1]}), JSON.stringify({...doc, meta:{a:"x"}})]) console.log(m.roundtrip(bad));
+console.log(m.todo('{"id":3,"title":"t","done":true,"tags":[],"due":"mon"}'), "|", m.todo('{"id":3,"title":"t","done":true,"tags":[]}'));
+console.log(m.tree('{"v":1,"kids":[{"v":2,"kids":[]}]}'), m.tree('{"v":1,"kids":[{"v":2}]}'));
+console.log(m.plain());
+console.log(m.proto('{"n":1}'), "|", m.proto('{"n":1,"toString":"s"}'), "|", m.proto('{"toString":2,"n":1}'));"#,
+    );
+    assert_eq!(
+        out,
+        "{\"todos\":[{\"id\":1,\"title\":\"a\",\"done\":false,\"tags\":[\"x\"],\"due\":null},{\"id\":2,\"title\":\"b\",\"done\":true,\"tags\":[],\"due\":null}],\"status\":\"Open\",\"shapes\":[{\"TAG\":\"Circle\",\"_0\":1.5},{\"TAG\":\"Rect\",\"_0\":2,\"_1\":3}],\"meta\":{\"a\":1,\"b\":2},\"ids\":[3,1],\"pair\":[7,\"s\"]}\n\
+         error: expected an i32 at $.todos[0].id, found 1.5\n\
+         error: expected one of \"Open\", \"Closed\" at $.status, found \"Half\"\n\
+         error: expected an object at $, found an array\n\
+         error: expected a variant of Shape at $.shapes[0].TAG, found \"Tri\"\n\
+         error: expected an array of 2 at $.pair, found an array\n\
+         error: expected an i32 at $.meta.a, found \"x\"\n\
+         3 t mon | 3 t -\n\
+         {\"v\":1,\"kids\":[{\"v\":2,\"kids\":[]}]} expected an array at $.kids[0].kids, found nothing\n\
+         [1,2]\"a\\\"b\"{\"id\":1,\"title\":\"x\",\"done\":false,\"tags\":[],\"due\":null}\n\
+         - 2 | s 2 | error: expected a string at $.toString, found 2\n"
+    );
+    // (not JSON at all: JSON.parse's message, which depends on the engine)
+    let out = node(&d, "const m = await import('./json.js'); console.log(m.roundtrip('{'));");
+    assert!(out.starts_with("error: ") && out.len() > 8, "{out}");
+}
+
+/// tests/patterns.zsc: `A | B`, guards (`n if n < 0`, also on an `|`) and record patterns give the same results lowered
+/// to Rust and run as wasm, and run as JS
+#[test]
+fn patterns_same_in_js_and_wasm() {
+    let src = root().join("tests/patterns.zsc");
+    let mut outs = vec![];
+    for (name, flags) in [("patterns-wasm", &[][..]), ("patterns-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = compare_build(&src, &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        outs.push(node(&d, "const m = await import('./patterns.js'); console.log(JSON.stringify(m.run()));"));
+    }
+    assert_eq!(outs[0], outs[1], "wasm and JS differ");
+    assert_eq!(outs[0], "[1,2,-1,0,3,9,2,3,5,4,0,0,1,2,3,4,1,2,3,3,1,2,0,0,25]\n");
+}
+
+/// tests/patterns_js.zsc: a record destructured by `let` (JS's own destructuring) and `if let`; a name an `|` binds at
+/// different places; a guard with a `?` (written before its test, in the arm's block)
+#[test]
+fn patterns_in_js() {
+    let d = out_dir("patterns_js");
+    let o = zsc(&root().join("tests/patterns_js.zsc"), &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(node(&d, "const m = await import('./patterns_js.js'); console.log(m.run());"), "ann:30 a@x - 1 8 -1 exit help colon ? over 2 none\n");
+    let js = std::fs::read_to_string(d.join("patterns_js.js")).unwrap();
+    assert!(js.contains("  const { name, age } = u;\n"), "{js}");
+    assert!(js.contains("    const x = (e.TAG === \"Click\") ? e._0 : e._1;\n"), "{js}");
+}
+
+/// tests/methods.zsc: `impl` blocks give the same results lowered to Rust and run as wasm, and run as JS; a method is
+/// the top-level function `V2$len`, called with the receiver first
+#[test]
+fn methods_same_in_js_and_wasm() {
+    let src = root().join("tests/methods.zsc");
+    let mut outs = vec![];
+    for (name, flags) in [("methods-wasm", &[][..]), ("methods-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = compare_build(&src, &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        outs.push(node(&d, "const m = await import('./methods.js'); console.log(JSON.stringify(m.run()), m.js_run(), m.as_value([{ x: 3, y: 4 }]));"));
+    }
+    assert_eq!(outs[0], outs[1], "wasm and JS differ");
+    assert_eq!(outs[0], "[10,6,3,2,2,1] 2 b true 3 3 5\n");
+    let js = std::fs::read_to_string(root().join("target/test-out/methods-js/methods.js")).unwrap();
+    assert!(js.contains("const st = Stack$push(Stack$push(Stack$empty(), \"a\"), \"b\");"), "{js}");
+}
+
+/// tests/review_edges.zsc: cases from the review of mizchi/zust#232, the same in JS and wasm; and a match over 26
+/// fields of `true | false` is checked at once (the coverage of identical remaining rows is reused)
+#[test]
+fn review_edges_same_in_js_and_wasm() {
+    let src = root().join("tests/review_edges.zsc");
+    let mut outs = vec![];
+    for (name, flags) in [("review-wasm", &[][..]), ("review-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = compare_build(&src, &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        outs.push(node(
+            &d,
+            "const l = []; globalThis.note = (s) => l.push(s); const m = await import('./review_edges.js'); console.log(JSON.stringify(m.wasm_run()), m.js_run(), JSON.stringify(l), m.guard_bind(1), m.recv_reassign(1), m.guard_once(0));",
+        ));
+        let o = compare_build(&root().join("tests/review_no_option.zsc"), &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        outs.push(node(&d, "const m = await import('./review_no_option.js'); console.log(JSON.stringify(m.reversed([1, 2, 3])));"));
+    }
+    assert_eq!(outs[0..2], outs[2..4], "wasm and JS differ");
+    assert_eq!(outs[0], "[1,2,1,1,2,105,905,1,8,7,6,0] 10 3 [] 1 74 21\n");
+    assert_eq!(outs[1], "[3,2,1]\n");
+    let d = out_dir("review-coverage");
+    let src = d.join("wide.zsc");
+    let fields: Vec<String> = (b'a'..=b'z').map(|c| format!("{}: bool", c as char)).collect();
+    let pats: Vec<String> = (b'a'..=b'z').map(|c| format!("{}: true | false", c as char)).collect();
+    std::fs::write(&src, format!("type W = {{ {} }}\nfn f(w: W) -> i32 {{ match w {{ W {{ {} }} => 1 }} }}\n", fields.join(", "), pats.join(", "))).unwrap();
+    let t = std::time::Instant::now();
+    let o = zsc(&src, &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert!(t.elapsed() < std::time::Duration::from_secs(30), "{:?}", t.elapsed());
+}
+
+/// JSON (review of mizchi/zust#232): a `__proto__` field is an own property; a primitive's decoder reports a
+/// mismatch with the inline runtime too
+#[test]
+fn json_proto_and_inline_primitive() {
+    let d = out_dir("json-proto");
+    let src = d.join("p.zsc");
+    // (and a parameter named `JSON` does not hide JS's; a type shared by many fields is checked once: D28 reaches D0
+    // 2^28 ways)
+    let mut deep: Vec<String> = vec!["type D0 = { value: i32 }".into()];
+    deep.extend((1..=28).map(|i| format!("type D{i} = {{ left: Option<D{}>, right: Option<D{}> }}", i - 1, i - 1)));
+    std::fs::write(
+        &src,
+        format!(
+            "type R = {{ __proto__: i32 }}\nexport fn d(s: String) -> String {{ let r: Result<R, String> = json_decode(s); match r {{ Ok(v) => json_encode(v), Err(m) => m }} }}\nexport fn prim(s: String) -> String {{ let r: Result<i32, String> = json_decode(s); match r {{ Ok(v) => v.to_string(), Err(m) => m }} }}\nexport fn encode(JSON: i32) -> String {{ json_encode(JSON) }}\n{}\nfn deep(s: String) -> bool {{ let r: Result<D28, String> = json_decode(s); r.is_ok() }}\nfn pair(s: String) -> bool {{ let r: Result<(Array<D28>, Map<String, D28>, D28), String> = json_decode(s); r.is_ok() }}\n",
+            deep.join("\n")
+        ),
+    )
+    .unwrap();
+    let o = zsc(&src, &d, &["--inline-runtime"]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let out = node(&d, "const m = await import('./p.js'); console.log(m.d('{\"__proto__\":7}'), '|', m.prim('\"x\"'), '|', m.prim('42'), '|', m.encode(5));");
+    assert_eq!(out, "{\"__proto__\":7} | expected an i32 at $, found \"x\" | 42 | 5\n");
 }
 
 /// tests/js_values.zsc: extern types (properties, methods, a setter, a constructor, a module's), `null` from JS as
