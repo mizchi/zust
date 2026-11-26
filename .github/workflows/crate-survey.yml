@@ -4,6 +4,10 @@ name: Crate survey
 # directory (sources from crates.io, versions from cratebench/survey/Cargo.lock), and commits what it finds to main:
 # CRATES_SUPPORT.md, cratebench/survey/results.json and a row of cratebench/survey/history.tsv. The Pages workflow then
 # rebuilds /crates/ from them. It reports; it does not fail on a crate that does not build yet.
+#
+# Two jobs: the survey runs the crates' build scripts (code from crates.io), so it has a read-only token and keeps no
+# credentials in its checkout; the publish job, which may push, runs none of that code and takes the survey's files
+# as data.
 on:
   push:
     branches: [main]
@@ -18,7 +22,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 # (one run at a time; a push while one runs waits, and only the latest waiting one runs: every run finishes)
 concurrency:
@@ -32,8 +36,12 @@ jobs:
   survey:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rust-src
@@ -44,19 +52,37 @@ jobs:
         run: python3 cratebench/survey/survey.py run --work "$RUNNER_TEMP/crate-survey" --commit "${GITHUB_SHA::7}" --history
       - name: Summary
         if: always()
-        run: sed -n '/^## Summary/,/^## What to fix first/p' CRATES_SUPPORT.md | head -n -1 >> "$GITHUB_STEP_SUMMARY" || true
+        run: sed -n '/^## Summary/,/^## By category/p' CRATES_SUPPORT.md | head -n -1 >> "$GITHUB_STEP_SUMMARY" || true
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: crate-survey
           path: |
             CRATES_SUPPORT.md
             cratebench/survey/results.json
-      # (as bench.yml commits the README's numbers: on main only, retried when main moves on)
+            cratebench/survey/history.tsv
+          if-no-files-found: error
+
+  # (as bench.yml commits the README's numbers: on main only, retried when main moves on. No cargo, zurgo or crate
+  #  code runs here)
+  publish:
+    needs: survey
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: crate-survey
+          path: ${{ runner.temp }}/crate-survey
       - name: Commit the results
-        if: github.ref == 'refs/heads/main'
+        env:
+          FROM: ${{ runner.temp }}/crate-survey
         run: |
           files="CRATES_SUPPORT.md cratebench/survey/results.json cratebench/survey/history.tsv"
+          for f in $files; do cp "$FROM/$f" "$f"; done
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add $files

@@ -24,6 +24,7 @@ blocked (its code is fine or unread, a dependency's is not), build-fail, builds.
 where rustc builds them, and crates for other platforms are listed but not probed.
 """
 import argparse
+import collections
 import concurrent.futures
 import datetime
 import functools
@@ -306,38 +307,50 @@ def parse_zurgo(err, by_lib, dirs):
 
 
 def compare_tests(cargo_out, zurgo_out):
-    """cargo's and zurgo's `test x ... ok` lines: (cargo's counts, same, differ)"""
+    """cargo's and zurgo's `test x ... ok` lines, as multisets of (name, result): two targets may each have a
+    `tests::smoke`, and neither may hide the other. (cargo's counts, same, differ: cargo's results zurgo does not
+    give, and zurgo's that cargo does not)"""
     pat = re.compile(r"^test (\S+) \.\.\. (ok|FAILED|ignored)", re.M)
-    c, z = dict(pat.findall(cargo_out)), dict(pat.findall(zurgo_out))
-    same = sum(1 for k, v in c.items() if z.get(k) == v)
-    counts = {s: sum(1 for v in c.values() if v == s) for s in ("ok", "FAILED", "ignored")}
-    return counts, same, len(c) - same
+    c, z = collections.Counter(pat.findall(cargo_out)), collections.Counter(pat.findall(zurgo_out))
+    same = sum((c & z).values())
+    counts = {s: sum(n for (_, v), n in c.items() if v == s) for s in ("ok", "FAILED", "ignored")}
+    return counts, same, sum((c - z).values()) + sum((z - c).values())
+
+
+def feature_flags(features):
+    """a row's features as cargo's (and zurgo's) flags"""
+    fs = [f for f in features.split(",") if f]
+    on = [f for f in fs if f != "-default"]
+    return (["--no-default-features"] if "-default" in fs else []) + (["--features", ",".join(on)] if on else [])
 
 
 def run_tests(r, src_dir, work, jobs):
-    """the crate's own tests from its crates.io package, copied to the work directory: cargo test against zurgo test"""
+    """the crate's own tests from its crates.io package, copied to the work directory: cargo test against zurgo test,
+    with the row's features"""
     d = os.path.join(work, "tests", dir_of(r))
     shutil.rmtree(d, ignore_errors=True)
-    shutil.copytree(src_dir, d, ignore=shutil.ignore_patterns("target", ".git"))
-    # (the package's Cargo.toml is crates.io's normalized one; a [workspace] of its own keeps it out of any parent)
-    toml = open(os.path.join(d, "Cargo.toml")).read()
-    if "[workspace]" not in toml:
-        open(os.path.join(d, "Cargo.toml"), "a").write("\n[workspace]\n")
-    env = {"CARGO_TARGET_DIR": os.path.join(d, "target-cargo")}
-    code, cout, cerr, _ = sh(["cargo", "test", "--no-fail-fast", "-j", str(jobs), "--lib", "--bins", "--tests"], cwd=d, env=env)
-    if code is None or "test result" not in cout:
-        return {"tests": "cargo-fails", "tests_note": (cerr.strip().splitlines() or [""])[-1][:200]}
-    env = {"CARGO_TARGET_DIR": os.path.join(d, "target-zurgo")}
-    code, zout, zerr, _ = sh([ZURGO, "test", "--no-fail-fast", "-j", str(jobs), "--lib", "--bins", "--tests"], cwd=d, env=env)
-    counts, same, differ = compare_tests(cout, zout)
-    shutil.rmtree(d, ignore_errors=True)
-    total = sum(counts.values())
-    if total == 0:
-        return {"tests": "none"}
-    if code is None or "test result" not in zout:
-        first = next((l for l in zerr.splitlines() if l.startswith("error")), (zerr.strip().splitlines() or [""])[-1])
-        return {"tests": "zurgo-fails", "tests_total": total, "tests_note": short(first, [src_dir])[:300]}
-    return {"tests": "match" if differ == 0 else "differ", "tests_total": total, "tests_same": same}
+    try:
+        shutil.copytree(src_dir, d, ignore=shutil.ignore_patterns("target", ".git"))
+        # (the package's Cargo.toml is crates.io's normalized one; a [workspace] of its own keeps it out of any parent)
+        toml = open(os.path.join(d, "Cargo.toml")).read()
+        if "[workspace]" not in toml:
+            open(os.path.join(d, "Cargo.toml"), "a").write("\n[workspace]\n")
+        args = ["test", "--no-fail-fast", "-j", str(jobs), "--lib", "--bins", "--tests", *feature_flags(r["features"])]
+        code, cout, cerr, _ = sh(["cargo", *args], cwd=d, env={"CARGO_TARGET_DIR": os.path.join(d, "target-cargo")})
+        if code is None or "test result" not in cout:
+            return {"tests": "cargo-fails", "tests_note": (cerr.strip().splitlines() or [""])[-1][:200]}
+        code, zout, zerr, _ = sh([ZURGO, *args], cwd=d, env={"CARGO_TARGET_DIR": os.path.join(d, "target-zurgo")})
+        counts, same, differ = compare_tests(cout, zout)
+        total = sum(counts.values())
+        if total == 0:
+            return {"tests": "none"}
+        if code is None or "test result" not in zout:
+            first = next((l for l in zerr.splitlines() if l.startswith("error")), (zerr.strip().splitlines() or [""])[-1])
+            return {"tests": "zurgo-fails", "tests_total": total, "tests_note": short(first, [src_dir])[:300]}
+        return {"tests": "match" if differ == 0 else "differ", "tests_total": total, "tests_same": same}
+    finally:
+        # (the copy and both target directories, whatever happened)
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def probe(r, work, jobs, tests):
@@ -429,6 +442,20 @@ def probe_in(r, d, work, jobs, tests, out, packages):
                 out["first_error"] = (bfatal or (err.strip().splitlines() or [""])[-1])[:300]
 
 
+def merge_package(packages, k, v):
+    """one package seen by several probes, maybe with other features: every error any of them reports (sorted, so the
+    order the probes finish in does not matter); not checked only if no probe checked it"""
+    cur = packages.get(k)
+    if cur is None:
+        packages[k] = dict(v, errors=None if v.get("errors") is None else sorted(set(v["errors"])))
+        return
+    if v.get("errors") is not None:
+        cur["errors"] = sorted(set(cur.get("errors") or []) | set(v["errors"]))
+        cur["unchecked"] = None
+    if v.get("build_error") and not cur.get("build_error"):
+        cur["build_error"] = v["build_error"]
+
+
 def base(r, **kw):
     """a crate's row of results.json, before or without its probe"""
     return dict(id=r["id"], name=r["name"], version=r["version"], rank=r["rank"], downloads=r["downloads"], kind=r["kind"],
@@ -465,10 +492,7 @@ def cmd_run(a):
                 c, p = base(r, status="survey-error", first_error=f"survey.py: {e!r}"[:300]), {}
             crates[c["id"]] = c
             for k, v in p.items():
-                cur = packages.get(k)
-                # (one package in several probes: the result of the probe that checked it)
-                if cur is None or (cur.get("errors") is None and v.get("errors") is not None):
-                    packages[k] = v
+                merge_package(packages, k, v)
             print(f'{c["rank"]:4} {c["id"][:28]:28} {c["status"]:10} {c["errors"]:3} {c.get("tests", "")[:11]:11} '
                   f'{c["first_error"][:90]}', flush=True)
     if old:
@@ -584,7 +608,13 @@ def missing(res):
             if m:
                 g = M.setdefault((m.group(1), m.group(2)), set())
                 g.add(k)
-    rows = [dict(what=w, name=n, packages=sorted(ps), own=any(defines(p, n) for p in ps)) for (w, n), ps in M.items()]
+    # (without the packages' sources (a report from results.json alone) a name keeps the class the run gave it)
+    known = {(m["what"], m["name"]): m.get("own") for m in res.get("missing") or []}
+    rows = []
+    for (w, n), ps in M.items():
+        found = [defines(p, n) for p in ps]
+        own = True if any(found) else (False if all(f is False for f in found) else known.get((w, n)))
+        rows.append(dict(what=w, name=n, packages=sorted(ps), own=own))
     rows.sort(key=lambda r: (-len(r["packages"]), r["name"]))
     return rows
 
@@ -689,7 +719,7 @@ def write_report(res, history):
               "(name resolution, `cfg`, a macro's output).", "",
               "| name | of | kind | packages |", "|---|---|---|---|"]
         for r in mi[:50]:
-            o.append(f"| `{r['name']}` | {'crate' if r['own'] else 'std'} | {r['what']} | "
+            o.append(f"| `{r['name']}` | {'?' if r['own'] is None else 'crate' if r['own'] else 'std'} | {r['what']} | "
                      f"{cell(', '.join(r['packages']), 120)} |")
     o += ["", "## Errors by kind", "",
           "Each error's text without its place, names and numbers. A kind in many packages is one gap of zustc's.", "",

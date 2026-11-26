@@ -111,6 +111,12 @@
     <p class="note">Each error's text without its place, names and numbers. A kind found in many packages is one gap of
       zustc's; the bar is the number of packages that have it.</p>
     <div class="chart tall" id="c-kind"></div>
+    <details class="fold">
+      <summary>The same, as a table (each kind's full text and an example)</summary>
+      <div class="tablewrap"><table class="table" id="t-kind">
+        <thead><tr><th class="l">Kind</th><th>Packages</th><th>Errors</th><th class="l">Example</th></tr></thead><tbody></tbody>
+      </table></div>
+    </details>
   </section>
 
   <section class="sec" id="gaps">
@@ -168,7 +174,7 @@
   const STATUS = [
     ['builds', 'builds', '--good'], ['build-fail', 'build fails', '--s3'], ['blocked', 'blocked by a dependency', '--s2'],
     ['errors', 'errors in its own code', '--bad'], ['graph-fail', 'graph not planned', '--s4'],
-    ['timeout', 'timeout', '--muted'], ['fetch-fail', 'not fetched', '--line'],
+    ['timeout', 'timeout', '--muted'], ['fetch-fail', 'not fetched', '--line'], ['survey-error', 'survey error', '--s6'],
   ];
   const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
   const fmt = d3.format(',');
@@ -301,6 +307,9 @@
   function renderKinds(R) {
     const host = document.getElementById('c-kind');
     host.replaceChildren();
+    document.querySelector('#t-kind tbody').replaceChildren(...(R.kinds || []).slice(0, 60).map((k) => el('tr', {},
+      el('td', {className: 'err'}, k.kind), el('td', {}, k.packages.length), el('td', {}, k.errors),
+      el('td', {className: 'err'}, k.example))));
     const ks = (R.kinds || []).slice(0, 18);
     if (!ks.length) return;
     const W = host.clientWidth || 600, rowH = 22;
