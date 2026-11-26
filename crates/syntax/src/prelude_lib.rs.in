@@ -11103,6 +11103,16 @@ pub trait Rem {
 // std::error::Error (メソッドは使わない: `Box<dyn Error>` は __DynError で表す)
 pub trait Error {
     fn __err_mark(&self) {}
+    /// (the TypeId of the implementing type, for `dyn Error`'s `is`: each impl's instance of the default)
+    fn __err_type_id(&self) -> TypeId {
+        TypeId::of::<Self>()
+    }
+}
+// `<dyn Error + 'static>::is` (std's: only a `'static` object has a type to compare)
+impl dyn Error + 'static {
+    pub fn is<T: Error + 'static>(&self) -> bool {
+        self.__err_type_id() == TypeId::of::<T>()
+    }
 }
 // (std's error types are errors: `Some(err)` as `&dyn Error`, `E: Error` bounds)
 impl Error for IoError {
