@@ -1,3 +1,18 @@
+drop 211
+took 214 212
+drop 214
+drop 212
+end reinit_then_move
+drop 213
+drop 221
+drop 224
+drop 222
+drop 223
+drop 221
+end reinit_then_move_early
+drop 224
+drop 222
+drop 223
 drop 191
 drop 192
 drop 193

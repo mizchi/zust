@@ -236,7 +236,36 @@ fn loop_nested_parts() {
     }
     println!("end loop_nested_parts {}", p.c);
 }
+// (a field whose own part was moved out and assigned again, then moved out as a whole: its parts are the new owner's)
+fn take_pair(p: (S, S)) {
+    println!("took {} {}", (p.0).0, (p.1).0);
+}
+fn reinit_then_move() {
+    let mut x = ((S(211), S(212)), S(213));
+    let a = x.0.0;
+    drop(a);
+    x.0.0 = S(214);
+    let b = x.0;
+    take_pair(b);
+    println!("end reinit_then_move");
+}
+fn reinit_then_move_early(c: bool) -> u32 {
+    let mut x = ((S(221), S(222)), S(223));
+    let a = x.0.0;
+    drop(a);
+    x.0.0 = S(224);
+    if c {
+        let b = x.0;
+        drop(b);
+        return 1;
+    }
+    println!("end reinit_then_move_early");
+    0
+}
 fn main() {
+    reinit_then_move();
+    reinit_then_move_early(true);
+    reinit_then_move_early(false);
     loop_parts();
     loop_nested_parts();
     arm_assigns(E2::A(S(121), S(122)));

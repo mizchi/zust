@@ -2827,6 +2827,9 @@ impl Cx<'_> {
             for f in flags.into_iter().flatten() {
                 self.clear_flag(f);
             }
+            for &(o, k) in &kids {
+                self.clear_inner_parts(root.0, o, k);
+            }
             self.clear_flag(cont);
             return;
         }
@@ -2844,6 +2847,7 @@ impl Cx<'_> {
             if exact(o, k) {
                 if clear {
                     self.clear_flag(f);
+                    self.clear_inner_parts(root.0, o, k);
                 }
                 continue;
             }
@@ -2852,6 +2856,25 @@ impl Cx<'_> {
             if !inner.is_empty() {
                 self.split_part(root, f, o, k, &inner, clear);
             }
+        }
+    }
+
+    /// A part (off, t) of the local whose flag is f0 moved out as a whole: the flags of its own parts that an earlier
+    /// split made (`let a = x.0.0; x.0.0 = ..;` before `let b = x.0;`) are cleared too, so that they are not dropped
+    /// where the local is as well as by the new owner
+    fn clear_inner_parts(&mut self, f0: StackSlot, off: i32, t: Ty) {
+        if !self.parts.iter().any(|p| p.0 == f0 && p.1 >= off && (p.1, p.2) != (off, t)) {
+            return;
+        }
+        let size = self.prog.size_align(t).0 as i32;
+        let inner: Vec<StackSlot> = self
+            .parts
+            .iter()
+            .filter(|p| p.0 == f0 && off <= p.1 && p.1 + self.prog.size_align(p.2).0 as i32 <= off + size && (p.1, p.2) != (off, t))
+            .map(|p| p.3)
+            .collect();
+        for f in inner {
+            self.clear_flag(f);
         }
     }
 
