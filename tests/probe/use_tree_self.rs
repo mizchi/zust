@@ -1,7 +1,9 @@
 // `self` in a `use` tree, and paths inside a tree's braces (#254): `use super::Sign::{self, Minus};` brings the enum
 // itself (num-bigint), `use crate::util::{alphabet::{self, ByteClasses}};` the module (regex-automata), and in
 // `pub use crate::{.., unicode::CaseFoldError};` beside `use crate::unicode;` the path goes on from the tree's
-// prefix (regex-syntax). Sign, Unit and CaseFoldError are defined twice, so the flattening renames them
+// prefix (regex-syntax), while a group right after `use` (`use {a::q as b};`) names from the scope. A `self` entry
+// brings the module only: `use crate::a::m::{self};` leaves the call `m()` to the glob's fn, not a's fn `m`. Sign,
+// Unit and CaseFoldError are defined twice, so the flattening renames them
 mod bigint {
     use self::Sign::{Minus, NoSign, Plus};
 
@@ -87,6 +89,35 @@ mod hir {
     }
 }
 
+mod a {
+    pub mod m {
+        pub fn inner() -> u8 {
+            3
+        }
+    }
+    #[allow(dead_code)]
+    pub fn m() -> u8 {
+        1
+    }
+}
+
+mod b {
+    pub fn m() -> u8 {
+        2
+    }
+}
+
+mod user {
+    use crate::a::m::{self};
+    use crate::b::*;
+    use crate::util as u;
+    use {u::alphabet as al};
+
+    pub fn run() -> (u8, u8) {
+        (m() * 10 + m::inner(), al::ByteClasses([5, 6, 7, 8]).get(1).0)
+    }
+}
+
 mod other {
     #[derive(Debug)]
     pub struct Unit;
@@ -103,5 +134,5 @@ fn main() {
     println!("{:?} {:?} {:?}", bigint::neg(bigint::Sign::Plus), mul(sign_of(-2), sign_of(5)), mul(sign_of(0), sign_of(1)));
     let c = util::alphabet::ByteClasses([1, 2, 3, 4]);
     println!("{:?} {:?} {:?} {:?}", dense::first(&c), other::Unit, other::Sign::Zero, other::CaseFoldError);
-    println!("{:?} {:?}", hir::fold(1), hir::fold(2).is_err());
+    println!("{:?} {:?} {:?}", hir::fold(1), hir::fold(2).is_err(), user::run());
 }

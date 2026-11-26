@@ -991,6 +991,41 @@ mod tests {
         let out = expand_module_aliases(src).unwrap();
         assert!(out.contains("pub use crate::{hir::v::f, unicode::CaseFoldError};"), "{out}");
         assert!(out.contains("fn g() -> crate::unicode::CaseFoldError { crate::unicode::CaseFoldError }"), "{out}");
+        // (a group right after `use` names from the scope, as the `use` does: the alias is followed in it)
+        let src = "mod p {\n    pub mod q { pub fn f() {} }\n}\nmod m {\n    use crate::p as a;\n    use {a::q as b, a::{q as c}};\n    fn g() { b::f() }\n}\nfn main() {}\n";
+        let out = expand_module_aliases(src).unwrap();
+        assert!(out.contains("use {crate::p::q as b, crate::p::{q as c}};"), "{out}");
+    }
+
+    /// A `self` entry brings the type namespace only (#254 review): `use crate::a::m::{self};` is the module m, not a's
+    /// fn m beside it, so `m()` is the one a glob brings
+    #[test]
+    fn a_self_import_brings_no_value() {
+        let src = "mod d {\n    pub mod a {\n        pub mod m { pub fn inner() -> u8 { 3 } }\n        pub fn m() -> u8 { 1 }\n    }\n    pub mod b {\n        pub fn m() -> u8 { 2 }\n    }\n    pub mod user {\n        use crate::a::m::{self};\n        use crate::b::*;\n        pub fn run() -> u8 { m() * 10 + m::inner() }\n    }\n}\nfn main() {}\n";
+        let out = flatten_modules_in(src, &["d".to_string()]).unwrap();
+        assert!(out.contains("{ d__b__m() * 10 + d__a__m__inner() }"), "{out}");
+    }
+
+    /// A fn named like a primitive is a value in an expression's place (#254 review): `let f = u32;` takes the fn, the
+    /// annotation and a binding among generics the type
+    #[test]
+    fn a_fn_named_like_a_primitive_as_a_value() {
+        let src = "mod d {\n    pub fn u32() -> usize { 1 }\n    pub fn run() -> usize {\n        let f = u32;\n        let g: fn() -> usize = u32;\n        let x: u32 = 4;\n        let i: Option<Box<dyn Iterator<Item = u32>>> = None;\n        f() + g() + x as usize + i.map_or(0, |_| 1)\n    }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["d".to_string()]).unwrap();
+        assert!(out.contains("let f = d__u32;"), "{out}");
+        assert!(out.contains("let g: fn() -> usize = d__u32;"), "{out}");
+        assert!(out.contains("let x: u32 = 4;"), "{out}");
+        assert!(out.contains("Iterator<Item = u32>"), "{out}");
+    }
+
+    /// A block's import named like a primitive shadows it in a type's place too (#254 review):
+    /// `use crate::Byte as u8;` makes the annotation `u8` the struct, as the call
+    #[test]
+    fn a_block_import_named_like_a_primitive_shadows_it() {
+        let src = "mod d {\n    pub struct Byte(pub u8);\n    pub fn run() {\n        use crate::Byte as u8;\n        let _: u8 = u8(1);\n    }\n    pub fn other() -> u8 { 2u8 }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["d".to_string()]).unwrap();
+        assert!(out.contains("let _: d__Byte = d__Byte(1);"), "{out}");
+        assert!(out.contains("pub fn d__other() -> u8 { 2u8 }"), "{out}");
     }
 
     fn ren(src: &str) -> String {
@@ -2865,10 +2900,24 @@ pub fn trait_scopes_in(src: &str, has_mod: bool, src_toks: Option<&[(u8, usize, 
 fn use_walk(
     toks: &[(u8, usize, usize)],
     s: &[u8],
+    j: usize,
+    end: usize,
+    prefix: Vec<Vec<u8>>,
+    out: &mut Vec<(Vec<Vec<u8>>, Vec<u8>)>,
+) -> usize {
+    use_walk_in(toks, s, j, end, prefix, out, &mut vec![])
+}
+
+/// use_walk, and the places in out of the `self` entries (`use a::m::{self};`), which bring the type namespace only:
+/// the module or the type m, not a fn m beside it
+fn use_walk_in(
+    toks: &[(u8, usize, usize)],
+    s: &[u8],
     mut j: usize,
     end: usize,
     prefix: Vec<Vec<u8>>,
     out: &mut Vec<(Vec<Vec<u8>>, Vec<u8>)>,
+    selfs: &mut Vec<usize>,
 ) -> usize {
     let tk = |k: usize| -> &[u8] { &s[toks[k].1..toks[k].2] };
     let mut path = prefix.clone();
@@ -2883,6 +2932,7 @@ fn use_walk(
                 let kw_prefix = prefix.last().is_some_and(|p| matches!(p.as_slice(), b"self" | b"super" | b"crate"));
                 if as_x || !kw_prefix {
                     let local = if as_x { tk(j + 2).to_vec() } else { prefix.last().cloned().unwrap_or_default() };
+                    selfs.push(out.len());
                     out.push((prefix.clone(), local));
                     path = prefix.clone();
                     j += if as_x { 3 } else { 1 };
@@ -2911,7 +2961,7 @@ fn use_walk(
         } else if t == b":" {
             j += 1;
         } else if t == b"{" {
-            j = use_walk(toks, s, j + 1, end, path.clone(), out);
+            j = use_walk_in(toks, s, j + 1, end, path.clone(), out, selfs);
             path = prefix.clone();
         } else if t == b"}" {
             return j + 1;
@@ -3341,10 +3391,10 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     // `use crate::m::*;` で取り込んだモジュール: (スコープ, モジュール)
     let mut globs: Vec<(usize, usize)> = vec![];
     // (モジュール m の中で use した名前を取り込むもの: (スコープ, 使う名前, m, m の中の名前, ブロック))
-    let mut pending: Vec<(usize, Vec<u8>, usize, Vec<u8>, Option<(usize, usize)>)> = vec![];
+    let mut pending: Vec<(usize, Vec<u8>, usize, Vec<u8>, Option<(usize, usize)>, u8)> = vec![];
     // (a name a `use` in a block (a fn body) imports, seen in that block only: (its `{`, its `}`, the name used, the new
     // name). The innermost block's wins over the module's items and imports)
-    let mut block_imports: Vec<(usize, usize, Vec<u8>, Vec<u8>, usize)> = vec![];
+    let mut block_imports: Vec<(usize, usize, Vec<u8>, Vec<u8>, usize, u8)> = vec![];
     // (the namespaces of each definition: a fn / const / static is a value, an enum / trait / type alias a type, a
     //  struct / union both (a tuple struct's constructor); one defined twice under a name, both)
     let mut def_ns: LMap<(usize, Vec<u8>), u8> = LMap::default();
@@ -3504,7 +3554,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         }
         use_ranges.push((k, e));
         let mut items = vec![];
-        use_walk(&toks, s, k + 1, e, vec![], &mut items);
+        let mut selfs = vec![];
+        use_walk_in(&toks, s, k + 1, e, vec![], &mut items, &mut selfs);
         // (a `pub use`: a glob of this module brings what it imports)
         if pub_before(&toks, s, k) {
             import_pub.extend(items.iter().filter(|it| it.1.as_slice() != b"*").map(|it| (sc, it.1.clone())));
@@ -3512,13 +3563,16 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         let own_brace = if sc == usize::MAX { usize::MAX } else { mods[sc].1 };
         let in_block = close_at.get(&block_of[k]).filter(|_| block_of[k] != own_brace).map(|&c| (block_of[k], c));
         let mut add = |local: Vec<u8>, nn: Vec<u8>, ns: u8| match in_block {
-            Some((o, c)) => block_imports.push((o, c, local, nn, sc)),
+            Some((o, c)) => block_imports.push((o, c, local, nn, sc, ns)),
             None => {
                 import_ns.insert((sc, local.clone()), ns);
                 imports.push((sc, local, nn));
             }
         };
-        for (path, local) in items {
+        for (ix, (path, local)) in items.into_iter().enumerate() {
+            // (a `self` entry, `use crate::a::m::{self};`, brings m's type namespace only: the module (followed as a
+            //  module alias) or a type, not a fn m of a beside it)
+            let want = if selfs.contains(&ix) { NS_TYPE } else { NS_ANY };
             if local.as_slice() == b"*" {
                 // (resolved before this loop, to a fixed point)
                 continue;
@@ -3536,16 +3590,17 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                     }
                     full.extend_from_slice(seg);
                 }
-                add(local, full, NS_ANY);
+                add(local, full, want);
                 continue;
             }
-            if let Some(m) = resolve_path(sc, mpath, k, &use_names) {
-                let ns = def_ns.get(&(m, name[0].clone())).copied().unwrap_or(NS_ANY);
+            // (none when the name is only a value, beside the module a `self` entry names)
+            let found = resolve_path(sc, mpath, k, &use_names).map(|m| (m, def_ns.get(&(m, name[0].clone())).copied().unwrap_or(NS_ANY) & want));
+            if let Some((m, ns)) = found.filter(|f| f.1 != 0) {
                 if let Some(nn) = renamed_in(m, &name[0]) {
                     add(local, nn, ns);
                 } else if !def_set.contains(&(m, name[0].clone())) {
                     // (`pub use` で取り込み直した名前かもしれない: 後で解く)
-                    pending.push((sc, local, m, name[0].clone(), in_block));
+                    pending.push((sc, local, m, name[0].clone(), in_block, want));
                 } else if local.as_slice() != name[0].as_slice() && def_set.contains(&(m, name[0].clone())) {
                     // (`use crate::parse::{FnSig as PSig}`: 別名はそのモジュールの中で元の名前に)
                     add(local, name[0].clone(), ns);
@@ -3571,7 +3626,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             let names = names_with!(&final_globs, &map);
             for p in std::mem::take(&mut pending) {
                 // (as module p.2 sees it: what its globs bring is what it imports)
-                match names.item_at(p.2, p.2, &p.3, NS_ANY) {
+                match names.item_at(p.2, p.2, &p.3, p.5) {
                     GlobHit::Item(nn, ns) => found_any.push((p, nn, ns)),
                     _ => rest.push(p),
                 }
@@ -3582,8 +3637,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             break;
         }
         for (p, nn, ns) in found_any {
+            let ns = ns & p.5;
             match p.4 {
-                Some((o, c)) => block_imports.push((o, c, p.1, nn, p.0)),
+                Some((o, c)) => block_imports.push((o, c, p.1, nn, p.0, ns)),
                 None => {
                     import_ns.insert((p.0, p.1.clone()), ns);
                     imports.push((p.0, p.1, nn));
@@ -4075,9 +4131,28 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 }
                 false
             };
-            let prim = (j > k || !call) && is_primitive_name(n) && !(j == k && call_arg());
-            // (a block's own import first: `fn f() { use b::g; g() }` beside a module-level `g`)
-            let in_block = || if is_def || prim { None } else { block_imports.iter().filter(|b| b.0 < k && k < b.1 && b.2 == n && b.4 == sc).max_by_key(|b| b.0).map(|b| b.3.clone()) };
+            // (and so is a value in an expression's place: a `let`'s or an assignment's, `let f = u32;` (not `==` / `<=`
+            //  .., nor a binding or a default among generics, `Iterator<Item = u8>` / `<T = u8>`), an arm's, `=> u32`,
+            //  and after `return` / `break`. A type's place is many more (`[u8]`, `(u8, char)`, `impl X for u8`, ..): what
+            //  is neither is a type)
+            let value_place = || {
+                if is_sym(k - 1, b'=') {
+                    let op = k >= 2 && toks[k - 2].0 == 1 && toks[k - 2].2 == toks[k - 1].1 && b"=!<>+-*/%&|^".contains(&s[toks[k - 2].1]);
+                    let binding = k >= 3 && toks[k - 2].0 == 0 && (is_sym(k - 3, b'<') || is_sym(k - 3, b','));
+                    return !op && !binding;
+                }
+                (k >= 2 && is_sym(k - 1, b'>') && is_sym(k - 2, b'=')) || is_id(k - 1, b"return") || is_id(k - 1, b"break")
+            };
+            let prim = (j > k || !call) && is_primitive_name(n) && !(j == k && k >= 1 && want != NS_TYPE && (call_arg() || value_place()));
+            // (a block's own import first: `fn f() { use b::g; g() }` beside a module-level `g`; for a primitive's name,
+            //  one in the type namespace, `use crate::Byte as u8;`, as it shadows the primitive)
+            let in_block = || {
+                if is_def {
+                    return None;
+                }
+                let ns = if prim { NS_TYPE } else { NS_ANY };
+                block_imports.iter().filter(|b| b.0 < k && k < b.1 && b.2 == n && b.4 == sc && b.5 & ns != 0).max_by_key(|b| b.0).map(|b| b.3.clone())
+            };
             // (the scope's own item, its import, or what its globs pass on, globs of globs too, all of them compared
             //  (two distinct is ambiguous): libc's unix sees `time_t` of linux_like/linux/gnu/b64; a definition is its own)
             // (the first segment of a path that goes on is a type or module: `E::V(..)`)
@@ -4210,23 +4285,26 @@ pub fn expand_module_aliases(src: &str) -> Option<String> {
     // (the innermost block around token k: a module's body, or a function's for a `use` in it)
     let scope = |k: usize| blocks.iter().filter(|&&(o, c)| o < k && k < c).min_by_key(|&&(o, c)| c - o).copied();
     let mut reps: Vec<(usize, Vec<u8>, usize)> = vec![]; // (token, its new text, the size of the use's scope)
-    // (the tokens in a `use` tree's braces, `use crate::{hir::x, m::Y};`: a path there goes on from the tree's prefix,
-    //  so its `m` is the prefix's child, not the module imported as `m` (regex-syntax's hir has `use crate::unicode;`
-    //  and `pub use crate::{.., unicode::CaseFoldError};`, #254). Found once a name is imported)
+    // (the tokens in the braces after a `use` tree's prefix, `use crate::{hir::x, m::Y};`: a path there goes on from
+    //  the prefix, so its `m` is the prefix's child, not the module imported as `m` (regex-syntax's hir has
+    //  `use crate::unicode;` and `pub use crate::{.., unicode::CaseFoldError};`, #254). Found once a name is imported)
     let mut in_tree: Vec<bool> = vec![];
     let use_trees = || {
         let mut v = vec![false; toks.len()];
         let mut k = 0;
         while k < toks.len() {
             if is_id(k) && tk(k) == b"use" && !(k >= 1 && (is_sym(k - 1, b'.') || is_sym(k - 1, b':'))) {
-                let mut d = 0i32;
+                // (the open groups, each whether it goes on from a prefix: `a::{..}` does, and a group in it; a group
+                //  right after `use`, `use {a::q as b};`, names from the scope as the `use` itself does)
+                let mut groups: Vec<bool> = vec![];
                 let mut j = k + 1;
                 while j < toks.len() && !is_sym(j, b';') {
                     if is_sym(j, b'{') {
-                        d += 1;
+                        let prefixed = groups.last().copied().unwrap_or(false) || is_sym(j - 1, b':');
+                        groups.push(prefixed);
                     } else if is_sym(j, b'}') {
-                        d -= 1;
-                    } else if d > 0 {
+                        groups.pop();
+                    } else if groups.last().copied().unwrap_or(false) {
                         v[j] = true;
                     }
                     j += 1;
