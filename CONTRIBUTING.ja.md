@@ -306,7 +306,7 @@ origin/main からの差分の行だけを変異させ、テストで見つか�
 - `.github/workflows/kpi.yml`: pull request への push ごとに走る。head と分岐点 (merge base) を
   `bench/kpi_track.py --dry-run --only <セクション>` で測る (zust-analyzer のセッションも含む)。測定は 3 つに分けて、並んだ
   ランナーで同時に走らせる (ベースの分も head の分と同時に): gen5000、traits・crates・patterns、LSP セッション。
-  ベースの値は、測った環境 (ツールチェーン・valgrind・イメージ・C ライブラリ) をキーにして保存する。どの部分も、自分の環境が
+  ベースの値は、測った環境 (ツールチェーン・valgrind・OS・C ライブラリ) をキーにして保存する。どの部分も、自分の環境が
   そのキーの環境と同じかを確かめる。pull request に書き込めるのは、コメントするジョブだけ。命令数は、同じイメージならどのランナーでも
   同じになる。ベースの値はキャッシュするので、一度測ったベースは測り直さない。`bench/kpi_pr.py` が
   pull request のコメントを 1 件だけ保ち、更新する。そこには KPI ごとのベースとの差と、push ごとの行 (前の push との差つき) が載る。1% を超えて増えた KPI には印を付け、

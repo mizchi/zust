@@ -314,7 +314,7 @@ Mutants the tests miss are written to `mutants.out/missed.txt`; add tests to kil
 - `.github/workflows/kpi.yml` runs on every push to a pull request. It measures the head and the merge base with
   `bench/kpi_track.py --dry-run --only <sections>` (a zust-analyzer session included), in three parts on runners side
   by side, the base's beside the head's: gen5000; traits, crates and patterns; the LSP session. The base's KPIs are
-  kept by the environment they are measured in (toolchain, valgrind, image, C library), which every part checks it has.
+  kept by the environment they are measured in (toolchain, valgrind, OS, C library), which every part checks it has.
   Only the job that comments may write to the pull request. An instruction count is the same on any runner of the
   image. The base's numbers are cached, so a base measured before is not measured again.
   `bench/kpi_pr.py` then keeps one comment on the pull request up to date: the change of each KPI against

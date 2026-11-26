@@ -64,12 +64,12 @@ jobs:
         run: bash scripts/ci_install_valgrind.sh
       # (the key of a commit's KPIs: the files they are measured from (not the documents, nor the KPI log that main's
       # commits append to; submodules by their commits), and what moves the counts besides them: the toolchain,
-      # valgrind, the runner's image and its C library (cachegrind counts its instructions too). A commit that changes
+      # valgrind, the runner's OS and its C library (cachegrind counts its instructions too). A commit that changes
       # only documents keeps its parent's key)
       - name: Find the merge base and the cache keys
         id: keys
         run: |
-          env_now="$(rustc -V) | $(valgrind --version) | ${ImageOS:-} ${ImageVersion:-} | $(ldd --version 2>&1 | sed -n 1p)"
+          env_now="$(rustc -V) | $(valgrind --version) | ${ImageOS:-} | $(ldd --version 2>&1 | sed -n 1p)"
           echo "env=$env_now" | tee -a "$GITHUB_OUTPUT"
           kpi_key() {
             { echo "$env_now"
@@ -176,12 +176,14 @@ jobs:
           cat ~/valgrind-install.log
           [ "$(cat ~/valgrind-install.done)" = 0 ] || { echo "valgrind's install failed"; exit 1; }
           valgrind --version
-      # (what the key names: a part measured on another toolchain, valgrind or image than plan's is not kept)
+      # (what the key names: a part measured on another toolchain, valgrind, OS or C library than plan's is not kept.
+      # Not the image's build (ImageVersion): runners of one run had 20261116.376.1 and 20261116.133.1 during a
+      # rollout, with the same toolchain, valgrind and C library, which are what move the counts)
       - name: Check the environment against the plan's
         env:
           PLANNED: ${{ needs.plan.outputs.env }}
         run: |
-          env_now="$(rustc -V) | $(valgrind --version) | ${ImageOS:-} ${ImageVersion:-} | $(ldd --version 2>&1 | sed -n 1p)"
+          env_now="$(rustc -V) | $(valgrind --version) | ${ImageOS:-} | $(ldd --version 2>&1 | sed -n 1p)"
           echo "planned: $PLANNED"; echo "here:    $env_now"
           [ "$env_now" = "$PLANNED" ] || { echo "::error::this runner's environment is not the one plan keyed the KPIs by"; exit 1; }
       - name: Measure
