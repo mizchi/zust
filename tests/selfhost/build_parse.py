@@ -1,11 +1,17 @@
 """Bundles zustc's own crates/syntax/src/parse.rs (the Rust parser that does not use syn) into a single-file program.
 usage: python3 tests/selfhost/build_parse.py > out/selfhost/parse_main.rs
-main parses each file in its arguments and prints the number of nodes, the item names and the fn signatures."""
+main parses each file in its arguments and prints the number of nodes, the item names and the fn signatures.
+(parse.rs calls regions::mentions_lt and fxhash; regions.rs uses types / ast_closure, so those come along)"""
 
 parse = open("crates/syntax/src/parse.rs").read()
+deps = "".join(f"mod {name} {{\n" + open(path).read() + "}\n\n" for name, path in [
+    ("regions", "crates/syntax/src/regions.rs"), ("types", "crates/syntax/src/types.rs"),
+    ("ast_closure", "crates/syntax/src/ast_closure.rs"), ("fxhash", "crates/base/src/fxhash.rs")])
 print("""// 自動生成: tests/selfhost/build_parse.py (zustc の crates/syntax/src/parse.rs をそのまま含む)
 mod parse {
 """ + parse + """}
+
+""" + deps + """
 
 use parse::*;
 
