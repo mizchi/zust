@@ -10844,6 +10844,10 @@ impl<T> OnceCell<T> {
     pub fn get_or_init<F: FnOnce() -> T>(&self, f: F) -> &T {
         if self.val.is_none() {
             let v = f();
+            // (an initializer that set the cell itself: std's "reentrant init" panic, not the value replaced)
+            if self.val.is_some() {
+                panic!("reentrant init");
+            }
             let p = &self.val as *const Option<T> as *mut Option<T>;
             unsafe {
                 p.write(Some(v));

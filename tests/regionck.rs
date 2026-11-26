@@ -5993,4 +5993,29 @@ impl W<&'static u8> {
 }
 fn main() {}
 "#, &[], "q13");
+    // (the review's: an impl lifetime that the self type does not have (`impl<'a> S`) is not the receiver's; a
+    // constructor in a returned position is checked too; `St<Option<T>>` in the signature implies T: 'static in a
+    // closure; a closure of a fn whose T is 'static builds St and En of it)
+    errors_at("struct S;\nimpl<'a> S {\n    fn f(self: S, _: &'a u8) {}\n}\nfn main() { S.f(&1); }\n", &[], "q14");
+    errors_at("struct S<T: 'static>(T);\nfn bad<T>(x: T) -> impl Sized {\n    return S(x);\n}\nfn main() {}\n", &[(3, "may not live long enough")], "q15");
+    errors_at(r#"struct St<U: 'static>(U);
+fn needs_static<T: 'static>() {}
+fn f<T>(_: St<Option<T>>) {
+    let c = || needs_static::<T>();
+    c();
+}
+fn main() { f::<u8>(St(None)); }
+"#, &[], "q16");
+    errors_at(r#"struct St<T: 'static>(T);
+enum En<T: 'static> { A(T), B }
+fn c<T: 'static + Copy>(x: T) -> usize {
+    let f = move || {
+        let _ = St(x);
+        En::A(x)
+    };
+    let _ = f();
+    1
+}
+fn main() { let _ = c(3u8); let _ = En::<u8>::B; }
+"#, &[], "q17");
 }

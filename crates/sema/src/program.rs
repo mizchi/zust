@@ -3838,9 +3838,11 @@ impl Program {
                 if self.impls.contains(&(b, if sync { "Sync" } else { "Send" }.to_string())) {
                     return true;
                 }
+                // (the prelude's, not a program's own type of the name)
+                let ours = self.struct_item.get(b as usize).is_some_and(|&i| i >= self.prelude_from);
                 match name {
-                    "Rc" => return false,
-                    "Cell" | "RefCell" | "LazyCell" | "OnceCell" if sync => return false,
+                    "Rc" if ours => return false,
+                    "Cell" | "RefCell" | "LazyCell" | "OnceCell" if sync && ours => return false,
                     // (the prelude's own types hold raw pointers: what they hold decides)
                     _ => {}
                 }

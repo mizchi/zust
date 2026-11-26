@@ -548,7 +548,8 @@ fn elided_in_self_recv(rt: &PTy, o: &Owner) -> Option<crate::parse::Pos> {
         }
     }
     // (the self type has a region: a reference in it, or a lifetime of the header's in its slots)
-    let self_slots = o.regions.as_deref().map_or(0, |r| r.self_slots.len());
+    // (not R_ELIDED_ADT, a path the header writes without lifetimes (`impl<'a> S`), which may have none)
+    let self_slots = o.regions.as_deref().map_or(0, |r| r.self_slots.iter().filter(|&&c| c != crate::types::R_ELIDED_ADT).count());
     if self_slots == 0 && !syn_has_ref(&o.self_ty) {
         return None;
     }

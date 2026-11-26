@@ -3155,9 +3155,11 @@ impl Cx<'_> {
                 Ty::Struct(s) => {
                     let b = prog.base_of(s);
                     let args = &prog.structs[s as usize].args;
+                    // (also within the argument: `St<Option<T>>` and `St<&'a T>` need T: 'static too; not within a fn
+                    // pointer's types (`mentions` does not look there))
                     let own = prog.adt_regions.get(&b).is_some_and(|ar| {
                         args.iter().enumerate().any(|(j, &a)| {
-                            a == Ty::Param(k as u8) && prog.structs[b as usize].generics.get(j).is_some_and(|gn| ar.ty_outlives.iter().any(|x| x.0 == *gn && x.1 == crate::types::R_STATIC))
+                            mentions(prog, a, k, 0) && prog.structs[b as usize].generics.get(j).is_some_and(|gn| ar.ty_outlives.iter().any(|x| x.0 == *gn && x.1 == crate::types::R_STATIC))
                         })
                     });
                     own || args.iter().any(|&a| implies(prog, a, k, depth + 1))
