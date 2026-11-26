@@ -130,7 +130,7 @@ fn diverging_macro(p: &Path) -> bool {
 /// 必ず発散する式 (`return` / `break` / `continue` / `panic!(..)`)
 fn diverges(e: &Expr) -> bool {
     match e {
-        Expr::Return(_) | Expr::Break(..) | Expr::Continue(..) => true,
+        Expr::Return(..) | Expr::Break(..) | Expr::Continue(..) => true,
         Expr::Macro(p, _, _) => diverging_macro(p),
         _ => false,
     }
@@ -1652,7 +1652,7 @@ impl Inf<'_> {
                 self.block(b);
                 self.known(Ty::Unit)
             }
-            Expr::Return(x) => {
+            Expr::Return(x, _) => {
                 if let Some(x) = x {
                     let v = self.expr(x);
                     let ret = self.ret;
@@ -2366,7 +2366,9 @@ impl Inf<'_> {
     /// tell them apart yet
     fn pick_inherent_overload(&mut self, id: u32, rv: u32) -> Option<u32> {
         let p = self.prog;
-        let Some(group) = p.overloads.get(&p.names[id as usize]) else { return Some(id) };
+        // (by the group's name: self_method may give an overload, `W::f#1`)
+        let name = &p.names[id as usize];
+        let Some(group) = p.overloads.get(name.split('#').next().unwrap_or(name)) else { return Some(id) };
         let inh: Vec<u32> = group.iter().copied().filter(|&c| p.sigs[c as usize].has_self && p.sigs[c as usize].impl_trait.is_none() && p.sigs[c as usize].self_ty.is_some()).collect();
         if inh.len() < 2 || !inh.contains(&id) {
             // (impls of one trait for instances of the type (the prelude's `impl Read for Cursor<Vec<u8>>` and `.. for
@@ -2506,7 +2508,7 @@ impl Inf<'_> {
                 Some(Shape::Adt(b, _, _)) => Some(b),
                 _ => None,
             };
-            if let Some(id) = sid.and_then(|s| self.prog.method(s, n)) {
+            if let Some(id) = sid.and_then(|s| self.prog.self_method(s, n)) {
                 // (a method of the program's own type that has a scalar method's name (`checked_add`): its overloads too,
                 // as below)
                 let id = self.pick_inherent_overload(id, rv);
@@ -2522,7 +2524,25 @@ impl Inf<'_> {
             Some(Shape::Adt(b, _, _)) => Some(b),
             _ => None,
         };
-        let mut callee = sid.and_then(|sid| self.prog.method(sid, n).or_else(|| self.prog.default_method(sid, n)));
+        // (a method with `self`: an associated function of the name is none (self_method), by the reference the receiver
+        // reaches its struct through last, as the lowering's lookup (self_method_at))
+        let mut wrap = None;
+        let mut v = r;
+        while sid.is_some() {
+            let x = self.find(v);
+            match self.shape[x as usize] {
+                Some(Shape::Ref(m, i)) => {
+                    wrap = Some(m);
+                    v = i;
+                }
+                Some(Shape::Bx(i)) => {
+                    wrap = None;
+                    v = i;
+                }
+                _ => break,
+            }
+        }
+        let mut callee = sid.and_then(|sid| self.prog.self_method_at(sid, n, wrap).or_else(|| self.prog.self_default_method(sid, n)));
         let mut rv = rv;
         let mut sid = sid;
         let mut hops = 0;
@@ -2540,7 +2560,7 @@ impl Inf<'_> {
                     Some(Shape::Adt(b, _, _)) => Some(b),
                     _ => None,
                 };
-                callee = sid.and_then(|sid| self.prog.method(sid, n).or_else(|| self.prog.default_method(sid, n)));
+                callee = sid.and_then(|sid| self.prog.self_method(sid, n).or_else(|| self.prog.self_default_method(sid, n)));
             } else {
                 break;
             }
@@ -2623,22 +2643,84 @@ impl Inf<'_> {
             dt = Some(*i);
         }
         if let Some(Ty::Dyn(tr)) = dt {
+            // (the trait's method, else one of `impl dyn Tr { .. }` / `impl X for dyn Tr`: `__dyn_Tr::m`)
             let decl = self
                 .prog
                 .traits
                 .get(tr)
-                .and_then(|ds| ds.iter().copied().find(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(n)));
+                .and_then(|ds| ds.iter().copied().find(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(n)))
+                .or_else(|| self.prog.prim_method(Ty::Dyn(tr), n).filter(|&d| self.prog.sigs[d as usize].has_self))
+                // (or a default method of a trait the object implements, `impl MyTrait for dyn Tr {}`)
+                .or_else(|| {
+                    self.prog.dyn_impl_traits(tr).into_iter().filter(|t2| self.prog.implements(Ty::Dyn(tr), t2)).find_map(|t2| {
+                        self.prog.traits.get(t2)?.iter().copied().find(|&d| {
+                            let s = &self.prog.sigs[d as usize];
+                            s.has_body && s.has_self && self.prog.names[d as usize].rsplit("::").next() == Some(n)
+                        })
+                    })
+                });
             if let Some(d) = decl {
                 let sig = &self.prog.sigs[d as usize];
+                // (an impl's parameters solved from the receiver's object: `impl<T> Get<T> for dyn O<T>` through `dyn
+                // O<u8>`, T u8)
+                let mut sol = vec![None; sig.generics.len()];
+                if let (false, Some(&p0 @ Ty::Ref(m, _))) = (sol.is_empty(), sig.params.first()) {
+                    self.prog.match_ty(p0, Ty::Ref(m, crate::types::intern(Ty::Dyn(tr))), &mut sol);
+                }
+                // (a default's trait parameters from the one impl for the object: `impl<T> Get<T> for dyn Obj<T>`
+                // through `dyn Obj<u8>`, T u8)
+                if let (Some(trn), true) = (sig.trait_of.as_deref(), sol.iter().skip(1).any(|x| x.is_none())) {
+                    let prog = self.prog;
+                    let fits: Vec<Vec<Ty>> = prog
+                        .impl_targs
+                        .get(trn)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|(ist, args, ng)| {
+                            let mut isol = vec![None; *ng];
+                            if !prog.match_ty(*ist, Ty::Dyn(tr), &mut isol) {
+                                return None;
+                            }
+                            let a: Vec<Ty> = args.iter().map(|&a| prog.partial_subst(a, &isol)).collect();
+                            a.iter().all(|&t| !prog.has_param(t)).then_some(a)
+                        })
+                        .collect();
+                    if let [a] = fits.as_slice() {
+                        for (i, &t) in a.iter().enumerate() {
+                            if let Some(x @ None) = sol.get_mut(1 + i) {
+                                *x = Some(t);
+                            }
+                        }
+                    }
+                }
                 let (ps, ret) = (sig.params[1..].to_vec(), sig.ret);
                 for (a, p) in avs.into_iter().zip(ps) {
+                    let p = self.prog.partial_subst(p, &sol);
                     if !self.prog.has_param(p) {
                         let k = self.known(p);
                         self.unify(a, k);
                     }
                 }
+                let ret = self.prog.partial_subst(ret, &sol);
                 if !self.prog.has_param(ret) {
                     return self.known(ret);
+                }
+                // (the method's own parameters from its turbofish, the last ones: `x.make::<u8>()`)
+                let tys: Vec<&PTy> = tf.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None }).collect();
+                let ng = sol.len();
+                if !tys.is_empty() && tys.len() <= ng {
+                    let mut pv: Vec<Option<u32>> = vec![None; ng];
+                    for (i, t) in sol.into_iter().enumerate() {
+                        pv[i] = t.map(|t| self.known(t));
+                    }
+                    for (k, t) in tys.into_iter().enumerate() {
+                        let v = self.ty_var(t);
+                        let i = (ng + k).wrapping_sub(tf.len());
+                        if i < ng && pv[i].is_none() {
+                            pv[i] = Some(v);
+                        }
+                    }
+                    return self.known_g(ret, &mut pv);
                 }
             }
             return self.var();
@@ -2711,7 +2793,7 @@ impl Inf<'_> {
                 _ => None,
             };
             if let (Some(e), Some(&vb)) = (elem, self.prog.struct_index.get("Vec")) {
-                if let Some(id) = self.prog.method(vb, n) {
+                if let Some(id) = self.prog.self_method(vb, n) {
                     if !matches!(n, "len" | "is_empty" | "iter" | "iter_mut" | "into_iter") {
                         let vv = self.adt(vb, vec![e]);
                         return self.apply_recv(Some(id), avs.clone(), vv);

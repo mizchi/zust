@@ -486,7 +486,8 @@ pub enum Expr {
     /// (the last field: where its label is, else where the keyword is)
     Break(Option<String>, Option<Box<Expr>>, Pos),
     Continue(Option<String>, Pos),
-    Return(Option<Box<Expr>>),
+    /// (the last field: where the keyword is)
+    Return(Option<Box<Expr>>, Pos),
     /// (the last field: where the closure starts)
     Closure(bool, Vec<(Pat, Option<Ty>)>, Option<Box<Ty>>, Box<Expr>, Pos),
     Tuple(Vec<Expr>),
@@ -512,12 +513,12 @@ pub struct Arm {
 pub fn expr_pos(e: &Expr) -> Pos {
     let first = |s: &Span, x: &Expr| if s.start.line != 0 { s.start } else { expr_pos(x) };
     match e {
-        Expr::Lit(_, p) | Expr::Break(_, _, p) | Expr::Continue(_, p) | Expr::Closure(.., p) => *p,
+        Expr::Lit(_, p) | Expr::Break(_, _, p) | Expr::Continue(_, p) | Expr::Closure(.., p) | Expr::Return(_, p) => *p,
         Expr::Path(_, pa) | Expr::Struct(pa, ..) => pa.pos,
         Expr::Unary(_, x, s) | Expr::Binary(_, x, _, s) | Expr::AssignOp(_, x, _, s) | Expr::MethodCall(x, _, _, _, s) | Expr::Index(x, _, s) | Expr::Field(x, _, s) => first(s, x),
         Expr::Macro(_, _, s) => s.start,
         Expr::Call(x, _) | Expr::Cast(x, _) | Expr::Try(x) | Expr::Paren(x) | Expr::Assign(x, _) | Expr::Ref(_, x) | Expr::RawRef(_, x) | Expr::Repeat(x, _) => expr_pos(x),
-        Expr::Let(_, x) | Expr::Match(x, _) | Expr::If(x, ..) | Expr::While(_, x, _) | Expr::For(_, _, x, _) | Expr::Return(Some(x)) | Expr::Range(Some(x), ..) => expr_pos(x),
+        Expr::Let(_, x) | Expr::Match(x, _) | Expr::If(x, ..) | Expr::While(_, x, _) | Expr::For(_, _, x, _) | Expr::Range(Some(x), ..) => expr_pos(x),
         Expr::Tuple(xs) | Expr::Array(xs) => xs.first().map(expr_pos).unwrap_or_default(),
         // (a block's: its first statement's)
         Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => match b.stmts.first() {
@@ -2584,9 +2585,10 @@ impl Parser {
                 if self.in_const {
                     return Err(self.err_plain("return statement outside of function body (E0572)"));
                 }
+                let kw = self.pos();
                 self.i += 1;
                 let v = if self.expr_follows() { Some(Box::new(self.expr(ss)?)) } else { None };
-                return Ok(Expr::Return(v));
+                return Ok(Expr::Return(v, kw));
             }
             "break" => {
                 let kw = self.pos();
@@ -3879,8 +3881,8 @@ impl Counts {
                 self.expr(x);
                 self.block(b);
             }
-            Expr::Break(_, v, _) | Expr::Return(v) => {
-                if matches!(e, Expr::Return(_)) {
+            Expr::Break(_, v, _) | Expr::Return(v, _) => {
+                if matches!(e, Expr::Return(..)) {
                     self.returns += 1;
                 }
                 if let Some(v) = v {

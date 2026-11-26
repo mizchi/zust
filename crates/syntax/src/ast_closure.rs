@@ -208,7 +208,7 @@ fn each_child(e: &Expr, f: &mut dyn FnMut(&Expr)) {
             f(x);
             block_exprs(b, f);
         }
-        Expr::Break(_, v, _) | Expr::Return(v) => {
+        Expr::Break(_, v, _) | Expr::Return(v, _) => {
             if let Some(v) = v {
                 f(v);
             }
@@ -671,7 +671,7 @@ fn moves_in(e: &Expr, caps: &[String], by: MovesBy) -> bool {
             return if *mv { free_vars(e).iter().any(|n| caps.contains(n)) } else { moves_capture_by(e, caps, by) };
         }
         Expr::Call(_, a) if a.iter().any(|x| is_cap(x, caps)) => return true,
-        Expr::Return(Some(v)) if is_cap(v, caps) => return true,
+        Expr::Return(Some(v), _) if is_cap(v, caps) => return true,
         _ => {}
     }
     // (`let C(ref mut r, _) = c;` binds by reference: not a move)
@@ -882,7 +882,7 @@ fn move_site_in(e: &Expr, caps: &[String], by: MovesBy) -> Option<(String, Pos)>
                 return Some(x);
             }
         }
-        Expr::Return(Some(v)) => {
+        Expr::Return(Some(v), _) => {
             if let Some(x) = cap_at(v, caps) {
                 return Some(x);
             }
@@ -1312,7 +1312,7 @@ impl EHash {
                 self.n(24);
                 self.opt_s(l);
             }
-            Expr::Return(x) => {
+            Expr::Return(x, _) => {
                 self.n(25);
                 self.opt_e(x, memo);
             }

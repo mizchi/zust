@@ -513,7 +513,7 @@ impl Cx<'_> {
         if let Some((recv, m)) = call {
             {
                 let peeked = match self.peek(recv) {
-                    Some(Ty::Struct(sid)) => Some((self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), self.prog.method(sid, m).is_none())),
+                    Some(Ty::Struct(sid)) => Some((self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), self.prog.self_method(sid, m).is_none())),
                     _ => ctor_of(self, recv).filter(|_| m == "into_iter").map(|n| (n, true)),
                 };
                 if let Some((tyname, true)) = peeked {

@@ -17,6 +17,7 @@ zurgo run
 | コマンド | すること |
 |---|---|
 | `zurgo build` | マニフェストのパッケージ (仮想ワークスペースならすべてのメンバー) とその依存をビルドする |
+| `zurgo check` | ビルドがコンパイルするすべてのクレートを検査し、それぞれのエラーを並べる (後述)。オブジェクトは書かない |
 | `zurgo run [-- 引数]` | ビルドしてから、バイナリを実行する (いくつかあるときは `--bin` で選ぶ) |
 | `zurgo test [フィルタ] [-- 引数]` | テストをビルドし、テストごとに別のプロセスで、すべてを同時に動かす (下で述べる) |
 | `zurgo metadata` | パッケージのグラフを、`cargo metadata --format-version 1` が書く形で出す |
@@ -179,6 +180,32 @@ proc macro を使うと、何もビルドする前にエラーになる:
   - proc-macro のクレートのルートは、その feature で読む。なので、`#[cfg_attr(feature = "x", proc_macro_attribute)]`
     は、その feature が有効なら数える;
 - 関数のようなマクロ (`html!(..)`) は、#29 を示す `compile_error!` に展開する。
+
+## 検査
+
+`zurgo check` は、`zurgo build` と同じくクレートを用意し (ビルドスクリプトと proc macro は走る)、それから依存の順に
+各クレートを型検査して、コンパイルする代わりにそのエラーを 1 行ずつ出す:
+
+```text
+error: crate `util`: /path/to/util/src/lib.rs:5:5: mismatched types: expected `u32`, found `&str`
+error: crate `util`: /path/to/util/src/lib.rs:11:5: mismatched types: expected `bool`, found `u8`
+error: crate `app`: src/main.rs:3:21: mismatched types: expected `String`, found `i32`
+error: 3 errors in 2 crates
+```
+
+- ビルドはクレートの最初のエラーで止まる。検査は続ける: どの fn の本体も検査してそれぞれのエラーを並べ、クレートの
+  エラーはそれに依存するクレートを止めない (クレートは依存のオブジェクトではなくソースを使う)。
+- 依存の行のエラー (このクレートの型でのその generic fn のインスタンス) は、依存のファイルに、それを見つけた最初の
+  クレートの下に 1 度だけ出す。
+- 本体より前の解析のエラー (アイテムのシグネチャで解決しない名前、形の崩れたアイテム) は、`zustc check` と同じく、
+  いまもそのクレートのただ 1 つのエラーである。
+- ソースが読めないか展開できないクレート (どの規則にも合わない `macro_rules!` の呼び出し、読み込めない proc macro)
+  は、そのエラーを持つ。それを使うクレートは検査しない: それを検査するためのそのインタフェースがない。zurgo はそう
+  言い (``warning: crate `app` not checked: its dependency `util` could not be read or expanded``)、ほかのクレートを
+  検査する。ビルドスクリプトが失敗するクレート、ビルドできない proc-macro のクレート、proc-macro サーバなしで
+  スタブのマクロを使うクレートも同じである。
+- オブジェクトもフィンガープリントも書かず、ビルドが新しいとみなすものも含めて、すべてのクレートを検査する。
+  クレートは 1 つずつ順に検査する (ビルドは古いクレートを一度にコンパイルする)。
 
 ## テスト
 

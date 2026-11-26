@@ -149,7 +149,7 @@ impl Cx<'_> {
             let sd = &self.prog.structs[sid as usize];
             if sd.base.is_none()
                 && sd.name == "String"
-                && self.prog.method(sid, &name).is_none()
+                && self.prog.self_method(sid, &name).is_none()
                 && (matches!(
                     name.as_str(),
                     "split" | "split_whitespace" | "lines" | "trim" | "starts_with" | "ends_with" | "contains"
@@ -195,7 +195,7 @@ impl Cx<'_> {
             }
         }
         // (a Vec too, as a slice when Vec itself has no method of that name: `v.copy_from_slice(..)`)
-        let vec_slice = matches!(rt, Ty::Struct(sid) if self.vec_fields(sid).is_some() && self.prog.method(sid, &name).is_none());
+        let vec_slice = matches!(rt, Ty::Struct(sid) if self.vec_fields(sid).is_some() && self.prog.self_method(sid, &name).is_none());
         if let (Some((f, m)), true) = (slice_fn, vec_slice || matches!(rt, Ty::Array(..) | Ty::Ref(_, Ty::Slice(_)))) {
             if let Some(&id) = self.prog.index.get(f) {
                 // Make the receiver `&[T]` / `&mut [T]`, and pass the arguments (closures too) as the original expressions

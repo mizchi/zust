@@ -8,7 +8,7 @@ tests/ui directories named in the comment next to the number:
 
 Both count only the tests `bench/rust_ui.py` can ask zustc to handle (no nightly features, auxiliary crates, special
 flags or targets other than Linux x86-64), so 100% does not mean every test of a directory passes. They were measured
-<!-- measured -->2026-11-26, 2736337<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
+<!-- measured -->2026-11-26, 022713c<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
 `scripts/update_readme.py` writes them here). The totals for each kind of test are in the
 [README](README.md#coverage-of-rustcs-test-suite), the subset of the language in prose is in
 [docs/language.md](docs/language.md), and the [reports](docs/reports/) explain each step.

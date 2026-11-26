@@ -5742,3 +5742,129 @@ impl<'a, U> Tr<'a> for (U,) {
 fn main() {}
 "#, &[(7, "impl has stricter requirements than trait")], "rw16");
 }
+
+#[test]
+fn part38_methods_of_impls_for_trait_objects() {
+    // (#169: methods of `impl dyn Tr { .. }` and of a trait's impl for the object, `impl X for dyn Tr`, found through
+    // the object and called with it as `&self`; each checked with rustc 1.97. A header's object not behind a reference
+    // is `dyn Tr + 'static` (a written `+ '_` is not), so the call needs the receiver's object to be 'static, rustc's
+    // E0521: none here, where it is or the impl says `'_`)
+    errors_at(r#"trait Tr { fn name(&self) -> u8; }
+impl dyn Tr { fn m(&self) -> u8 { self.name() + 1 } }
+struct S;
+impl Tr for S { fn name(&self) -> u8 { 1 } }
+trait ObjectTrait {}
+trait MyTrait { fn use_self(&self) -> &() { panic!() } }
+impl MyTrait for dyn ObjectTrait + '_ {}
+trait Other { fn other(&self) -> &(); }
+impl Other for dyn ObjectTrait + '_ { fn other(&self) -> &() { panic!() } }
+fn a<'a>(val: &'a dyn ObjectTrait) -> &'a () { val.use_self() }
+fn b<'a>(val: &'a dyn ObjectTrait) -> &'a () { val.other() }
+fn c<'a>(val: &'a (dyn Tr + 'static)) -> u8 { val.m() }
+fn main() {
+    let r: &dyn Tr = &S;
+    let x: Box<dyn Tr> = Box::new(S);
+    let _ = (r.m(), (*x).m(), x.m());
+}
+"#, &[], "dy1");
+    let e = "lifetime may not live long enough";
+    // (an inherent method of `impl dyn ObjectTrait`, the trait's method for the object, its default, and the default
+    // named as `MyTrait::use_self(val)`: each requires 'a: 'static)
+    errors_at("trait ObjectTrait {}\nimpl dyn ObjectTrait { fn use_self(&self) -> &() { panic!() } }\nfn use_it<'a>(val: &'a dyn ObjectTrait) -> &'a () {\n    val.use_self()\n}\nfn main() {}\n", &[(4, e)], "dy2");
+    errors_at("trait ObjectTrait {}\ntrait MyTrait { fn use_self(&self) -> &(); }\nimpl MyTrait for dyn ObjectTrait { fn use_self(&self) -> &() { panic!() } }\nfn use_it(val: &dyn ObjectTrait) -> &() {\n    val.use_self()\n}\nfn main() {}\n", &[(5, e)], "dy3");
+    errors_at("trait ObjectTrait {}\ntrait MyTrait { fn use_self(&self) -> &() { panic!() } }\nimpl MyTrait for dyn ObjectTrait {}\nfn use_it<'a>(val: &'a dyn ObjectTrait) -> &'a () {\n    val.use_self()\n}\nfn main() {}\n", &[(5, e)], "dy4");
+    errors_at("trait ObjectTrait {}\ntrait MyTrait { fn use_self(&self) -> &() { panic!() } }\nimpl MyTrait for dyn ObjectTrait {}\nfn use_it<'a>(val: &'a dyn ObjectTrait) -> &'a () {\n    MyTrait::use_self(val)\n}\nfn main() {}\n", &[(5, e)], "dy5");
+    // (a generic impl for an object of a generic trait, its parameter from the object's arguments, and a method's
+    // turbofish)
+    errors_at("trait ObjectTrait<T> {}\ntrait MyTrait<T> { fn use_self<K>(&self) -> &(); }\nimpl<T> MyTrait<T> for dyn ObjectTrait<T> { fn use_self<K>(&self) -> &() { panic!() } }\nfn use_it<'a>(val: &'a dyn ObjectTrait<u8>) -> &'a () {\n    val.use_self::<u16>()\n}\nfn main() {}\n", &[(5, e)], "dy6");
+    // (an `impl Trait` result whose type is such a method's: `&'a ()` for `impl OtherTrait<'a> + 'a`)
+    errors_at("trait OtherTrait<'a> {}\nimpl<'a> OtherTrait<'a> for &'a () {}\ntrait ObjectTrait {}\nimpl dyn ObjectTrait { fn use_self(&self) -> &() { panic!() } }\nfn use_it<'a>(val: &'a dyn ObjectTrait) -> impl OtherTrait<'a> + 'a {\n    val.use_self()\n}\nfn main() {}\n", &[(6, e)], "dy7");
+    // (two traits whose defaults of the name the object has: ambiguous, E0034)
+    errors_at("trait ObjectTrait {}\ntrait A { fn f(&self) {} }\ntrait B { fn f(&self) {} }\nimpl A for dyn ObjectTrait + '_ {}\nimpl B for dyn ObjectTrait + '_ {}\nfn g(val: &dyn ObjectTrait) {\n    val.f()\n}\nfn main() {}\n", &[(7, "multiple applicable items in scope")], "dy8");
+}
+
+#[test]
+fn part38_review_methods_of_impls_for_trait_objects() {
+    // (#237's review, each checked with rustc 1.97. Accepted: an object whose trait takes a lifetime (`trait Obj<'a>:
+    // 'a`, the default its own bound), an impl for `dyn Obj<u8> + '_` (the object's arguments in the lookup), and
+    // `Ext::pick(x)` beside the object's own `pick`, which picks Ext's)
+    errors_at(r#"trait Obj<'a>: 'a {}
+impl<'a> dyn Obj<'a> { fn get(&self) -> u8 { 1 } }
+fn f<'a>(x: &'a dyn Obj<'a>) -> u8 { x.get() }
+trait O2<T> {}
+trait Ext { fn e(&self) -> u8 { 1 } }
+impl Ext for dyn O2<u8> + '_ {}
+fn g<'a>(x: &'a dyn O2<u8>) -> u8 { x.e() }
+trait O3 { fn pick(&self) -> u8 { 1 } }
+trait E3 { fn pick(&self) -> u8 { 2 } }
+impl E3 for dyn O3 {}
+fn h(x: &(dyn O3 + 'static)) -> u8 { E3::pick(x) }
+fn main() {}
+"#, &[], "rv1");
+    // (rejected: a `&self` result borrowed from the receiver, not only its object (3:50); an unsafe method outside
+    // `unsafe` (E0133); a `&mut self` method through `&` (E0596); a local Box's borrow returned (E0515))
+    errors_at("trait Tr {}\nimpl dyn Tr { fn get(&self) -> &u8 { panic!() } }\nfn leak(x: &(dyn Tr + 'static)) -> &'static u8 { x.get() }\nfn main() {}\n", &[(3, "lifetime may not live long enough")], "rv2");
+    errors_at("trait Obj {}\nimpl dyn Obj { unsafe fn dangerous(&self) -> u8 { 1 } }\nfn f(x: &(dyn Obj + 'static)) -> u8 { x.dangerous() }\nfn main() {}\n", &[(3, "E0133")], "rv3");
+    errors_at("trait Obj {}\nimpl dyn Obj { fn change(&mut self) {} }\nfn f(x: &(dyn Obj + 'static)) { x.change() }\nfn main() {}\n", &[(3, "E0596")], "rv4");
+    errors_at("trait Tr {}\nimpl dyn Tr { fn get<'a>(&'a self) -> &'a u8 { panic!() } }\nstruct S;\nimpl Tr for S {}\nfn g() -> &'static u8 { let b: Box<dyn Tr> = Box::new(S); b.get() }\nfn main() {}\n", &[(5, "E0515")], "rv5");
+    // (an explicit deref of the Box (`(*b).get()`), through `impl dyn Tr` and through the vtable: its content
+    // borrowed as `b.get()`'s (E0515); of `b: &Box<dyn Tr>` or a field's Box through `&W` a reborrow, not a loan; and
+    // `(*x).get()` of `x: &'a (dyn Tr + 'static)` borrowed for `'a`, not `'static` (9:54))
+    errors_at(r#"trait Tr {}
+impl dyn Tr { fn get<'a>(&'a self) -> &'a u8 { panic!() } }
+struct S; impl Tr for S {}
+fn f() -> &'static u8 { let b: Box<dyn Tr> = Box::new(S); (*b).get() }
+fn g(b: &Box<dyn Tr>) -> &u8 { (*b).get() }
+fn h(b: &Box<dyn Tr>) -> &u8 { (**b).get() }
+struct W { b: Box<dyn Tr> }
+fn k(w: &W) -> &u8 { (*w.b).get() }
+fn l<'a>(x: &'a (dyn Tr + 'static)) -> &'static u8 { (*x).get() }
+fn main() {}
+"#, &[(4, "E0515"), (9, "lifetime may not live long enough")], "rv6");
+    errors_at(r#"trait Tr { fn get<'a>(&'a self) -> &'a u8; }
+fn f(b: Box<dyn Tr>) -> &'static u8 { (*b).get() }
+fn g(b: &Box<dyn Tr>) -> &u8 { (*b).get() }
+fn h(b: &Box<dyn Tr>) -> &u8 { (**b).get() }
+fn main() {}
+"#, &[(2, "E0515")], "rv7");
+    // (#237's second review, accepted by rustc 1.97: an object among a user type's arguments takes that type's bound
+    // (`impl<'a> W<'a, dyn Obj>` with `T: ?Sized + 'a`), not `'static`; a result type solved from the type expected
+    // and, in an `impl Trait` body's inference, from the object's arguments)
+    errors_at(r#"struct W<'a, T: ?Sized + 'a>(&'a T);
+trait Obj {}
+impl<'a> W<'a, dyn Obj> { fn get(&self) -> u8 { 1 } }
+fn f<'a>(w: W<'a, dyn Obj + 'a>) -> u8 { w.get() }
+trait Tr {}
+impl dyn Tr { fn make<T: Default>(&self) -> T { T::default() } }
+fn g(x: &(dyn Tr + 'static)) -> u8 { x.make() }
+trait O<T> {}
+trait Get<T> { fn get(&self) -> T; }
+impl<T: Default> Get<T> for dyn O<T> + '_ { fn get(&self) -> T { T::default() } }
+fn h(x: &dyn O<u8>) -> impl std::fmt::Display { x.get() }
+fn main() {}
+"#, &[], "rv8");
+    // (the third review's, accepted by rustc 1.97: a user type named as a std one (`RwLock<'a, T: ?Sized + 'a>`) gives
+    // its object its bound, not `'static`; a method's turbofish in an `impl Trait` body's inference)
+    errors_at(r#"struct RwLock<'a, T: ?Sized + 'a>(&'a T);
+trait Obj {}
+impl<'a> RwLock<'a, dyn Obj> { fn get(&self) -> u8 { 1 } }
+fn f<'a>(w: RwLock<'a, dyn Obj + 'a>) -> u8 { w.get() }
+impl dyn Obj { fn make<T: Default>(&self) -> T { T::default() } }
+fn g(x: &(dyn Obj + 'static)) -> impl std::fmt::Display { x.make::<u8>() }
+fn main() {}
+"#, &[], "rv9");
+    // (the fourth review's, checked with rustc 1.97: a default's trait parameters from the impl's trait arguments
+    // (`impl Ext<u8> for dyn Obj + '_`, `x.value()` with no annotation); an object that writes `'static` asks for it,
+    // as the default does (4:41, E0521 for rustc))
+    errors_at(r#"trait Obj {}
+trait Ext<T> { fn value(&self) -> Option<T> { None } }
+impl Ext<u8> for dyn Obj + '_ {}
+fn f(x: &dyn Obj) -> Option<u8> { let v = x.value(); v }
+trait Obj2<T> {}
+trait Ext2<T> { fn get(&self) -> Vec<T> { Vec::new() } }
+impl<T> Ext2<T> for dyn Obj2<T> + '_ {}
+fn g(y: &dyn Obj2<u16>) -> usize { let w = y.get(); w.len() }
+fn main() {}
+"#, &[], "rv10");
+    errors_at("trait Obj {}\ntrait Ext { fn e(&self) -> u8 { 1 } }\nimpl Ext for dyn Obj + 'static {}\nfn f<'a>(x: &'a (dyn Obj + 'a)) -> u8 { x.e() }\nfn main() {}\n", &[(4, "lifetime may not live long enough")], "rv11");
+}
