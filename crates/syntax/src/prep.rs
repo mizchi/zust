@@ -611,6 +611,31 @@ fn skeleton(t: &str, names: &[String]) -> (String, u64, bool) {
             None => false,
         };
         let in_init = k >= init_start && k < init_end;
+        // (a `macro_rules!` outside the bodies is kept as written, as one in a body is: a `fn f() { .. }` in its rules is
+        // no body to blank, and the calls of the changed chunks expand what it says)
+        if !in_body && !in_init && toks[k].0 == 0 && &s[toks[k].1..toks[k].2] == b"macro_rules" && k + 3 < n && is_sym(k + 1, b'!') && toks[k + 2].0 == 0 {
+            if toks[k + 3].0 == 1 && matches!(s[toks[k + 3].1], b'(' | b'[' | b'{') {
+                let mut d = 0i32;
+                let mut j = k + 3;
+                while j < n {
+                    if toks[j].0 == 1 {
+                        match s[toks[j].1] {
+                            b'(' | b'[' | b'{' => d += 1,
+                            b')' | b']' | b'}' => {
+                                d -= 1;
+                                if d == 0 {
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    j += 1;
+                }
+                k = j + 1;
+                continue;
+            }
+        }
         if (in_body || in_init) && toks[k].0 == 0 {
             let w = &s[toks[k].1..toks[k].2];
             let stmt_start = k == 0 || is_sym(k - 1, b'{') || is_sym(k - 1, b'}') || is_sym(k - 1, b';') || is_sym(k - 1, b']');

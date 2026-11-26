@@ -253,3 +253,15 @@ fn prep_inc_attributed_item_in_a_const_initializer() {
     let srcs = vec![base.to_string(), edited, again];
     assert_eq!(through_memo(&srcs), vec![false, true]);
 }
+
+/// A `macro_rules!` outside the fn bodies whose rules hold a fn with a body (`fn inner() -> i32 { 7 }`): the skeleton
+/// keeps it as written, so a call of it in the changed chunk expands to that body (it used to expand to `{}`)
+#[test]
+fn prep_inc_macro_rules_with_a_fn_body() {
+    let base = "macro_rules! val {\n    () => {{ fn inner(q: u8) -> i32 { 7 } inner(1) }};\n}\nfn other(a: i32) -> i32 {\n    a\n}\nfn main() {\n    let v = val!();\n}\n";
+    let edited = base.replace("    let v = val!();\n", "    let z = 2;\n    let v = val!();\n");
+    let again = edited.replace("let z = 2;", "let z = 3;");
+    assert!(base != edited && edited != again);
+    let srcs = vec![base.to_string(), edited, again];
+    assert_eq!(through_memo(&srcs), vec![false, true]);
+}
