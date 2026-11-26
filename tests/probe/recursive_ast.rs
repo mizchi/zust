@@ -1,5 +1,5 @@
-// 互いに再帰する型 (構文木): 非ジェネリックな enum の中の Option<T> (T は後で決まる型) の配置、
-// 後で代入する `let x;`
+// Mutually recursive types (a syntax tree): the layout of Option<T> (T a type decided later) inside a non-generic enum,
+// `let x;` assigned later
 #[derive(Clone, Debug)]
 pub struct Path { pub segs: Vec<String> }
 #[derive(Clone, Debug)]

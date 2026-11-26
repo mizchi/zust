@@ -1,24 +1,24 @@
-//! フロントエンドの流れ (コンパイラと LSP・解析で共有する): 前処理 (prep) → アイテムへの分割 (split、差分) →
-//! 使われうる prelude のアイテムを後ろに付ける。編集をまたいで覚えるもの (FrontMemo) を渡すと、変わっていない所を作り直さない
+//! The frontend flow (shared by the compiler and LSP / analysis): preprocessing (prep) → splitting into items (split, incremental) →
+//! appending the prelude items that may be used. Given what is remembered across edits (FrontMemo), unchanged parts are not rebuilt
 
 use crate::lexer::{self, ItemKind, SrcItem};
 use crate::prof::{Timer, now_ns};
 
 pub type R<T> = Result<T, String>;
 
-/// ユーザのソースの後ろに、使われうる prelude のアイテムを付ける (driver::with_prelude と同じ)。
-/// 返り値は (全体のソース, アイテム, ユーザのアイテムの数)
+/// Appends the prelude items that may be used after the user's source (same as driver::with_prelude).
+/// Returns (the whole source, the items, the number of user items)
 pub fn with_prelude(src: &str) -> R<(String, Vec<SrcItem>, usize)> {
     with_prelude_in(src, &[], &mut vec![], None, &mut Default::default()).map(|(s, i, u, _)| (s, i, u))
 }
 
-/// 前処理の、編集をまたいで覚えておくもの (LSP の didChange で変わっていない所を作り直さない)
+/// What preprocessing remembers across edits (so that LSP's didChange does not rebuild unchanged parts)
 #[derive(Default)]
 pub struct FrontMemo {
     pub sel: crate::prelude::SelectCache,
-    /// 前回の split の入力と結果
+    /// The input and result of the previous split
     pub split: Option<(String, Vec<SrcItem>)>,
-    /// 前処理のチャンクごとの結果
+    /// The result per preprocessing chunk
     pub prep: crate::prep::PrepMemo,
 }
 
@@ -30,9 +30,9 @@ fn count_nl(b: &[u8]) -> usize {
     b.iter().filter(|&&c| c == b'\n').count()
 }
 
-/// lexer::split を、前回の入力と結果から差分で作る: 前後の変わっていない部分のアイテムはそのまま (後ろは位置をずらす) 使い、
-/// 間だけを split し直す。区切りは、空白の後から始まるトップレベルのアイテム (impl / trait のブロックは丸ごと) の先頭。
-/// 間の終わりがコメント・文字列の途中になりうるときや、split が失敗するときは全体を split する
+/// Builds lexer::split incrementally from the previous input and result: the items of the unchanged parts before and after are used as they are (those after with their positions shifted),
+/// and only the middle is split again. The boundaries are the starts of top-level items beginning after whitespace (impl / trait blocks as a whole).
+/// When the end of the middle may be inside a comment or a string, or when split fails, the whole is split
 #[doc(hidden)]
 pub fn split_inc(src: &str, memo: &mut Option<(String, Vec<SrcItem>)>) -> R<Vec<SrcItem>> {
     let r = match memo.as_ref() {
@@ -69,7 +69,7 @@ fn split_diff(old: &str, items: &[SrcItem], new: &str) -> Option<Vec<SrcItem>> {
     while suf < lim - pre && p[p.len() - 1 - suf] == n[n.len() - 1 - suf] {
         suf += 1;
     }
-    // 区切り: (アイテムの番号, 位置)
+    // Boundaries: (item index, position)
     let mut groups: Vec<(usize, usize)> = vec![];
     for (k, it) in items.iter().enumerate() {
         let top = !matches!(it.kind, ItemKind::ImplMember(_) | ItemKind::TraitMember(_));
@@ -77,14 +77,14 @@ fn split_diff(old: &str, items: &[SrcItem], new: &str) -> Option<Vec<SrcItem>> {
             groups.push((k, it.start));
         }
     }
-    // 前: 区切りの範囲 (次の区切りまで) が変わった所より前にあるもの
+    // Before: those whose boundary range (up to the next boundary) lies before the changed part
     let mut j = 0;
     while j + 1 < groups.len() && groups[j + 1].1 <= pre {
         j += 1;
     }
-    // (groups[j] が変わった所を含む。先頭のアイテムより前が変わったら最初から)
+    // (groups[j] contains the changed part; if what precedes the first item changed, from the beginning)
     let (keep_n, a) = if groups.is_empty() || groups[j].1 > pre { (0, 0) } else { (groups[j].0, groups[j].1) };
-    // 後ろ: 変わった所より後から始まる最初の区切り
+    // After: the first boundary starting after the changed part
     let chg_end = p.len() - suf;
     let m = groups.iter().position(|g| g.1 > chg_end && g.1 > a);
     let (tail_k, b_old) = match m {
@@ -97,7 +97,7 @@ fn split_diff(old: &str, items: &[SrcItem], new: &str) -> Option<Vec<SrcItem>> {
     }
     let mid = &new[a..b_new];
     let mut mids = lexer::split(mid).ok()?;
-    // (間の終わりの、アイテムの後ろ: コメントや文字列が開いたままかもしれないものがあれば使わない)
+    // (after the items at the end of the middle: if there is anything that may have left a comment or string open, do not use it)
     let last_end = mids.last().map(|x| x.end).unwrap_or(0);
     let gap = &mid.as_bytes()[last_end..];
     if gap.windows(2).any(|w| w == b"/*") || gap.iter().any(|&c| c == b'"' || c == b'\'' || c == b'#') {
@@ -143,10 +143,10 @@ fn split_diff(old: &str, items: &[SrcItem], new: &str) -> Option<Vec<SrcItem>> {
     Some(out)
 }
 
-/// crates: ソースの中のクレートのモジュールの名前 (lexer::rename_module_collisions_in)
-/// fix: モジュールの名前を変えて桁がずれた所 (lexer::rename_module_collisions_fix)
-/// cfg: マクロを展開したものの中の `#[cfg(..)]` を評価する設定
-/// 返り値の 4 つ目は prelude の先頭の行 (prelude の中の行 = 結合したソースの行 - これ)
+/// crates: the names of the crate modules in the source (lexer::rename_module_collisions_in)
+/// fix: the places whose columns shifted from renaming modules (lexer::rename_module_collisions_fix)
+/// cfg: the settings for evaluating `#[cfg(..)]` in the macro expansions
+/// The fourth return value is the first line of the prelude (line in the prelude = line of the joined source - this)
 pub fn with_prelude_in(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, cfg: Option<&crate::cfg::CfgSet>, cache: &mut FrontMemo) -> R<(String, Vec<SrcItem>, usize, usize)> {
     let mut tm = Timer { on: std::env::var_os("ZUSTC_PROF").is_some(), last: now_ns(), start: now_ns() };
     let renamed = crate::prep::std_renames(src);

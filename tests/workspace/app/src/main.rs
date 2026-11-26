@@ -13,7 +13,7 @@ fn main() {
     // (`::util::pick`: a path from the extern crate)
     println!("{}", ::util::pick(&[7, 8], 0));
     println!("calls {}", util::calls());
-    // (引数 5 個: 依存するクレートの総称関数の中で範囲外の添字 (場所はそのクレートのファイル))
+    // (5 arguments: an out-of-range index inside a generic fn of a dependency crate (the location is in that crate's file))
     if std::env::args().count() == 6 {
         println!("{}", util::pick(&[1u8, 2, 3], 9));
     }

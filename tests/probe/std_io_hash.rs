@@ -1,4 +1,4 @@
-// std の fs / env / io::Error / hash (DefaultHasher は SipHash-1-3 で値も std と同じ) / bool::then / 型の別名 / to_le_bytes
+// std's fs / env / io::Error / hash (DefaultHasher is SipHash-1-3 and its values are the same as std's) / bool::then / type aliases / to_le_bytes
 use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
 type Key = u128;
@@ -8,7 +8,7 @@ fn parse(s: &str) -> Res<i32> {
 }
 fn main() {
     // (a file of this build's own, beside the executable: the tests that build and run the probes at the same time
-    // (driver2, driver2_inline, driver2_cranelift) each have their own, where a fixed /tmp path was shared)
+    // (run_examples, opt_inline, cranelift_backend) each have their own, where a fixed /tmp path was shared)
     let path = &format!("{}.txt", std::env::args().next().unwrap());
     fs::write(path, "alpha\nbeta\n").unwrap();
     let s = fs::read_to_string(path).unwrap();

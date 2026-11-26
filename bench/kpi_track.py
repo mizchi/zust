@@ -2,7 +2,7 @@
 """Measure the KPIs after one change and append them to bench/kpi_log.tsv, so that what each change did, and how far
 the KPIs have drifted in total, stays visible (small increases add up).
 
-usage: python3 bench/kpi_track.py "short label of the change" [--lsp] [--dry-run]
+usage: python3 bench/kpi_track.py "short label of the change" [--lsp] [--dry-run] [--jobs N]
 (in a pull request, measure with --dry-run and commit no rows: .github/workflows/kpi.yml compares the pull request
  with its base and keeps the result in a comment on it; rows go in with commits made on main)
 (run from the repository root after cargo build --release --workspace; with tests/ui numbers, run
@@ -65,7 +65,7 @@ def build_kpis():
     # (the least of 3 runs, as for the no-op build: one run moves by ~0.06%. At -j 1: valgrind does not count the
     # children a parallel check forks, #101)
     check = min(instructions([ZUSTC, "check", "-j", "1", src]) for _ in range(3))
-    cache = os.path.getsize(exe + ".crcache2") / 1024
+    cache = os.path.getsize(exe + ".cache") / 1024
     return noop, edit, check, cache
 
 
@@ -272,12 +272,19 @@ def main():
     ap.add_argument("change")
     ap.add_argument("--lsp", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    # (the sections side by side, each in its own work directory: an instruction count does not depend on the load.
+    # The LSP session runs alone after them, as its count moves with how often the client polls)
+    ap.add_argument("--jobs", type=int, default=1, help="measure the gen5000, traits, crates and patterns sections side by side")
     a = ap.parse_args()
     os.makedirs(WORK, exist_ok=True)
-    noop, edit, check, cache = build_kpis()
-    tr_check, tr_edit = traits_kpis()
-    cr_noop, cr_edit = crates_kpis()
-    pt_check, pt_edit = patterns_kpis()
+    sections = [build_kpis, traits_kpis, crates_kpis, patterns_kpis]
+    if a.jobs > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(a.jobs) as ex:
+            results = [f.result() for f in [ex.submit(s) for s in sections]]
+    else:
+        results = [s() for s in sections]
+    (noop, edit, check, cache), (tr_check, tr_edit), (cr_noop, cr_edit), (pt_check, pt_edit) = results
     lsp = lsp_kpi() if a.lsp else None
     ui = ui_counts()
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=ROOT).stdout.strip()

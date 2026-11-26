@@ -1,4 +1,4 @@
-// no_std: panic すると #[panic_handler] が呼ばれる (unwrap)
+// no_std: a panic calls the #[panic_handler] (unwrap)
 #![no_std]
 #![no_main]
 

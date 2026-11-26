@@ -1,7 +1,7 @@
-//! driver2 のキャッシュと並列化: 2 回目のビルドは全部キャッシュから読み同じ .o になること、
-//! 関数 1 つの変更ではその関数だけコンパイルし直すこと、fork で並列にコンパイルしても 1 プロセスと同じ .o になること。
+//! session's cache and parallelism: a second build reads everything from the cache and gives the same .o,
+//! a change to one fn recompiles only that fn, and compiling in parallel with fork gives the same .o as one process.
 #![cfg(feature = "acg")]
-use zustc::driver2::{Options2, Session2};
+use zustc::session::{Options, Session};
 
 fn program(k: u32) -> String {
     let mut s = String::new();
@@ -22,9 +22,9 @@ fn cache_and_parallel() {
     let dir = std::env::temp_dir().join(format!("d2cache_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let out = dir.join("p");
-    let cp = dir.join("p.crcache2");
+    let cp = dir.join("p.cache");
     let run = |src: &str, jobs: usize, cache: bool| {
-        let mut s = Session2::new(Options2 { jobs, no_cache: !cache, ..Default::default() });
+        let mut s = Session::new(Options { jobs, no_cache: !cache, ..Default::default() });
         if cache {
             s.load_cache(&cp);
         }
@@ -43,11 +43,11 @@ fn cache_and_parallel() {
     assert_eq!(r2.fns_compiled, 0, "{r2:?}");
     assert_eq!(r2.items_parsed, 0, "{r2:?}");
     assert!(o1 == o2 && s1 == s2);
-    // 関数 1 つだけ変える
+    // Change just one fn
     let src2 = program(37);
     let (r3, o3, s3) = run(&src2, 1, true);
     assert_eq!(r3.fns_compiled, 1, "{r3:?}");
-    // 並列 (fork) とキャッシュなしの 1 プロセスで同じ .o と出力
+    // The same .o and output in parallel (fork) and in one process without a cache
     let (_, o4, s4) = run(&src2, 4, false);
     let (_, o5, s5) = run(&src2, 1, false);
     assert!(o3 == o4 && o4 == o5, "objects differ");
@@ -61,9 +61,9 @@ fn alias_in_a_constant_invalidates() {
     let dir = std::env::temp_dir().join(format!("d2cache_alias_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let out = dir.join("p");
-    let cp = dir.join("p.crcache2");
+    let cp = dir.join("p.cache");
     let run = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, ..Default::default() });
+        let mut s = Session::new(Options { jobs: 1, ..Default::default() });
         s.load_cache(&cp);
         s.build(src, &out).unwrap();
         s.save_cache(&cp).unwrap();
@@ -86,9 +86,9 @@ fn associated_type_invalidates() {
     let dir = std::env::temp_dir().join(format!("d2cache_assoc_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let out = dir.join("p");
-    let cp = dir.join("p.crcache2");
+    let cp = dir.join("p.cache");
     let run = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, ..Default::default() });
+        let mut s = Session::new(Options { jobs: 1, ..Default::default() });
         s.load_cache(&cp);
         let r = s.build(src, &out);
         s.save_cache(&cp).unwrap();
@@ -109,5 +109,44 @@ fn associated_type_invalidates() {
     assert_eq!(run(&lt("&'a u32")).unwrap(), "3\n");
     let e = run(&lt("&'static u32")).unwrap_err().to_string();
     assert!(e.contains("lifetime may not live long enough"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The reference graph refers to names, not to each fn of a name (#188): a change to the signature of one of a
+/// name's fns (`S3::area`) compiles again every fn that names it, as before: `uses_area`, which calls `S0::area` and
+/// `S1::area` only (the over-approximation by the name's last segment), main, and each `area` (its definition names
+/// it). Not `other`
+#[test]
+fn a_names_signature_change_reaches_its_callers() {
+    let program = |ret: &str| {
+        let mut s = String::new();
+        for i in 0..6 {
+            let r = if i == 3 { ret } else { "u64" };
+            s.push_str(&format!("struct S{i}(u64);\nimpl S{i} {{\n    fn area(&self) -> {r} {{ (self.0 * {}) as {r} }}\n}}\n", i + 2));
+        }
+        s.push_str("fn uses_area(x: u64) -> u64 { S0(x).area() + S1(x).area() }\n");
+        s.push_str("fn other(x: u64) -> u64 { x.wrapping_mul(3) }\n");
+        s.push_str("fn main() {\n    let v = uses_area(2) + other(5) + S3(1).area() as u64;\n    println!(\"{v}\");\n}\n");
+        s
+    };
+    let dir = std::env::temp_dir().join(format!("d2names_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("p");
+    let cp = dir.join("p.cache");
+    let run = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Default::default() });
+        s.load_cache(&cp);
+        let rep = s.build(src, &out).unwrap();
+        s.save_cache(&cp).unwrap();
+        let o = std::process::Command::new(&out).output().unwrap();
+        (rep, String::from_utf8_lossy(&o.stdout).into_owned())
+    };
+    let (_, a) = run(&program("u64"));
+    assert_eq!(a, "30\n");
+    let (r, b) = run(&program("u64"));
+    assert_eq!((r.fns_compiled, b.as_str()), (0, "30\n"), "{r:?}");
+    // (the six `area`s, uses_area and main)
+    let (r, c) = run(&program("u32"));
+    assert_eq!((r.fns_compiled, c.as_str()), (8, "30\n"), "{r:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }

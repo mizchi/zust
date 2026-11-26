@@ -1,7 +1,7 @@
-//! 差分の前処理 (prep::prep) が、毎回全体を前処理したもの (prep::prep_full) と同じになるか。
-//! 実際のソース (examples/*.rs と、crates/syntax/src のファイルを `mod x { .. }` で束ねたもの) に乱数で編集を続けて加え、
-//! 各段で本文・桁のずれ・成否を比べる。編集は関数の本体の中 (骨組みが変わらない: 差分の経路) と、どこでも (骨組みが
-//! 変わる: 全体の経路) の両方
+//! Whether incremental preprocessing (prep::prep) is the same as preprocessing the whole every time (prep::prep_full).
+//! To real sources (examples/*.rs, and the files of crates/syntax/src bundled with `mod x { .. }`), keeps applying random edits,
+//! comparing the text, the column shifts and success / failure at each step. The edits are both inside fn bodies (the skeleton does not change: the incremental path) and anywhere (the skeleton
+//! changes: the full path)
 
 use zustc::prep::{PrepMemo, marked, prep, prep_full};
 
@@ -27,7 +27,7 @@ fn char_floor(s: &str, mut i: usize) -> usize {
 }
 
 fn edit(s: &str, r: &mut Rng) -> String {
-    // (半分は `let` の行の直後 (関数の本体の中) に、半分はどこでも)
+    // (half right after a `let` line (inside a fn body), half anywhere)
     let at = if r.below(2) == 0 {
         let lets: Vec<usize> = s.match_indices("let ").map(|(i, _)| i).collect();
         if lets.is_empty() { char_floor(s, r.below(s.len() + 1)) } else { lets[r.below(lets.len())] }
@@ -59,7 +59,7 @@ fn sources() -> Vec<String> {
     for p in ps.iter().filter(|p| p.extension().is_some_and(|e| e == "rs")).take(25) {
         v.push(std::fs::read_to_string(p).unwrap());
     }
-    // (モジュールに束ねたもの: 名前のぶつかりの書き換え・use・入れ子のアイテム・マクロ)
+    // (the files bundled into modules: rewriting of name collisions, use, nested items, macros)
     let mut bundle = String::from("fn main() {}\n");
     for m in ["ctors", "cfg", "stub", "macros"] {
         let t = std::fs::read_to_string(format!("{root}/crates/syntax/src/{m}.rs")).unwrap();
@@ -126,4 +126,130 @@ fn prep_inc_attr_with_bracket_string() {
             (a, b) => panic!("ok / err differ: full {:?} inc {:?}", a.err(), b.err()),
         }
     }
+}
+
+/// Each source in turn through one memo: the incremental result is the full one's, and whether each call after the
+/// first reused the chunks it kept (the first call preprocesses the whole and keeps nothing; the second keeps the
+/// chunks; the third can reuse them)
+fn through_memo(srcs: &[String]) -> Vec<bool> {
+    through(PrepMemo::default(), srcs)
+}
+
+fn through(mut memo: PrepMemo, srcs: &[String]) -> Vec<bool> {
+    let mut reused = vec![];
+    for (i, src) in srcs.iter().enumerate() {
+        let (mut f1, mut f2) = (vec![], vec![]);
+        let full = prep_full(src, &[], &mut f1, None).map(marked);
+        let inc = prep(src, &[], &mut f2, None, &mut memo);
+        match (full, inc) {
+            (Ok(a), Ok(b)) => assert!(a == b && f1 == f2, "source {i} differs:\n{src}"),
+            (Err(_), Err(_)) => {}
+            (a, b) => panic!("source {i}: ok / err differ: full {:?} inc {:?}", a.err(), b.err()),
+        }
+        if i > 0 {
+            reused.push(memo.was_incremental());
+        }
+    }
+    reused
+}
+
+/// What only looks like an item after a brace on its line (in a comment, a string, a one-line impl) does not stop the
+/// incremental path, and an item that is one (in a fn body on its `{`'s line) is moved as the full preparation moves it
+/// (#188: on zustc's own sources, every edit used to preprocess the whole)
+#[test]
+fn prep_inc_same_line_items() {
+    let base = "\
+// (a comment: `extern \"C\" { fn f(); }`)
+struct T(u8);
+impl T { fn get(&self) -> u8 { self.0 } }
+fn label() -> &'static str { \"{ type X = u8; }\" }
+fn helper() -> u8 {
+    let t = T(1);
+    t.get()
+}
+fn outer() -> u8 { fn inner() -> u8 { 7 } inner() + helper() }
+fn main() { let _ = (outer(), label()); }
+";
+    let in_helper = base.replace("    t.get()\n", "    let _q = 2;\n    t.get()\n");
+    let in_outer = in_helper.replace("inner() + helper()", "inner() + helper() + 1");
+    let in_label = in_outer.replace("type X = u8;", "type X = u16;");
+    let srcs: Vec<String> = [base, &in_helper, &in_outer, &in_label].iter().map(|s| s.to_string()).collect();
+    for w in srcs.windows(2) {
+        assert_ne!(w[0], w[1]);
+    }
+    assert_eq!(through_memo(&srcs), vec![false, true, true]);
+}
+
+/// A body whose `fn` type comes before a block (`let f: fn() -> u8 = || { 1 };`) and that holds an item: the item
+/// stays in its skeleton (it once went with the closure's block, and with it the name another body's item collides
+/// with: that one was not renamed after an edit elsewhere)
+#[test]
+fn prep_inc_fn_type_before_a_block() {
+    let base = "\
+fn a() -> usize {
+    let f: fn() -> u8 = || { 1 };
+    const K: usize = 1;
+    K + f() as usize
+}
+fn b() -> usize {
+    const K: usize = 2;
+    K
+}
+fn main() { let _ = a() + b(); }
+";
+    let edited = base.replace("    K\n}", "    let _q = 1;\n    K\n}");
+    let again = edited.replace("let _q = 1;", "let _q = 2;");
+    assert!(base != edited && edited != again);
+    let srcs = vec![base.to_string(), edited, again];
+    assert_eq!(through_memo(&srcs), vec![false, true]);
+}
+
+/// keep_from_first (zust-analyzer's documents): the first call keeps the chunks, so the second reuses them
+#[test]
+fn prep_inc_keeps_from_the_first_call() {
+    let base = "fn a() -> u8 {\n    1\n}\nfn b() -> u8 {\n    2\n}\nfn main() {\n    let _ = a() + b();\n}\n";
+    let edited = base.replace("    2\n", "    let _q = 1;\n    2\n");
+    let srcs = vec![base.to_string(), edited.clone()];
+    let mut memo = PrepMemo::default();
+    memo.keep_from_first();
+    assert_eq!(through(memo, &srcs), vec![true]);
+    // (without it, as a build: the first call keeps nothing)
+    assert_eq!(through_memo(&srcs), vec![false]);
+}
+
+/// An item in a const's initializer (`const F: fn() -> u8 = { fn inner() .. inner };`) is moved out as a fn body's,
+/// and its name counts with the other moved items' (`inner__h0`, `inner__h1`): the skeleton keeps such an
+/// initializer, so an edit in another body (`other`) leaves the names as the full preparation gives them (once two
+/// `fn inner__h0`)
+#[test]
+fn prep_inc_item_in_a_const_initializer() {
+    let base = "fn inner() -> u8 { 0 }\nconst F: fn() -> u8 = { fn inner() -> u8 { 1 } inner };\nfn other() -> u8 { fn inner() -> u8 { 2 } inner() }\nfn main() { let _ = (F(), other()); }\n";
+    let edited = base.replace("inner() }\nfn main", "inner() + 1 }\nfn main");
+    let again = edited.replace("inner() + 1", "inner() + 2");
+    assert!(base != edited && edited != again);
+    let srcs = vec![base.to_string(), edited, again];
+    assert_eq!(through_memo(&srcs), vec![false, true]);
+}
+
+/// A multi-line impl block: its chunks start inside it (each method a chunk), so a chunk's delimiters do not match
+/// alone, the impl's `{` in one and its `}` in another. An edit in a method still reuses the other chunks
+#[test]
+fn prep_inc_reuses_chunks_in_an_impl_block() {
+    let base = "struct T(u8);\nimpl T {\n    fn a(&self) -> u8 {\n        self.0\n    }\n    fn b(&self) -> u8 {\n        2\n    }\n}\nmod m {\n    pub fn c() -> u8 {\n        3\n    }\n}\nfn main() {\n    let _ = T(1).a() + T(1).b() + m::c();\n}\n";
+    let edited = base.replace("        2\n", "        let q = 2;\n        q\n");
+    let again = edited.replace("let q = 2;", "let q = 4;");
+    assert!(base != edited && edited != again);
+    let srcs = vec![base.to_string(), edited, again];
+    assert_eq!(through_memo(&srcs), vec![false, true]);
+}
+
+/// An item after an attribute in a const's initializer (`{ #[inline] fn inner() .. }`) keeps the initializer in the
+/// skeleton too
+#[test]
+fn prep_inc_attributed_item_in_a_const_initializer() {
+    let base = "fn inner() -> u8 { 0 }\nconst F: fn() -> u8 = { #[inline] fn inner() -> u8 { 1 } inner };\nfn other() -> u8 { fn inner() -> u8 { 2 } inner() + 1 }\nfn main() { let _ = (F(), other()); }\n";
+    let edited = base.replace("inner() + 1", "inner() + 3");
+    let again = edited.replace("inner() + 3", "inner() + 4");
+    let srcs = vec![base.to_string(), edited, again];
+    assert_eq!(through_memo(&srcs), vec![false, true]);
 }

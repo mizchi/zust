@@ -1,0 +1,60 @@
+name: Fuzz
+
+# zust-fuzz (crates/fuzz) over every target, seeded from rustc's tests/ui, examples/, tests/probe/ and tests/fuzz/.
+# It does not run on pull requests: a new input can find a bug the pull request did not make. Pull requests run
+# tests/fuzz/'s kept findings instead (cargo test, crates/fuzz/tests/regressions.rs). Findings are uploaded as an
+# artifact; the run fails when there is one.
+on:
+  schedule:
+    - cron: "41 17 * * *"
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "minutes per target group"
+        default: "10"
+
+concurrency:
+  group: fuzz
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # (the checker is the slowest per input: it gets a job of its own)
+        include:
+          - name: check
+            targets: check
+          - name: front
+            targets: lex,parse,expand,expand-diff,prep
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build zust-fuzz
+        run: cargo build --release -p zust-fuzz
+      - name: Fetch rust-lang/rust tests/ui
+        run: python3 bench/rust_ui.py --fetch
+      - name: Fuzz
+        run: |
+          secs=$(( ${{ github.event.inputs.minutes || '10' }} * 60 ))
+          target/release/zust-fuzz fuzz --target ${{ matrix.targets }} --time "$secs" --seed ${{ github.run_id }} \
+            --corpus examples --corpus tests/probe --corpus tests/fuzz --corpus out/rust-tests/tests/ui \
+            --out out/fuzz-${{ matrix.name }}
+      # (also when the run passes: a mismatch of the two expanders is saved without failing it)
+      - name: Upload the findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings-${{ matrix.name }}
+          path: out/fuzz-${{ matrix.name }}/findings/
+          if-no-files-found: ignore

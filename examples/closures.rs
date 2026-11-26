@@ -1,5 +1,5 @@
-// クロージャのサンプル: キャプチャ (参照 / move)、Fn / FnMut / FnOnce 境界、impl Fn (引数・戻り値)、
-// Option / Result のクロージャを取るメソッド、struct に入れたクロージャ、入れ子のクロージャ
+// A closure sample: captures (by reference / move), Fn / FnMut / FnOnce bounds, impl Fn (parameters, return values),
+// methods of Option / Result that take closures, closures stored in structs, nested closures
 unsafe extern "C" {
     fn putchar(c: i32) -> i32;
 }
@@ -100,18 +100,18 @@ impl Counter {
 }
 
 fn main() {
-    // 参照キャプチャ (型は使われ方から推論する)
+    // Capture by reference (the type is inferred from how it is used)
     let k = 10;
     let add_k = |x| x + k;
     line(apply(add_k, 5));
     line(apply(|x| x * 3, 7));
     line(twice(|x: i64| x - 1, 0));
 
-    // 複数引数・注釈つき戻り値
+    // Multiple parameters, an annotated return type
     let add = |a: i64, b: i64| -> i64 { a + b };
     line(add(2, 40));
 
-    // FnMut: 外の変数を書き換える
+    // FnMut: rewrites an outer variable
     let mut sum = 0;
     each(&[1, 2, 3, 4], |x| sum += x);
     line(sum);
@@ -122,23 +122,23 @@ fn main() {
     inc();
     line(count);
 
-    // ジェネリックな畳み込み
+    // A generic fold
     line(fold(&[1, 2, 3, 4, 5], 0, |a, x| a * 2 + x));
     line(fold(&[3u8, 4, 5], 1i64, |a, x| a * x as i64));
 
-    // move と FnOnce
+    // move and FnOnce
     let base = 100;
     let f = move || base + 1;
     line(consume(f));
     line(consume(move || base * 2));
 
-    // impl Fn を返す
+    // Returning impl Fn
     let a5 = make_adder(5);
     line(a5(1));
     line(make_adder(100)(1));
     line(compose(make_adder(1), |x| x * 10, 4));
 
-    // 参照で渡す / &dyn Fn
+    // Passing by reference / &dyn Fn
     let even = |x: i64| x % 2 == 0;
     line(if by_ref(&even, 4) { 1 } else { 0 });
     line(count_if(&[1, 2, 3, 4, 5, 6], &even));
@@ -147,7 +147,7 @@ fn main() {
     let sq: &dyn Fn(i64) -> i64 = &|x| x * x;
     line(sq(9));
 
-    // Option / Result のメソッド
+    // Methods of Option / Result
     let o: Option<i64> = Some(4);
     line(o.map(|v| v * 10).unwrap_or(0));
     line(o.and_then(|v| if v > 5 { Some(v) } else { None }).unwrap_or(-1));
@@ -162,7 +162,7 @@ fn main() {
     let r2: Result<i64, u8> = Ok(8);
     line(r2.and_then(|v| if v > 5 { Ok(v * 2) } else { Err(0) }).unwrap());
 
-    // struct に入れたクロージャ
+    // A closure stored in a struct
     let bonus = 1000;
     let b = Button {
         id: 7,
@@ -170,7 +170,7 @@ fn main() {
     };
     line(b.click());
 
-    // 入れ子のクロージャ・メソッド呼び出しを含むキャプチャ
+    // Nested closures, captures including method calls
     let mut c = Counter { n: 0 };
     let mut step = |k: i64| c.bump_by(k);
     step(5);

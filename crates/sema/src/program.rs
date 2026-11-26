@@ -1,6 +1,6 @@
-//! プログラム全体の表 (関数シグネチャ・struct / enum の定義とレイアウト・trait 実装など)。
-//! アイテム要約 (`Summary`) から作る。syn に依存しない (zustc 自身でもコンパイルできる) 部分で、
-//! syn の構文木を引く検索 (`fn_by_path` など) は front.rs の別の `impl Program` にある。
+//! Tables for the whole program (fn signatures, struct / enum definitions and layouts, trait impls and so on).
+//! Built from the item summaries (`Summary`). This part does not depend on syn (zustc can compile it);
+//! the lookups that walk syn's syntax trees (`fn_by_path` and so on) are in another `impl Program` in front.rs.
 
 // (Fx hashing throughout: deterministic iteration and instruction counts, unlike the std maps' random seeds)
 type HashMap<K, V> = crate::fxhash::FxMap<K, V>;
@@ -23,18 +23,18 @@ pub const TEST_ENTRY: &str = "__zust_test_entry";
 pub struct FnSig {
     pub params: Vec<Ty>,
     pub ret: Ty,
-    /// オブジェクトファイル上のシンボル名
+    /// The symbol name in the object file
     pub symbol: String,
     pub is_extern: bool,
     pub is_main: bool,
-    /// impl の中の関数なら self 型 (struct id)
+    /// For a fn in an impl, the self type (struct id)
     pub impl_of: Option<u32>,
     pub has_self: bool,
     pub generics: Vec<(String, Vec<String>)>,
     pub trait_of: Option<String>,
     pub has_body: bool,
     pub impl_trait: Option<String>,
-    /// impl の中の関数の `Self` (型パラメータを含みうる)
+    /// The `Self` of a fn in an impl (may contain type parameters)
     pub self_ty: Option<Ty>,
     pub export: bool,
     pub panic_handler: bool,
@@ -47,25 +47,25 @@ pub struct FnSig {
 }
 
 impl FnSig {
-    /// 単相化が必要か (直接はコンパイルしない)
+    /// Whether it needs monomorphization (it is not compiled directly)
     pub fn is_generic(&self) -> bool {
         !self.generics.is_empty()
     }
 }
 
-/// 関数本体の中で型名を解決するための環境 (`Self` と型パラメータ)
+/// The environment for resolving type names in a fn body (`Self` and the type parameters)
 #[derive(Clone, Debug, Default)]
 pub struct TyEnv {
     pub self_sid: Option<u32>,
     pub params: Vec<(String, Ty)>,
-    /// `Self` の型 (struct なら Struct(self_sid)、プリミティブへの trait 実装なら u32 など)
+    /// The type of `Self` (Struct(self_sid) for a struct, u32 and so on for a trait impl on a primitive)
     pub self_ty: Option<Ty>,
 }
 
 pub struct VariantDef {
     pub name: String,
     pub kind: VariantKind,
-    /// (名前, 型, enum 先頭からのオフセット)
+    /// (name, type, offset from the start of the enum)
     pub fields: Vec<(String, Ty, u32)>,
     pub discr: i64,
 }
@@ -110,32 +110,34 @@ impl FieldPriv {
     }
 }
 
-/// struct と enum (名前付きの集約型) の定義。enum も同じ表に入れることで、
-/// コピー・引数渡し・impl・deep hash などの処理を struct と共有する。
+/// Definitions of structs and enums (named aggregate types). Keeping enums in the same table lets them share
+/// copying, argument passing, impls, deep hashing and so on with structs.
 pub struct StructDef {
     pub name: String,
-    /// (名前, 型, オフセット)
+    /// (name, type, offset)
     pub fields: Vec<(String, Ty, u32)>,
     pub size: u32,
     pub align: u32,
-    /// 定義と、フィールドから推移的に届く struct の定義すべてのハッシュ (レイアウトが変わったら変わる)
+    /// A hash of the definition and of every struct definition its fields reach (changes when the layout changes)
     pub deep: Key,
-    /// enum ならバリアント (struct なら空)
+    /// For an enum, its variants (empty for a struct)
     pub variants: Vec<VariantDef>,
     pub is_enum: bool,
-    /// enum のタグの型 (U8 か I32)。オフセット 0 に置く
+    /// The type of the enum's tag (U8 or I32), placed at offset 0
     pub tag: Ty,
-    /// ジェネリックな定義 (`Option<T>`) なら型パラメータ名。フィールドの型は Param を含み、レイアウトはない
+    /// For a generic definition (`Option<T>`), its type parameter names. Field types hold Param; no layout
     pub generics: Vec<String>,
-    /// インスタンス (`Option<i64>`) なら元の定義と型引数
+    /// For an instance (`Option<i64>`), the base definition and the type arguments
     pub base: Option<u32>,
     pub args: Vec<Ty>,
-    /// 型引数に型パラメータが残っているインスタンスか (has_param が引数を辿り直さないように: 入れ子のクロージャの
-    /// 型は共有された部分を持つので、辿り直すと段の数の指数になる)
+    /// Whether the instance's type arguments still hold type parameters (so has_param need not walk them again:
+    /// nested closure types share parts, so walking them again is exponential in the nesting depth)
     pub symbolic: bool,
     /// A placeholder for a type parameter of a generic fn `zustc check` instantiates though nothing calls it: the
     /// traits the parameter's bounds name (Program::placeholder)
     pub placeholder: Option<Vec<String>>,
+    /// That placeholder's parameter is declared `?Sized` (Program::fn_unsized_gens): it may be unsized
+    pub maybe_unsized: bool,
 }
 
 impl StructDef {
@@ -154,6 +156,7 @@ impl StructDef {
             args: vec![],
             symbolic: false,
             placeholder: None,
+            maybe_unsized: false,
         }
     }
 }
@@ -166,12 +169,12 @@ type LazyLocals = (u64, FxMap<u64, (crate::parse::Expr, Vec<(Option<It>, Result<
 
 thread_local! {
     static LAZY: std::cell::RefCell<LazyLocals> = std::cell::RefCell::new((0, FxMap::default()));
-    /// 作っている途中のインスタンス (基の型, 型引数) と、途中で取った番号
+    /// The instances under construction (base type, type arguments) and the ids reserved for them midway
     static INSTANTIATING: std::cell::RefCell<Vec<((u32, Vec<Ty>), Option<u32>)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// struct / enum の表。後からインスタンス (`Option<i64>` など) を足せる (並列のコード生成中にも)。
-/// 要素は Box で持ち、決して削除・移動しないので、`&self` から要素への参照を返せる
+/// The struct / enum table. Instances such as `Option<i64>` can be added later (also during parallel codegen).
+/// Elements are boxed and never removed or moved, so a reference to an element can be returned from `&self`
 pub struct AdtTable {
     v: Mutex<Vec<Box<StructDef>>>,
     inst: Mutex<HashMap<(u32, Vec<Ty>), u32>>,
@@ -210,7 +213,7 @@ impl AdtTable {
     fn get_mut(&mut self, i: usize) -> &mut StructDef {
         &mut self.v.get_mut().unwrap()[i & !(DST_TAG as usize)]
     }
-    /// 先に番号だけ取ったインスタンスの中身を入れる (まだ誰にも公開していない番号だけに使う)
+    /// Fills in an instance whose id was reserved first (only for ids not yet handed out to anyone)
     fn replace(&self, i: u32, d: StructDef) {
         let mut g = self.v.lock().unwrap();
         *g[(i & !DST_TAG) as usize] = d;
@@ -223,20 +226,20 @@ impl std::ops::Index<usize> for AdtTable {
         let g = self.v.lock().unwrap();
         let p: *const StructDef = &*g[i & !(DST_TAG as usize)];
         drop(g);
-        // SAFETY: 要素は Box に入っていて削除されない (Vec の再確保で動くのは Box のポインタだけ)。
-        // 公開後の要素を変更するのは &mut self を取る get_mut (build 中) だけ
+        // SAFETY: the elements are boxed and never removed (a reallocation of the Vec moves only the Box pointers).
+        // Only get_mut, which takes &mut self (during build), changes an element after it is published
         unsafe { &*p }
     }
 }
 
-/// レイアウト計算の入力
+/// The input to the layout computation
 #[derive(Clone)]
 enum AdtShape {
     Struct(Vec<(String, TySyn)>),
     Enum(Vec<VariantSyn>),
 }
 
-/// const / static の定義
+/// The definition of a const / static
 impl ConstDef {
     /// The type holds a fn pointer somewhere (written out: `fn(` in the type's name is enough for statics)
     pub fn ty_has_fn(&self) -> bool {
@@ -254,16 +257,16 @@ impl ConstDef {
 pub struct ConstDef {
     pub name: String,
     pub ty: Ty,
-    /// 初期値の式のソース (使う側・初期化で parse し直す)
+    /// The source of the initializer expression (parsed again where it is used and at initialization)
     pub expr: String,
-    /// 定義しているアイテム (キャッシュキー用)
+    /// The item that defines it (for the cache key)
     pub item: u32,
-    /// static なら Some(mut か)
+    /// For a static, Some(whether it is mut)
     pub stat: Option<bool>,
 }
 
-/// `u32::MAX` などの関連定数
-/// `const _: () = { .. };` (名前のない const: コンパイル時の検査だけなので読み飛ばす。モジュールを平らにした `m___` も)
+/// Associated consts such as `u32::MAX`
+/// `const _: () = { .. };` (nameless: only a compile-time check, so skipped; also a flattened module's `m___`)
 fn anon_const(n: &str) -> bool {
     n == "_" || n.ends_with("::_") || (n.len() > 3 && n.ends_with("___"))
 }
@@ -381,7 +384,7 @@ pub fn prim_assoc_const(t: Ty, name: &str) -> Option<i128> {
     let bits = t.bits();
     Some(match (name, t.signed()) {
         ("BITS", _) => bits as i128,
-        // (u128::MAX はビット列として持つ: -1)
+        // (u128::MAX is held as its bit pattern: -1)
         ("MAX", true) => (u128::MAX >> (129 - bits)) as i128,
         ("MIN", true) => -((u128::MAX >> (129 - bits)) as i128) - 1,
         ("MAX", false) if t == Ty::Char => 0x10FFFF,
@@ -392,11 +395,11 @@ pub fn prim_assoc_const(t: Ty, name: &str) -> Option<i128> {
 }
 
 pub struct Program {
-    /// 全関数 (ユーザ定義 + extern)。index が u32 の関数 ID になる
+    /// All fns (user-defined + extern). The index is the u32 fn ID
     pub names: Vec<String>,
     pub index: FxMap<String, u32>,
     pub sigs: Vec<FnSig>,
-    /// ユーザ定義関数を定義しているアイテム番号 (extern は None)
+    /// The number of the item that defines each user-defined fn (None for an extern)
     pub item_of: Vec<Option<u32>>,
     /// The associated types of trait impls by name (indices into assocs), made once for normalize: every name is
     /// looked for again by each instance's goals
@@ -407,13 +410,13 @@ pub struct Program {
     pub fn_preds: FxMap<u32, Vec<(crate::types::TySyn, String, Vec<String>)>>,
     pub structs: AdtTable,
     pub struct_index: FxMap<String, u32>,
-    /// バリアント名 → (enum, 番号)。`use E::*;` で取り込んだバリアントを短い名前で引く (同名が複数なら引かない)
+    /// Variant name → (enum, index): finds variants from `use E::*;` by short name (not when several share it)
     pub variant_names: FxMap<String, Option<(u32, usize)>>,
-    /// 戻り値が本体から決まる `impl Trait` の関数
+    /// The fns whose `impl Trait` return type their body determines
     pub opaque: Vec<u32>,
-    /// これ以降のアイテムは prelude (オーバーフロー検査をしない)
+    /// The items from here on are the prelude's (no overflow checks)
     pub prelude_from: u32,
-    /// 算術のオーバーフロー検査をするか (-O でなければ)
+    /// Whether arithmetic is checked for overflow (when not -O)
     pub overflow_checks: bool,
     /// `#![deny(unreachable_patterns)]` (or forbid) in the source: an arm no value can reach is an error
     pub deny_unreachable: bool,
@@ -430,6 +433,10 @@ pub struct Program {
     pub copy_params: FxMap<u32, Vec<usize>>,
     /// A struct's type parameters declared `?Sized` (base ids: the places), which its last field may make unsized
     pub unsized_params: FxMap<u32, Vec<usize>>,
+    /// A fn's own type parameters, by their index in its generics: those that must be sized (a call's type for one is
+    /// E0277 when unsized) and those declared `?Sized` (its placeholder may be unsized). The program's fns only
+    pub fn_sized_gens: FxMap<u32, Vec<usize>>,
+    pub fn_unsized_gens: FxMap<u32, Vec<usize>>,
     /// A struct's parameter names and its last field's type as written (base ids, the structs with `?Sized`
     /// parameters): whether an instance's tail is unsized, asked before the definition's fields are resolved
     /// (`struct Holder<T> { p: *const Tail<[u8]> }` laid out before `struct Tail<T: ?Sized>(T)`)
@@ -484,9 +491,9 @@ pub struct Program {
     /// the names of the methods of numbers / bool / char that take `&mut self` (`impl Inc for i32 { fn inc(&mut
     /// self) }`): a local that calls one is kept in memory, and the method gets its address
     pub prim_mut_methods: HashSet<String>,
-    /// -O (最適化ビルド)
+    /// -O (optimized build)
     pub opt: bool,
-    /// ブランケット impl のメソッド (名前 → 関数 id) と、その self 型の型パラメータ名
+    /// The methods of blanket impls (name → fn id), and the type parameter name of their self type
     pub blanket: FxMap<String, u32>,
     /// A blanket impl's trait → the bounds of its self type's parameter, its where clauses' too
     /// (`impl<T: ?Sized> FutureExt for T where T: Future`: ?Sized, Future)
@@ -508,8 +515,8 @@ pub struct Program {
     pub const_fns: HashMap<String, (Vec<String>, String)>,
     /// The parameter and result type names of those const fns (see Summary::const_fn_tys)
     pub const_fn_tys: HashMap<String, (Vec<String>, String)>,
-    /// 同じ型への別々の trait impl が同じ名前の関数を持つもの (`impl From<&str> for P` と `impl From<String> for P`):
-    /// 最初の名前 → 候補の関数 (2 つ目以降は `P::from#1` のような名前)。呼び出し側が引数の型で選ぶ
+    /// Same-named fns of separate trait impls for one type (`impl From<&str> for P`, `impl From<String> for P`):
+    /// the first name → the candidates (later ones are named like `P::from#1`). The caller picks by argument types
     pub overloads: FxMap<String, Vec<u32>>,
     /// zust_syntax::lexer::trait_scopes of the program's own source: where two scopes define traits of one name, the
     /// traits in scope on each line (pick_overload chooses the impl of the one in scope at the call)
@@ -517,9 +524,17 @@ pub struct Program {
     /// The source line (1-based) of each item, for trait_scopes: the diagnostic line base of a function is not it (a
     /// dependency's is tagged, and it is the line before). Empty when trait_scopes is
     pub item_lines: Vec<u32>,
-    /// 名前の最後のセグメント → 関数 ID 群 (`len` → `A::len`, `B::len`)。参照の過大近似用
-    pub by_last: FxMap<String, Vec<u32>>,
-    /// trait 名 → その trait で宣言された関数
+    /// The last segment of a name → its group of fns (ref_groups: `len` → `A::len`, `B::len`). For over-approximating
+    /// references
+    pub by_last: FxMap<String, u32>,
+    /// The groups of fns of one last segment (by_last), in the order the names were first met: the nodes of the
+    /// reference graph between fns. A fn refers to a name, not to each fn of that name: `x.area()` to `area`, not to
+    /// its 2400 definitions in a program that defines it 2400 times, so the graph, and the cache keys over it, grow
+    /// with the calls plus the definitions, not with their product (#188). The same over-approximation: a change to
+    /// any `area` still reaches every caller of `area`. A fn is in its name's group, and in a second one for a
+    /// `__core_` name (`swap` too). Each group's fns ascend; an edit that adds a name keeps the others' order
+    pub ref_groups: Vec<Vec<u32>>,
+    /// Trait name → the fns declared in that trait
     pub traits: FxMap<String, Vec<u32>>,
     /// impls whose self type is a reference to a concrete type (`impl Tr for &i32` / `for &S`): (that type, trait)
     pub ref_impls: HashSet<(Ty, String)>,
@@ -534,7 +549,7 @@ pub struct Program {
     pub dyn_impls_exact: FxSet<(String, String)>,
     /// traits implemented for fn pointers (`impl Tr for fn(A) -> B`; generic ones count for every fn pointer)
     pub fnptr_impls: HashSet<(Option<Ty>, String)>,
-    /// 親トレイト (`trait Bar: Foo`)
+    /// Supertraits (`trait Bar: Foo`)
     pub trait_supers: FxMap<String, Vec<String>>,
     /// trait → its supertraits Copy / Clone (`trait Num: Copy`), which trait_supers leaves out
     pub trait_marker_supers: FxMap<String, Vec<String>>,
@@ -555,7 +570,7 @@ pub struct Program {
     /// The bounds of each impl_targs entry's generic parameters, in the same order (`impl<T: Marker> From<W<T>> for
     /// J`: `[["Marker"]]`)
     pub impl_targ_bounds: FxMap<String, Vec<Vec<Vec<String>>>>,
-    /// (型, trait) の実装
+    /// The impls, as (type, trait)
     pub impls: HashSet<(u32, String)>,
     /// the self types of the impls of a trait for a struct's instances (`impl A for W<u8>`), by (struct, trait), with
     /// the impl's parameters as `Param(i)` and their number
@@ -588,29 +603,29 @@ pub struct Program {
     /// The declared type (as written) of a constant whose type is not known yet during layout (`[u8; 1]`, `(u8,)`):
     /// what an element or field of it is before its type is resolved
     pub early_syn: FxMap<u32, crate::types::TySyn>,
-    /// `#[panic_handler]` の関数 (no_std)。panic (範囲外アクセス・unwrap など) はここを呼ぶ
+    /// The `#[panic_handler]` fn (no_std). Panics (out-of-bounds access, unwrap and so on) call it
     pub panic_handler: Option<u32>,
-    /// const と static
+    /// Consts and statics
     pub consts: Vec<ConstDef>,
     pub const_index: FxMap<String, u32>,
-    /// 関連定数 (`S::N`) を最後の名前 (`N`) で引く (参照関係の過大近似用)
+    /// Associated consts (`S::N`) by their last name (`N`) (for over-approximating references)
     pub const_by_last: FxMap<String, Vec<u32>>,
-    /// プリミティブ型への trait 実装 (型, trait)
+    /// Trait impls for primitive types (type, trait)
     pub prim_impls: HashSet<(Ty, String)>,
     /// prim_impls that only an impl for a reference to the type makes (`impl Tr for &mut i32`): the type itself does not
     /// implement the trait (implements_std)
     pub prim_ref_only: HashSet<(Ty, String)>,
-    /// `&[T]` に実装された trait (`impl BufRead for &[u8]`)
+    /// The traits implemented for `&[T]` (`impl BufRead for &[u8]`)
     pub ref_slice_traits: HashSet<String>,
-    /// クロージャの fn id → 定義
+    /// Closure fn id → definition
     pub closures: FxMap<u32, ClosureDef>,
-    /// (親の関数 id, 前順の番号) → クロージャの fn id
+    /// (parent fn id, preorder index) → closure fn id
     pub closure_by: FxMap<(u32, u32), u32>,
-    /// クロージャの (ジェネリックな) struct id → fn id
+    /// A closure's (generic) struct id → fn id
     pub closure_of_struct: FxMap<u32, u32>,
-    /// hash_ty のインスタンスごとの記憶 (入れ子のクロージャの型は同じ部分を共有するので、辿り直すと指数になる)
+    /// hash_ty's memo per instance (nested closure types share parts, so walking them again is exponential)
     pub inst_keys: std::sync::Mutex<FxMap<u32, Key>>,
-    /// `impl Drop for S` のある struct / enum (ジェネリックなら元の定義)
+    /// The structs / enums with an `impl Drop for S` (the base definition when generic)
     pub drop_impls: crate::fxhash::FxSet<u32>,
     /// The structs (base ids) whose `deref` returns a reference to an array, slice or str: `t.len()` on one of them is
     /// that target's method
@@ -618,21 +633,21 @@ pub struct Program {
     /// The program's structs (base ids) with a `deref_mut`: a method call's receiver of another one reaches no
     /// program's `DerefMut`
     pub deref_mut_of: crate::fxhash::FxSet<u32>,
-    /// drop が要る型がありうるか (prelude に drop glue があるか。Box も Drop もなければ false)
+    /// Whether any type may need drop (whether the prelude has drop glue: false with neither Box nor Drop)
     pub has_drop: bool,
-    /// impl の関連型の定義
+    /// The definitions of impls' associated types
     pub assocs: Vec<AssocDef>,
     /// (trait, associated type) -> the bounds of its declaration (`type Y: Clone;`)
     pub assoc_bounds: HashMap<(String, String), Vec<String>>,
     /// generic fns returning `impl Trait`: (parameters, body, has self), to type each instance's body
     pub opaque_generic: HashMap<u32, std::sync::Arc<(Vec<(crate::parse::Pat, crate::parse::Ty)>, crate::parse::Block, bool)>>,
-    /// 右辺の型を持つ比較の impl の eq (`Vec::<PartialEq<[T;N]>>::eq` など)。`a == b` の型が違うとき探す
+    /// Comparison impls' eq for a right-hand type (`Vec::<PartialEq<[T;N]>>::eq`): tried when `a == b`'s types differ
     pub peq: Vec<u32>,
-    /// 型の別名: 名前 → (型パラメータ, 中身)
+    /// Type aliases: name → (type parameters, body)
     pub aliases: FxMap<String, (Vec<String>, TySyn)>,
-    /// 同じく `S::<PartialOrd<R>>::partial_cmp`。`a < b` の型が違うとき探す
+    /// Likewise `S::<PartialOrd<R>>::partial_cmp`, looked up when the types of `a < b` differ
     pub pord: Vec<u32>,
-    /// struct / enum の定義 (番号の若いもの) を書いたアイテムの番号
+    /// The number of the item that writes each struct / enum definition (the low ids)
     pub struct_item: Vec<u32>,
     /// The regions of the struct / enum definitions that name lifetimes (by definition id): region checking
     pub adt_regions: FxMap<u32, std::sync::Arc<RAdtSyn>>,
@@ -644,7 +659,7 @@ pub type AssocRegions = (Vec<u8>, Vec<u8>, Vec<(u8, u8)>, Vec<u8>);
 /// `impl<..> Trait for S<..> { type Name = Value; }`
 pub struct AssocDef {
     pub name: String,
-    /// impl の self 型と値 (impl の型パラメータを Param で含む)
+    /// The impl's self type and value (with the impl's type parameters as Param)
     pub self_ty: Ty,
     pub value: Ty,
     /// the impl's parameters
@@ -740,32 +755,32 @@ fn gat_split(gn: &[&str]) -> (usize, usize) {
     }
 }
 
-/// 型推論に任せる `_` の印 (型パラメータの番号としては使わない値)
+/// The mark of a `_` left to type inference (a value never used as a type parameter index)
 pub const HOLE: u8 = 250;
 /// the key mark of a closure's fn-pointer instance in the instance table (not a type parameter)
 pub const FNPTR_MARK: u8 = 251;
 
-/// 持ち上げたクロージャ ([`crate::closure`])
+/// A lifted closure ([`crate::closure`])
 pub struct ClosureDef {
-    /// 親 (クロージャを書いた関数) の id と、その本体での前順の番号
+    /// The id of the parent (the fn the closure is written in), and the closure's preorder index in its body
     pub parent: u32,
     pub k: u32,
-    /// ジェネリックな struct
+    /// The generic struct
     pub sid: u32,
-    /// キャプチャの名前 (struct のフィールド順)
+    /// The names of the captures (in the struct's field order)
     pub captures: Vec<String>,
     pub by_move: bool,
-    /// キャプチャごとに値で持つか (残りは参照で持つ)
+    /// For each capture, whether it is held by value (the rest are held by reference)
     pub moved: Vec<bool>,
-    /// 親の型パラメータの数 (型引数の先頭)
+    /// The number of the parent's type parameters (they lead the type arguments)
     pub n_parent: usize,
-    /// 戻り値の注釈 (親の型パラメータを Param で含みうる)
+    /// The annotated return type (may contain the parent's type parameters as Param)
     pub ret_ann: Option<Ty>,
     /// ClosureSyn::fake_reads
     pub fake_reads: Vec<String>,
 }
 
-/// 単相化したインスタンス (ジェネリック関数 base に型引数 args を入れたもの)
+/// A monomorphized instance (the generic fn base with the type arguments args)
 pub struct Inst {
     pub base: u32,
     pub args: Vec<Ty>,
@@ -774,8 +789,8 @@ pub struct Inst {
     pub fnptr: bool,
 }
 
-/// インスタンス表。関数 ID は Program の関数の後ろに続けて振る。
-/// コード生成中に (並列に) 要求されたものを pending に積み、ドライバが不動点まで処理する
+/// The instance table. Fn IDs continue after the Program's fns.
+/// What codegen requests (in parallel) is pushed on pending, and the driver processes it to a fixpoint
 pub struct Insts {
     pub n_fns: u32,
     pub list: Vec<Inst>,
@@ -790,7 +805,7 @@ pub struct Insts {
     /// zustc check's last round: the instances with placeholders for type parameters (Program::placeholder), and
     /// what they request. A typeck error of one is not reported (acg::compile)
     pub lenient: bool,
-    /// Of those, the instances of fns that instances were made of with `Copy` types only (driver2's
+    /// Of those, the instances of fns that instances were made of with `Copy` types only (session's
     /// placeholder_wave): checked for what moving a T does, nothing else
     pub recheck: FxSet<u32>,
     /// Of those, the instances of fns that a where clause bounds (the fn's, its impl's): a parameter's bounds there
@@ -915,7 +930,7 @@ impl Insts {
             .and_then(|i| self.list.get(i as usize))
     }
 
-    /// インスタンスを要求する (なければ作り、pending に積む)。トレイト境界もここで確かめる
+    /// Requests an instance (makes it and pushes it on pending if absent). Trait bounds are checked here too
     pub fn request(&mut self, prog: &Program, base: u32, args: Vec<Ty>) -> R<u32> {
         if let Some(&id) = self.map.get(&(base, args.clone())) {
             return Ok(id);
@@ -1089,7 +1104,7 @@ impl Insts {
             trait_of: None,
             has_body: true,
             impl_trait: None,
-            // Self: trait のデフォルトメソッドなら型引数の先頭、impl のメソッドなら self 型に型引数を入れたもの
+            // Self: a trait default method's first type argument, or an impl method's self type with the type arguments
             self_ty: if b.trait_of.is_some() {
                 Some(args[0])
             } else {
@@ -1149,7 +1164,7 @@ impl Insts {
         Ok(id)
     }
 
-    /// 関数 (またはインスタンス) id のシグネチャ
+    /// The signature of fn (or instance) id
     pub fn sig<'a>(&'a self, prog: &'a Program, id: u32) -> &'a FnSig {
         match self.get(id) {
             Some(i) => &i.sig,
@@ -1157,7 +1172,7 @@ impl Insts {
         }
     }
 
-    /// 本体を持つ関数 (インスタンスなら元のジェネリック関数) の id
+    /// The id of the fn holding the body (for an instance, its generic base fn)
     /// The facts a lowering told closures' bodies (from fx_log: those logged from `from` on)
     pub fn facts_since(&self, from: usize) -> Vec<CloFact> {
         let mut out: Vec<CloFact> = vec![];
@@ -1190,7 +1205,7 @@ impl Insts {
         self.get(id).map(|i| i.base).unwrap_or(id)
     }
 
-    /// 本体を型検査するときの型環境
+    /// The type environment for type-checking the body
     pub fn env(&self, prog: &Program, id: u32) -> TyEnv {
         match self.get(id) {
             Some(i) => {
@@ -1294,7 +1309,7 @@ fn rename_tysyn(t: &mut TySyn, from: &str, to: &str) {
     }
 }
 
-/// struct / enum 定義の中での `Self`
+/// `Self` inside a struct / enum definition
 pub fn self_of(name: &str, generics: &[String]) -> TySyn {
     if generics.is_empty() {
         TySyn::Named(name.to_string())
@@ -1335,7 +1350,7 @@ impl Program {
         Program::build_with(items, sums, true, items.len())
     }
 
-    /// need_main: false ならライブラリ (main がなくてよい)
+    /// need_main: false means a library (no main needed)
     /// `user`: how many of the items are the program's (the rest are the prelude's)
     pub fn build_with(items: &[SrcItem], sums: &[Summary], need_main: bool, user: usize) -> R<Program> {
         Program::build_with_edition(items, sums, need_main, user, 2021, false)
@@ -1425,6 +1440,7 @@ impl Program {
             trait_scopes: vec![],
             item_lines: vec![],
             by_last: FxMap::default(),
+            ref_groups: vec![],
             traits: FxMap::default(),
             impls: HashSet::default(),
             panic_handler: None,
@@ -1436,6 +1452,8 @@ impl Program {
             struct_defaults: FxMap::default(),
             copy_params: FxMap::default(),
             unsized_params: FxMap::default(),
+            fn_sized_gens: FxMap::default(),
+            fn_unsized_gens: FxMap::default(),
             tail_syn: FxMap::default(),
             has_mods: false,
             field_priv: None,
@@ -1470,8 +1488,8 @@ impl Program {
             struct_item: vec![],
             adt_regions: FxMap::default(),
         };
-        // 0. 型の別名 (struct のフィールドの型より先に)
-        // (同じ名前の struct / enum があればそちら: ユーザの `struct Path` と prelude の `type Path = str`)
+        // 0. Type aliases (before the types of struct fields)
+        // (a struct / enum of the same name wins: the user's `struct Path` over the prelude's `type Path = str`)
         let adt_names: HashSet<&str> = sums
             .iter()
             .flat_map(|sm| sm.structs.iter().map(|x| x.0.as_str()).chain(sm.enums.iter().map(|x| x.0.as_str())))
@@ -1576,7 +1594,7 @@ impl Program {
                 sums
             }
         };
-        // 0. const / static の名前 (配列の長さで使うので型より先に)
+        // 0. The names of consts / statics (before types, since array lengths use them)
         for (ii, sm) in sums.iter().enumerate() {
             let cs = sm
                 .consts
@@ -1584,7 +1602,7 @@ impl Program {
                 .map(|(n, t, e)| (n, t, e, None))
                 .chain(sm.statics.iter().map(|(n, t, e, m)| (n, t, e, Some(*m))));
             for (n, t, e, stat) in cs {
-                // (`const _: () = { assert!(..) };` はコンパイル時の検査だけ: 読み飛ばす)
+                // (`const _: () = { assert!(..) };` is only a compile-time check: skipped)
                 if anon_const(n) {
                     continue;
                 }
@@ -1672,7 +1690,7 @@ impl Program {
                 });
             }
         }
-        // 1. struct / enum 名を登録
+        // 1. Register the struct / enum names
         p.trait_decls = sums.iter().filter_map(|sm| sm.trait_decl.clone()).collect();
         let mut sdefs: Vec<(usize, String, AdtShape, Vec<String>)> = vec![];
         for (ii, (it, sm)) in items.iter().zip(sums).enumerate() {
@@ -1743,7 +1761,7 @@ impl Program {
                 }
             }
         }
-        // 2. フィールド型を解決し、依存順にレイアウトを決める
+        // 2. Resolve field types and lay the types out in dependency order
         for (_, n, sh, g) in &sdefs {
             let mut d = StructDef::blank(n.clone(), matches!(sh, AdtShape::Enum(_)));
             d.generics = g.clone();
@@ -1786,8 +1804,8 @@ impl Program {
                 }
             }
         }
-        // ジェネリックな定義を先に (フィールドの型を Param で解決するだけ。レイアウトはインスタンスごと)
-        let mut state = vec![0u8; sdefs.len()]; // 0 未処理, 1 処理中, 2 済み
+        // Generic definitions first (this only resolves their field types with Param; layout is per instance)
+        let mut state = vec![0u8; sdefs.len()]; // 0 not done, 1 in progress, 2 done
         for id in 0..sdefs.len() {
             if !sdefs[id].3.is_empty() {
                 p.layout(id, &sdefs, items, &mut state)?;
@@ -1825,8 +1843,8 @@ impl Program {
         for id in 0..sdefs.len() {
             p.layout(id, &sdefs, items, &mut state)?;
         }
-        // レイアウトの途中で作ったインスタンス (`Node` の中の `RefCell<Node>`) は、まだ大きさの決まっていない
-        // 型で計算されているので、全部決まってから取り直す
+        // Instances made midway through layout (`RefCell<Node>` in `Node`) were computed with types whose size was
+        // not settled yet, so they are redone once everything is settled
         p.relayout_instances();
         for sid in 0..p.structs.len() {
             let sd = &p.structs[sid];
@@ -1840,10 +1858,10 @@ impl Program {
                     .or_insert(Some((sid as u32, vi)));
             }
         }
-        // deep hash = 値・参照を問わずフィールドから推移的に届く全 struct の定義ハッシュ。
-        // 参照経由 (`&'a Other`) でもフィールドオフセットはコードに埋まるので含める。
+        // deep hash = the definition hashes of all structs the fields reach transitively, by value or by reference.
+        // A reference (`&'a Other`) counts too, since field offsets are embedded in the code.
         let n_defs = sdefs.len();
-        // `impl Drop` の有無も、その型を使う関数のコード (drop の呼び出し) を変えるので deep hash に入れる
+        // An `impl Drop` also changes the code of the fns using the type (drop calls), so it goes in the deep hash
         let drop_names: HashSet<&str> = sums
             .iter()
             .filter(|sm| sm.impl_trait.as_deref() == Some("Drop"))
@@ -1870,9 +1888,9 @@ impl Program {
                                 continue;
                             }
                             if (sid as usize) < n_defs && sdefs[sid as usize].1.contains("{closure#") {
-                                // クロージャの struct: レイアウトは型引数 (キャプチャの型) で決まり、本体は
-                                // クロージャの fn の側のキーに入るので、親アイテムのハッシュは入れない
-                                // (クロージャを 1 つ編集しても、それを受け取る map などのインスタンスは作り直さない)
+                                // A closure's struct: its layout follows from the type arguments (the capture types), and its body goes in the
+                                // key of the closure's fn, so the parent item's hash is left out
+                                // (editing one closure does not rebuild the instances of map and the like that take it)
                                 let mut kh = KeyHasher::new();
                                 kh.add(&sdefs[sid as usize].1);
                                 hs.push(kh.finish());
@@ -1891,7 +1909,7 @@ impl Program {
                 hs.sort_unstable();
                 let mut h = KeyHasher::new();
                 h.add(&hs);
-                // (相互再帰の型 (`Ty` ↔ `FnTy`) は届く定義の集合が同じなので、自分の名前も入れて区別する)
+                // (mutually recursive types (`Ty` ↔ `FnTy`) reach the same definitions, so the own name tells them apart)
                 if id < n_defs {
                     h.add(&sdefs[id].1);
                 }
@@ -1901,7 +1919,7 @@ impl Program {
         for (i, d) in deeps.into_iter().enumerate() {
             p.structs.get_mut(i).deep = d;
         }
-        // const / static の型
+        // The types of consts / statics
         let mut k = 0;
         for (it, sm) in items.iter().zip(sums) {
             for (n, t, _) in &sm.consts {
@@ -1924,7 +1942,7 @@ impl Program {
                 k += 1;
             }
         }
-        // 関連型 (関数のシグネチャの `Self::Item` を解決するので先に)
+        // Associated types (first, since they resolve `Self::Item` in fn signatures)
         let early: FxSet<(usize, usize)> = early.into_iter().collect();
         for (ii, (it, sm)) in items.iter().zip(sums).enumerate() {
             for (k, a) in sm.assocs.iter().enumerate() {
@@ -1969,7 +1987,7 @@ impl Program {
         }
         // (the impls of each trait for each type so far: their self types and trait arguments, and parameters)
         let mut self_tys: FxMap<(&str, &str), Vec<usize>> = FxMap::default();
-        // 3. 関数
+        // 3. Functions
         // (each trait impl's own associated types, by its header: `Self::X` in its methods' signatures is its own X, with
         // the impl's parameters as they are, also when X names a parameter only the trait's arguments bind (`impl<E>
         // Structure<E> for Slice { type FfiPtr = (*const E::FfiUnit, usize); }`, which no lookup by Slice can fill))
@@ -1983,6 +2001,8 @@ impl Program {
                 }
             }
         }
+        // (the program's fns' parameters that must be sized, classified once the traits' supertraits are known)
+        let mut pending_sized: Vec<(u32, usize, Vec<(String, Vec<String>)>, Vec<String>)> = vec![];
         for (ii, (it, sm)) in items.iter().zip(sums).enumerate() {
             let first = p.names.len() as u32;
             let cnames: Vec<String> = sm.closures.iter().map(|c| format!("{}::call", c.name)).collect();
@@ -2084,7 +2104,7 @@ impl Program {
                             .map_err(|e| format!("{}:1: {e}", it.line))?,
                     );
                 }
-                // (本体から決める `impl Trait` はいったん () にして、後で resolve_opaque が入れる)
+                // (an `impl Trait` the body determines is () for now: resolve_opaque fills it in later)
                 let nested = match &ss.ret {
                     TySyn::App(n, d) if n == OPAQUE_NESTED => {
                         p.resolve_g(&d[0], &gnames).map_err(|e| format!("{}:1: {e}", it.line))?;
@@ -2119,8 +2139,8 @@ impl Program {
                         n.strip_prefix("#tuple").and_then(|k| k.parse().ok()).map(|k| p.tuple_base(k))
                     }).as_ref() {
                         Some(&sid) => Some(sid),
-                        // ブランケット impl (`impl<T: Display> Describe for T`): どの型のメソッドとしても探す
-                        // (その中のクロージャを持ち上げた関数は self を持たない: メソッドとしては探さない)
+                        // A blanket impl (`impl<T: Display> Describe for T`): looked up as a method of any type
+                        // (the fns lifted from closures inside it have no self: not looked up as methods)
                         None if ss.generics.iter().any(|g| &g.0 == n) => {
                             blanket = ss.has_self;
                             p.blanket_selfs.insert(n.clone());
@@ -2132,16 +2152,14 @@ impl Program {
                     },
                     None => None,
                 };
-                // (同名の trait impl の関数 `P::from#1` も `from` で引く)
+                // (the fn `P::from#1` of a same-named trait impl is found by `from` too)
                 let last = name.rsplit("::").next().unwrap().split('#').next().unwrap().to_string();
-                // (`io::stdin()` / `mem::swap(..)` は prelude の `__core_*`: 名前の後ろで引けるようにする)
+                // (`io::stdin()` / `mem::swap(..)` are the prelude's `__core_*`: make them findable by the name's tail)
                 if let Some(short) = last.strip_prefix("__core_") {
-                    p.by_last.entry(short.to_string()).or_default().push(p.names.len() as u32);
+                    let short = short.to_string();
+                    p.add_to_group(short);
                 }
-                p.by_last
-                    .entry(last)
-                    .or_default()
-                    .push(p.names.len() as u32);
+                p.add_to_group(last);
                 if blanket {
                     let m = name.rsplit("::").next().unwrap().to_string();
                     p.blanket.entry(m).or_insert(p.names.len() as u32);
@@ -2151,6 +2169,10 @@ impl Program {
                 p.item_of.push((!ss.is_extern).then_some(ii as u32));
                 if !ss.preds.is_empty() {
                     p.fn_preds.insert(p.sigs.len() as u32, ss.preds.clone());
+                }
+                // (closure `call`s take their parent's parameters: not their own)
+                if ii < user && !ss.generics.is_empty() && !cnames.contains(name) {
+                    pending_sized.push((p.sigs.len() as u32, ii, ss.generics.clone(), ss.own_unsized.clone()));
                 }
                 p.sigs.push(FnSig {
                     params,
@@ -2247,6 +2269,30 @@ impl Program {
                 p.trait_ngen.insert(tr.clone(), 1 + sm.trait_generics.iter().filter(|g| !g.0.starts_with('#')).count());
             }
         }
+        // (own parameters follow the impl's (impl_generics) or the trait's (`Self` and the trait's); one declared
+        // `?Sized` whose other bounds imply Sized is sized: `T: Clone + ?Sized`, `T: Dup + ?Sized` with `trait Dup: Clone`)
+        for (fid, ii, generics, own_unsized) in std::mem::take(&mut pending_sized) {
+            let owner = match items[ii].kind {
+                crate::lexer::ItemKind::ImplMember(h) => sums.get(h as usize).map_or(0, |h| h.impl_generics.len()),
+                crate::lexer::ItemKind::TraitMember(h) => sums.get(h as usize).map_or(0, |h| 1 + h.trait_generics.iter().filter(|g| !g.0.starts_with('#')).count()),
+                _ => 0,
+            };
+            let sized_by = |bs: &[String]| {
+                bs.iter().any(|b| {
+                    matches!(b.split('<').next().unwrap_or(b).trim().rsplit("::").next().unwrap_or(""), "Sized" | "Clone" | "Copy" | "Default" | "From" | "Into" | "TryFrom" | "TryInto" | "FromStr" | "FromIterator")
+                        || p.bound_implies(b, &["Sized", "Clone", "Copy", "Default"], false, 0)
+                })
+            };
+            let un: Vec<usize> = own_unsized.iter().filter_map(|n| generics.iter().rposition(|g| &g.0 == n)).filter(|&k| !sized_by(&generics[k].1)).collect();
+            // (a const parameter is no type: `__const` among its bounds)
+            let sz: Vec<usize> = (owner.min(generics.len())..generics.len()).filter(|k| !un.contains(k) && !generics[*k].1.iter().any(|b| b.starts_with(crate::types::CONST_GENERIC))).collect();
+            if !sz.is_empty() {
+                p.fn_sized_gens.insert(fid, sz);
+            }
+            if !un.is_empty() {
+                p.fn_unsized_gens.insert(fid, un);
+            }
+        }
         p.peq = (0..p.names.len() as u32)
             .filter(|&i| {
                 let n = &p.names[i as usize];
@@ -2259,7 +2305,7 @@ impl Program {
                 n.ends_with("::partial_cmp") && n.contains("::<PartialOrd<")
             })
             .collect();
-        // 4. trait の実装 (impl ヘッダの要約から)
+        // 4. Trait impls (from the summaries of the impl headers)
         // (traits with an impl for `&T` of a type parameter T)
         // (the traits of `impl<T> Tr for &T` / `&mut T` (whether mut), and of `impl<T> Tr for T`)
         let mut ref_blankets: HashSet<(String, bool)> = Default::default();
@@ -2278,7 +2324,7 @@ impl Program {
             if ii < user && !sm.impl_generics.iter().any(|g| g.0 == *sn) {
                 other_impls.push((tr.clone(), it.line));
             }
-            // (右辺の型を持つ比較の impl と、配列・スライスへの impl は、`==` が関数を直接選ぶので数えない)
+            // (comparison impls with a right-hand type and impls for arrays / slices are not counted: `==` picks the fn)
             // (an impl for a trait object, `impl<A, R> Tr for dyn Fn(A) -> R`: by the object's trait's name; one with no
             // parameters by the object as written)
             if sn.starts_with("__dyn_") {
@@ -2293,7 +2339,7 @@ impl Program {
                 }
             }
             if tr.starts_with("PartialEq<") || tr.starts_with("PartialOrd<") || sn == "__array" || sn == "__slice" || sn.starts_with("__dyn_") {
-                // (`impl BufRead for &[u8]`: 境界を満たすかのために覚える)
+                // (`impl BufRead for &[u8]`: remembered for whether bounds hold)
                 if sn == "__slice" && matches!(sm.impl_self_ty, Some(TySyn::Ref(false, _))) && !tr.contains('<') {
                     p.ref_slice_traits.insert(tr.clone());
                 }
@@ -2367,8 +2413,8 @@ impl Program {
             if (tr == "From" || tr == "TryFrom") && !sm.impl_self_path && sm.impl_trait_args.len() == 1 && sm.impl_self_ty.as_ref() == Some(&sm.impl_trait_args[0]) {
                 return Err(format!("{}:1: conflicting implementations of trait `{tr}<{sn}>` for type `{sn}` (E0119)", it.line));
             }
-            // プリミティブ型への trait 実装 (`impl Tr for u32`)
-            // (`impl Hash for str`: str も組み込みの型として持つ)
+            // Trait impls for primitive types (`impl Tr for u32`)
+            // (`impl Hash for str`: str is kept as a built-in type too)
             if matches!(sn.as_str(), "__fnptr" | "__ptr" | "__never") {
                 // (a std trait for a fn pointer / raw pointer / `!`: none of them is local (E0117))
                 const STD: &[&str] = &["Display", "Debug", "Clone", "Copy", "PartialEq", "Eq", "PartialOrd", "Ord", "Hash", "Default", "Drop", "Iterator", "From", "Into", "Add", "Sub", "Mul", "Div", "Deref", "Send", "Sync", "Fn", "FnMut", "FnOnce"];
@@ -2498,11 +2544,11 @@ impl Program {
                 }
                 return Err(format!("{}:1: cannot find type `{sn}`", it.line));
             };
-            // (参照への impl は trait の実装としては数えない: 演算子だけが `__ref_*` を呼ぶ)
+            // (an impl for a reference does not count as an impl of the trait: only operators call `__ref_*`)
             if matches!(sm.impl_self_ty, Some(TySyn::Ref(..))) {
                 continue;
             }
-            // (型引数を取る trait は別々の引数で何度も実装できる: `impl From<&str> for P` と `impl From<String> for P`)
+            // (a generic trait may have an impl per argument: `impl From<&str> for P` and `impl From<String> for P`)
             // (a trait with parameters, `impl Tr<u8> for S` and `impl Tr<u16> for S`, or self types that differ in their
             // arguments, `impl Tr for Vec<i32>` and `impl Tr for Vec<Box<i32>>`)
             let dup = !p.impls.insert((sid, tr.clone()));
@@ -2558,7 +2604,7 @@ impl Program {
         if let Some((tr, line, _)) = ref_box_impls.iter().find(|(tr, _, t)| bare_blankets.contains(tr) && !matches!(p.blanket_certainty(*t, tr), Certainty::No)) {
             return Err(format!("{line}:1: conflicting implementations of trait `{tr}` for type `&Box<_>` (E0119)"));
         }
-        // derive は実装扱い (Clone / Copy など。中身は常にビットコピーなので本体は要らない)
+        // A derive counts as an impl (Clone / Copy and so on: the content is always a bit copy, so no body is needed)
         for sm in sums {
             for (tn, ds) in &sm.derives {
                 if let Some(&sid) = p.struct_index.get(tn) {
@@ -2622,7 +2668,7 @@ impl Program {
                 }
             }
         }
-        // 必須メソッドが実装されているか (derive したものは本体を codegen が作る)
+        // Whether the required methods are implemented (codegen makes the bodies of derived ones)
         let derived: HashSet<(u32, String)> = sums
             .iter()
             .flat_map(|sm| sm.derives.iter())
@@ -2661,10 +2707,10 @@ impl Program {
             }
             let Some(decls) = p.traits.get(tr) else {
                 continue;
-            }; // derive した組み込み trait
+            }; // derived built-in traits
             for &d in decls {
                 let m = p.names[d as usize].rsplit("::").next().unwrap();
-                // (Display / Debug のメソッドは `S::<Display>::fmt`)
+                // (Display / Debug methods are `S::<Display>::fmt`)
                 let found = if matches!(tr.as_str(), "Display" | "Debug") {
                     p.index
                         .contains_key(&format!("{}::<{tr}>::{m}", p.structs[*sid as usize].name))
@@ -3006,7 +3052,7 @@ impl Program {
         Ok(p)
     }
 
-    /// 型 t の値を捨てるときに drop glue が要るか (Box / `impl Drop` / それらを含む型)
+    /// Whether discarding a value of type t needs drop glue (Box / `impl Drop` / types holding them)
     pub fn needs_drop(&self, t: Ty) -> bool {
         if !self.has_drop {
             return false;
@@ -3033,7 +3079,7 @@ impl Program {
         }
     }
 
-    /// 型 t が trait tr を実装しているか
+    /// Whether type t implements trait tr
     /// whether a generic impl of tr exists for t's kind (fn pointer / raw pointer / `!`): one of its methods' self types
     fn has_kind_impl(&self, t: Ty, tr: &str) -> bool {
         let base = match t {
@@ -3345,11 +3391,11 @@ impl Program {
                 return self.structs[sid as usize].args.iter().all(|&a| matches!(a, Ty::Array(Ty::Unit, _)) || self.has_param(a) || self.implements(a, tr));
             }
         }
-        // (const ジェネリクスの引数は長さを持つ配列型)
+        // (a const generic argument is an array type carrying the length)
         if tr == CONST_GENERIC || tr.strip_prefix(CONST_GENERIC).is_some_and(|r| r.starts_with(':')) {
             return matches!(t, Ty::Array(Ty::Unit, _));
         }
-        // 組み込みの AsRef<str> / AsRef<[T]> (文字列・Vec・配列・スライスとその参照)
+        // The built-in AsRef<str> / AsRef<[T]> (strings, Vec, arrays, slices and references to them)
         if tr.starts_with("AsRef") && tr.contains('<') {
             let inner: String = tr["AsRef".len()..].chars().filter(|c| !c.is_whitespace()).collect();
             let mut b = t;
@@ -3370,7 +3416,7 @@ impl Program {
             }
             return false;
         }
-        // collect の先 (組み込み): String / Vec / HashMap など
+        // The targets of collect (built-in): String / Vec / HashMap and so on
         if tr.starts_with("FromIterator") {
             if let Ty::Struct(sid) = t {
                 let n = self.structs[self.base_of(sid) as usize].name.as_str();
@@ -3408,7 +3454,7 @@ impl Program {
                 }
             }
         }
-        // `Iterator<Item = T>` は trait の名前で見る (関連型の制約は呼び出し側で解く)
+        // `Iterator<Item = T>` is checked by the trait's name (the caller solves the associated type constraint)
         if let Some(i) = tr.find('<') {
             if parse_fn_bound(tr).is_none() {
                 // (the trait's name alone: its certainty goes on to evaluate, as impl_applies_noted's does)
@@ -3419,7 +3465,7 @@ impl Program {
         }
         match t {
             Ty::Struct(sid) if self.closure_of_struct.contains_key(&self.base_of(sid)) => {
-                // クロージャ: Fn 系と、キャプチャがすべて Copy なら Copy / Clone
+                // Closures: the Fn traits, and Copy / Clone when every capture is Copy
                 parse_fn_bound(tr).is_some()
                     || matches!(tr, "Fn" | "FnMut" | "FnOnce" | "Sized")
                     || (matches!(tr, "Copy" | "Clone")
@@ -3428,9 +3474,9 @@ impl Program {
                             .iter()
                             .all(|f| self.implements(f.1, tr)))
             }
-            // flat_map / flatten の中身: イテレータもよい
+            // The inside of flat_map / flatten: an iterator also fits
             Ty::Struct(_) if tr == "__Flat" && self.implements(t, "Iterator") => true,
-            // タプル: 要素がすべて実装していれば (core の impl と同じ)
+            // Tuples: when every element implements it (as core's impls do)
             Ty::Struct(sid) if self.is_tuple(sid) => {
                 if matches!(
                     tr,
@@ -3438,11 +3484,11 @@ impl Program {
                 ) {
                     self.structs[sid as usize].fields.iter().all(|f| self.implements(f.1, tr))
                 } else {
-                    // ユーザの `impl<A, B> Tr for (A, B)`: its self type matches t, and its bounds hold (as a struct's)
+                    // The user's `impl<A, B> Tr for (A, B)`: its self type matches t, and its bounds hold (as a struct's)
                     self.impls.contains(&(self.base_of(sid), tr.to_string())) && self.impl_applies_noted(t, tr)
                 }
             }
-            // prelude のコレクションと Option は Default (空 / None。中身が 0 のビット列)
+            // The prelude's collections and Option are Default (empty / None: an all-zero bit pattern)
             Ty::Struct(sid)
                 if tr == "Default"
                     && matches!(
@@ -3452,14 +3498,14 @@ impl Program {
             {
                 true
             }
-            // eq / clone メソッドを持つ型 (prelude の String / Vec など)
+            // Types with eq / clone methods (the prelude's String / Vec and so on)
             Ty::Struct(sid)
                 if (tr == "PartialEq" && self.method(sid, "eq").is_some())
                     || (tr == "Clone" && self.method(sid, "clone").is_some()) =>
             {
                 true
             }
-            // Vec / String は要素しだいで比較できる
+            // Vec / String compare depending on their elements
             Ty::Struct(sid)
                 if matches!(tr, "PartialOrd" | "Ord" | "Eq" | "Hash" | "PartialEq" | "Clone")
                     && matches!(self.structs[self.base_of(sid) as usize].name.as_str(), "Vec" | "String") =>
@@ -3469,7 +3515,7 @@ impl Program {
             // (an impl for the struct, whose self type t matches and whose bounds t's arguments meet: `impl<T: Bar> Foo
             // for W<T>` is not for W<u8> without `impl Bar for u8`, `impl Foo for W<i32>` is not for W<u8> (issue #2))
             Ty::Struct(sid) => self.impls.contains(&(self.base_of(sid), tr.to_string())) && self.impl_applies_noted(t, tr),
-            // (配列・スライス: 比較・Debug・Hash は要素が実装していれば)
+            // (arrays / slices: comparison, Debug and Hash when the element implements them)
             Ty::Array(e, _) => {
                 tr == "Sized"
                     || (matches!(tr, "Copy" | "Clone" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Debug" | "Hash" | "Default")
@@ -3496,7 +3542,7 @@ impl Program {
                 let name = first.split(|c: char| c == '(' || c == '<').next().unwrap_or(first).trim();
                 self.dyn_impls.contains(&(tr.to_string(), name.rsplit("::").next().unwrap_or(name).to_string()))
             }) || (!self.dyn_impls_exact.is_empty() && self.dyn_impls_exact.contains(&(tr.to_string(), dyn_first(d)))),
-            // 関数ポインタ: Fn 系 (引数の数が合うもの) と Copy
+            // Fn pointers: the Fn traits (with a matching argument count) and Copy
             // (impls for fn pointers / raw pointers / `!`: the exact type, or a generic one (None) of that kind)
             Ty::Fn(_) | Ty::Ptr(..) | Ty::Never
                 if !self.fnptr_impls.is_empty()
@@ -3510,10 +3556,10 @@ impl Program {
                 None => matches!(tr, "Fn" | "FnMut" | "FnOnce" | "Copy" | "Clone" | "Sized" | "PartialEq" | "Eq"),
             },
             Ty::Ref(false, Ty::Slice(_)) if self.ref_slice_traits.contains(tr) => true,
-            // 組み込み型: マーカー trait と比較・既定値など (core が実装しているもの)
+            // Built-in types: marker traits, comparison, defaults and so on (what core implements)
             Ty::Ref(true, _) => tr == "Sized",
             Ty::Box(_) => matches!(tr, "Sized" | "Drop"),
-            // `&T: Display` / `Debug` / `Hash` は T しだい
+            // `&T: Display` / `Debug` / `Hash` depend on T
             Ty::Ref(_, i) if matches!(tr, "Display" | "Debug" | "Hash" | "PartialOrd" | "Ord") => {
                 self.implements(*i, tr)
             }
@@ -3643,7 +3689,7 @@ impl Program {
         }
     }
 
-    /// プリミティブ型 t のメソッド (trait 実装のもの → なければ trait のデフォルトメソッド)
+    /// A method of primitive type t (from a trait impl, or else the trait's default method)
     /// prim_method for a method call: of the functions of that name, one that takes self (`impl Foo for isize`
     /// with `fn new() -> bool` and `impl Bar for isize` with `fn new(&self) -> bool`: `1.new()` is Bar's)
     pub fn prim_self_method(&self, t: Ty, name: &str) -> Option<u32> {
@@ -3686,7 +3732,7 @@ impl Program {
                 return Some(id);
             }
         }
-        // (`impl<T: Hash> Hash for [T]` / `for [T; N]` のメソッドは `__slice::m` / `__array::m`)
+        // (the methods of `impl<T: Hash> Hash for [T]` / `for [T; N]` are `__slice::m` / `__array::m`)
         let base = match t {
             Ty::Slice(_) => Some("__slice"),
             Ty::Fn(_) => Some("__fnptr"),
@@ -3722,7 +3768,7 @@ impl Program {
             }
         }
         if let Some(&id) = base.and_then(|g| self.index.get(&format!("{g}::{name}"))) {
-            // (`impl Tr for [u8; 1]`, `.. for [u8; 2]` ..: 同じ名前の impl が並ぶなら self の型が合うもの)
+            // (`impl Tr for [u8; 1]`, `.. for [u8; 2]` ..: among impls of one name, the one whose self type fits)
             if let Some(ids) = self.overloads.get(&self.names[id as usize]) {
                 let fit = |i: u32| match self.sigs[i as usize].self_ty {
                     Some(st) => {
@@ -3753,10 +3799,10 @@ impl Program {
         found.or_else(|| self.blanket.get(name).copied())
     }
 
-    /// struct sid に名前 name のメソッドが見つからないとき、実装している trait のデフォルトメソッド
+    /// When struct sid has no method named name, the default method of a trait it implements
     pub fn default_method(&self, sid: u32, name: &str) -> Option<u32> {
         let r = self.default_method_inner(sid, name);
-        // (なければブランケット impl のメソッド)
+        // (or else a blanket impl's method)
         r.or_else(|| self.blanket.get(name).copied())
     }
 
@@ -3781,7 +3827,7 @@ impl Program {
         found
     }
 
-    /// TySyn → Ty。generics に含まれる名前は型パラメータになる
+    /// TySyn → Ty. Names in generics become type parameters
     pub fn resolve_g(&self, t: &TySyn, generics: &[&str]) -> R<Ty> {
         self.resolve_with(t, &|n| {
             generics
@@ -3791,7 +3837,7 @@ impl Program {
         })
     }
 
-    /// 名前の解決を names に先に聞いてから struct 名を引く
+    /// Asks names to resolve a name first, then looks up struct names
     fn resolve_with(&self, t: &TySyn, names: &dyn Fn(&str) -> Option<Ty>) -> R<Ty> {
         let r = |t: &TySyn| self.resolve_with(t, names);
         Ok(match t {
@@ -3900,10 +3946,10 @@ impl Program {
             TySyn::Array(inner, len) => {
                 let n = match len {
                     ArrLen::Lit(n) => *n,
-                    // (const ジェネリクスの N)
+                    // (a const generic N)
                     ArrLen::Const(c) => match names(c) {
                         Some(Ty::Param(i)) => (CONST_LEN_BASE + i as u32) as u64,
-                        // (インスタンスの中: N は長さを持つ配列型 / 長さが N の型引数 `[(); N]`)
+                        // (inside an instance: N is an array type carrying the length / a type argument `[(); N]` of length N)
                         Some(Ty::Array(Ty::Unit, m)) => m as u64,
                         _ => self.const_usize(c)?,
                     },
@@ -3937,7 +3983,7 @@ impl Program {
                         return self.resolve_with(&TySyn::App(n.clone(), vec![]), names);
                     }
                     Some(_) => return Err(format!("missing generics for `{n}`")),
-                    // (`zeros::<K>()` / `Buf<K>`: const の名前は const ジェネリクスの引数)
+                    // (`zeros::<K>()` / `Buf<K>`: a const's name is a const generic argument)
                     None if self.const_index.contains_key(n) => Ty::Array(intern(Ty::Unit), self.const_usize(n)? as u32),
                     // (core::arch's vector types, when the program has no type of the name: `v128`, `__m256`)
                     None => match crate::simd_sig::vector_name(n) {
@@ -3946,7 +3992,7 @@ impl Program {
                     },
                 }
             }
-            // `Box<dyn Error>`: prelude の __DynError (表示と Debug の文字列を持つ)
+            // `Box<dyn Error>`: the prelude's __DynError (holds the Display and Debug strings)
             TySyn::App(n, args)
                 if n == "Box"
                     && matches!(args.as_slice(), [TySyn::Dyn(d)] if d == "Error")
@@ -3954,7 +4000,7 @@ impl Program {
             {
                 Ty::Struct(self.struct_index["__DynError"])
             }
-            // `Cow<'a, [T]>` は prelude の `Cow<T>` (借りたスライスか Vec)、`Cow<'a, str>` は `__CowStr`
+            // `Cow<'a, [T]>` is the prelude's `Cow<T>` (a borrowed slice or a Vec), `Cow<'a, str>` is `__CowStr`
             TySyn::App(n, args) if n == "Cow" && args.len() == 1 && matches!(args[0], TySyn::Slice(_) | TySyn::Str) => {
                 match &args[0] {
                     TySyn::Slice(e) => {
@@ -3973,7 +4019,7 @@ impl Program {
             TySyn::App(n, args) if n == "Box" && args.len() == 1 && !self.struct_index.contains_key(n) => {
                 Ty::Box(intern(self.bare_dyn(&args[0], names).unwrap_or_else(|| r(&args[0]))?))
             }
-            // 型パラメータを持つ別名 (`type R<T> = Result<T, String>;`)
+            // An alias with type parameters (`type R<T> = Result<T, String>;`)
             TySyn::App(n, args) if self.aliases.get(n).is_some_and(|a| a.0.len() == args.len()) => {
                 let (g, t) = self.aliases[n].clone();
                 let vals = args.iter().map(r).collect::<R<Vec<Ty>>>()?;
@@ -3986,7 +4032,7 @@ impl Program {
                 let Some(&id) = self.struct_index.get(n) else {
                     return Err(format!("cannot find type `{n}`"));
                 };
-                // `HashMap<K, V, S>` / `HashSet<K, S>`: ハッシャの型 (BuildHasherDefault<..>) は無視して既定のハッシュで
+                // `HashMap<K, V, S>` / `HashSet<K, S>`: ignore the hasher type (BuildHasherDefault<..>), use the default hash
                 let mut args = args.as_slice();
                 if matches!(n.as_str(), "HashMap" | "HashSet") && args.len() == self.structs[id as usize].generics.len() + 1 {
                     args = &args[..args.len() - 1];
@@ -4017,7 +4063,7 @@ impl Program {
         })
     }
 
-    /// 配列の長さに使う const (要約の const 表から整数の定数式として評価する)
+    /// A const used for an array length (evaluated as an integer constant expression from the summaries' consts)
     /// Whether an impl of trait tr for a type parameter (`impl<T> Tr for T { const N = .. }`) defines its const n: a
     /// type it covers takes that, not the trait's default (which the qualified-path fallback then must not read)
     fn blanket_defines(&self, tr: &str, n: &str) -> Option<String> {
@@ -4058,7 +4104,7 @@ impl Program {
                 return self.const_usize(&format!("{base}::{last}"));
             }
         }
-        // (const ジェネリクスの引数の式 `{ A - 16 }` は式のテキストで来る)
+        // (a const generic argument's expression `{ A - 16 }` comes as the expression's text)
         let v = if !self.const_index.contains_key(name) && (name.starts_with(|c: char| c.is_ascii_digit()) || name.bytes().any(|c| !(c.is_ascii_alphanumeric() || c == b'_' || c == b':'))) {
             let e = crate::parse::parse_expr(name)?;
             self.eval_const(&e, 1)?
@@ -4071,7 +4117,7 @@ impl Program {
         Ok(v as u64)
     }
 
-    /// 整数の const を評価する (リテラル・四則演算・ビット演算・シフト・キャスト・他の const)
+    /// Evaluates an integer const (literals, arithmetic, bit operations, shifts, casts, other consts)
     pub fn const_int(&self, name: &str, depth: u32) -> R<i128> {
         Ok(self.const_int_t(name, depth)?.0)
     }
@@ -4247,7 +4293,7 @@ impl Program {
         }
     }
 
-    /// 自前の構文木の整数の定数式を評価する (値だけ: 型は eval_t)
+    /// Evaluates an integer constant expression of our own syntax tree (the value only: eval_t gives the type too)
     pub fn eval_const(&self, e: &crate::parse::Expr, depth: u32) -> R<i128> {
         Ok(self.eval_t(e, depth, None)?.0)
     }
@@ -4643,7 +4689,7 @@ impl Program {
                 self.prim_const_t(t, &p.segs.last().unwrap().name)
             }
             Expr::Path(None, p) if p.segs.len() == 2 => {
-                // (impl の関連 const: `i128::MAX_STR_LEN`)
+                // (an impl's associated const: `i128::MAX_STR_LEN`)
                 let full = format!("{}::{}", p.segs[0].name, p.segs[1].name);
                 if self.const_index.contains_key(&full) {
                     return self.const_int_t(&full, depth);
@@ -4662,7 +4708,7 @@ impl Program {
                 let t = Ty::prim(&p.segs[0].name).or_else(|| Ty::prim(&self.prim_of_name(&p.segs[0].name))).ok_or("unsupported path in constant")?;
                 self.prim_const_t(t, &p.segs[1].name)
             }
-            // 整数のメソッド (`u128::MAX.ilog10()`): 受け手の型の幅・符号で (`(-1i8).count_ones()` は 8)
+            // Integer methods (`u128::MAX.ilog10()`): by the receiver type's width and sign (`(-1i8).count_ones()` is 8)
             Expr::MethodCall(recv, m, _, args, _) => {
                 let (v, t) = self.eval_t(recv, depth, None)?;
                 let bits = t.map_or(128, |it| it.bits);
@@ -4819,15 +4865,86 @@ impl Program {
         Ok((v, if name == "BITS" { Some(It { bits: 32, signed: false }) } else { It::of_ty(t) }))
     }
 
-    /// n 要素のタプルの (組み込みの) ジェネリック定義
+    /// The (built-in) generic definition of an n-element tuple
     /// The placeholder type for type parameter k (named `name`, bounded by the traits `bounds`) of fn id: a struct
     /// with no fields, named `name#` (no program's type has that name), that implements just those traits
+    /// Whether t may be unsized: `[T]`, `str`, `dyn Tr`, a struct with such a tail, or the placeholder of a parameter
+    /// declared `?Sized`
+    pub fn maybe_unsized(&self, t: Ty) -> bool {
+        t.is_unsized() || matches!(t, Ty::Struct(s) if self.structs[s as usize].maybe_unsized)
+    }
+
+    /// Whether t may be unsized when may says so of some types (a definition's `?Sized` parameters): those, or a
+    /// struct whose unsized tail is one (`W<T>` with `struct W<T: ?Sized>(T)` of a `T: ?Sized`)
+    pub fn maybe_unsized_with(&self, t: Ty, may: &dyn Fn(Ty) -> bool) -> bool {
+        if may(t) || self.maybe_unsized(t) {
+            return true;
+        }
+        match t {
+            Ty::Struct(s) => {
+                let sd = &self.structs[s as usize];
+                sd.base.is_some_and(|b| !self.is_tuple(b) && self.instance_unsized_with(b, &sd.args, &|a| self.maybe_unsized_with(a, may)))
+            }
+            _ => false,
+        }
+    }
+
+    /// The first type in t that may be unsized (maybe_unsized) where only a sized one may be: an argument of the
+    /// program's struct or enum for a parameter not declared `?Sized`, of std's `Vec` / `Option` / `Result` and the
+    /// collections, a tuple's element other than the last, a slice's or array's element (E0277)
+    pub fn sized_wf(&self, t: Ty, depth: u32) -> Option<Ty> {
+        self.sized_wf_with(t, &|t| self.maybe_unsized(t), depth)
+    }
+
+    /// sized_wf with may_unsized saying which types may be unsized (a definition's `?Sized` parameters too)
+    pub fn sized_wf_with(&self, t: Ty, may_unsized: &dyn Fn(Ty) -> bool, depth: u32) -> Option<Ty> {
+        if depth > 16 {
+            return None;
+        }
+        match t {
+            Ty::Struct(s) => {
+                let sd = &self.structs[s as usize];
+                let b = sd.base?;
+                let tuple = self.is_tuple(b);
+                let user = !tuple && self.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prelude_from) && !self.is_closure(b);
+                let std_sized = !user && !tuple && self.struct_item.get(b as usize).is_some_and(|&ii| ii >= self.prelude_from) && matches!(self.structs[b as usize].name.as_str(), "Vec" | "Option" | "Result" | "VecDeque" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "BinaryHeap" | "LinkedList");
+                let n = sd.args.len();
+                for (k, &a) in sd.args.iter().enumerate() {
+                    let may = if tuple {
+                        k + 1 == n
+                    } else if user {
+                        self.unsized_params.get(&b).is_some_and(|v| v.contains(&k))
+                    } else {
+                        !std_sized
+                    };
+                    if !may && may_unsized(a) {
+                        return Some(a);
+                    }
+                    if let Some(x) = self.sized_wf_with(a, may_unsized, depth + 1) {
+                        return Some(x);
+                    }
+                }
+                None
+            }
+            Ty::Slice(e) | Ty::Array(e, _) => {
+                if may_unsized(*e) {
+                    return Some(*e);
+                }
+                self.sized_wf_with(*e, may_unsized, depth + 1)
+            }
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) => self.sized_wf_with(*i, may_unsized, depth + 1),
+            Ty::Fn(f) => f.params.iter().chain([&f.ret]).find_map(|&x| self.sized_wf_with(x, may_unsized, depth + 1)),
+            _ => None,
+        }
+    }
+
     pub fn placeholder(&self, id: u32, k: u32, name: &str, bounds: &[String]) -> u32 {
         if let Some(&s) = self.structs.placeholders.lock().unwrap().get(&(id, k)) {
             return s;
         }
         let mut d = StructDef::blank(format!("{name}#"), false);
         d.placeholder = Some(bounds.to_vec());
+        d.maybe_unsized = self.fn_unsized_gens.get(&id).is_some_and(|v| v.contains(&(k as usize)));
         let mut h = KeyHasher::new();
         h.add(&("placeholder", id, k));
         d.deep = h.finish();
@@ -5061,7 +5178,7 @@ impl Program {
         id
     }
 
-    /// 型が prelude とプリミティブの型だけでできているか (ユーザ・依存するクレートの struct / enum を含まない)
+    /// Whether a type consists only of prelude and primitive types (no struct / enum of the user or a dependency)
     pub fn is_prelude_ty(&self, t: Ty) -> bool {
         match t {
             Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => self.is_prelude_ty(*i),
@@ -5082,7 +5199,7 @@ impl Program {
             .starts_with("#tuple")
     }
 
-    /// インスタンスなら元の定義
+    /// For an instance, its base definition
     pub fn base_of(&self, sid: u32) -> u32 {
         self.structs[sid as usize].base.unwrap_or(sid)
     }
@@ -5141,8 +5258,8 @@ impl Program {
                     d.align = align;
                 }
             }
-            // (ジェネリックでない定義も、フィールドのインスタンスの大きさが変わっていれば取り直す:
-            //  `enum ItemKind { Const(String, Option<Ty>, ..) }` の Option<Ty> が Ty より先に作られた場合)
+            // (a non-generic definition is redone too when the size of one of its fields' instances changed:
+            //  `enum ItemKind { Const(String, Option<Ty>, ..) }` when Option<Ty> was made before Ty)
             for id in 0..self.structs.len() {
                 let b = &self.structs[id];
                 if b.base.is_some() || !b.generics.is_empty() || b.name.starts_with('#') {
@@ -5187,11 +5304,11 @@ impl Program {
         if let Some(&id) = self.structs.inst.lock().unwrap().get(&(base, args.clone())) {
             return Ok(id);
         }
-        // 自分を (Box などの中に) 含む型 (`Node<T> { next: Option<Box<Node<T>>> }`): 作っている途中の
-        // インスタンスがまた要求されたら、先に番号だけ取って返す (中身は外側が作り終えてから入れる)
+        // A type holding itself (in a Box or the like, `Node<T> { next: Option<Box<Node<T>>> }`): when an instance
+        // being built is requested again, reserve its id and return it (the outer request fills it in when done)
         let key = (base, args.clone());
-        // (型引数が入れ子に増えていく再帰 (`struct A<T> { y: A<A<T>> }`) や、自分を含むクロージャは止まらない:
-        // rustc の再帰の上限と同じく、深すぎればエラー)
+        // (recursion whose type arguments nest deeper (`struct A<T> { y: A<A<T>> }`) or a closure holding itself
+        // never ends: as with rustc's recursion limit, too deep is an error)
         if INSTANTIATING.with(|v| v.borrow().len()) > 64 {
             return Err(format!("reached the recursion limit while instantiating `{}`", self.structs[base as usize].name));
         }
@@ -5226,7 +5343,7 @@ impl Program {
         if let Some(&id) = g.get(&key) {
             return Ok(id);
         }
-        // 最後のフィールドが unsized (`[T]` / `str` / そういう struct) なら番号に印を付ける (`&S<[T]>` は fat pointer)
+        // When the last field is unsized (`[T]` / `str` / such a struct), mark the id (`&S<[T]>` is a fat pointer)
         // (from the definition's last field: a symbolic instance (`Fat<[T]>`) has no laid-out fields)
         let id = match placeholder {
             Some(pid) => {
@@ -5239,8 +5356,8 @@ impl Program {
         Ok(id)
     }
 
-    /// インスタンスの名前 `Name<A, B>` (タプルは `(A, B)`)。入れ子のクロージャの型 (`dup(dup(..))`) は名前が段ごとに倍に
-    /// なるので、長いもの (512 byte を超える) は先頭と全体のハッシュにする (名前はシンボルにも使うので、ハッシュで区別を残す)
+    /// Instance name `Name<A, B>` (`(A, B)` for tuples). Nested closure types (`dup(dup(..))`) double the name
+    /// per level: one over 512 bytes becomes its head plus a hash of the whole (the hash keeps symbol names distinct)
     fn inst_name(&self, base_name: &str, args: &[Ty]) -> String {
         let names: Vec<String> = args.iter().map(|&t| self.tn(t)).collect();
         let full = if base_name.starts_with("#tuple") {
@@ -5295,11 +5412,17 @@ impl Program {
 
     /// Whether the instance of base with args has an unsized tail (its id carries DST_TAG)
     fn instance_unsized(&self, base: u32, args: &[Ty]) -> bool {
+        self.instance_unsized_with(base, args, &|a| self.maybe_unsized(a))
+    }
+
+    /// instance_unsized with may saying which arguments may be unsized (a definition's `?Sized` parameters too)
+    fn instance_unsized_with(&self, base: u32, args: &[Ty], may: &dyn Fn(Ty) -> bool) -> bool {
         let b = &self.structs[base as usize];
         if b.is_enum {
             return false;
         }
-        let oracle = |i: u8| args.get(i as usize).is_some_and(|a| a.is_unsized());
+        // (a placeholder of a `?Sized` parameter counts: `Bar<T>` with `struct Bar<T: ?Sized>` may be unsized)
+        let oracle = |i: u8| args.get(i as usize).is_some_and(|&a| may(a));
         match b.fields.last() {
             Some(f) => self.tail_unsized(base, f.1, &oracle, 0),
             // (the definition's fields are not resolved yet: from its last field as written)
@@ -5392,7 +5515,7 @@ impl Program {
         Ok(d)
     }
 
-    /// フィールドを宣言順に自然なアラインメントで並べる (repr(C) 相当)
+    /// Lays out the fields in declaration order with natural alignment (like repr(C))
     /// The layout of a struct named name (a union: every field at offset 0)
     fn adt_fields_layout(&self, name: &str, fields: Vec<(String, Ty)>) -> (Vec<(String, Ty, u32)>, u32, u32) {
         // (`#[repr(packed(N))]`: each field aligned to at most N; `#[repr(align(N))]`: the whole to at least N)
@@ -5423,7 +5546,7 @@ impl Program {
         let (mut off, mut align) = (0u32, 1u32);
         for (n, t) in fields {
             let (sz, al) = self.size_align(t);
-            // (まだレイアウトの決まっていない型 (作っている途中の再帰する型) は揃えが 0: 揃えは 1 以上)
+            // (a type not laid out yet (a recursive type under construction) has alignment 0: alignment is at least 1)
             let al = al.max(1).min(pack);
             off = off.next_multiple_of(al);
             out.push((n, t, off));
@@ -5433,7 +5556,7 @@ impl Program {
         (out, off.next_multiple_of(align), align)
     }
 
-    /// タグ (判別値) は先頭、ペイロードは全バリアントで共有する領域に置く
+    /// The tag (discriminant) goes first, and the payload in an area all variants share
     fn enum_layout(
         &self,
         name: &str,
@@ -5483,7 +5606,7 @@ impl Program {
         (out, (poff + pmax).next_multiple_of(align), align)
     }
 
-    /// 型の中に型パラメータが残っているか
+    /// Whether type parameters remain in the type
     pub fn has_param(&self, t: Ty) -> bool {
         match t {
             Ty::Param(_) => true,
@@ -5493,7 +5616,7 @@ impl Program {
             }
             Ty::Struct(sid) => self.structs[sid as usize].symbolic,
             Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&a| self.has_param(a)),
-            // 関連型は具体型ではない (型パラメータを含むときだけ現れる)
+            // An associated type is not a concrete type (it only appears when type parameters are involved)
             Ty::Assoc(_) => true,
             // (`dyn A<T>`: its marks, dyn_canon)
             Ty::Dyn(s) => s.contains(PMARK) && dyn_marks(s).next().is_some(),
@@ -5686,7 +5809,7 @@ impl Program {
         None
     }
 
-    /// 具体型 t の関連型 name (`impl Iterator for Counter { type Item = u32; }` なら u32)
+    /// The associated type name of concrete type t (u32 for `impl Iterator for Counter { type Item = u32; }`)
     /// The associated type `name` of the impl of trait tr with arguments args for t: the impls whose self type and
     /// trait arguments match exactly (crate::traits::mtch), one definition or none
     pub fn assoc_of_targs(&self, t: Ty, tr: &str, args: &[Ty], name: &str) -> Option<Ty> {
@@ -5901,10 +6024,10 @@ impl Program {
         }
     }
 
-    /// 型パラメータに型引数を入れる
+    /// Substitutes type arguments for type parameters
     pub fn subst(&self, t: Ty, args: &[Ty]) -> Ty {
         match t {
-            // (引数のない型パラメータ (`_` の印 HOLE など) はそのまま: 型推論・検査が後で扱う)
+            // (a type parameter with no argument (such as the `_` mark HOLE) stays: inference / checking handle it later)
             Ty::Param(i) => args.get(i as usize).copied().unwrap_or(t),
             Ty::Ref(m, i) => Ty::Ref(m, intern(self.subst(*i, args))),
             Ty::Ptr(m, i) => Ty::Ptr(m, intern(self.subst(*i, args))),
@@ -5957,7 +6080,7 @@ impl Program {
         }
     }
 
-    /// 分かっている型パラメータだけ置き換える (分からないものは Param のまま)
+    /// Replaces only the known type parameters (unknown ones stay Param)
     pub fn partial_subst(&self, t: Ty, sol: &[Option<Ty>]) -> Ty {
         let args: Vec<Ty> = (0..sol.len())
             .map(|i| sol[i].unwrap_or(Ty::Param(i as u8)))
@@ -6006,7 +6129,7 @@ impl Program {
         }
     }
 
-    /// 仮引数型 pt (型パラメータを含む) と実引数型 at を突き合わせて型パラメータを解く
+    /// Solves type parameters by matching parameter type pt (with type parameters) against argument type at
     pub fn match_ty(&self, pt: Ty, at: Ty, sol: &mut [Option<Ty>]) -> bool {
         self.match_ty_in(pt, at, sol, false)
     }
@@ -6026,7 +6149,7 @@ impl Program {
             }
         }
         match (pt, at) {
-            // 関連型からは解けない (具体型が分かってから置き換わる)
+            // Not solvable from an associated type (it is replaced once the concrete type is known)
             (Ty::Assoc(_), _) => true,
             (Ty::Param(i), t) => match sol.get(i as usize).copied().flatten() {
                 // (a turbofish's type with holes, `f::<Box<_>>(Box::new(100))`: the argument's type that fits it fills
@@ -6049,7 +6172,7 @@ impl Program {
             | (Ty::Ptr(_, a), Ty::Ref(_, b))
             | (Ty::Slice(a), Ty::Slice(b))
             | (Ty::Box(a), Ty::Box(b)) => self.match_ty_in(*a, *b, sol, exact),
-            // (const ジェネリクスの長さ: 長さを持つ Ty::Array(Unit, m) で解く)
+            // (a const generic length: solved with an array Ty::Array(Unit, m) carrying the length)
             (Ty::Array(a, n), Ty::Array(b, m)) if n >= CONST_LEN_BASE && m < CONST_LEN_BASE => {
                 self.match_ty_in(Ty::Param((n - CONST_LEN_BASE) as u8), Ty::Array(intern(Ty::Unit), m), sol, exact) && self.match_ty_in(*a, *b, sol, exact)
             }
@@ -6270,7 +6393,7 @@ impl Program {
         })
     }
 
-    /// Ty → TySyn (キャッシュにインスタンスを名前で書くため)
+    /// Ty → TySyn (to write instances by name in the cache)
     pub fn ty_syn(&self, t: Ty) -> TySyn {
         match t {
             Ty::Ref(m, i) => TySyn::Ref(m, Box::new(self.ty_syn(*i))),
@@ -6321,7 +6444,7 @@ impl Program {
         let (ii, _, shape, generics) = &sdefs[id];
         let line = items[*ii].line;
         let gnames: Vec<&str> = generics.iter().map(|s| s.as_str()).collect();
-        // 値として含む型 (参照・ポインタの先は除く) を先にレイアウトしておく
+        // Lay out first the types held by value (not what references / pointers point to)
         let fields_of = |sh: &AdtShape| -> Vec<TySyn> {
             match sh {
                 AdtShape::Struct(f) => f.iter().map(|x| x.1.clone()).collect(),
@@ -6345,7 +6468,7 @@ impl Program {
                         }
                     }
                 }
-                // `Box<T>` はポインタなので T のレイアウトは要らない
+                // `Box<T>` is a pointer, so T's layout is not needed
                 TySyn::App(n, _) if n == "Box" && !self.struct_index.contains_key(&n) => {}
                 // (`C::Assoc<Self>` / `type MaybeBox<T> = <T as A<T, Box<T>>>::B;`: a projection, whose type is the
                 // impl's: whether it holds its arguments by value is not known here)
@@ -6361,7 +6484,7 @@ impl Program {
                     }
                 }
                 TySyn::App(n, args) => {
-                    // 型引数のうち、その型が値として持つもの (`Vec<T>` の T はポインタの先なので要らない)
+                    // The type arguments the type holds by value (`Vec<T>`'s T is behind a pointer, so it is not needed)
                     let mut by_value = vec![true; args.len()];
                     // (a generic type holding itself by value: `struct Foo<T> { f: Option<Foo<T>> }`)
                     if self.struct_index.get(&n) == Some(&(id as u32)) {
@@ -6521,7 +6644,7 @@ impl Program {
         })
     }
 
-    /// struct `sid` のメソッド `name`
+    /// Method `name` of struct `sid`
     /// Whether the references in two types' struct arguments agree, `&` and `&mut` apart (match_ty does not tell them
     /// apart), past any references around the two: `Either<&L, &R>` is not `Either<&mut i32, &mut u8>`'s self type, and
     /// `&W<&T>` (a `&self` receiver) is not `W<&mut i32>`'s
@@ -6691,12 +6814,12 @@ impl Program {
                 (s.size, s.align)
             }
             Ty::Array(e, n) => {
-                // (const ジェネリクスの長さの仮の値 (CONST_LEN_BASE + i) は大きいので折り返す: 使われない)
+                // (the provisional length of a const generic (CONST_LEN_BASE + i) is large, so wrap around: it is never used)
                 let (s, a) = self.size_align(*e);
                 (s.wrapping_mul(n), a)
             }
             t if t.is_fat() => (16, 8),
-            // (unsized な末尾は大きさ 0、揃えは要素のもの: `S<[T]>` の末尾の位置は `S<[T; N]>` と同じ)
+            // (an unsized tail has size 0 and the element's alignment: the tail of `S<[T]>` sits where `S<[T; N]>`'s does)
             Ty::Slice(e) => (0, self.size_align(*e).1),
             Ty::Unit | Ty::Never | Ty::Str | Ty::Dyn(_) | Ty::Param(_) => (0, 1),
             t => (t.bits() / 8, t.bits() / 8),
@@ -6711,7 +6834,7 @@ impl Program {
             .map(|&(_, t, o)| (t, o))
     }
 
-    /// エラーメッセージ用の型名
+    /// The type name for error messages
     /// A `dyn` type's text with its marks (dyn_canon) as the program writes them: a struct's by its name, and (params)
     /// a type parameter's by the parameter's name
     fn dyn_shown(&self, s: &str, params: bool) -> String {
@@ -6768,7 +6891,7 @@ impl Program {
         format!("{:032x}", h.finish())
     }
 
-    /// キャッシュキー用: 型を (struct は deep hash で) ハッシュする
+    /// For cache keys: hashes a type (a struct by its deep hash)
     pub fn hash_ty(&self, t: Ty, h: &mut KeyHasher) {
         match t {
             Ty::Ref(m, i) => {
@@ -6778,8 +6901,8 @@ impl Program {
             Ty::Struct(id) => {
                 let sd = &self.structs[id as usize];
                 match sd.base {
-                    // インスタンス: 元の定義の deep hash + 型引数
-                    // (クロージャの struct は同じアイテムに複数あるので名前も入れる)
+                    // An instance: the base definition's deep hash + the type arguments
+                    // (one item has several closure structs, so the name goes in too)
                     Some(b) => {
                         let cached = self.inst_keys.lock().unwrap().get(&id).copied();
                         let k = match cached {
@@ -6817,7 +6940,7 @@ impl Program {
                 self.hash_ty(*i, h);
             }
             Ty::Str => h.add(&107u8),
-            // vtable の並び (trait のメソッドの順) もコードに埋まる
+            // The vtable order (the trait's method order) is embedded in the code too
             Ty::Dyn(s) => {
                 h.add(&(108u8, s));
                 for &f in self.traits.get(s).map(|v| &v[..]).unwrap_or(&[]) {
@@ -6853,9 +6976,16 @@ impl Program {
             s.has_self,
             s.params.len(),
         ));
-        // 大半の関数では空のフィールドは、空でないときだけ入れる (no-op ビルドで全関数分ハッシュするため)
+        // Fields empty for most fns go in only when non-empty (a no-op build hashes every fn)
         if !s.generics.is_empty() || s.trait_of.is_some() || !s.has_body || s.impl_trait.is_some() {
             h.add(&(&s.generics, &s.trait_of, s.has_body, &s.impl_trait));
+        }
+        // (which parameters must be sized, which may not: a call's E0277 depends on them)
+        if let Some(v) = self.fn_sized_gens.get(&id) {
+            h.add(&("sized", v));
+        }
+        if let Some(v) = self.fn_unsized_gens.get(&id) {
+            h.add(&("unsized", v));
         }
         if let Some(t) = s.self_ty {
             self.hash_ty(t, h);
@@ -6874,15 +7004,26 @@ impl Program {
         }
     }
 
-    /// アイテム内の識別子のうち関数名に一致するもの (ソート済み) と struct 名に一致するもの。
-    /// ローカル変数による shadowing は無視した過大近似だが、
-    /// キャッシュキーと到達可能性の両方にとって安全側である。
-    /// (関数, struct / enum, const / static) の参照。識別子を 1 回だけ走査する
-    pub fn refs(&self, src: &str, it: &SrcItem) -> (Vec<u32>, Vec<u32>, Vec<u32>) {
-        self.refs_in(src, it, None)
+    /// The next fn (names.len()) into the group of the last segment `last` (by_last, ref_groups)
+    fn add_to_group(&mut self, last: String) {
+        let id = self.names.len() as u32;
+        let groups = &mut self.ref_groups;
+        let g = *self.by_last.entry(last).or_insert_with(|| {
+            groups.push(vec![]);
+            groups.len() as u32 - 1
+        });
+        let v = &mut self.ref_groups[g as usize];
+        if v.last() != Some(&id) {
+            v.push(id);
+        }
     }
 
-    /// refs で引く名前 (どれかの表にある名前) の集合。多くの識別子 (変数・キーワード) は 1 回引くだけで済む
+    /// The fns whose last name segment is `last` (`len` → `A::len`, `B::len`), ascending
+    pub fn fns_named(&self, last: &str) -> Option<&[u32]> {
+        self.by_last.get(last).map(|&g| self.ref_groups[g as usize].as_slice())
+    }
+
+    /// The set of names refs looks up (names in any table). Most identifiers (variables, keywords) need one lookup
     pub fn ref_names(&self) -> FxSet<&str> {
         let mut s: FxSet<&str> = FxSet::default();
         s.extend(self.by_last.keys().map(|k| k.as_str()));
@@ -6895,7 +7036,10 @@ impl Program {
         s
     }
 
-    /// names: ref_names (あれば、そこにない識別子は飛ばす)
+    /// The names in the item that name fns (their groups, ref_groups: sorted), and the structs / enums and the consts
+    /// / statics it names. An over-approximation that ignores shadowing by local variables, which errs on the safe
+    /// side for both cache keys and reachability. Scans the identifiers only once.
+    /// names: ref_names (when given, identifiers not in it are skipped)
     pub fn refs_in(&self, src: &str, it: &SrcItem, names: Option<&FxSet<&str>>) -> (Vec<u32>, Vec<u32>, Vec<u32>) {
         let mut fns = vec![];
         let mut sts = vec![];
@@ -6907,11 +7051,11 @@ impl Program {
             if names.is_some_and(|n| !n.contains(s)) {
                 continue;
             }
-            // `for` はイテレータなら名前を書かずに next を呼ぶ
+            // `for` calls next on an iterator without writing the name
             let s = if s == "for" { "next" } else { s };
             let mut hit = false;
-            if let Some(ids) = self.by_last.get(s) {
-                fns.extend_from_slice(ids);
+            if let Some(&g) = self.by_last.get(s) {
+                fns.push(g);
                 hit = true;
             }
             if let Some(&i) = self.struct_index.get(s) {
@@ -6945,24 +7089,27 @@ impl Program {
         (fns, sts, cs)
     }
 
-    /// main から到達可能な関数 ID。
-    /// 到達しない関数は parse も型検査もコード生成もしない (relax/blaze の demand-driven の AOT 版)。
+    /// The fn IDs reachable from main (refs: each fn's groups (ref_groups)).
+    /// Unreachable fns are not parsed, type-checked or compiled (relax/blaze's demand-driven approach, done AOT).
     pub fn reachable(&self, refs: &[Vec<u32>]) -> Vec<bool> {
+        let groups = &self.ref_groups;
         let mut seen = vec![false; self.names.len()];
-        // 根: main・外に見せる関数・panic handler (panic はどこからでも起こりうる)
+        // (a group's fns are pushed once: each name is followed once, however many fns name it)
+        let mut gseen = vec![false; groups.len()];
+        // Roots: main, exported fns, the panic handler (a panic can happen anywhere)
         let mut stack: Vec<u32> = self.index.get("main").copied().into_iter().collect();
         stack.extend(self.index.get(TEST_ENTRY).copied());
         stack.extend((0..self.names.len() as u32).filter(|&i| self.sigs[i as usize].export));
         stack.extend(self.panic_handler);
-        // `Box::new` が呼ぶアロケータと drop が呼ぶ free (prelude にあるのは Box / Drop が使われたときだけ)
+        // The allocator `Box::new` calls and the free drop calls (the prelude has them only when Box / Drop are used)
         stack.extend(self.index.get(crate::prelude::BOX_ALLOC).copied());
         stack.extend(self.index.get(crate::prelude::BOX_FREE).copied());
-        // `vec![..]` / `"..".to_string()` は名前を書かずに Vec の realloc / String::from を使う
+        // `vec![..]` / `"..".to_string()` use Vec's realloc / String::from without writing their names
         stack.extend(self.index.get("__exr_realloc").copied());
         stack.extend(self.index.get("String::from").copied());
-        // (`process::exit` は名前を書かずに呼ばれる: あれば根にする。使われなければ要約で選ばれない)
+        // (`process::exit` is called without its name: a root when present; the summaries leave it out when unused)
         stack.extend(self.index.get("__core_process_exit").copied());
-        // (`fs::read_to_string` / `env::args` などはパスで引くので、名前からは届かない)
+        // (`fs::read_to_string` / `env::args` and the like are looked up by path, so names do not reach them)
         for n in [
             "__exr_fs_read", "__exr_fs_read_to_string", "__exr_fs_write", "__exr_env_args", "__exr_env_var",
             "__exr_env_var_os", "__exr_env_split_paths", "__exr_fs_remove_file", "__exr_path_new", "__exr_ptr_eq",
@@ -6970,7 +7117,7 @@ impl Program {
         ] {
             stack.extend(self.index.get(n).copied());
         }
-        // const の式から呼ぶ関数 (`const N: u32 = sq(4);`。const は使う場所で式として展開される)
+        // Fns called from const expressions (`const N: u32 = sq(4);`: a const is expanded as an expression where used)
         for c in &self.consts {
             if c.expr.contains('(') {
                 for w in c.expr.split(|ch: char| !(ch.is_alphanumeric() || ch == '_')) {
@@ -6979,17 +7126,17 @@ impl Program {
             }
         }
 
-        // `impl Drop` の drop は drop glue から、メソッド `eq` は `==` から (名前を書かずに) 呼ばれる
+        // `impl Drop`'s drop is called from drop glue, and method `eq` from `==` (without writing their names)
         stack.extend((0..self.names.len() as u32).filter(|&i| {
             let s = &self.sigs[i as usize];
-            // (書式化の部品と Display / Debug の impl も、codegen が名前を書かずに呼ぶ)
+            // (codegen also calls the formatting parts and Display / Debug impls without writing their names)
             matches!(s.impl_trait.as_deref(), Some("Drop"))
                 || (s.has_self && self.names[i as usize].ends_with("::eq"))
-                // (`write!(w, ..)` は codegen が w.write_str(..) を呼ぶ)
+                // (for `write!(w, ..)` codegen calls w.write_str(..))
                 || (s.has_self && self.names[i as usize].ends_with("::write_str"))
-                // (libm などの prelude の extern は codegen が名前を書かずに呼ぶ。宣言だけなのでコードは増えない)
+                // (codegen calls the prelude's externs such as libm without their names: only declarations, so no extra code)
                 || (s.is_extern && self.names[i as usize].starts_with("__exr_"))
-                // (演算子 `a + b` は codegen が `a.add(b)` にする)
+                // (codegen turns the operator `a + b` into `a.add(b)`)
                 || (s.has_self
                     && matches!(
                         s.impl_trait.as_deref(),
@@ -7000,7 +7147,7 @@ impl Program {
                                 | "ShrAssign" | "Index" | "IndexMut" | "IntoIterator" | "Deref" | "DerefMut"
                         )
                     ))
-                // (`<` と sort は比較の glue から partial_cmp / cmp を呼ぶ)
+                // (`<` and sort call partial_cmp / cmp from the comparison glue)
                 || (s.has_self
                     && matches!(s.impl_trait.as_deref(), Some("PartialOrd" | "Ord"))
                     && (self.names[i as usize].ends_with("::cmp")
@@ -7011,13 +7158,17 @@ impl Program {
             if std::mem::replace(&mut seen[i as usize], true) {
                 continue;
             }
-            stack.extend(refs[i as usize].iter().copied());
+            for &g in &refs[i as usize] {
+                if !std::mem::replace(&mut gseen[g as usize], true) {
+                    stack.extend(groups[g as usize].iter().copied());
+                }
+            }
         }
         seen
     }
 }
 
-/// 整数・bool・文字・バイトのリテラル (`0x1F_u8` / `true` / `'a'` / `b'a'`)
+/// Integer, bool, char and byte literals (`0x1F_u8` / `true` / `'a'` / `b'a'`)
 pub fn lit_int(t: &str) -> Option<i128> {
     if t == "true" {
         return Some(1);
@@ -7359,7 +7510,7 @@ fn syn_has_app(t: &TySyn, aliases: &FxMap<String, (Vec<String>, TySyn)>) -> bool
     }
 }
 
-/// 型 t が型パラメータ g を値として含むか (参照・ポインタ・Box の先は含まない。ほかの型の引数は含むとみなす)
+/// Whether t holds type parameter g by value (not behind a reference, pointer or Box; assumed in other types' args)
 fn syn_holds_by_value(t: &TySyn, g: &str) -> bool {
     match t {
         TySyn::Named(n) => n == g,
@@ -7377,14 +7528,14 @@ pub fn ty_code(t: Ty) -> u8 {
     TYS.iter().position(|&x| x == t).unwrap() as u8
 }
 
-/// パスの 1 セグメント (名前と、型引数 `<..>` / `(..)` があるか)。syn のパスも自前の構文木のパスもこれにして引く
+/// A path segment (name, and whether it has `<..>` / `(..)` args): lookups convert syn and own-tree paths to it
 #[derive(Clone, Debug, PartialEq)]
 pub struct PSeg {
     pub name: String,
     pub args: bool,
 }
 
-/// 名前のパス (`::a::b` の先頭の `::` と、セグメント)
+/// A path of names (the leading `::` of `::a::b`, and the segments)
 #[derive(Clone, Debug, PartialEq)]
 pub struct PPath {
     pub global: bool,
@@ -7392,7 +7543,7 @@ pub struct PPath {
 }
 
 impl PPath {
-    /// 自前の構文木のパス
+    /// A path of our own syntax tree
     pub fn of(p: &crate::parse::Path) -> PPath {
         PPath {
             global: p.global,
@@ -7411,9 +7562,9 @@ impl PPath {
     }
 }
 
-// --- パスで struct / enum のバリアント / 関数を引く (front.rs の syn 版はこれを呼ぶ) ---
+// --- Looking up struct / enum variants / fns by path (front.rs's syn version calls these) ---
 impl Program {
-    /// 先頭のモジュールの部分 (`crate::` / `self::` / `super::` / 小文字のモジュール名) を外したパス
+    /// The path without its leading module part (`crate::` / `self::` / `super::` / a lowercase module name)
     pub fn strip_mods_p(&self, p: &PPath) -> Option<PPath> {
         let mut k = 0;
         let n = p.segs.len();
@@ -7449,7 +7600,7 @@ impl Program {
     }
 
     fn variant_by_p_inner(&self, p: &PPath, self_sid: Option<u32>) -> Option<(u32, usize)> {
-        // `core::option::Option::Some` / `alloc::borrow::Cow::Borrowed` などは最後の 2 つで見る
+        // `core::option::Option::Some` / `alloc::borrow::Cow::Borrowed` and the like are matched by the last two
         let segs: &[PSeg] = if p.segs.len() > 2 && matches!(p.segs[0].name.as_str(), "core" | "crate" | "std" | "alloc") {
             &p.segs[p.segs.len() - 2..]
         } else {
@@ -7460,8 +7611,8 @@ impl Program {
             let en = match n {
                 "Some" | "None" => "Option",
                 "Ok" | "Err" => "Result",
-                // `use Expr::*;` したバリアント (大文字で始まり、ほかの enum と名前が重ならないもの)
-                // (同じ名前の struct があればそちら: `TokenTree::Punct(Punct { .. })`)
+                // A variant brought in by `use Expr::*;` (it starts uppercase, and no other enum has the name)
+                // (a struct of the same name wins: `TokenTree::Punct(Punct { .. })`)
                 _ if n.starts_with(|c: char| c.is_ascii_uppercase()) => {
                     // (but not a struct of the prelude with named fields (its iterator `Skip { .. }`), which a program
                     // never writes as a value: `use Ord::*;`'s unit variant `Skip` is the variant)
@@ -7516,7 +7667,7 @@ impl Program {
     }
 
     pub fn struct_by_p(&self, p: &PPath, self_sid: Option<u32>) -> Option<u32> {
-        // `std::cmp::Reverse` / `core::cmp::Ordering` などは最後のセグメント (prelude の型)
+        // `std::cmp::Reverse` / `core::cmp::Ordering` and the like by the last segment (a prelude type)
         if p.segs.len() > 1 && matches!(p.segs[0].name.as_str(), "std" | "core" | "alloc") {
             return self.struct_index.get(&p.segs.last().unwrap().name).copied();
         }
@@ -7569,9 +7720,9 @@ impl Program {
     }
 
     fn fn_by_p_inner(&self, p: &PPath, self_sid: Option<u32>) -> Option<u32> {
-        // 最後のセグメントの turbofish (`f::<T>`) は呼び出し側で読む
+        // The caller reads the last segment's turbofish (`f::<T>`)
         let n = p.segs.len();
-        // (`Buf::<8>::new`: 型のセグメントの型引数も呼び出し側で読む)
+        // (`Buf::<8>::new`: the caller reads a type segment's type arguments too)
         if n == 2 && p.segs[0].args && !p.global {
             let mut q = p.clone();
             q.segs[0].args = false;
@@ -7587,7 +7738,7 @@ impl Program {
             return None;
         }
         let name = |k: usize| p.segs[k].name.as_str();
-        // `std::collections::HashMap::new` などは `HashMap::new`
+        // `std::collections::HashMap::new` and the like are `HashMap::new`
         if n >= 3 && matches!(name(0), "core" | "std" | "alloc") {
             let ty = name(n - 2);
             // (`std::cell::Ref::map`: below, as `Ref::map`; `std::vec::Vec::from_raw_parts` as well, when the prelude's
@@ -7597,8 +7748,8 @@ impl Program {
                 return self.index.get(&format!("{ty}::{}", name(n - 1))).copied();
             }
         }
-        // `std::process::exit` / `process::exit` (ユーザの `exit` と名前がぶつからないように別の名前)
-        // `fs::read_to_string` / `fs::write` / `env::args` などは prelude の `__core_*`
+        // `std::process::exit` / `process::exit` (under another name, so it does not clash with the user's `exit`)
+        // `fs::read_to_string` / `fs::write` / `env::args` and the like are the prelude's `__core_*`
         if n >= 2 {
             let core = match (name(n - 2), name(n - 1)) {
                 ("fs", "read_to_string") => Some("__exr_fs_read_to_string"),
@@ -7629,19 +7780,19 @@ impl Program {
         if n >= 2 && name(n - 2) == "process" && name(n - 1) == "exit" {
             return self.index.get("__core_process_exit").copied();
         }
-        // `core::cmp::max` / `core::mem::swap` などは prelude の `__core_*` へ
+        // `core::cmp::max` / `core::mem::swap` and the like go to the prelude's `__core_*`
         if n >= 2 && matches!(name(0), "core" | "std") {
             return self.index.get(&format!("__core_{}", name(n - 1))).copied();
         }
         match n {
             1 => {
                 let f = name(0);
-                // `use core::cmp::max;` してからの `max(..)`: ユーザの関数がなければ core のもの
+                // `max(..)` after `use core::cmp::max;`: core's unless the user has the fn
                 self.index.get(f).or_else(|| self.index.get(&format!("__core_{f}"))).copied()
             }
             2 => {
                 let (ty, m) = (name(0), name(1));
-                // `f64::max` / `f64::sqrt` (関数として): prelude の `__exr_f64_*`、`i32::max` は core::cmp::max
+                // `f64::max` / `f64::sqrt` (as fns): the prelude's `__exr_f64_*`; `i32::max` is core::cmp::max
                 // (or a trait's method of the program's, `impl From<J> for f64`: `f64::from`)
                 if ty == "f64" || ty == "f32" {
                     return self.index.get(&format!("__exr_{ty}_{m}")).or_else(|| self.index.get(&format!("{ty}::{m}"))).copied();
@@ -7649,7 +7800,7 @@ impl Program {
                 if Ty::from_suffix(ty).is_some() && matches!(m, "max" | "min") {
                     return self.index.get(&format!("__core_{m}")).copied();
                 }
-                // `char::from_digit(d, 10)` / `char::from_u32(x)` / `char::from(b)`: prelude の `__exr_char_*`
+                // `char::from_digit(d, 10)` / `char::from_u32(x)` / `char::from(b)`: the prelude's `__exr_char_*`
                 if ty == "char" {
                     let m = match m {
                         "from_u32" => "from_u32_checked",
@@ -7677,7 +7828,7 @@ impl Program {
     }
 }
 
-/// 型の環境で name が const ジェネリクスの引数 (`[(); n]`) なら、その値
+/// When name is a const generic argument (`[(); n]`) in the type environment, its value
 pub fn const_generic_value(env: &TyEnv, name: &str) -> Option<u32> {
     env.params.iter().find(|(n, _)| n == name).and_then(|(_, t)| match t {
         Ty::Array(Ty::Unit, n) if *n < CONST_LEN_BASE => Some(*n),

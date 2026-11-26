@@ -1,4 +1,4 @@
-// glue (__exr_cmp) を付けない小さいプログラムの大小比較: タプル・配列・derive(PartialOrd) の enum を codegen がその場で展開する
+// Ordering comparisons in a small program without the glue (__exr_cmp): codegen expands tuples, arrays and derive(PartialOrd) enums in place
 #[derive(PartialEq, PartialOrd, Clone, Copy)]
 enum Lvl { Lo, Hi(u8) }
 fn main() {

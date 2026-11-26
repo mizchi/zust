@@ -1,21 +1,21 @@
-//! キャッシュキー (128 bit のハッシュ)。cache.rs と program.rs が使う。
+//! Cache keys (128-bit hashes). Used by cache.rs and program.rs.
 //!
-//! 以前は SipHash (std の DefaultHasher) を 2 つ使っていたが、全アイテムの全トークンを毎ビルドハッシュするので、
-//! zustc でコンパイルしたコンパイラ (インライン展開がない) では目に見えて遅かった。
-//! 2 本の 64 bit の掛け算・回転の混ぜ合わせ (互いに違う定数) を使い、最後に murmur3 の fmix64 で混ぜる。
-//! 暗号的な強さは要らない (入力は自分のソース) が、128 bit なので偶然の衝突は起きない。
+//! It used to use two SipHashes (std's DefaultHasher), but since every token of every item is hashed on every build,
+//! this was visibly slow in a compiler compiled with zustc (which has no inline expansion).
+//! It uses two 64-bit multiply-rotate mixes (with constants different from each other) and mixes at the end with murmur3's fmix64.
+//! No cryptographic strength is needed (the input is our own source), but with 128 bits accidental collisions do not happen.
 
 use std::hash::{Hash, Hasher};
 
 pub type Key = u128;
 
-/// バイト列を 8 byte ずつ混ぜる。呼び出しの区切りに依らない (write("ab") と write("a"); write("b") が同じ):
-/// std と zustc の prelude で Hash の実装が write を呼ぶ区切りが違っても同じ値になるように
+/// Mixes bytes 8 at a time. Independent of how the calls are split (write("ab") and write("a"); write("b") are the same):
+/// so that the value is the same even if the Hash impls of std and of zustc's prelude split their write calls differently
 #[derive(Clone, Copy)]
 pub struct KeyState {
     a: u64,
     b: u64,
-    /// まだ混ぜていないバイト (下位から) とその数、全体の長さ
+    /// The bytes not yet mixed (from the low end) and their count, and the total length
     buf: u64,
     nb: u32,
     len: u64,
@@ -31,7 +31,7 @@ impl KeyState {
         self.a = (self.a ^ w).wrapping_mul(K1).rotate_left(29);
         self.b = (self.b.rotate_left(23) ^ w.wrapping_mul(K3)).wrapping_mul(K2);
     }
-    /// 残りのバイトと長さを混ぜた状態
+    /// The state with the remaining bytes and the length mixed in
     fn done(&self) -> (u64, u64) {
         let mut s = *self;
         s.word(s.buf ^ (s.nb as u64) << 59);
@@ -53,7 +53,7 @@ impl Hasher for KeyState {
     fn write(&mut self, bytes: &[u8]) {
         self.len = self.len.wrapping_add(bytes.len() as u64);
         let mut i = 0;
-        // (途中のバイトがあれば 1 byte ずつ足して 8 byte にする)
+        // (if there are leftover bytes, add 1 byte at a time to make 8 bytes)
         while self.nb != 0 && i < bytes.len() {
             self.buf |= (bytes[i] as u64) << (8 * self.nb);
             self.nb += 1;

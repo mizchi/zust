@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
-"""LSP の機能の比較: zust-analyzer / rust-analyzer / rust-glancer が、同じ問い合わせに同じ答えを返すか。
-速さの比較 (lsp_compare.py) は「何を返すか」を見ないので、機能の不足と答えの違いをここで見る。rust-analyzer を正解とする。
+"""A comparison of LSP features: whether zust-analyzer / rust-analyzer / rust-glancer return the same answers to the same queries.
+The speed comparison (lsp_compare.py) does not look at "what is returned", so missing features and differences in answers are checked here. rust-analyzer is taken as the correct answer.
 
-(事前に cargo build --release --workspace: target/release/zust-analyzer を使う)
+(cargo build --release --workspace beforehand: uses target/release/zust-analyzer)
 usage: python3 bench/lsp_parity.py [--servers zustc,rust-analyzer,rust-glancer] [--targets synth,fixture,zustc,ide]
                                    [--points 40] [--out bench/lsp_parity_result.md] [--json bench/lsp_parity.json]
                                    [--compare bench/lsp_parity.json] [--detail [--detail-out FILE]]
 
-見るもの (対象ごと・サーバごと):
-- caps: initialize が返した機能 (documentSymbol / workspaceSymbol / definition / hover / completion / references / ...)
-- docsym: 開いたファイルの documentSymbol の (名前, 種類) の集合が rust-analyzer と何割同じか (足りない・余分の例)
-- wsym: 問い合わせごとの上位 20 個の名前の集合の一致 (Jaccard)
-- definition: ファイルの中の識別子 (ワークスペースで定義された名前) の位置で、行き先 (ファイル, 行) が rust-analyzer と同じ割合
-- hover: 同じ位置で、空でない hover を返した割合
-- completion: `.` の直後 (`x.|name`) と、識別子の 2 文字目の後 (`na|me`) で、そこに実際に書いてある名前が候補に入る割合と候補の数
-- references: 同じ位置で、参照の数が rust-analyzer と同じ割合
-- documentHighlight / rename / signatureHelp: 数・書き換えの集合・(名前, 引数の数, 今の引数) が同じ割合
-- 一致の平均: 上の割合の平均
-各問い合わせの時間の p50 / p90、起動から索引ができるまでの時間、メモリの最大 (サーバと子のプロセスの RSS) も出す。
---json で zustc の数字を残し、次に --compare で前回との差 (一致は点、時間は ms) を列に足す。
+What is checked (per target / per server):
+- caps: the capabilities initialize returned (documentSymbol / workspaceSymbol / definition / hover / completion / references / ...)
+- docsym: what fraction of the set of (name, kind) of the open file's documentSymbol is the same as rust-analyzer's (examples of missing / extra ones)
+- wsym: the agreement of the sets of the top 20 names per query (Jaccard)
+- definition: at the positions of identifiers in the file (names defined in the workspace), the fraction whose destination (file, line) is the same as rust-analyzer's
+- hover: at the same positions, the fraction that returned a non-empty hover
+- completion: right after a `.` (`x.|name`) and after the 2nd character of an identifier (`na|me`), the fraction where the name actually written there is among the candidates, and the number of candidates
+- references: at the same positions, the fraction where the number of references is the same as rust-analyzer's
+- documentHighlight / rename / signatureHelp: the fraction where the count / the set of edits / (name, number of parameters, current parameter) is the same
+- mean agreement: the mean of the fractions above
+Also reports the p50 / p90 of the time of each query, the time from startup until the index is ready, and the peak memory (RSS of the server and its child processes).
+--json saves zustc's numbers, and next time --compare adds columns with the difference from the previous run (points for agreement, ms for time).
 """
 
 import argparse, json, os, re, shutil, statistics, sys, tempfile, time
@@ -55,7 +55,7 @@ def start(cmd, t, timeout):
     s.notify("initialized", {})
     path = os.path.join(root, t["open"])
     s.notify("textDocument/didOpen", {"textDocument": {"uri": uri(path), "languageId": "rust", "version": 1, "text": open(path).read()}})
-    # (索引ができるまで待つ)
+    # (wait until the index is ready)
     q, want = t["ready"]
     while time.time() - t0 < timeout and s.alive:
         m = s.request("workspace/symbol", {"query": q}, timeout=timeout)
@@ -63,7 +63,7 @@ def start(cmd, t, timeout):
             break
         time.sleep(0.05)
     s.ready_ms = (time.time() - t0) * 1000
-    # (名前が引けても、rust-analyzer は型の解析などをまだ続けている: 終わるまで待つ。待った時間は別に残す)
+    # (even once names can be looked up, rust-analyzer is still going on with type analysis etc.: wait until it finishes; the time waited is recorded separately)
     s.wait_idle(timeout)
     s.idle_ms = (time.time() - t0) * 1000
     return s, (init.get("result") or {}).get("capabilities") or {}
@@ -91,12 +91,12 @@ def sym_set(res):
 
 
 def norm_name(n):
-    # (impl の名前の書き方はサーバで違う: `impl Tr for S` / `impl Tr for S<T>` / `S`。名前だけで比べるときは impl を外す)
+    # (how impls are named differs by server: `impl Tr for S` / `impl Tr for S<T>` / `S`; when comparing by name only, strip the impl)
     return re.sub(r"^impl\s+", "", n or "")
 
 
 def loc_of(res):
-    """definition の結果 → (ファイル名, 行) の集合"""
+    """The result of definition → a set of (file name, line)"""
     if res is None:
         return set()
     if isinstance(res, dict):
@@ -118,7 +118,7 @@ def comp_labels(res):
 
 
 def edits_of(res):
-    """rename の WorkspaceEdit → (ファイル名, 行, 桁, 新しい文字列) の集合"""
+    """The WorkspaceEdit of rename → a set of (file name, line, column, new string)"""
     if not res:
         return None
     out = set()
@@ -133,7 +133,7 @@ def edits_of(res):
 
 
 def call_points(text, n):
-    """呼び出し `name(a, b)` の、最初の引数の始めの位置と、引数の番号 (最初のカンマの後なら 1)"""
+    """For calls `name(a, b)`, the position where the first argument starts, and the argument number (1 if after the first comma)"""
     pts = []
     for li, l in enumerate(text.split("\n")):
         if l.lstrip().startswith("//"):
@@ -149,7 +149,7 @@ def call_points(text, n):
 
 
 def points(text, names, n):
-    """ファイルの中の、names のどれかの名前の識別子の位置 (行, 桁) を n 個まで (均等に)"""
+    """Up to n positions (line, column) of identifiers in the file named by one of names (evenly spread)"""
     lines = text.split("\n")
     pts = []
     for li, l in enumerate(lines):
@@ -165,7 +165,7 @@ def points(text, names, n):
 
 
 def dot_points(text, n):
-    """`x.name` の `.` の直後の位置と name"""
+    """The position right after the `.` of `x.name`, and name"""
     pts = []
     for li, l in enumerate(text.split("\n")):
         if l.lstrip().startswith("//"):
@@ -182,7 +182,7 @@ def run(servers, t, npts, timeout):
     path = os.path.join(t["root"], t["open"])
     text = open(path).read()
     u = uri(path)
-    # (問い合わせる位置: ワークスペースで定義された名前の出てくる所)
+    # (the positions to query: where names defined in the workspace occur)
     names = set(re.findall(r"\b(?:fn|struct|enum|trait|type|const|static)\s+([A-Za-z_][A-Za-z0-9_]*)", text))
     names |= set(n for n in re.findall(r"\b([A-Z][A-Za-z0-9_]+)\b", text))
     pts = points(text, names, npts)
@@ -250,7 +250,7 @@ def pct(a, b):
 
 
 def detail(tn, res, pts):
-    """--detail: rust-analyzer と違った所 (definition の行き先・references の数・rename・signatureHelp)"""
+    """--detail: where the result differed from rust-analyzer's (definition destination / references count / rename / signatureHelp)"""
     pts, cpts = pts
     ref = res.get("rust-analyzer")
     if not ref:
@@ -280,7 +280,7 @@ def detail(tn, res, pts):
         for i, (li, col, name) in enumerate(cpts):
             if ref["sig"][i] and r["sig"][i] != ref["sig"][i]:
                 print(f"[{tn}/{sn}] {li + 1}:{col + 1} {name}(: signature {r['sig'][i]} vs ra {ref['sig'][i]}", file=sys.stderr)
-        # (completion: rust-analyzer は候補に入れたが、こちらは入れなかった所)
+        # (completion: where rust-analyzer included it among the candidates but this one did not)
         for key in ["dot", "pre"]:
             for i, (li, col, name) in enumerate(r.get(key + "_at", [])):
                 if i < len(ref[key]) and ref[key][i] and not r[key][i]:
@@ -296,7 +296,7 @@ TIMED = ["definition", "hover", "completion", "references", "rename", "signature
 
 
 def metrics(res):
-    """サーバごとの一致の数字 {名前: (割合 0..1 か None, 表の文字列)} (rust-analyzer を正解とする)"""
+    """The agreement numbers per server {name: (fraction 0..1 or None, table string)} (rust-analyzer taken as correct)"""
     ref = res.get("rust-analyzer")
     out = {}
     for sn, r in res.items():
@@ -340,7 +340,7 @@ def metrics(res):
 
 
 def timing(r):
-    """{メソッド: (p50, p90)} (ms)"""
+    """{method: (p50, p90)} (ms)"""
     out = {}
     for k in TIMED:
         v = r["times"].get("textDocument/" + k)
@@ -380,7 +380,7 @@ def report(tn, res, npts, ndots, prev=None):
 
 
 def summary(res):
-    """JSON に残すもの (zustc の分): 一致の数字・時間・起動・メモリ"""
+    """What is saved to the JSON (zustc's part): agreement numbers, times, startup, memory"""
     r = res.get("zustc")
     if not r:
         return {}
@@ -424,8 +424,8 @@ def main():
 
 
 def target(tn, tmp):
-    """対象: synth (生成した 40 モジュール)・fixture (ide のテストの fixture のワークスペース)・zustc (このリポジトリの
-    driver2.rs を開く)・ide (このリポジトリの navigate.rs を開く: 字句の部品が多い別の書き方のファイル)"""
+    """Targets: synth (40 generated modules), fixture (the fixture workspace of the ide tests), zustc (opens this repository's
+    session.rs), ide (opens this repository's navigate.rs: a file in a different style, with many lexical parts)"""
     if tn == "synth":
         return make_synth(os.path.join(tmp, "synth"))
     if tn == "fixture":

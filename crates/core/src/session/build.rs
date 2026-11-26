@@ -1,5 +1,5 @@
-//! driver2 のビルドの部分 (feature `build`): 関数を機械語にする (lower)・fork の並列化・オブジェクト・リンク・ワークスペース。
-//! 解析と check (LSP) は親の driver2 にあり、バックエンドに依存しない
+//! The build part of session (feature `build`): turning fns into machine code (lower), fork parallelism, objects, linking, workspaces.
+//! Analysis and check (LSP) live in the parent session and do not depend on the backend
 
 use super::*;
 use crate::acg::Target;
@@ -14,28 +14,28 @@ fn blob_fns(b: &Blob) -> Vec<u32> {
     v
 }
 
-/// 記録を機械語にして Blob を作る
+/// Turns the record into machine code and makes a Blob
 pub(super) fn lower_blob(a: &Analysis, c: acg::Compiled, req: Vec<u32>) -> R<(Blob, Vec<u32>)> {
     let (code, relocs, traps) = crate::lower::lower(&c.rec, &c.late, a.prog.opt, a.cl)?;
     Ok((c.into_blob(code, relocs, traps), req))
 }
 
-/// ソースから ELF の .o を作る (キャッシュも並列化もしない)
+/// Makes an ELF .o from source (no cache and no parallelism)
 pub fn build_object(src0: &str, opt: bool) -> R<Vec<u8>> {
-    let mut s = Session2::new(Options2 { opt, no_cache: true, jobs: 1, ..Default::default() });
+    let mut s = Session::new(Options { opt, no_cache: true, jobs: 1, ..Default::default() });
     let a = s.analyze(src0)?;
-    s.compile_object(&a, &mut Report2::default(), None)
+    s.compile_object(&a, &mut BuildReport::default(), None)
 }
 
-/// ソースから実行ファイルを作る (キャッシュも並列化もしない)
+/// Makes an executable from source (no cache and no parallelism)
 pub fn build(src: &str, output: &std::path::Path, opt: bool, linker: Option<&str>) -> R<()> {
-    let mut s = Session2::new(Options2 { opt, no_cache: true, jobs: 1, linker: linker.map(|l| l.to_string()), ..Default::default() });
+    let mut s = Session::new(Options { opt, no_cache: true, jobs: 1, linker: linker.map(|l| l.to_string()), ..Default::default() });
     s.build(src, output).map(|_| ())
 }
 
 
-impl Session2 {
-    /// ids をコンパイルする (jobs > 1 で数が多ければ fork した子プロセスで分けて)。結果は ids と同じ順
+impl Session {
+    /// Compiles ids (split across forked child processes when jobs > 1 and there are many). The results are in the same order as ids
     fn compile_many(&self, a: &Analysis, insts: &Mutex<Insts>, ids: &[u32]) -> R<Vec<Blob>> {
         // (at least 16 per child; ZUSTC_BUILD_PAR_MIN for tests: 1 splits nearly every wave)
         let per_job = std::env::var("ZUSTC_BUILD_PAR_MIN").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(16).max(1);
@@ -47,15 +47,15 @@ impl Session2 {
             }
             return Ok(out);
         }
-        // 子プロセス k は ids[i] (i % jobs == k) をコンパイルし、(番号, 失敗か, 中身) の並びを pipe に書く
+        // Child process k compiles ids[i] (i % jobs == k) and writes a sequence of (index, failed?, contents) to the pipe
         let mut kids = vec![];
         for k in 0..jobs {
             let mut fds = [0i32; 2];
-            // SAFETY: fds は 2 つの int
+            // SAFETY: fds is 2 ints
             if unsafe { c_pipe(fds.as_mut_ptr()) } != 0 {
                 return Err("pipe failed".into());
             }
-            // SAFETY: 子はコンパイルして書くだけで _exit する
+            // SAFETY: the child only compiles and writes, then calls _exit
             let pid = fork_counted();
             if pid < 0 {
                 return Err("fork failed".into());
@@ -66,7 +66,7 @@ impl Session2 {
                 let mut i = k;
                 while i < ids.len() {
                     let at = buf.len();
-                    crate::cache2::put_uv(&mut buf, i as u64);
+                    crate::build_cache::put_uv(&mut buf, i as u64);
                     match compile_id(a, insts, ids[i]) {
                         Ok(b) => {
                             let mut e = vec![];
@@ -81,15 +81,15 @@ impl Session2 {
                                     i += jobs;
                                     continue;
                                 }
-                                crate::cache2::encode_blob(&b, &a.prog, &*g, &mut e);
+                                crate::build_cache::encode_blob(&b, &a.prog, &*g, &mut e);
                             }
                             buf.push(0);
-                            crate::cache2::put_uv(&mut buf, e.len() as u64);
+                            crate::build_cache::put_uv(&mut buf, e.len() as u64);
                             buf.extend_from_slice(&e);
                         }
                         Err(m) => {
                             buf.push(1);
-                            crate::cache2::put_uv(&mut buf, m.len() as u64);
+                            crate::build_cache::put_uv(&mut buf, m.len() as u64);
                             buf.extend_from_slice(m.as_bytes());
                         }
                     }
@@ -108,7 +108,7 @@ impl Session2 {
             unsafe { c_close(fd) };
             let mut st = 0i32;
             unsafe { c_waitpid(pid, &mut st, 0) };
-            let mut r = crate::cache2::Rd { d: &d, pos: 0 };
+            let mut r = crate::build_cache::Rd { d: &d, pos: 0 };
             while r.pos < d.len() {
                 let (Some(i), Some(fail), Some(n)) = (r.uv(), r.u8(), r.uv()) else { break };
                 let Some(body) = r.take(n as usize) else { break };
@@ -118,14 +118,14 @@ impl Session2 {
                 }
             }
         }
-        // (順に読み戻す: 子が要求したインスタンスはここで要求し直す。失敗は ids の順で最初のもの)
+        // (read back in order: instances the children requested are requested again here; the failure is the first one in ids order)
         let mut out = vec![];
         for (i, r) in res.into_iter().enumerate() {
             match r {
-                Some(Ok(d)) => out.push(crate::cache2::decode_blob(&d, &a.prog, insts).ok_or("internal: cannot decode a compiled function")?),
+                Some(Ok(d)) => out.push(crate::build_cache::decode_blob(&d, &a.prog, insts).ok_or("internal: cannot decode a compiled function")?),
                 Some(Err(m)) => return Err(m),
                 None => {
-                    // (子が落ちた: その関数はここでコンパイルする (エラーが出るならそれが出る))
+                    // (the child crashed: compile that fn here (if it gives an error, that error comes out))
                     out.push(compile_id(a, insts, ids[i])?);
                 }
             }
@@ -133,8 +133,8 @@ impl Session2 {
         Ok(out)
     }
 
-    /// 解析済みのプログラムの .o を作る (キャッシュを引き、なければコンパイルしてキャッシュに入れる)
-    fn compile_object(&mut self, a: &Analysis, rep: &mut Report2, tm: Option<&mut Timer>) -> R<Vec<u8>> {
+    /// Makes the .o of an analyzed program (looks up the cache; if missing, compiles and puts it in the cache)
+    fn compile_object(&mut self, a: &Analysis, rep: &mut BuildReport, tm: Option<&mut Timer>) -> R<Vec<u8>> {
         let mut live = a.prog.reachable(&a.refs);
         // (a function only a static points to (`static F: fn() = f;`) is compiled too)
         for c in &a.prog.consts {
@@ -165,21 +165,21 @@ impl Session2 {
                 }
                 let k = self.key_of(a, &insts, id);
                 keys.insert(id, k);
-                // (場所を書き込んだ関数は、アイテムの開始行が変わっていたら使わない)
+                // (a fn with locations written into it is not used if its item's start line has changed)
                 let lb = {
                     let g = insts.lock().unwrap();
                     a.line_base_for(&*g, id)
                 };
                 let raw = self.get(k);
                 if log_compiled && raw.is_some() {
-                    let d = crate::cache2::decode_blob(raw.as_ref().unwrap(), &a.prog, &insts);
+                    let d = crate::build_cache::decode_blob(raw.as_ref().unwrap(), &a.prog, &insts);
                     match &d {
                         None => eprintln!("decode-fail {}", a.prog.names[insts.lock().unwrap().body_of(id) as usize]),
                         Some(b) if !(b.line_base.is_none() || b.line_base == lb) => eprintln!("line-mismatch {}", a.prog.names[insts.lock().unwrap().body_of(id) as usize]),
                         _ => {}
                     }
                 }
-                let hit = raw.and_then(|d| crate::cache2::decode_blob(&d, &a.prog, &insts)).filter(|b| b.line_base.is_none() || b.line_base == lb);
+                let hit = raw.and_then(|d| crate::build_cache::decode_blob(&d, &a.prog, &insts)).filter(|b| b.line_base.is_none() || b.line_base == lb);
                 match hit {
                     Some(b) => {
                         rep.fns_hit += 1;
@@ -203,16 +203,16 @@ impl Session2 {
                     let mut e = vec![];
                     {
                                 let g = insts.lock().unwrap();
-                                crate::cache2::encode_blob(&b, &a.prog, &*g, &mut e);
+                                crate::build_cache::encode_blob(&b, &a.prog, &*g, &mut e);
                             }
                     self.put(keys[&id], e);
                 }
                 blobs.insert(id, b);
             }
             wave = std::mem::take(&mut insts.lock().unwrap().pending);
-            // (展開した本体が呼ぶ関数は、呼んだ側の名前からは届かない: 再配置が指す総称でない関数もコンパイルする)
-            // (vtable の欄も: `Box<dyn Shape>` にした自分の型のメソッドは、名前で届くとは限らない
-            //  (呼ぶのが依存するクレートの関数の中で、その本体はインターフェースでは消してある))
+            // (the fns that an expanded body calls are not reachable from the caller's names: also compile the non-generic fns that relocations point to)
+            // (vtable slots too: the methods of one's own type made into `Box<dyn Shape>` are not necessarily reachable by name
+            //  (the call is inside a fn of a dependency crate, whose body has been removed in the interface))
             for &id in &cur {
                 if let Some(b) = blobs.get(&id) {
                     let fs = b.relocs.iter().filter_map(|r| if let Target::Func(f) = r.target { Some(f) } else { None });
@@ -231,7 +231,9 @@ impl Session2 {
                 let g = insts.lock().unwrap();
                 wave.iter().map(|&id| g.body_of(id)).collect()
             };
-            let mut stack: Vec<u32> = starts.iter().flat_map(|&b| a.refs[b as usize].iter().copied()).collect();
+            // (the fns referred to, in the order of their ids, as before the groups (#188): the order they are pushed in is
+            // the order of the functions in the object)
+            let mut stack: Vec<u32> = starts.iter().flat_map(|&b| a.ref_fns(b as usize)).collect();
             if starts.iter().any(|&b| matches!(a.prog.names[b as usize].as_str(), "__exr_display" | "__exr_debug")) {
                 stack.extend((0..a.prog.names.len() as u32).filter(|&i| matches!(a.prog.sigs[i as usize].impl_trait.as_deref(), Some("Display" | "Debug"))));
             }
@@ -242,7 +244,7 @@ impl Session2 {
                 if a.is_ext(i) {
                     continue;
                 }
-                stack.extend(a.refs[i as usize].iter().copied());
+                stack.extend(a.ref_fns(i as usize));
                 if concrete(&a.prog, i as usize) && !blobs.contains_key(&i) {
                     user_live.push(i);
                     wave.push(i);
@@ -256,11 +258,11 @@ impl Session2 {
         emit_object(a, &self.ctx, &insts, &user_live, &blobs, self.opts.module_writer)
     }
 
-    /// ソースから実行ファイルを作る。前回と同じ .o ならリンクしない
-    pub fn build(&mut self, src: &str, output: &std::path::Path) -> R<Report2> {
+    /// Makes an executable from source. Does not link if the .o is the same as last time
+    pub fn build(&mut self, src: &str, output: &std::path::Path) -> R<BuildReport> {
         let t0 = now_ns();
         let mut tm = Timer { on: self.opts.time, last: t0, start: t0 };
-        let mut rep = Report2::default();
+        let mut rep = BuildReport::default();
         let a = self.analyze(src).map_err(|e| self.unhoist_analysis_err(src, e))?;
         rep.items_parsed = a.n_parsed;
         tm.lap("front", format!("{} items, {} parsed", a.items.len(), a.n_parsed));
@@ -317,7 +319,7 @@ impl Session2 {
     }
 }
 
-/// 関数 (インスタンス) 1 つをコンパイルする
+/// Compiles one fn (instance)
 fn compile_id(a: &Analysis, insts: &Mutex<Insts>, id: u32) -> R<Blob> {
     compile_id_req(a, insts, id).map(|r| r.0)
 }
@@ -331,7 +333,7 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
             None => &prog.sigs[id as usize].symbol,
         }
     };
-    // 置く関数: main / export から、再配置と vtable を辿って届くものだけ
+    // The fns to emit: only those reachable from main / exports by following relocations and vtables
     let mut reach: FxSet<u32> = FxSet::default();
     let mut stack: Vec<u32> = user_live
         .iter()
@@ -368,7 +370,7 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
     let mut placed: Vec<u32> = user_live.iter().copied().filter(|u| reach.contains(u) && blobs.contains_key(u)).collect();
     let mut order: Vec<u32> = (0..insts.list.len() as u32).map(|i| insts.n_fns + i).filter(|i| reach.contains(i) && blobs.contains_key(i)).collect();
     order.sort_by(|a, b| sym_of(*a).cmp(sym_of(*b)));
-    // 同じ機械語になるインスタンスは 1 つだけ置く (ICF)
+    // Instances that become the same machine code are emitted only once (ICF)
     let mut fold: FxMap<u32, u32> = FxMap::default();
     for _ in 0..4 {
         let canon = |f: u32, fold: &FxMap<u32, u32>| *fold.get(&f).unwrap_or(&f);
@@ -453,7 +455,7 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
         let f = resolve(f);
         sym_of(f).to_string()
     };
-    // static: コードから参照されているもの (と、その初期値から参照されているもの)
+    // statics: those referenced from code (and those referenced from their initial values)
     let mut datas: Vec<DataDef> = vec![];
     let mut anon: HashMap<Vec<u8>, String> = HashMap::default();
     let mut anon_data = |bytes: &[u8], datas: &mut Vec<DataDef>| -> String {
@@ -465,7 +467,7 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
         datas.push((n.clone(), bytes.to_vec(), vec![], false));
         n
     };
-    // (ライブラリの panic の表は `_xT_<名前>` で外に見せる: 実行ファイルの表がそれを指す)
+    // (a library's panic table is exported as `_xT_<name>`: the executable's table points to it)
     let static_name = |ci: u32| match (&ctx.lib, prog.consts[ci as usize].name.as_str()) {
         // (a static of an extern block: the linked program's symbol)
         _ if prog.consts[ci as usize].expr.starts_with(crate::parse::EXTERN_STATIC_SYM) => {
@@ -483,7 +485,7 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
             }
         }
     }
-    // (実行ファイルは、依存するクレートが使う unwrap の場所を必ず置く)
+    // (an executable always emits the unwrap location that the dependency crates use)
     if ctx.lib.is_none() && !ctx.deps.is_empty() {
         todo.extend(prog.const_index.get("__EXR_CALLER").copied());
     }
@@ -505,19 +507,19 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
             trap_table = Some(ci);
             continue;
         }
-        // (実行ファイルの表: 実行ファイルでは __EXR_TRAP_TABLE と同じもの、ライブラリでは外のもの)
+        // (the executable's table: in an executable, the same as __EXR_TRAP_TABLE; in a library, an external one)
         if c.name == "__EXR_EXE_TABLE" {
             if ctx.lib.is_none() {
                 todo.push(trap_table_ci(prog));
             }
             continue;
         }
-        // (依存するクレートの static はそちらの .o にある。unwrap の場所 (__EXR_CALLER) は実行ファイルの 1 つを皆で使う)
+        // (a dependency crate's statics are in its own .o; the unwrap location (__EXR_CALLER) is the executable's single one, shared by all)
         if a.is_ext_static(ci) || (ctx.lib.is_some() && c.name == "__EXR_CALLER") {
             continue;
         }
         let dv = crate::ast_consteval::eval_src(prog, &c.expr, c.ty).map_err(|e| format!("in static `{}`: {e}", c.name))?;
-        // (入れ子の無名データ (`&[..]` の中身) は名前を付けて置く)
+        // (nested anonymous data (the contents of `&[..]`) is emitted under a name)
         fn place(
             dv: crate::ast_consteval::DataVal,
             name: String,
@@ -547,14 +549,14 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
         }
         let n0 = datas.len();
         place(dv, static_name(ci), &mut datas, &mut todo, &mut nested, &static_name, &fname);
-        // (ライブラリの static は外に見せる)
+        // (a library's statics are exported)
         if (ctx.lib.is_some() && c.item < a.prog.prelude_from && !a.ext_items[c.item as usize]) || (ctx.lib.is_none() && !ctx.deps.is_empty() && c.name == "__EXR_CALLER") {
             if let Some(d) = datas[n0..].iter_mut().find(|d| d.0 == static_name(ci)) {
                 d.3 = true;
             }
         }
     }
-    // 関数とその再配置
+    // Fns and their relocations
     let mut funcs: Vec<(String, Vec<u8>, Vec<Reloc>, bool)> = vec![];
     let mut vts: HashMap<Vec<u32>, String> = HashMap::default();
     let mut fn_off: Vec<(u32, u64)> = vec![];
@@ -616,8 +618,8 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
         text_end += blob.code.len() as u64;
         funcs.push((sym_of(uid).to_string(), blob.code.clone(), relocs, global));
     }
-    // panic の trap の表 (driver.rs と同じ形式)
-    // (依存するクレートのある実行ファイルは、自分が使わなくても表を置く: 依存するクレートの .o が `_xT__exe` を引く)
+    // The panic trap table (same format as driver.rs)
+    // (an executable with dependency crates emits the table even if it does not use it: the dependency crates' .o refer to `_xT__exe`)
     if trap_table.is_some() || ctx.lib.is_some() || !ctx.deps.is_empty() {
         let tname = match (trap_table, &ctx.lib) {
             (Some(ci), _) => static_name(ci),
@@ -642,7 +644,7 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
                 continue;
             }
             nf += 1;
-            // (閉じた依存するクレートの関数の場所は、そのクレートのテキストの中の行: このソースでの位置を足す)
+            // (the locations of a dependency crate's closed fns are lines in that crate's text: add the position in this source)
             let shift = a.line_shift(insts, uid) as i64;
             uv(&mut fbytes, fo - prev_fn);
             prev_fn = fo;
@@ -674,7 +676,7 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
                 uv(&mut fbytes, col);
             }
         }
-        // (ファイルの対応: 結合したソースの行 → ファイル。PRELUDE_LINE から後ろは prelude)
+        // (the file map: line of the joined source → file; from PRELUDE_LINE on it is the prelude)
         let mut segs: Vec<(u32, String, u32)> = ctx.map.segs.iter().map(|&(st, fi, first)| (st, ctx.map.files.get(fi as usize).cloned().unwrap_or_else(|| "src/main.rs".to_string()), first)).collect();
         if segs.is_empty() {
             segs.push((1, "src/main.rs".to_string(), 1));
@@ -689,7 +691,7 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
             uv(&mut bytes, n.len() as u64);
             bytes.extend_from_slice(n.as_bytes());
         }
-        // (桁のずれ: (行, 桁, ずれ (zigzag)))
+        // (column shifts: (line, column, shift (zigzag)))
         uv(&mut bytes, ctx.map.colfix.len() as u64);
         for &(l, c, d) in &ctx.map.colfix {
             uv(&mut bytes, l as u64);
@@ -708,7 +710,7 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
             Some(f) => vec![(0u32, f.0.clone(), 0i64)],
             None => vec![],
         };
-        // (実行ファイル: 8 byte 目に依存するクレートの表の列 [数, アドレス *])
+        // (an executable: at byte 8, the list of the dependency crates' tables [count, address *])
         if ctx.lib.is_none() && !ctx.deps.is_empty() {
             let mut ext = vec![0u8; 8 * (1 + ctx.deps.len())];
             ext[..8].copy_from_slice(&(ctx.deps.len() as u64).to_le_bytes());
@@ -716,7 +718,7 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
             datas.push((".Lxext".to_string(), ext, ers, false));
             rs.push((8, ".Lxext".to_string(), 0));
         }
-        // (ライブラリの表は 8 byte 目にクレートの印)
+        // (a library's table has the crate's tag at byte 8)
         if let Some(l) = &ctx.lib {
             bytes[8..16].copy_from_slice(&(crate_tag(l) as u64).to_le_bytes());
         }
@@ -782,9 +784,9 @@ type Parts = (Vec<(String, Vec<u8>, Vec<Reloc>, bool)>, Vec<DataDef>);
 
 fn read_parts(d: &[u8]) -> Option<Parts> {
     let d = d.strip_prefix(PARTS_MAGIC)?;
-    let mut r = crate::cache2::Rd { d, pos: 0 };
+    let mut r = crate::build_cache::Rd { d, pos: 0 };
     let unzz = |v: u64| ((v >> 1) as i64) ^ -((v & 1) as i64);
-    let s = |r: &mut crate::cache2::Rd| -> Option<String> {
+    let s = |r: &mut crate::build_cache::Rd| -> Option<String> {
         let n = r.uv()? as usize;
         Some(String::from_utf8_lossy(r.take(n)?).into_owned())
     };
@@ -857,18 +859,28 @@ fn trap_table_ci(prog: &Program) -> u32 {
     prog.const_index.get("__EXR_TRAP_TABLE").copied().unwrap_or(0)
 }
 
-/// ワークスペースの 1 つのクレート
+/// A crate's result in a check of a workspace (Session::check_workspace)
+#[derive(Clone, Debug, Default)]
+pub struct CrateCheck {
+    pub name: String,
+    /// its errors, as `file:line:col: message`
+    pub errors: Vec<String>,
+    /// not checked: the dependency whose source could not be read or expanded (that one's error is in its errors)
+    pub blocked_by: Option<String>,
+}
+
+/// One crate of a workspace
 #[derive(Clone, Debug)]
 pub struct CrateSpec {
     pub name: String,
-    /// 根のファイル (lib.rs / main.rs)
+    /// The root file (lib.rs / main.rs)
     pub root: std::path::PathBuf,
-    /// 表示するパス (panic とエラーの場所)
+    /// The path to display (in panic and error locations)
     pub display: String,
     pub lib: bool,
-    /// 直接依存するクレートの名前
+    /// The names of the directly depended-on crates
     pub deps: Vec<String>,
-    /// 有効な feature (`features=a,b`)
+    /// The enabled features (`features=a,b`)
     pub features: Vec<String>,
     /// (a bin: the name of the executable, when it is not `name`. A Cargo package's lib and bin share the package's
     /// name, so zurgo gives the bin another crate name and keeps the executable's here)
@@ -921,10 +933,10 @@ fn ws_unescape(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// ワークスペースの説明ファイルを読む。1 行に 1 クレート: `lib <名前> <根のファイル> [依存...]` / `bin <名前> <根のファイル> [依存...]`
-/// (依存の代わりに `features=a,b` で feature を有効にする。bin の `exe=NAME` は実行ファイルの名前。`cfg=name` / `cfg=name=value`
-/// は cfg、`env=KEY=VALUE` は `env!` の値: 値の `%` `#` 空白は `%XX` (ws_escape)。`pm=PATH` は proc-macro クレートの dylib)
-/// (`#` から後ろはコメント。パスは説明ファイルのディレクトリから)
+/// Reads a workspace description file. One crate per line: `lib <name> <root file> [deps...]` / `bin <name> <root file> [deps...]`
+/// (in place of a dependency, `features=a,b` enables features; a bin's `exe=NAME` is the name of the executable; `cfg=name` / `cfg=name=value`
+/// is a cfg, `env=KEY=VALUE` is a value for `env!`: `%`, `#` and whitespace in the value are `%XX` (ws_escape); `pm=PATH` is a proc-macro crate's dylib)
+/// (everything from `#` on is a comment; paths are relative to the description file's directory)
 pub fn read_workspace(path: &std::path::Path) -> R<Vec<CrateSpec>> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let dir = path.parent().map(|d| d.to_path_buf()).unwrap_or_default();
@@ -971,16 +983,16 @@ pub fn read_workspace(path: &std::path::Path) -> R<Vec<CrateSpec>> {
     Ok(out)
 }
 
-/// ワークスペースのビルドの結果 (クレートごと)
+/// The result of a workspace build (per crate)
 #[derive(Clone, Debug, Default)]
 pub struct WsReport {
-    pub crates: Vec<(String, Report2)>,
-    /// 書き直した .o の数
+    pub crates: Vec<(String, BuildReport)>,
+    /// The number of .o files rewritten
     pub objects_written: usize,
     pub linked: usize,
 }
 
-/// 依存の順 (依存されるものが先) に並べる
+/// Sorts in dependency order (what is depended on comes first)
 fn topo(crates: &[CrateSpec]) -> R<Vec<usize>> {
     let mut order: Vec<usize> = vec![];
     let mut state = vec![0u8; crates.len()];
@@ -1009,13 +1021,13 @@ fn topo(crates: &[CrateSpec]) -> R<Vec<usize>> {
     Ok(order)
 }
 
-/// クレートのソース (`pub mod name { .. }`) のうち、使う側のコンパイルに効く部分のハッシュ。
-/// 総称でない関数の本体は使う側ではコンパイルしない (シンボルで呼ぶ) のでシグネチャだけを入れる。
-/// 総称関数・trait のメンバ・総称の impl のメンバ・`const fn`・`-> impl Trait` は本体も (使う側で実体化・評価する)、
-/// 行も入れる (panic の場所)
+/// The hash of the parts of a crate's source (`pub mod name { .. }`) that affect the compilation of its users.
+/// The bodies of non-generic fns are not compiled on the user's side (they are called by symbol), so only their signatures go in.
+/// For generic fns, trait members, members of generic impls, `const fn` and `-> impl Trait`, the bodies too (the user's side instantiates / evaluates them),
+/// and the lines too (panic locations)
 pub fn interface_hash(text: &str) -> Key {
     let mut h = KeyHasher::new();
-    // (`pub mod name {` と最後の `}` の内側を平らにする)
+    // (flatten the inside of `pub mod name {` and the last `}`)
     let body = match (text.find('{'), text.rfind('}')) {
         (Some(a), Some(b)) if a < b => &text[a + 1..b],
         _ => text,
@@ -1058,7 +1070,7 @@ pub fn interface_hash(text: &str) -> Key {
     h.finish()
 }
 
-/// 16 進の文字列 (u128::from_str_radix の代わり: zustc の std にはない)
+/// A hex string (in place of u128::from_str_radix: zustc's std does not have it)
 fn parse_hex(s: &str) -> Option<u128> {
     let mut v: u128 = 0;
     for c in s.bytes() {
@@ -1076,14 +1088,14 @@ fn key_hex(k: Key) -> String {
     format!("{:016x}{:016x}", (k >> 64) as u64, k as u64)
 }
 
-/// ディレクトリを (親も) 作る (std::fs::create_dir_all の代わり: zustc の std にはない)
+/// Creates a directory (and its parents) (in place of std::fs::create_dir_all: zustc's std does not have it)
 fn mkdir_all(dir: &std::path::Path) -> R<()> {
     let s = format!("{}", dir.display());
     let b = s.as_bytes();
     for i in 1..=b.len() {
         if i == b.len() || b[i] == b'/' {
             let p = format!("{}\0", &s[..i]);
-            // SAFETY: NUL で終わる文字列
+            // SAFETY: a NUL-terminated string
             unsafe { c_mkdir(p.as_bytes().as_ptr(), 0o755) };
         }
     }
@@ -1125,21 +1137,22 @@ fn n_lines(s: &str) -> u32 {
     s.as_bytes().iter().filter(|&&c| c == b'\n').count() as u32
 }
 
-impl Session2 {
-    /// 1 つのクレート (複数のファイル) をビルドする: 根のファイルから `mod x;` を辿る
-    pub fn build_path(&mut self, root: &std::path::Path, display: &str, output: &std::path::Path) -> R<Report2> {
+impl Session {
+    /// Builds one crate (multiple files): follows `mod x;` from the root file
+    pub fn build_path(&mut self, root: &std::path::Path, display: &str, output: &std::path::Path) -> R<BuildReport> {
         let (src, map) = crate::srcmap::load_crate(root, display, &self.opts.cfg_with(&self.opts.features))?;
         let src = if self.opts.test { with_harness(&src, display, &self.opts.cfg_with(&self.opts.features)) } else { src };
         self.ctx = CrateCtx { map: map.clone(), ..Default::default() };
-        // (1 ファイルなら場所は `行:桁:` のまま (呼ぶ側がファイル名を付ける))
+        // (with one file, locations stay as `line:col:` (the caller adds the file name))
         let r = self.build(&src, output).map_err(|e| if map.files.len() > 1 { self.ctx.map.relocate_err(&e) } else { e });
         self.ctx = CrateCtx::default();
         self.last_map = Some(map);
         r
     }
 
-    /// ワークスペースのクレート i を 1 つコンパイルし、.o・キャッシュ・指紋を書く。(結果, .o が変わったか, 時間 (ns))
-    fn build_one(
+    /// A crate's source as build_one compiles it: its own (expanded) text, then the dependency crates' interfaces
+    /// (pruned to what it reaches), with self.ctx set for it
+    fn ws_source(
         &mut self,
         crates: &[CrateSpec],
         loaded: &[Option<(String, crate::srcmap::SrcMap)>],
@@ -1147,18 +1160,9 @@ impl Session2 {
         prune: (&[Option<Vec<crate::stub::StubItem>>], Option<&[(usize, usize)]>),
         i: usize,
         deps: &[usize],
-        fp: &str,
-        out_dir: &std::path::Path,
-    ) -> R<(Report2, bool, u64)> {
+    ) -> String {
         let c = &crates[i];
-        let t1 = now_ns();
-        let fp_path = out_dir.join(format!("{}.fp", c.name).as_str());
-        let op = out_dir.join(format!("{}.o", c.name).as_str());
-        let cp = out_dir.join(format!("{}.crcache2", c.name).as_str());
-        if !self.opts.no_cache {
-            self.disk = crate::cache2::Cache2::open(cp.as_path());
-        }
-        // ソース: 自分 + 依存するクレート (後ろに付ける)
+        // The source: own + the dependency crates (appended after it)
         let (own, own_map) = loaded[i].clone().unwrap();
         let mut src = own.clone();
         let mut map = own_map.clone();
@@ -1167,7 +1171,7 @@ impl Session2 {
         let mut ranges: Vec<(u32, u32, Vec<usize>, u32)> = vec![];
         for &j in deps {
             let (t0, m) = dep_loaded[j].as_ref().unwrap();
-            // (名前で届かないアイテムは空白にする: 平らにする・要約・Program・prelude の選択が使う分だけになる)
+            // (items not reachable by name are blanked out: flattening, summaries, Program and the prelude selection then get only what is used)
             let pruned;
             let t: &str = match (prune.1, prune.0.get(j).and_then(|x| x.as_ref())) {
                 (Some(reach), Some(its)) if !no_prune => {
@@ -1192,7 +1196,7 @@ impl Session2 {
             src.push('\n');
             ranges.push((at, n_lines(&src) + 1, vec![], crate_tag(&crates[j].name)));
         }
-        // (依存するクレート j から見えるクレート: j 自身と j の推移的な依存)
+        // (the crates visible from dependency crate j: j itself and j's transitive dependencies)
         for (k, &j) in deps.iter().enumerate() {
             let mut seen = vec![false; crates.len()];
             let mut st = vec![j];
@@ -1225,7 +1229,58 @@ impl Session2 {
             env: c.env.clone(),
             dep_ranges: ranges,
         };
-        let mut r = Report2::default();
+        src
+    }
+
+    /// check_workspace's crate: its errors, as `file:line:col: message` (relocated as build_one's error is: one in a
+    /// dependency's lines (an instance of its generic fn, an item of its interface) at the dependency's file). An
+    /// error of the analysis is the only one, as with `zustc check`; the fns' bodies are all checked, each one's
+    /// errors reported
+    #[cold]
+    fn check_one(
+        &mut self,
+        crates: &[CrateSpec],
+        loaded: &[Option<(String, crate::srcmap::SrcMap)>],
+        dep_loaded: &[Option<(String, crate::srcmap::SrcMap)>],
+        prune: (&[Option<Vec<crate::stub::StubItem>>], Option<&[(usize, usize)]>),
+        i: usize,
+        deps: &[usize],
+        out_dir: &std::path::Path,
+    ) -> Vec<String> {
+        if !self.opts.no_cache {
+            self.disk = crate::build_cache::BuildCache::open(out_dir.join(format!("{}.cache", crates[i].name).as_str()).as_path());
+        }
+        let src = self.ws_source(crates, loaded, dep_loaded, prune, i, deps);
+        let diags = self.check(&src);
+        // (a program's type renamed against the prelude's: its own name, as zustc shows it; in the message only, not
+        // in the file's path)
+        let out = diags.iter().map(|d| self.ctx.map.relocate_err(&format!("{}:{}: {}", d.line, d.col, d.msg.replace("__u_", "")))).collect();
+        self.ctx = CrateCtx::default();
+        out
+    }
+
+    /// Compiles the single workspace crate i and writes the .o, the cache and the fingerprint. (result, whether the .o changed, time (ns))
+    fn build_one(
+        &mut self,
+        crates: &[CrateSpec],
+        loaded: &[Option<(String, crate::srcmap::SrcMap)>],
+        dep_loaded: &[Option<(String, crate::srcmap::SrcMap)>],
+        prune: (&[Option<Vec<crate::stub::StubItem>>], Option<&[(usize, usize)]>),
+        i: usize,
+        deps: &[usize],
+        fp: &str,
+        out_dir: &std::path::Path,
+    ) -> R<(BuildReport, bool, u64)> {
+        let c = &crates[i];
+        let t1 = now_ns();
+        let fp_path = out_dir.join(format!("{}.fp", c.name).as_str());
+        let op = out_dir.join(format!("{}.o", c.name).as_str());
+        let cp = out_dir.join(format!("{}.cache", c.name).as_str());
+        if !self.opts.no_cache {
+            self.disk = crate::build_cache::BuildCache::open(cp.as_path());
+        }
+        let src = self.ws_source(crates, loaded, dep_loaded, prune, i, deps);
+        let mut r = BuildReport::default();
         let a = self.analyze(&src).map_err(|e| format!("crate `{}`: {}", c.name, self.ctx.map.relocate_err(&e)))?;
         r.items_parsed = a.n_parsed;
         let obj = self.compile_object(&a, &mut r, None).map_err(|e| format!("crate `{}`: {}", c.name, self.ctx.map.relocate_err(&e)))?;
@@ -1248,8 +1303,8 @@ impl Session2 {
         Ok((r, changed, now_ns() - t1))
     }
 
-    /// 細かい指紋 (build_workspace の .fp2): コンパイラ・設定・自分のソース (展開したもの)・依存するクレートの名前と
-    /// ファイル、依存するクレートのインターフェースのアイテムのうち、自分の識別子から名前でたどって届くもののハッシュ
+    /// The precise fingerprint (build_workspace's .fp2): the hash of the compiler, the settings, own source (after expansion), the names and
+    /// files of the dependency crates, and the items of the dependency crates' interfaces reachable by name from own identifiers
     #[allow(clippy::too_many_arguments)]
     fn precise_fp(
         &self,
@@ -1261,7 +1316,7 @@ impl Session2 {
         loaded: &[Option<(String, crate::srcmap::SrcMap)>],
         dep_items: &[Option<Vec<crate::stub::StubItem>>],
     ) -> (String, Vec<(usize, usize)>) {
-        // (名前 → (クレート, アイテム))
+        // (name → (crate, item))
         let mut by_name: FxMap<String, Vec<(usize, usize)>> = FxMap::default();
         for &j in deps {
             for (k, it) in dep_items[j].as_ref().unwrap().iter().enumerate() {
@@ -1332,8 +1387,8 @@ impl Session2 {
         (key_hex(h.finish()), reached)
     }
 
-    /// ワークスペースをビルドする: クレートごとに .o を out_dir に作り (変わらなければ書かない)、
-    /// bin ごとに自分と依存するクレートの .o をリンクする。キャッシュはこの Session2 のものを共有する
+    /// Builds a workspace: makes a .o per crate in out_dir (not written if unchanged),
+    /// and for each bin links its own .o and its dependency crates' .o. They share this Session's cache
     pub fn build_workspace(&mut self, crates: &[CrateSpec], out_dir: &std::path::Path) -> R<WsReport> {
         // (wasm32: a crate's object is the parts of the module (write_parts); a bin's "link" writes the module from its
         // parts and its dependencies' with the module writer itself)
@@ -1344,6 +1399,18 @@ impl Session2 {
         let r = self.build_workspace_in(crates, out_dir, module_writer);
         self.opts.module_writer = module_writer;
         r
+    }
+
+    /// Checks a workspace (`zurgo check`): every crate, in dependency order, as build_workspace prepares it, and
+    /// each one's errors instead of its object (Session::check). A crate's errors do not stop the others: a crate
+    /// uses its dependencies' sources, not their objects. A crate whose source cannot be read or expanded has that
+    /// error, and the crates that use it are not checked (they have no interface of it to use). `failed`: the crates
+    /// the caller already found so, with their errors (zurgo's plan). Writes no objects nor fingerprints
+    pub fn check_workspace(&mut self, crates: &[CrateSpec], out_dir: &std::path::Path, failed: Vec<(String, String)>) -> R<Vec<CrateCheck>> {
+        self.ws_diags = Some(failed.into_iter().map(|(name, e)| CrateCheck { name, errors: vec![e], blocked_by: None }).collect());
+        let r = self.build_workspace(crates, out_dir);
+        let d = self.ws_diags.take().unwrap_or_default();
+        r.map(|_| d)
     }
 
     fn build_workspace_in(&mut self, crates: &[CrateSpec], out_dir: &std::path::Path, module_writer: Option<ModuleWriter>) -> R<WsReport> {
@@ -1367,21 +1434,38 @@ impl Session2 {
         };
         let order = topo(crates)?;
         mkdir_all(out_dir)?;
-        // (読んだクレートのソース: 名前 → (`pub mod 名前 { .. }` にしたテキスト, ファイルの対応))
+        // (a check (check_workspace): a crate whose source cannot be read, or expanded, has that error, and the
+        // crates that use it are not checked; the others are)
+        let checking = self.ws_diags.is_some();
+        let mut prep_err: Vec<Option<String>> = vec![None; crates.len()];
+        // (the crates check_workspace was given as failed)
+        for c in self.ws_diags.as_mut().map(std::mem::take).unwrap_or_default() {
+            if let Some(i) = crates.iter().position(|x| x.name == c.name) {
+                prep_err[i] = c.errors.into_iter().next();
+            }
+        }
+        // (the sources of the crates read: name → (the text made into `pub mod name { .. }`, the file map))
         let mut loaded: Vec<Option<(String, crate::srcmap::SrcMap)>> = vec![None; crates.len()];
         for &i in &order {
             let c = &crates[i];
             // (a workspace's crates have no edition of their own here (zurgo gives each package's to rustc only): the
             // edition-dependent token checks stay off, as an edition 2018 package may write `m!(foo#bar)`)
             let cfg = crate::cfg::CfgSet { edition: 0, ..self.opts.cfg_of(&c.features, &c.cfgs, &c.env) };
-            let (text, map) = crate::srcmap::load_crate(c.root.as_path(), &c.display, &cfg)?;
+            let (text, map) = match crate::srcmap::load_crate(c.root.as_path(), &c.display, &cfg) {
+                Ok(v) => v,
+                Err(e) if checking => {
+                    prep_err[i].get_or_insert(e);
+                    Default::default()
+                }
+                Err(e) => return Err(e),
+            };
             let text = if c.test { with_harness(&text, &c.display, &self.opts.cfg_of(&c.features, &c.cfgs, &c.env)) } else { text };
             let text = if c.lib { format!("pub mod {} {{ {text}\n}}\n", c.name) } else { text };
             loaded[i] = Some((text, map));
         }
         let mut rep = WsReport::default();
         let mut changed = vec![false; crates.len()];
-        // (推移的な依存: 依存の順)
+        // (transitive dependencies: in dependency order)
         let all_deps = |i: usize| -> Vec<usize> {
             let mut seen = vec![false; crates.len()];
             let mut st: Vec<usize> = vec![i];
@@ -1397,8 +1481,8 @@ impl Session2 {
             }
             order.iter().copied().filter(|&j| seen[j]).collect()
         };
-        // (ライブラリの、使う側に効く部分のハッシュ)
-        // (ソースが前回と同じなら、前回のものを out_dir/<名前>.iface から読む: `ソースのハッシュ インターフェースのハッシュ`)
+        // (the hash of the parts of a library that affect its users)
+        // (if the source is the same as last time, read last time's from out_dir/<name>.iface: `source-hash interface-hash`)
         let mut ifaces: Vec<Key> = vec![0; crates.len()];
         for i in 0..crates.len() {
             if !crates[i].lib {
@@ -1433,12 +1517,12 @@ impl Session2 {
                 h.finish()
             })
             .collect();
-        // 古いクレート: (番号, 指紋)
+        // Stale crates: (index, fingerprint)
         let mut stale: Vec<(usize, String)> = vec![];
         for &i in &order {
             let c = &crates[i];
             let deps = all_deps(i);
-            // 指紋: コンパイラ・設定・自分のソース・依存するクレートのインターフェース。前回と同じで .o があれば何もしない
+            // The fingerprint: the compiler, the settings, own source, the dependency crates' interfaces. If it is the same as last time and the .o exists, do nothing
             let mut h = KeyHasher::new();
             h.add(&self.cid);
             h.add(&(self.opts.opt as u8));
@@ -1463,22 +1547,22 @@ impl Session2 {
             let fp = key_hex(h.finish());
             let fp_path = out_dir.join(format!("{}.fp", c.name).as_str());
             let op = out_dir.join(format!("{}.o", c.name).as_str());
-            if !self.opts.no_cache && op.exists() && std::fs::read_to_string(fp_path.as_path()).is_ok_and(|old| old == fp) {
+            if !self.opts.no_cache && self.ws_diags.is_none() && op.exists() && std::fs::read_to_string(fp_path.as_path()).is_ok_and(|old| old == fp) {
                 if self.opts.time {
                     eprintln!("  {:<12} fresh", c.name);
                 }
-                rep.crates.push((c.name.clone(), Report2::default()));
+                rep.crates.push((c.name.clone(), BuildReport::default()));
                 continue;
             }
             stale.push((i, fp));
         }
-        // 古いクレートが使うソース: 自分は依存するクレートのマクロだけを添えて展開したもの、依存するクレートは
-        // 展開して総称でない関数の本体を消したもの (stub::interface_text)。どちらもクレートごとに 1 回だけ作る
-        // (使う側で依存するクレートのソース全体を展開・解析し直すと、依存が多いと推移的な依存の大きさに比例する)
+        // The sources a stale crate uses: for itself, its expansion with only the dependency crates' macros attached; for the dependency crates,
+        // their expansion with the bodies of non-generic fns removed (stub::interface_text). Both are made only once per crate
+        // (re-expanding and re-analyzing the whole source of the dependency crates on the user's side would, with many dependencies, scale with the size of the transitive dependencies)
         // (proc macros expand only here: with them, ZUSTC_NO_DEP_STUB does not turn it off)
         let reuse = std::env::var_os("ZUSTC_NO_DEP_STUB").is_none() || crates.iter().any(|c| c.proc_macro.is_some());
         let mut fp2s: Vec<(usize, String)> = vec![];
-        // (古いクレートごとの、依存するクレートのインターフェースのうち名前で届くアイテム: 使う側にはそれだけを渡す)
+        // (for each stale crate, the items of the dependency crates' interfaces reachable by name: only those are passed to the user)
         let mut reach_of: Vec<Option<Vec<(usize, usize)>>> = vec![None; crates.len()];
         let mut dep_items_all: Vec<Option<Vec<crate::stub::StubItem>>> = (0..crates.len()).map(|_| None).collect();
         let mut own_v: Vec<Option<(String, crate::srcmap::SrcMap)>> = loaded.clone();
@@ -1499,18 +1583,32 @@ impl Session2 {
                 .map(|i| if need[i] { crate::macros::macro_defs(&loaded[i].as_ref().unwrap().0) } else { String::new() })
                 .collect();
             for &i in &order {
-                if !need[i] {
+                if !need[i] || (checking && (prep_err[i].is_some() || all_deps(i).iter().any(|&j| prep_err[j].is_some()))) {
                     continue;
                 }
                 let (text, map) = loaded[i].clone().unwrap();
                 let mut dd = String::new();
                 // (the proc-macro crates it reaches: directly, or through the libraries that re-export their macros)
                 let mut pms: Vec<crate::pm::Lib> = vec![];
+                let mut pm_err = None;
                 for j in all_deps(i) {
                     dd.push_str(&defs[j]);
                     if let Some(p) = &crates[j].proc_macro {
-                        pms.push(crate::pm::load(&crates[j].name, p).map_err(|e| format!("crate `{}`: the proc-macro crate `{}`: {e}", crates[i].name, crates[j].name))?);
+                        match crate::pm::load(&crates[j].name, p) {
+                            Ok(l) => pms.push(l),
+                            Err(e) => {
+                                pm_err = Some(format!("the proc-macro crate `{}`: {e}", crates[j].name));
+                                break;
+                            }
+                        }
                     }
+                }
+                if let Some(e) = pm_err {
+                    if !checking {
+                        return Err(format!("crate `{}`: {e}", crates[i].name));
+                    }
+                    prep_err[i] = Some(e);
+                    continue;
                 }
                 // (which of their macros the libraries re-export, and under what names: `re::answer!()`. From their
                 // expanded text, prepared before this crate's: a `pub use` a macro of theirs gives counts too)
@@ -1522,7 +1620,7 @@ impl Session2 {
                         }
                     }
                 }
-                // (前回と同じ入力なら out_dir/<名前>.prep から読む: `キー\n展開したものの長さ\n展開したもの インターフェース`)
+                // (with the same input as last time, read from out_dir/<name>.prep: `key\nlength of the expansion\nexpansion interface`)
                 let mut kh = KeyHasher::new();
                 kh.add(&self.cid);
                 kh.add(&text);
@@ -1572,12 +1670,17 @@ impl Session2 {
                     full.push_str(marker);
                     full.push_str(&dd);
                     let cfg = self.opts.cfg_of(&crates[i].features, &crates[i].cfgs, &crates[i].env);
-                    match crate::macros::expand_with(&full, Some(&cfg), &pms).map_err(|e| format!("crate `{}`: {}", crates[i].name, map.relocate_err(&e)))? {
-                        Some(t) => match t.find(marker) {
+                    match crate::macros::expand_with(&full, Some(&cfg), &pms) {
+                        Ok(Some(t)) => match t.find(marker) {
                             Some(k) => t[..k].to_string(),
                             None => t,
                         },
-                        None => text.clone(),
+                        Ok(None) => text.clone(),
+                        Err(e) if checking => {
+                            prep_err[i] = Some(map.relocate_err(&e));
+                            continue;
+                        }
+                        Err(e) => return Err(format!("crate `{}`: {}", crates[i].name, map.relocate_err(&e))),
                     }
                 };
                 let stub = crate::stub::interface_text(&exp);
@@ -1591,9 +1694,12 @@ impl Session2 {
             if self.opts.time {
                 eprintln!("  {:<12} {:>8.2} ms", "(prepare)", (now_ns() - t2) as f64 / 1e6);
             }
-            // 細かい指紋: 自分 (展開したもの) と、依存するクレートのインターフェースのうち自分から名前でたどって届くアイテム。
-            // 前回と同じなら作り直さない (依存するクレートの使っていない所が変わっただけ: 本体を消してあるので、依存の
-            // 依存の関数のシグネチャは、呼んでいる総称関数の本体などから名前が届かなければ効かない)
+            if checking {
+                stale.retain(|&(i, _)| prep_err[i].is_none() && all_deps(i).iter().all(|&j| prep_err[j].is_none()));
+            }
+            // The precise fingerprint: own (expanded) source, and the items of the dependency crates' interfaces reachable by name from it.
+            // If it is the same as last time, do not rebuild (only unused parts of the dependency crates changed: since the bodies are removed, the signatures of the fns of
+            // dependencies' dependencies have no effect unless their names are reached from, e.g., the bodies of the generic fns calling them)
             let t3 = now_ns();
             let mut dep_items: Vec<Option<Vec<crate::stub::StubItem>>> = (0..crates.len()).map(|_| None).collect();
             let mut keep: Vec<(usize, String)> = vec![];
@@ -1608,12 +1714,12 @@ impl Session2 {
                 let (fp2, reached) = self.precise_fp(&crates[i], own, &loaded[i].as_ref().unwrap().1, &deps, crates, &loaded, &dep_items);
                 let p2 = out_dir.join(format!("{}.fp2", crates[i].name).as_str());
                 let op = out_dir.join(format!("{}.o", crates[i].name).as_str());
-                if !self.opts.no_cache && op.exists() && std::fs::read_to_string(p2.as_path()).is_ok_and(|old| old == fp2) {
+                if !self.opts.no_cache && self.ws_diags.is_none() && op.exists() && std::fs::read_to_string(p2.as_path()).is_ok_and(|old| old == fp2) {
                     let _ = std::fs::write(out_dir.join(format!("{}.fp", crates[i].name).as_str()), &fp);
                     if self.opts.time {
                         eprintln!("  {:<12} fresh (used interface unchanged)", crates[i].name);
                     }
-                    rep.crates.push((crates[i].name.clone(), Report2::default()));
+                    rep.crates.push((crates[i].name.clone(), BuildReport::default()));
                     continue;
                 }
                 fp2s.push((i, fp2));
@@ -1626,9 +1732,37 @@ impl Session2 {
                 eprintln!("  {:<12} {:>8.2} ms", "(fp2)", (now_ns() - t3) as f64 / 1e6);
             }
         }
-        // (クレートは互いのソースしか使わない (.o は使わない) ので、古いものを fork して同時にコンパイルする)
+        // (crates use only each other's sources (not the .o), so the stale ones are forked and compiled concurrently)
+        // (a check (check_workspace): here, one after another, each crate's errors kept)
+        // (an error in a dependency's lines that an earlier crate reported, as it is: once)
+        if checking {
+            let mut seen: FxSet<String> = FxSet::default();
+            let mut is_stale = vec![false; crates.len()];
+            for &(i, _) in &stale {
+                is_stale[i] = true;
+            }
+            let failed: Vec<bool> = prep_err.iter().map(Option::is_some).collect();
+            for &i in &order {
+                let name = crates[i].name.clone();
+                let r = if let Some(e) = prep_err[i].take() {
+                    CrateCheck { name, errors: vec![e], blocked_by: None }
+                } else if let Some(j) = all_deps(i).into_iter().find(|&j| failed[j]) {
+                    CrateCheck { name, errors: vec![], blocked_by: Some(crates[j].name.clone()) }
+                } else if is_stale[i] {
+                    let mut d = self.check_one(crates, &own_v, &dep_v, (&dep_items_all, match &reach_of[i] { Some(v) => Some(v.as_slice()), None => None }), i, &all_deps(i), out_dir);
+                    d.retain(|e| seen.insert(e.clone()));
+                    CrateCheck { name, errors: d, blocked_by: None }
+                } else {
+                    continue;
+                };
+                if let Some(w) = self.ws_diags.as_mut() {
+                    w.push(r);
+                }
+            }
+            return Ok(rep);
+        }
         let par = self.opts.jobs.min(stale.len()).max(1);
-        let mut results: Vec<Option<R<(Report2, bool, u64)>>> = vec![None; stale.len()];
+        let mut results: Vec<Option<R<(BuildReport, bool, u64)>>> = vec![None; stale.len()];
         if par > 1 {
             let inner = (self.opts.jobs / par).max(1);
             let mut k0 = 0;
@@ -1637,7 +1771,7 @@ impl Session2 {
                 let mut kids: Vec<(usize, i32, i32)> = vec![];
                 for k in k0..k1 {
                     let mut fds = [0i32; 2];
-                    // SAFETY: fds は 2 つの int
+                    // SAFETY: fds is 2 ints
                     if unsafe { c_pipe(fds.as_mut_ptr()) } != 0 {
                         continue;
                     }
@@ -1654,15 +1788,15 @@ impl Session2 {
                                 buf.push(0);
                                 buf.push(ch as u8);
                                 for v in [rp.fns_compiled as u64, rp.fns_hit as u64, rp.items_parsed as u64, rp.object_bytes as u64, ns] {
-                                    crate::cache2::put_uv(&mut buf, v);
+                                    crate::build_cache::put_uv(&mut buf, v);
                                 }
-                                // (作ったキャッシュのエントリ (要約・関数の機械語) も返す: 後の組のクレートが fork で引き継いで使う。
-                                //  prelude の単相化や依存するクレートのアイテムの要約は、多くのクレートで同じ)
+                                // (also return the cache entries made (summaries, fns' machine code): crates in later batches inherit them through fork and use them.
+                                //  the prelude's monomorphizations and the summaries of the dependency crates' items are the same across many crates)
                                 for &k in &self.fresh {
                                     if let Some(v) = self.mem.get(&k) {
                                         buf.extend_from_slice(&(k as u64).to_le_bytes());
                                         buf.extend_from_slice(&((k >> 64) as u64).to_le_bytes());
-                                        crate::cache2::put_uv(&mut buf, v.len() as u64);
+                                        crate::build_cache::put_uv(&mut buf, v.len() as u64);
                                         buf.extend_from_slice(v);
                                     }
                                 }
@@ -1688,7 +1822,7 @@ impl Session2 {
                     unsafe { c_close(fd) };
                     let mut st = 0i32;
                     unsafe { c_waitpid(pid, &mut st, 0) };
-                    let mut r = crate::cache2::Rd { d: &d, pos: 0 };
+                    let mut r = crate::build_cache::Rd { d: &d, pos: 0 };
                     results[k] = match r.u8() {
                         Some(0) => {
                             let ch = r.u8().unwrap_or(1) != 0;
@@ -1696,7 +1830,7 @@ impl Session2 {
                             for x in v.iter_mut() {
                                 *x = r.uv().unwrap_or(0);
                             }
-                            let rp = Report2 { fns_compiled: v[0] as usize, fns_hit: v[1] as usize, items_parsed: v[2] as usize, object_bytes: v[3] as usize, linked: false };
+                            let rp = BuildReport { fns_compiled: v[0] as usize, fns_hit: v[1] as usize, items_parsed: v[2] as usize, object_bytes: v[3] as usize, linked: false };
                             while r.pos < d.len() {
                                 let (Some(lo), Some(hi), Some(n)) = (r.u64(), r.u64(), r.uv()) else { break };
                                 let Some(body) = r.take(n as usize) else { break };
@@ -1708,7 +1842,7 @@ impl Session2 {
                             Some(Ok((rp, ch, v[4])))
                         }
                         Some(_) => Some(Err(String::from_utf8_lossy(&d[1..]).into_owned())),
-                        // (子が落ちた: ここでもう一度 (エラーならそれが出る))
+                        // (the child crashed: once more here (if it is an error, that comes out))
                         None => None,
                     };
                 }

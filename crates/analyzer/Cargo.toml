@@ -3,7 +3,7 @@ name = "zust-analyzer"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-description = "zustc の LSP サーバ (バイナリ zust-analyzer)。診断は driver2 の Session2::check、シンボル・定義・参照・hover・補完は zust-ide。バックエンド (codegen / minclif / Cranelift) に依存しない"
+description = "zustc の LSP サーバ (バイナリ zust-analyzer)。診断は session の Session::check、シンボル・定義・参照・hover・補完は zust-ide。バックエンド (codegen / minclif / Cranelift) に依存しない"
 
 [[bin]]
 name = "zust-analyzer"

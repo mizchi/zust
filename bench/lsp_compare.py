@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""LSP サーバの比較: zust-analyzer / rust-analyzer / rust-glancer を同じ手順で動かして測る。
+"""A comparison of LSP servers: runs zust-analyzer / rust-analyzer / rust-glancer through the same steps and measures them.
 
 usage: python3 bench/lsp_compare.py [--servers zustc,rust-analyzer,rust-glancer] [--targets synth,zustc]
                                     [--out bench/lsp_compare_result.md] [--reps 10] [--timeout 300]
-(このディレクトリで実行。事前に cargo build --release --workspace (target/release/zust-analyzer を作る)。rust-glancer は RUST_GLANCER=<バイナリ> か PATH から)
+(run in this directory; cargo build --release --workspace beforehand (builds target/release/zust-analyzer); rust-glancer comes from RUST_GLANCER=<binary> or PATH)
 
-測るもの (サーバごと・対象ごと):
-- init: initialize の応答までの時間
-- ready: 起動から、workspace/symbol が対象の既知のシンボルを返すまでの時間 (索引ができるまで)。0.1 秒ごとに問い合わせる
-- docsym: textDocument/documentSymbol の応答の時間 (中央値) とシンボルの数 (木を平らにした数)
-- wsym: workspace/symbol の応答の時間 (いくつかの問い合わせの中央値) と、既知の名前が見つかったか
-- edit→docsym: didChange (関数を 1 つ足す) の直後の documentSymbol の時間と、足した関数が出たか
-- edit→diag: didChange から publishDiagnostics (そのドキュメントの) が来るまで (来なければ -)
-- peak RSS: サーバのプロセスの VmHWM と、子孫のプロセス (cargo metadata・proc-macro-srv など) を足した RSS の最大 (50 ms ごとに見る)
+What is measured (per server / per target):
+- init: the time until the response to initialize
+- ready: the time from startup until workspace/symbol returns a known symbol of the target (until the index is ready). Queries every 0.1 s
+- docsym: the response time of textDocument/documentSymbol (median) and the number of symbols (counted with the tree flattened)
+- wsym: the response time of workspace/symbol (median over several queries) and whether the known names were found
+- edit→docsym: the time of documentSymbol right after a didChange (adding one fn), and whether the added fn appeared
+- edit→diag: from didChange until publishDiagnostics (for that document) arrives (- if it never does)
+- peak RSS: the server process's VmHWM, and the peak RSS summed with its descendant processes (cargo metadata, proc-macro-srv, etc.) (sampled every 50 ms)
 
-サーバから来る要求 (workspace/configuration・window/workDoneProgress/create・client/registerCapability など) には空で答える。
-対象:
-- synth: 生成した Cargo のクレート (モジュール 40 個・各 25 関数 + struct / enum / impl)
-- zustc: このディレクトリ (Cargo のワークスペース。依存に cranelift などがある)
+Requests from the server (workspace/configuration, window/workDoneProgress/create, client/registerCapability, etc.) are answered with empty results.
+Targets:
+- synth: a generated Cargo crate (40 modules, each with 25 fns + struct / enum / impl)
+- zustc: this directory (a Cargo workspace; its dependencies include cranelift etc.)
 """
 
 import argparse, json, os, shutil, statistics, subprocess, sys, tempfile, threading, time
@@ -35,10 +35,10 @@ class Lsp:
         self.next_id = 1
         self.lock = threading.Lock()
         self.waiting = {}
-        self.diags = []  # (時刻, uri, version)
+        self.diags = []  # (time, uri, version)
         self.alive = True
         self.tree_peak = 0
-        # (サーバの作業の進み: 終わっていない `$/progress` のトークンと、rust-analyzer の experimental/serverStatus)
+        # (the progress of the server's work: the tokens of unfinished `$/progress`, and rust-analyzer's experimental/serverStatus)
         self.progress = set()
         self.quiescent = None
         self.last_progress = time.time()
@@ -46,7 +46,7 @@ class Lsp:
         threading.Thread(target=self._sample, daemon=True).start()
 
     def _sample(self):
-        """サーバと子孫のプロセスの RSS の合計の最大 (50 ms ごと)"""
+        """The peak of the total RSS of the server and its descendant processes (every 50 ms)"""
         while self.p.poll() is None:
             kids = {}
             for d in os.listdir("/proc"):
@@ -99,7 +99,7 @@ class Lsp:
             except Exception:
                 continue
             if "id" in m and "method" in m:
-                # サーバからの要求: 空で答える
+                # A request from the server: answer with an empty result
                 meth = m["method"]
                 if meth == "workspace/configuration":
                     res = [None for _ in m.get("params", {}).get("items", [])]
@@ -142,7 +142,7 @@ class Lsp:
         return ev[1][0]
 
     def wait_idle(self, timeout, quiet=0.5):
-        """サーバの作業 (`$/progress`・serverStatus) が終わり、quiet 秒なにも来なくなるまで待つ"""
+        """Waits until the server's work (`$/progress`, serverStatus) is finished and nothing has arrived for quiet seconds"""
         t0 = time.time()
         while time.time() - t0 < timeout and self.alive:
             busy = self.progress or self.quiescent is False
@@ -189,11 +189,11 @@ def flat_names(syms):
     return out
 
 
-# ---------------------------------------------------------------- 対象
+# ---------------------------------------------------------------- targets
 
 
 def make_synth(dir, mods=40):
-    """生成した Cargo のクレート: src/main.rs + src/m{k}.rs (mods 個。既定 40、big は 1000)"""
+    """A generated Cargo crate: src/main.rs + src/m{k}.rs (mods of them; default 40, 1000 for big)"""
     os.makedirs(os.path.join(dir, "src"), exist_ok=True)
     open(os.path.join(dir, "Cargo.toml"), "w").write('[package]\nname = "synth"\nversion = "0.1.0"\nedition = "2021"\n\n[dependencies]\n')
     for k in range(mods):
@@ -222,18 +222,23 @@ def make_synth(dir, mods=40):
 
 def zustc_target():
     # (ZUST_LSP_ROOT: another copy of the sources, e.g. a fixed snapshot, so that the target does not change with the code)
+    root = os.environ.get("ZUST_LSP_ROOT") or HERE
+    # (a tree from before the session was renamed (driver2.rs, Session2), as the KPIs' snapshot (bench/kpi_track.py
+    # REF_COMMIT) is: the same file and names as then, so its numbers stay comparable)
+    old = not os.path.exists(os.path.join(root, "crates/core/src/session.rs"))
+    session = "Session2" if old else "Session"
     return {
-        "root": os.environ.get("ZUST_LSP_ROOT") or HERE,
-        "open": "crates/core/src/driver2.rs",
+        "root": root,
+        "open": "crates/core/src/driver2.rs" if old else "crates/core/src/session.rs",
         "ready": ("build_workspace", "build_workspace"),
-        "queries": ["Session2", "check", "split_inc", "Recorder", "lower"],
+        "queries": [session, "check", "split_inc", "Recorder", "lower"],
         "expect_doc": "check",
         "edit_after": "pub struct Diagnostic",
-        "refs": "Session2",
+        "refs": session,
     }
 
 
-# ---------------------------------------------------------------- 測る
+# ---------------------------------------------------------------- measuring
 
 
 def bench(name, cmd, t, reps, timeout, env=None):
@@ -259,7 +264,7 @@ def bench(name, cmd, t, reps, timeout, env=None):
         return r
     s.notify("initialized", {})
     s.notify("textDocument/didOpen", {"textDocument": {"uri": u, "languageId": "rust", "version": 1, "text": text}})
-    # 索引ができるまで: 既知の名前が workspace/symbol に出るまで
+    # Until the index is ready: until a known name shows up in workspace/symbol
     q, want = t["ready"]
     r["ready_ms"] = None
     while time.time() - t0 < timeout and s.alive:
@@ -297,7 +302,7 @@ def bench(name, cmd, t, reps, timeout, env=None):
             found += 1
     r["wsym_ms"] = statistics.median(ts)
     r["wsym_found"] = f"{found}/{len(t['queries'])}"
-    # 編集: 関数を 1 つ足す
+    # Edit: add one fn
     at = text.find(t["edit_after"])
     at = text.rfind("\n", 0, at) + 1 if at >= 0 else len(text)
     new = text[:at] + "pub fn added_by_bench() -> u32 { 1 }\n\n" + text[at:]
@@ -314,7 +319,7 @@ def bench(name, cmd, t, reps, timeout, env=None):
             r["edit_diag_ms"] = (hit[0][0] - a) * 1000
             break
         time.sleep(0.01)
-    # 参照 (ワークスペース全体を引く): 開いたファイルの中の名前の最初の位置。初回と 2 回目
+    # References (searches the whole workspace): at the first position of a name in the open file. The first and the second time
     r["refs_ms"], r["refs_n"] = None, None
     if t.get("refs") and "referencesProvider" in str((init.get("result") or {}).get("capabilities", {})):
         i = new.find(t["refs"])

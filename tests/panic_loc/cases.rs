@@ -1,4 +1,4 @@
-// panic の場所 (行:桁) を rustc と比べる (tests/panic_loc.rs)。引数の番号の場合で panic する
+// Compares panic locations (line:column) with rustc (tests/panic_loc.rs). Panics in the case given by the argument number
 fn pick(k: usize) -> i32 {
     let v = vec![1, 2, 3];
     let a = [10u8, 20];
@@ -11,6 +11,7 @@ fn pick(k: usize) -> i32 {
         3 => o.unwrap(),
         4 => { assert!(k == 0, "k was {}", k); 0 }
         5 => { let d = k as i32 - 5; 10 / d }
+        6 => (k as i32 - 10).isqrt(),
         _ => { let s = format!("{}", v.iter().map(|q| q * 2).sum::<i32>()); s.parse::<i32>().expect("num") + o.expect("none") }
     }
 }

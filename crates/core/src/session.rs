@@ -1,7 +1,10 @@
-//! syn と Cranelift を使わないドライバ: ソース → (lexer / macros / prelude) → ast_summary → Program →
-//! acg (自前の構文木のコード生成) → minclif の ELF の .o → リンク。
-//! driver.rs と同じ手順を、外部クレートに依存しないモジュールだけで行う (zustc 自身でもコンパイルできる)。
-//! キャッシュと並列化はまだない。
+//! コンパイルのセッション ([`Session`]): ソース → (lexer / macros / prelude) → ast_summary → Program →
+//! acg (自前の構文木のコード生成) → 機械語 (Cranelift か minclif) → ELF の .o → リンク。
+//! セッションはキャッシュ (メモリと、ディスクの `<出力>.cache`) と、編集をまたいで覚えるもの (前処理の差分・check の記録) を
+//! 持ち、同じセッションで何度でも build / check できる (zust-analyzer はドキュメントごとに 1 つ持つ)。数の多い部分 (アイテムの
+//! 要約、check と機械語の wave) は fork した子に分ける。解析と check はここ、機械語・オブジェクト・リンク・ワークスペースは
+//! feature `build` の session/build.rs。外部クレートに依存しないモジュールだけで書く (zustc 自身でもコンパイルできる)。
+//! (2026-11-25 までの名前は driver2: 2 つ目のドライバだったため。それより前のレポートはその名前で書いている)
 
 use crate::cfg::{attr_entries, cfg_pred, lit_end, malformed_cfg, str_lit, str_value};
 use std::sync::Mutex;
@@ -59,7 +62,12 @@ pub struct Analysis {
     pub src: String,
     pub items: Vec<SrcItem>,
     pub prog: Program,
+    /// Each fn's references to fns: the groups of the names it refers to (Program::ref_groups), sorted
     pub refs: Vec<Vec<u32>>,
+    /// Each group's part of a cache key (Session::group_key), once per analysis: of the keys that keep every fn and of
+    /// those that leave out the fns before the prelude's (the program's own), by group (0: not yet), and of a closed
+    /// crate's (by group and universe)
+    pub group_keys: Mutex<(Vec<[Key; 2]>, FxMap<(u32, u64), Key>)>,
     /// 関数ごとの、名前で現れる struct と const / static (キャッシュのキー用)
     pub srefs: Vec<Vec<u32>>,
     pub crefs: Vec<Vec<u32>>,
@@ -436,6 +444,14 @@ fn const_check_item(src: &str, items: &[SrcItem]) -> Option<(String, Vec<usize>,
 const CHECK_SALT: Key = 0x5eed_c4ec_0000_0000_0000_0000_0000_0001;
 
 impl Analysis {
+    /// The fns fn id refers to (the fns of the names it refers to), ascending and once each
+    pub fn ref_fns(&self, id: usize) -> Vec<u32> {
+        let mut v: Vec<u32> = self.refs[id].iter().flat_map(|&g| self.prog.ref_groups[g as usize].iter().copied()).collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
+
     /// アイテム ii が依存するクレートのものなら、その dep_ranges の番号
     /// シグネチャのハッシュ (覚えておく)
     pub fn sig_key(&self, id: u32) -> Key {
@@ -580,7 +596,7 @@ impl Analysis {
 }
 
 pub fn analyze(src0: &str, opt: bool) -> R<Analysis> {
-    Session2::new(Options2 { opt, no_cache: true, jobs: 1, ..Default::default() }).analyze(src0)
+    Session::new(Options { opt, no_cache: true, jobs: 1, ..Default::default() }).analyze(src0)
 }
 
 /// 機械語にするバックエンド (Cranelift: zust-clif の compile)。feature `build` なしでは使わない
@@ -591,7 +607,7 @@ pub type Backend = fn();
 
 /// ドライバの設定
 #[derive(Clone, Debug)]
-pub struct Options2 {
+pub struct Options {
     pub opt: bool,
     /// 関数のコンパイルに使うプロセスの数 (fork する)
     pub jobs: usize,
@@ -620,13 +636,13 @@ pub struct Options2 {
 /// Writes the output from the functions and data build.rs lays out (in place of the ELF object)
 pub type ModuleWriter = fn(&[(String, Vec<u8>, Vec<crate::ir::Reloc>, bool)], &[(String, Vec<u8>, Vec<(u32, String, i64)>, bool)]) -> Result<Vec<u8>, String>;
 
-impl Default for Options2 {
+impl Default for Options {
     fn default() -> Self {
-        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None, edition: 2021, cfgs: vec![], test: false }
+        Options { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None, edition: 2021, cfgs: vec![], test: false }
     }
 }
 
-impl Options2 {
+impl Options {
     /// キャッシュのキーに入れるバックエンドの印 (Cranelift なら 1)
     pub fn backend_id(&self) -> u8 {
         // (wasm: the address checks are part of the code, so a build without them (ZUSTC_WASM_NO_ADDR_CHECK, for
@@ -674,7 +690,7 @@ pub struct CrateCtx {
     pub map: crate::srcmap::SrcMap,
     /// 依存するクレート (推移的に全部。実行ファイルの panic の表がそれらの表を指す)
     pub deps: Vec<String>,
-    /// このクレートの feature (ワークスペース。None なら Options2 の features)
+    /// このクレートの feature (ワークスペース。None なら Options の features)
     pub features: Option<Vec<String>>,
     /// このクレートの cfg と `env!` の環境 (ワークスペース: CrateSpec の cfgs / env)
     pub cfgs: Vec<(String, Option<String>)>,
@@ -685,7 +701,7 @@ pub struct CrateCtx {
 
 /// ビルドの結果
 #[derive(Clone, Debug, Default)]
-pub struct Report2 {
+pub struct BuildReport {
     pub items_parsed: usize,
     pub fns_compiled: usize,
     pub fns_hit: usize,
@@ -734,7 +750,7 @@ fn compiler_id() -> Key {
     // SAFETY: "/proc/self/exe" は NUL で終わる。buf は struct stat (144 byte) より大きい
     let r = unsafe { c_stat(b"/proc/self/exe\0".as_ptr(), buf.as_mut_ptr()) };
     let mut h = KeyHasher::new();
-    h.add("driver2-1");
+    h.add("session-1");
     if r == 0 {
         // (x86-64: st_size は 48、st_mtim は 88 / 96)
         h.add(&buf[48..56]);
@@ -745,11 +761,11 @@ fn compiler_id() -> Key {
 
 /// 時間の計測 (-time)
 
-/// キャッシュを持つドライバ (driver.rs の Session と同じ使い方)
-pub struct Session2 {
-    pub opts: Options2,
+/// コンパイルのセッション: キャッシュと、編集をまたいで覚えるものを持ち、build / check / analyze を何度でも呼べる
+pub struct Session {
+    pub opts: Options,
     cid: Key,
-    disk: crate::cache2::Cache2,
+    disk: crate::build_cache::BuildCache,
     mem: FxMap<Key, Vec<u8>>,
     used: FxSet<Key>,
     /// put したキー (ワークスペースの子プロセスが、作ったエントリを親に返す)
@@ -775,16 +791,25 @@ pub struct Session2 {
     const_lines: Vec<usize>,
     /// their fns' names' prefix (CONST_CHECK_FN, or another when the program writes that)
     const_fn: String,
+    /// In a check_workspace: each crate's result (and no objects are written)
+    #[cfg(feature = "build")]
+    ws_diags: Option<Vec<CrateCheck>>,
 }
 
-impl Session2 {
-    pub fn new(opts: Options2) -> Session2 {
-        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new() }
+impl Session {
+    pub fn new(opts: Options) -> Session {
+        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new(), #[cfg(feature = "build")] ws_diags: None }
+    }
+
+    /// For a session whose document will be edited (zust-analyzer): the preprocessing keeps its chunks from the first
+    /// analysis on, so that the first edit preprocesses only what it changed (PrepMemo::keep_from_first)
+    pub fn keep_for_edits(&mut self) {
+        self.sel.prep.keep_from_first();
     }
 
     pub fn load_cache(&mut self, path: &std::path::Path) {
         if !self.opts.no_cache {
-            self.disk = crate::cache2::Cache2::open(path);
+            self.disk = crate::build_cache::BuildCache::open(path);
         }
     }
 
@@ -802,7 +827,7 @@ impl Session2 {
         }
         let n = self.save_cache_keep(path)?;
         self.mem.retain(|k, _| used.contains(k));
-        self.disk = crate::cache2::Cache2::empty();
+        self.disk = crate::build_cache::BuildCache::empty();
         Ok(n)
     }
 
@@ -825,7 +850,7 @@ impl Session2 {
             entries.push((k, v));
         }
         let refs: Vec<(Key, &[u8])> = entries.iter().map(|(k, v)| (*k, &v[..])).collect();
-        let n = crate::cache2::Cache2::save(path, &refs)?;
+        let n = crate::build_cache::BuildCache::save(path, &refs)?;
         self.used.clear();
         Ok(n)
     }
@@ -1068,8 +1093,8 @@ impl Session2 {
                             if let Ok(sm) = crate::ast_summary::parse_and_summarize(&src, it, ow.as_ref()) {
                                 let mut e = vec![];
                                 sm.encode(&mut e);
-                                crate::cache2::put_uv(&mut buf, j as u64);
-                                crate::cache2::put_uv(&mut buf, e.len() as u64);
+                                crate::build_cache::put_uv(&mut buf, j as u64);
+                                crate::build_cache::put_uv(&mut buf, e.len() as u64);
                                 buf.extend_from_slice(&e);
                             }
                             j += jobs;
@@ -1090,7 +1115,7 @@ impl Session2 {
                     unsafe { c_close(fd) };
                     let mut st = 0i32;
                     unsafe { c_waitpid(pid, &mut st, 0) };
-                    let mut r = crate::cache2::Rd { d: &d, pos: 0 };
+                    let mut r = crate::build_cache::Rd { d: &d, pos: 0 };
                     while r.pos < d.len() {
                         let (Some(j), Some(n)) = (r.uv(), r.uv()) else { break };
                         let Some(body) = r.take(n as usize) else { break };
@@ -1512,6 +1537,11 @@ impl Session2 {
         }
         // (E0276: an impl's method whose own type parameter has a bound the trait's does not give)
         if let Some(e) = stricter_impl_bound(&src, &items[..user_src]) {
+            return Err(e);
+        }
+        // (E0276: an impl's method whose where clause bounds the impl's lifetimes or types by a lifetime the trait's,
+        // read through the impl header's trait arguments, does not imply)
+        if let Some(e) = stricter_impl_where(&src, &items[..user_src]) {
             return Err(e);
         }
         // (E0119: two blanket impls of one trait for a bare parameter, `impl<T: A> Tr for T` and `impl<T: B> Tr for T`,
@@ -2114,6 +2144,9 @@ impl Session2 {
         if let Some(e) = sized_error(&sums, &src, &items, user) {
             return Err(e);
         }
+        if let Some(e) = sized_wf_error(&prog, &sums, &src, &items, user) {
+            return Err(e);
+        }
         // (E0119: two impls of a trait of the program's that both apply to one goal, by the trait solver: their heads
         // unify and both impls' where clauses hold there (crate::traits::TraitDb::conflict))
         // (an impl's where clauses, from its header's text: the summary keeps those on one of its parameters (`T: Tr`);
@@ -2450,7 +2483,7 @@ impl Session2 {
             crefs.push(c);
         }
         tm.lap("refs", String::new());
-        let mut a = Analysis { late_err, iface_fp, src, items, prog, refs, srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()), assoc_keys: (0, vec![]) };
+        let mut a = Analysis { late_err, iface_fp, src, items, prog, refs, group_keys: Mutex::new((vec![], FxMap::default())), srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()), assoc_keys: (0, vec![]) };
         a.assoc_keys = a.assoc_keys();
         if self.opts.opt && std::env::var_os("ZUSTC_NO_INLINE").is_none() {
             a.inl = inline_bodies(&a);
@@ -9550,7 +9583,7 @@ fn write_all(fd: i32, mut d: &[u8]) {
     }
 }
 
-impl Session2 {
+impl Session {
     /// 関数 id のキャッシュのキー: 本体のハッシュ + 自分と参照先のシグネチャ + 名前で現れる struct (レイアウトごと) + const
 
     /// closed: prelude の関数で、ユーザの関数を呼びえないもの (総称でないか、型引数が prelude の型だけ)。参照の
@@ -9585,10 +9618,30 @@ impl Session2 {
             h.add(&(self.opts.backend_id()));
             h.add(&a.items[ii].hash);
             h.add(&a.sig_key(id as u32));
-            for &r in &a.refs[id] {
-                if in_u(a.prog.item_of[r as usize]) {
-                    h.add(&a.sig_key(r));
-                }
+            let uk = {
+                let mut uh = KeyHasher::new();
+                uh.add(u);
+                uh.finish() as u64 | 1 << 63
+            };
+            // (a group none of whose fns the crate sees adds nothing, as no fn of it did before the groups: a name in
+            // the crate that only a consumer's fn has does not change the crate's keys. The parts are added in the
+            // order of their values, not of the groups' numbers, which follow where the program first meets each
+            // name: a consumer that names one before the crate does would reorder them)
+            let mut parts: Vec<Key> = a.refs[id]
+                .iter()
+                .filter_map(|&g| {
+                    self.group_key(a, g, uk, &|r, h| {
+                        let seen = in_u(a.prog.item_of[r as usize]);
+                        if seen {
+                            h.add(&a.sig_key(r));
+                        }
+                        seen
+                    })
+                })
+                .collect();
+            parts.sort_unstable();
+            for k in &parts {
+                h.add(k);
             }
             for &st in &a.srefs[id] {
                 let b = a.prog.base_of(st);
@@ -9656,9 +9709,9 @@ impl Session2 {
             h.add(&a.prog.names[id]);
         }
         h.add(&a.sig_key(id as u32));
-        for &r in &a.refs[id] {
+        let each = |r: u32, h: &mut KeyHasher| -> bool {
             if closed && a.prog.item_of[r as usize].is_some_and(|ri| (ri as usize) < pf) {
-                continue;
+                return false;
             }
             h.add(&a.sig_key(r));
             // (展開しうるユーザの関数は、本体と行も効く)
@@ -9672,7 +9725,7 @@ impl Session2 {
                         if let Some(vis) = a.prog.traits_at_item(ri) {
                             h.add(&vis.join(","));
                         }
-                        for &r2 in &a.refs[r as usize] {
+                        for r2 in a.ref_fns(r as usize) {
                             if a.inl.user_lines.contains_key(&r2) {
                                 if let Some(vis) = a.prog.item_of[r2 as usize].and_then(|ri2| a.prog.traits_at_item(ri2)) {
                                     h.add(&vis.join(","));
@@ -9681,6 +9734,12 @@ impl Session2 {
                         }
                     }
                 }
+            }
+            true
+        };
+        for &g in &a.refs[id] {
+            if let Some(k) = self.group_key(a, g, closed as u64, &each) {
+                h.add(&k);
             }
         }
         for &st in &a.srefs[id] {
@@ -9701,6 +9760,39 @@ impl Session2 {
         // changes what `<() as Foo>::Out` is with the body the same)
         h.add(&a.assoc_keys.0);
         h.finish()
+    }
+
+    /// A group's part of a fn's cache key (fn_key_r): what `each` adds of each of its fns, in their order, or None when
+    /// it adds nothing of any (each says whether it added). The same for every fn that refers to the group, so it is
+    /// made once per analysis and `kind` (which fns `each` keeps: 0 for a key that keeps every fn, 1 for one that leaves
+    /// out the fns before the prelude's (the program's own), a universe's hash with the top bit for a closed crate's)
+    fn group_key(&self, a: &Analysis, g: u32, kind: u64, each: &dyn Fn(u32, &mut KeyHasher) -> bool) -> Option<Key> {
+        // (0: not made yet; a made key is never 0, see below)
+        let got = {
+            let ks = a.group_keys.lock().unwrap();
+            if kind < 2 { ks.0.get(g as usize).map_or(0, |k| k[kind as usize]) } else { ks.1.get(&(g, kind)).copied().unwrap_or(0) }
+        };
+        if got != 0 {
+            return (got != 1).then_some(got);
+        }
+        // (made outside the lock: each takes the sig keys' own)
+        let mut h = KeyHasher::new();
+        let mut any = false;
+        for &r in &a.prog.ref_groups[g as usize] {
+            any |= each(r, &mut h);
+        }
+        // (kept as 1 when nothing was added, and as a key that is neither 0 nor 1 otherwise)
+        let k = if any { h.finish().max(2) } else { 1 };
+        let mut ks = a.group_keys.lock().unwrap();
+        if kind < 2 {
+            if ks.0.is_empty() {
+                ks.0.resize(a.prog.ref_groups.len(), [0; 2]);
+            }
+            ks.0[g as usize][kind as usize] = k;
+        } else {
+            ks.1.insert((g, kind), k);
+        }
+        any.then_some(k)
     }
 
     /// 関数かインスタンスのキー (インスタンスは元の関数のキー + 型引数)
@@ -9954,7 +10046,20 @@ fn sig_part(text: &str, part: &str) -> Option<usize> {
     if part == "f" {
         return toks.get(k).map(|t| t.1);
     }
-    let open = (k..toks.len()).find(|&j| tk(j) == "(")?;
+    // (the parameters' `(`: after `fn` (not `pub(crate)`'s) and outside the generics' `<..>` (not a bound's `Fn()`))
+    let from = (k..toks.len()).find(|&j| tk(j) == "fn").map_or(k, |j| j + 1);
+    let open = {
+        let mut angle = 0i32;
+        (from..toks.len()).find(|&j| {
+            match tk(j) {
+                "<" => angle += 1,
+                ">" if !(j > 0 && tk(j - 1) == "-" && toks[j - 1].2 == toks[j].1) => angle -= 1,
+                "(" if angle <= 0 => return true,
+                _ => {}
+            }
+            false
+        })?
+    };
     // (the parameters: split at the commas outside brackets, `->` not closing one)
     let (mut d, mut start, mut params, mut close) = (0i32, open + 1, vec![], None);
     let mut j = open;
@@ -10058,7 +10163,7 @@ fn sendable(a: &Analysis, g: &Insts, ids: &[u32]) -> bool {
 }
 
 /// Whether this process has one thread: a fork copies only the calling thread, and a lock another thread holds (an
-/// interner's) would stay held in the child. A host that runs Session2 beside other threads checks in process
+/// interner's) would stay held in the child. A host that runs Session beside other threads checks in process
 pub(crate) fn single_threaded() -> bool {
     std::fs::read_to_string("/proc/self/status")
         .ok()
@@ -10115,7 +10220,7 @@ fn syn_sendable(t: &crate::types::TySyn) -> bool {
 /// A checked fn: the instances it requested and its Blob as the cache keeps it (None when nothing needs it), or its error
 type Checked = R<(Vec<u32>, Option<Vec<u8>>)>;
 
-impl Session2 {
+impl Session {
     /// Checks ids, in forked children when there are many (#101): child k checks ids[i] with i % jobs == k and sends
     /// back each one's Blob (encoded by name, as a parallel build's children do) or its error. The parent reads them
     /// back in the order of ids, which requests again the instances each one requested, so what follows (the
@@ -10130,7 +10235,7 @@ impl Session2 {
             let mut e = vec![];
             {
                 let g = insts.lock().unwrap();
-                crate::cache2::encode_blob(&b, &a.prog, &*g, &mut e);
+                crate::build_cache::encode_blob(&b, &a.prog, &*g, &mut e);
             }
             Ok((req, Some(e)))
         };
@@ -10159,7 +10264,7 @@ impl Session2 {
                 let mut buf = vec![];
                 let mut i = k;
                 while i < ids.len() {
-                    crate::cache2::put_uv(&mut buf, i as u64);
+                    crate::build_cache::put_uv(&mut buf, i as u64);
                     let (p0, l0) = {
                         let g = insts.lock().unwrap();
                         (g.pending.len(), g.fx_log.len())
@@ -10175,18 +10280,18 @@ impl Session2 {
                                 let mut all: Vec<u32> = g.pending[p0..].to_vec();
                                 all.extend(req.iter().filter(|i| !all.contains(i)).copied().collect::<Vec<u32>>());
                                 if sendable(a, &*g, &all) {
-                                    crate::cache2::encode_blob(&check_blob(b, &all), &a.prog, &*g, &mut e);
+                                    crate::build_cache::encode_blob(&check_blob(b, &all), &a.prog, &*g, &mut e);
                                 }
                             }
                             // (what cannot be sent is checked again by the parent)
                             if e.is_empty() {
                                 buf.push(2);
-                                crate::cache2::put_uv(&mut buf, 0);
+                                crate::build_cache::put_uv(&mut buf, 0);
                                 i += jobs;
                                 continue;
                             }
                             buf.push(0);
-                            crate::cache2::put_uv(&mut buf, e.len() as u64);
+                            crate::build_cache::put_uv(&mut buf, e.len() as u64);
                             buf.extend_from_slice(&e);
                         }
                         Err(m) => {
@@ -10198,19 +10303,19 @@ impl Session2 {
                                 let made = g.pending[p0..].to_vec();
                                 if sendable(a, &*g, &made) {
                                     let b = Blob { clo_facts: g.facts_since(l0), ..acg::Compiled::empty_blob() };
-                                    crate::cache2::encode_blob(&check_blob(b, &made), &a.prog, &*g, &mut e);
+                                    crate::build_cache::encode_blob(&check_blob(b, &made), &a.prog, &*g, &mut e);
                                 }
                             }
                             if e.is_empty() {
                                 buf.push(2);
-                                crate::cache2::put_uv(&mut buf, 0);
+                                crate::build_cache::put_uv(&mut buf, 0);
                                 i += jobs;
                                 continue;
                             }
                             buf.push(1);
-                            crate::cache2::put_uv(&mut buf, m.len() as u64);
+                            crate::build_cache::put_uv(&mut buf, m.len() as u64);
                             buf.extend_from_slice(m.as_bytes());
-                            crate::cache2::put_uv(&mut buf, e.len() as u64);
+                            crate::build_cache::put_uv(&mut buf, e.len() as u64);
                             buf.extend_from_slice(&e);
                         }
                     }
@@ -10228,7 +10333,7 @@ impl Session2 {
             let d = read_all(fd);
             unsafe { c_close(fd) };
             wait_child(pid);
-            let mut r = crate::cache2::Rd { d: &d, pos: 0 };
+            let mut r = crate::build_cache::Rd { d: &d, pos: 0 };
             while r.pos < d.len() {
                 let (Some(i), Some(fail), Some(n)) = (r.uv(), r.u8(), r.uv()) else { break };
                 let Some(body) = r.take(n as usize) else { break };
@@ -10252,7 +10357,7 @@ impl Session2 {
         got.into_iter()
             .zip(ids)
             .map(|(g, &id)| match g {
-                Some(Ok(d)) => match crate::cache2::decode_blob(&d, &a.prog, insts) {
+                Some(Ok(d)) => match crate::build_cache::decode_blob(&d, &a.prog, insts) {
                     Some(b) => {
                         let req = b.relocs.iter().filter_map(|r| match r.target { acg::Target::Func(i) => Some(i), _ => None }).collect();
                         Ok((req, if self.opts.no_cache { None } else { Some(d) }))
@@ -10262,7 +10367,7 @@ impl Session2 {
                 // (what the failed fn left behind, read back; when it cannot be (a name only the child knows), the fn is
                 // checked here, which leaves it as the serial check does: requests are made once, so what the reading
                 // requested before it failed is not requested twice)
-                Some(Err((m, made))) => match crate::cache2::decode_blob(&made, &a.prog, insts) {
+                Some(Err((m, made))) => match crate::build_cache::decode_blob(&made, &a.prog, insts) {
                     Some(_) => Err(m),
                     None => one(id),
                 },
@@ -10276,7 +10381,7 @@ impl Session2 {
 #[cfg(not(feature = "build"))]
 fn lower_blob(_: &Analysis, _: acg::Compiled, _: Vec<u32>) -> R<(Blob, Vec<u32>)> { Err("internal: zust-core was built without the backend (feature `build`)".into()) }
 
-impl Session2 {
+impl Session {
     /// An error of the analysis at a line past the program's own (an item hoisted out of a fn body, prep::HOIST_MARK):
     /// at the line it was written on. The text is preprocessed again for it, only when there is such an error
     #[cold]
@@ -10320,7 +10425,9 @@ fn hoisted_err_holds(msg: &str) -> bool {
         // (`const FOO = 1;` in a fn body)
         "missing type for `",
         // (an item's written types: an unsized type where a Sized one is needed, sized_error)
-        "the size for values of type `"];
+        "the size for values of type `",
+        // (an impl's method against its trait's: an impl in a fn body is hoisted)
+        "impl has stricter requirements than trait"];
     let unused = msg.starts_with("function `") && msg.contains("is never used") || msg.starts_with("type parameter `") && msg.ends_with("is never used (E0091)")
         // (two variants or foreign items of one name, in the item itself)
         || msg.starts_with("the name `") && msg.ends_with("is defined multiple times (E0428)");
@@ -10360,6 +10467,513 @@ fn allow_variant_bindings(src: &str, errs: &mut Vec<String>) {
     });
     if allowed {
         errs.retain(|e| !e.ends_with("(E0170)"));
+    }
+}
+
+/// The items of a `<..>` list starting at the `<` at byte k of t, split at its top-level commas, and the byte after
+/// its `>` (None: no list there)
+fn angle_items(t: &str, k: usize) -> Option<(Vec<&str>, usize)> {
+    let b = t.as_bytes();
+    if b.get(k) != Some(&b'<') {
+        return None;
+    }
+    let mut d = 0i32;
+    let mut start = k + 1;
+    let mut out = vec![];
+    let mut i = k;
+    while i < b.len() {
+        match b[i] {
+            b'>' if i > 0 && b[i - 1] == b'-' => {}
+            // (a char or byte literal, `b'>'`, `'\''`, and a string: their brackets close nothing)
+            b'\'' | b'"' if quote_end(b, i).is_some() => i = quote_end(b, i).unwrap_or(i),
+            b'<' | b'(' | b'[' => d += 1,
+            b'>' | b')' | b']' => {
+                d -= 1;
+                if d == 0 {
+                    let piece = t[start..i].trim();
+                    if !piece.is_empty() {
+                        out.push(piece);
+                    }
+                    return Some((out, i + 1));
+                }
+            }
+            b',' if d == 1 => {
+                out.push(t[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// The byte of the closing quote of a char, byte or string literal whose opening quote is at byte i of b (`'x'`,
+/// `'\''`, `b']'`, `"a]"`). None for a lifetime (`'a`), which has none
+fn quote_end(b: &[u8], i: usize) -> Option<usize> {
+    match b.get(i)? {
+        b'\'' if b.get(i + 1) == Some(&b'\\') || b.get(i + 2) == Some(&b'\'') => {
+            let mut j = i + if b.get(i + 1) == Some(&b'\\') { 3 } else { 2 };
+            while j < b.len() && b[j] != b'\'' {
+                j += 1;
+            }
+            Some(j)
+        }
+        b'"' => {
+            let mut j = i + 1;
+            while j < b.len() && b[j] != b'"' {
+                j += if b[j] == b'\\' { 2 } else { 1 };
+            }
+            Some(j)
+        }
+        _ => None,
+    }
+}
+
+/// The byte of t's first `;` outside brackets and literals (`fn f(_: [u8; 1]) where T: 'a;`: the last one; not one
+/// after `b']'`)
+fn top_semi(t: &str) -> Option<usize> {
+    let b = t.as_bytes();
+    let mut d = 0i32;
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'\'' | b'"' if quote_end(b, i).is_some() => i = quote_end(b, i).unwrap_or(i),
+            b'(' | b'[' | b'{' => d += 1,
+            b')' | b']' | b'}' => d -= 1,
+            b';' if d == 0 => return Some(i),
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// The byte of a generic list item's `=` before its default (`T = fn(x: u8)`, `const N: usize = 3`), not one in
+/// brackets (`Iterator<Item = u8>`)
+fn top_eq(it: &str) -> Option<usize> {
+    let b = it.as_bytes();
+    let mut d = 0i32;
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'\'' | b'"' if quote_end(b, i).is_some() => i = quote_end(b, i).unwrap_or(i),
+            b'>' if i > 0 && b[i - 1] == b'-' => {}
+            b'<' | b'(' | b'[' | b'{' => d += 1,
+            b'>' | b')' | b']' | b'}' => d -= 1,
+            b'=' if d == 0 => return Some(i),
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// The byte of the first word w in t (not part of a longer name: `where` after a space or a line break)
+fn find_word(t: &str, w: &str) -> Option<usize> {
+    let id = |c: char| c.is_alphanumeric() || c == '_';
+    t.match_indices(w).map(|(i, _)| i).find(|&i| !t[..i].ends_with(id) && !t[i + w.len()..].starts_with(id))
+}
+
+/// The text with each identifier or lifetime that names a key of map replaced by its value, and its whitespace one
+/// space where it parts two names (`&'a T`, `Vec<T>`)
+fn subst_names(t: &str, map: &[(String, String)]) -> String {
+    let mut out = String::new();
+    let cs: Vec<char> = t.chars().collect();
+    let mut i = 0;
+    let id = |c: char| c.is_alphanumeric() || c == '_';
+    while i < cs.len() {
+        let c = cs[i];
+        if id(c) || (c == '\'' && cs.get(i + 1).is_some_and(|&n| id(n))) {
+            let mut j = i + 1;
+            while j < cs.len() && id(cs[j]) {
+                j += 1;
+            }
+            let w: String = cs[i..j].iter().collect();
+            let v = map.iter().find(|(k, _)| *k == w).map_or(w.as_str(), |(_, v)| v.as_str());
+            if out.ends_with(id) && v.starts_with(|c: char| id(c) || c == '\'') {
+                out.push(' ');
+            }
+            out.push_str(v);
+            i = j;
+            continue;
+        }
+        if !c.is_whitespace() {
+            out.push(c);
+        }
+        i += 1;
+    }
+    out
+}
+
+/// E0276 "impl has stricter requirements than trait" for an impl's method whose where clause bounds by a lifetime
+/// what the trait's method does not: a lifetime of the impl outliving another (`where 'a: 'b`), or a type outliving a
+/// lifetime (`where V: 'a`), read through the impl header's trait arguments (`impl<'a, U, V> Master<'a, U, V>` for
+/// `trait Master<'a, T, U>`: the trait's `where T: 'a` is the impl's `U: 'a`), with the trait's and the impl's own
+/// header bounds. Not compared where a type of the signatures implies it (`x: &'a V` implies `V: 'a`), nor for the
+/// method's own parameters (stricter_impl_bound, early_mismatch). At the bound
+fn stricter_impl_where(src: &str, items: &[SrcItem]) -> Option<String> {
+    use crate::lexer::ItemKind as K;
+    let text = |it: &SrcItem| src.get(it.start..it.end).unwrap_or("");
+    // (a member's text to its body or its `;`, not one in its types: `fn f(_: [u8; 1]);`)
+    let member_head = |t: &str| -> usize { fn_body_start(t).or_else(|| top_semi(t)).unwrap_or(t.len()) };
+    if !items.iter().any(|it| matches!(it.kind, K::ImplMember(_)) && {
+        let t = text(it);
+        let h = &t[..member_head(t)];
+        h.contains("where") && h.contains('\'') && h.contains("fn ")
+    }) {
+        return None;
+    }
+    let word_in = |p: &str, n: &str| {
+        p.match_indices(n).any(|(i, _)| {
+            let id = |c: char| c.is_alphanumeric() || c == '_';
+            !p[..i].ends_with(id) && !p[i + n.len()..].starts_with(id)
+        })
+    };
+    // (a generic list's names, and the lifetime bounds its items write: `'b: 'a`, `T: 'a + Clone`)
+    let names_and_bounds = |its: &[&str]| -> (Vec<String>, Vec<(String, String)>) {
+        let mut names = vec![];
+        let mut bounds = vec![];
+        for it in its {
+            let it = it.trim().strip_prefix("const ").unwrap_or(it.trim());
+            // (the name and bounds before a default: not the `:` of `T = fn(x: u8)`)
+            let it = it[..top_eq(it).unwrap_or(it.len())].trim();
+            let (n, rest) = match it.find(':') {
+                Some(c) => (it[..c].trim(), &it[c + 1..]),
+                None => (it.split('=').next().unwrap_or(it).trim(), ""),
+            };
+            for b in rest.split('+') {
+                let b = b.trim();
+                if b.starts_with('\'') {
+                    bounds.push((n.to_string(), b.to_string()));
+                }
+            }
+            names.push(n.to_string());
+        }
+        (names, bounds)
+    };
+    let where_bounds = |head: &str| -> Vec<(String, String)> {
+        where_preds(head).unwrap_or_default().into_iter().flat_map(|(s, bs)| bs.into_iter().filter(|b| b.starts_with('\'')).map(move |b| (s.clone(), b))).collect()
+    };
+    // (a generic list item's default: `T = ()`, `const N: usize = 3`; not the `=` of `Iterator<Item = u8>`)
+    let default_of = |it: &str| -> Option<String> { top_eq(it).map(|i| it[i + 1..].trim().to_string()) };
+    // (the generic parameters after a fn's name in its text: `fn f<T>`, not the `f` of `fn`)
+    let fn_generics = |t: &str, name: &str| -> Vec<String> {
+        let Some(k) = t.find("fn ") else { return vec![] };
+        let r = t[k + 3..].trim_start();
+        angle_items(t, t.len() - r.len() + name.len()).map(|(its, _)| names_and_bounds(&its).0).unwrap_or_default()
+    };
+    // (the program's traits: name, header item, parameters, header bounds, the parameters' defaults)
+    let mut traits: Vec<(String, u32, Vec<String>, Vec<(String, String)>, Vec<Option<String>>)> = vec![];
+    for (i, it) in items.iter().enumerate() {
+        if it.kind != K::TraitHeader {
+            continue;
+        }
+        let t = text(it);
+        let head = &t[..t.find('{').unwrap_or(t.len())];
+        let Some(k) = head.find("trait ") else { continue };
+        let r = &head[k + 6..];
+        let n_end = r.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(r.len());
+        let name = r[..n_end].to_string();
+        let (params, mut bounds, defaults) = match angle_items(head, k + 6 + n_end) {
+            Some((its, _)) => {
+                let (n, b) = names_and_bounds(&its);
+                (n, b, its.iter().map(|it| default_of(it)).collect())
+            }
+            None => (vec![], vec![], vec![]),
+        };
+        bounds.extend(where_bounds(head));
+        traits.push((name, i as u32, params, bounds, defaults));
+    }
+    if traits.is_empty() {
+        return None;
+    }
+    for m in items {
+        let K::ImplMember(h) = m.kind else { continue };
+        let mt = text(m);
+        let mh = &mt[..member_head(mt)];
+        if !(mh.contains("where") && mh.contains('\'')) {
+            continue;
+        }
+        let Some(fk) = mh.find("fn ") else { continue };
+        let r = mh[fk + 3..].trim_start();
+        let name = &r[..r.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(r.len())];
+        // (the method's own generics: not compared here)
+        let own = fn_generics(mh, name);
+        // (the impl's header: its generics, the trait and its arguments, the self type)
+        let Some(hi) = items.get(h as usize) else { continue };
+        let ht = text(hi);
+        let head = &ht[..ht.find('{').unwrap_or(ht.len())];
+        let Some(ik) = head.find("impl") else { continue };
+        let (impl_names, impl_bounds, after) = match angle_items(head, ik + 4 + head[ik + 4..].len() - head[ik + 4..].trim_start().len()) {
+            Some((its, e)) => {
+                let (n, b) = names_and_bounds(&its);
+                (n, b, e)
+            }
+            None => (vec![], vec![], ik + 4),
+        };
+        // (the keyword `for` after a space or a line break, not the `for<'b>` of a higher-ranked type in the
+        // arguments)
+        let hs = &head[after..];
+        let Some(f) = hs.match_indices("for").map(|(i, _)| i).find(|&i| hs[..i].ends_with(char::is_whitespace) && hs[i + 3..].starts_with(char::is_whitespace)) else { continue };
+        let trait_part = hs[..f].trim();
+        // (to its `where`, after a space or a line break)
+        let rest = &hs[f + 3..];
+        let self_ty = rest[..find_word(rest, "where").unwrap_or(rest.len())].trim();
+        let tn_end = trait_part.find('<').unwrap_or(trait_part.len());
+        let tname = trait_part[..tn_end].rsplit("::").next().unwrap_or("").trim();
+        let Some((_, th, tparams, tbounds, tdefaults)) = traits.iter().find(|t| t.0 == tname) else { continue };
+        let mut targs: Vec<String> = if tn_end < trait_part.len() { angle_items(trait_part, tn_end).map(|x| x.0).unwrap_or_default() } else { vec![] }.iter().map(|a| subst_names(a, &[])).collect();
+        let mut map: Vec<(String, String)> = vec![("Self".to_string(), subst_names(self_ty, &[]))];
+        map.extend(tparams.iter().cloned().zip(targs.iter().cloned()));
+        // (an argument left out for a parameter with a default: the default, read through the ones before it,
+        // `Rhs = Self`)
+        while targs.len() < tparams.len() {
+            let Some(Some(dv)) = tdefaults.get(targs.len()) else { break };
+            let v = subst_names(dv, &map);
+            map.push((tparams[targs.len()].clone(), v.clone()));
+            targs.push(v);
+        }
+        if targs.len() != tparams.len() {
+            continue;
+        }
+        // (the trait's method of that name)
+        let Some(d) = items.iter().find(|d| d.kind == K::TraitMember(*th) && {
+            let dt = text(d);
+            dt.find("fn ").is_some_and(|k| {
+                let r = dt[k + 3..].trim_start();
+                r.starts_with(name) && !r[name.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')
+            })
+        }) else {
+            continue;
+        };
+        let dt = text(d);
+        let dh = &dt[..member_head(dt)];
+        // (what holds: the trait's method's and header's bounds through the arguments, the impl header's. Not the
+        // trait's method's bounds of its own parameters, which are not the impl's of the same names)
+        // (the impl's `Self` is its self type)
+        let self_map = [("Self".to_string(), subst_names(self_ty, &[]))];
+        let downs = fn_generics(dh, name);
+        let of_downs = |x: &str| downs.iter().any(|o| word_in(x, o));
+        let mut facts: Vec<(String, String)> =
+            where_bounds(dh).into_iter().filter(|(a, b)| !of_downs(a) && !of_downs(b)).chain(tbounds.iter().cloned()).map(|(a, b)| (subst_names(&a, &map), subst_names(&b, &map))).collect();
+        facts.extend(impl_bounds.iter().map(|(a, b)| (subst_names(a, &self_map), b.clone())));
+        facts.extend(where_bounds(head).into_iter().map(|(a, b)| (subst_names(&a, &self_map), b)));
+        // (a type outlives a lifetime where each of its parts does (RFC 1214): `[U]: 'a`, `&'b U: 'a`, `Bar<'b, T>:
+        // 'a` give `U: 'a`, `'b: 'a`, `T: 'a`. Not a projection's (`U::Item: 'a` says nothing of U))
+        let mut parts: Vec<(String, String)> = vec![];
+        for (a, b) in &facts {
+            if a.starts_with('\'') || a.contains("::") {
+                continue;
+            }
+            let cs: Vec<char> = a.chars().collect();
+            let mut i = 0;
+            while i < cs.len() {
+                let lt = cs[i] == '\'';
+                if lt || cs[i].is_alphabetic() || cs[i] == '_' {
+                    let mut j = i + 1;
+                    while j < cs.len() && (cs[j].is_alphanumeric() || cs[j] == '_') {
+                        j += 1;
+                    }
+                    let w: String = cs[i..j].iter().collect();
+                    if (lt && w.len() > 1) || impl_names.contains(&w) {
+                        parts.push((w, b.clone()));
+                    }
+                    i = j;
+                } else {
+                    i += 1;
+                }
+            }
+        }
+        facts.extend(parts);
+        // (types that may imply a bound of what they name: the signatures', not the impl header's (rustc 1.97 takes
+        // nothing from `for &'a T` or `Tr<'a, &'a T>` here: `where T: 'a` is stricter). As text, and parsed
+        // (wf_implies: `(&'a u8, &'b u8)` implies nothing of `'a: 'b`); the text of what does not parse is read as
+        // before)
+        // (the trait's method's own generics renamed in its types: its `T` is not the impl header's `T`)
+        let mut dmap = map.clone();
+        dmap.extend(downs.iter().map(|d| (d.clone(), match d.strip_prefix('\'') {
+            Some(l) => format!("'__m_{l}"),
+            None => format!("__m_{d}"),
+        })));
+        let mut pieces: Vec<String> = sig_type_pieces(dh).iter().map(|p| subst_names(p, &dmap)).collect();
+        pieces.extend(sig_type_pieces(mh).iter().map(|p| subst_names(p, &[])));
+        let parse_sig = |t: &str| -> Option<crate::parse::FnSig> {
+            match crate::parse::parse_file(&format!("{};", t.trim_end())).ok()?.items.into_iter().next()?.kind {
+                crate::parse::ItemKind::Fn(s, _) => Some(s),
+                _ => None,
+            }
+        };
+        let (mut tys, mut loose): (Vec<crate::parse::Ty>, Vec<String>) = (vec![], vec![]);
+        let fn_at = |t: &str| t.find("fn ").unwrap_or(0);
+        for (sg, text_pieces) in [(subst_names(&dh[fn_at(dh)..], &dmap), sig_type_pieces(dh).iter().map(|p| subst_names(p, &dmap)).collect::<Vec<_>>()), (mh[fn_at(mh)..].to_string(), sig_type_pieces(mh).iter().map(|p| subst_names(p, &[])).collect())] {
+            match parse_sig(&sg) {
+                Some(fs) => tys.extend(fs.recv_ty.into_iter().chain(fs.params.into_iter().map(|p| p.1)).chain(fs.ret)),
+                None => loose.extend(text_pieces),
+            }
+        }
+        // (what the signatures' types imply of the impl's parameters and lifetimes, as facts, so the outlives below
+        // go through them: `x: &'b T` gives `T: 'b`, which with the header's `'b: 'a` gives `T: 'a`)
+        let lts: Vec<String> = impl_names.iter().filter(|n| n.starts_with('\'')).cloned().chain(["'static".to_string()]).collect();
+        for n in &impl_names {
+            for l in &lts {
+                if n != l && tys.iter().any(|t| wf_implies(t, n, l)) {
+                    facts.push((n.clone(), l.clone()));
+                }
+            }
+        }
+        let outlives = |x: &str, y: &str| -> bool {
+            if x == y || x == "'static" {
+                return true;
+            }
+            let (mut seen, mut work) = (vec![x.to_string()], vec![x.to_string()]);
+            while let Some(z) = work.pop() {
+                for (a, b) in &facts {
+                    if *a == z && !seen.contains(b) {
+                        if b == y || b == "'static" {
+                            return true;
+                        }
+                        seen.push(b.clone());
+                        work.push(b.clone());
+                    }
+                }
+            }
+            false
+        };
+        for (subj0, bound) in where_bounds(mh) {
+            let subj = subst_names(&subj0, &self_map);
+            let mentions_own = own.iter().any(|o| word_in(&subj, o) || word_in(&bound, o));
+            // (a parameter or a lifetime by the types' structure; another type (`Vec<T>: 'a`) by their text)
+            let simple = subj.starts_with('\'') || subj.chars().all(|c| c.is_alphanumeric() || c == '_');
+            let implied = if simple {
+                tys.iter().any(|t| wf_implies(t, &subj, &bound)) || loose.iter().any(|p| word_in(p, &subj) && word_in(p, &bound))
+            } else {
+                pieces.iter().any(|p| word_in(p, &subj) && word_in(p, &bound))
+            };
+            // (a type that names no parameter and no lifetime outlives every lifetime: `fn(u8): 'a`, `(): 'a`)
+            let trivial = !subj.contains('\'') && !impl_names.iter().any(|n| word_in(&subj, n)) && !word_in(&subj, "Self");
+            if mentions_own || implied || trivial {
+                continue;
+            }
+            let held = if subj.starts_with('\'') {
+                outlives(&subj, &bound)
+            } else {
+                facts.iter().any(|(a, b)| *a == subj && outlives(b, &bound))
+            };
+            if held {
+                continue;
+            }
+            // (at the bound: the first `bound` after `subj:` in the where clause, `where T: 'a,\n U: 'a` for U's)
+            let w = mh.rfind("where").unwrap_or(0);
+            let wc = &mh[w..];
+            let id = |c: char| c.is_alphanumeric() || c == '_';
+            let off = wc
+                .match_indices(&*subj0)
+                .find_map(|(i, _)| {
+                    let after = &wc[i + subj0.len()..];
+                    let t = after.trim_start();
+                    let at = !wc[..i].ends_with(|c: char| id(c) || c == '\'') && !after.starts_with(id) && t.starts_with(':') && !t.starts_with("::");
+                    at.then(|| wc[i + subj0.len()..].find(&*bound).map(|o| w + i + subj0.len() + o)).flatten()
+                })
+                .or_else(|| wc.find(&*bound).map(|o| w + o))?;
+            let line = m.line + mt[..off].matches('\n').count();
+            let abs = m.start + off;
+            let col = abs - src[..abs].rfind('\n').map_or(0, |k| k + 1) + 1;
+            return Some(format!("{line}:{col}: impl has stricter requirements than trait (E0276)"));
+        }
+    }
+    None
+}
+
+/// Whether a type names the type parameter n
+fn ty_names(t: &crate::parse::Ty, n: &str) -> bool {
+    use crate::parse::{Bound, GArg, Ty as PTy};
+    let path = |p: &crate::parse::Path| {
+        p.segs.iter().any(|s| {
+            s.name == n
+                || s.args.iter().any(|a| match a {
+                    GArg::Ty(t) | GArg::Bind(_, t) => ty_names(t, n),
+                    _ => false,
+                })
+                || s.fn_args.as_ref().is_some_and(|(ps, r)| ps.iter().any(|t| ty_names(t, n)) || r.as_deref().is_some_and(|t| ty_names(t, n)))
+        })
+    };
+    let bounds = |bs: &[Bound]| bs.iter().any(|b| matches!(b, Bound::Trait(_, p) if path(p)));
+    match t {
+        PTy::Path(q, p) => q.as_deref().is_some_and(|q| ty_names(q, n)) || path(p),
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => ty_names(i, n),
+        PTy::Tuple(ts) => ts.iter().any(|t| ty_names(t, n)),
+        PTy::Fn(ps, r) => ps.iter().any(|t| ty_names(t, n)) || ty_names(r, n),
+        PTy::Impl(bs) | PTy::Dyn(bs) => bounds(bs),
+        _ => false,
+    }
+}
+
+/// Whether a type of a signature may imply `n: 'static` (wf_implies)
+fn static_implies(t: &crate::parse::Ty, n: &str) -> bool {
+    wf_implies(t, n, "'static")
+}
+
+/// Whether n (a type parameter or a lifetime) is a component of a type, what its outliving a lifetime makes outlive
+/// it (RFC 1214): not the inputs of a projection (`<T as Has>::Item`, `T::Item`: an `Item` may hold nothing of T)
+fn comp_names(t: &crate::parse::Ty, n: &str) -> bool {
+    use crate::parse::{Bound, GArg, Ty as PTy};
+    let lt = n.starts_with('\'');
+    let path = |p: &crate::parse::Path| {
+        // (`T::Item`: a projection)
+        if p.segs.len() > 1 && p.segs.first().is_some_and(|s| s.name == n || s.name == "Self") {
+            return false;
+        }
+        (!lt && p.segs.len() == 1 && p.segs[0].name == n)
+            || p.segs.iter().any(|s| {
+                s.args.iter().any(|a| match a {
+                    GArg::Lifetime(x) => lt && x == n,
+                    GArg::Ty(t) | GArg::Bind(_, t) => comp_names(t, n),
+                    _ => false,
+                }) || s.fn_args.as_ref().is_some_and(|(ps, r)| ps.iter().any(|t| comp_names(t, n)) || r.as_deref().is_some_and(|t| comp_names(t, n)))
+            })
+    };
+    match t {
+        PTy::Path(Some(_), _) => false,
+        PTy::Path(None, p) => path(p),
+        PTy::Ref(r, _, i) => (lt && r.as_deref() == Some(n)) || comp_names(i, n),
+        PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => comp_names(i, n),
+        PTy::Tuple(ts) => ts.iter().any(|t| comp_names(t, n)),
+        PTy::Fn(ps, r) => ps.iter().any(|t| comp_names(t, n)) || comp_names(r, n),
+        PTy::Impl(bs) | PTy::Dyn(bs) => bs.iter().any(|b| match b {
+            Bound::Lifetime(x) => lt && x == n,
+            Bound::Trait(_, p) => path(p),
+        }),
+        _ => false,
+    }
+}
+
+/// Whether a type of a signature may imply `n: l`, n a type parameter or a lifetime: n behind a `&l` (`&'b &'a u8`
+/// gives `'a: 'b`), or beside l among one path's arguments (`W<'static, T>`, whose definition may bound T by it), or
+/// in a trait object or `impl Trait` bounded by l. Not two parts of a tuple, a fn pointer's parameters or an array's
+/// element beside an l elsewhere (`(T, &'static str)`, `(&'a u8, &'b u8)`)
+fn wf_implies(t: &crate::parse::Ty, n: &str, l: &str) -> bool {
+    use crate::parse::{Bound, GArg, Ty as PTy};
+    let names = |t: &crate::parse::Ty| comp_names(t, n);
+    match t {
+        PTy::Ref(Some(r), _, i) if r == l && names(i) => true,
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => wf_implies(i, n, l),
+        PTy::Tuple(ts) => ts.iter().any(|t| wf_implies(t, n, l)),
+        PTy::Fn(ps, r) => ps.iter().any(|t| wf_implies(t, n, l)) || wf_implies(r, n, l),
+        PTy::Path(q, p) => {
+            q.as_deref().is_some_and(|q| wf_implies(q, n, l))
+                || p.segs.iter().any(|s| {
+                    let has_l = s.args.iter().any(|a| matches!(a, GArg::Lifetime(x) if x == l));
+                    let has_n = s.args.iter().any(|a| match a {
+                        GArg::Lifetime(x) => x == n,
+                        GArg::Ty(t) | GArg::Bind(_, t) => names(t),
+                        _ => false,
+                    });
+                    (has_l && has_n) || s.args.iter().any(|a| matches!(a, GArg::Ty(t) | GArg::Bind(_, t) if wf_implies(t, n, l)))
+                })
+        }
+        PTy::Impl(bs) | PTy::Dyn(bs) => bs.iter().any(|b| matches!(b, Bound::Lifetime(x) if x == l)) && names(t),
+        _ => false,
     }
 }
 
@@ -10650,20 +11264,13 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
             // or the trait's parameters and result name `'static` and that type parameter, which may imply it (`x:
             // &'static T`; not `x: &'static u8`). At the first `'static` of the member's signature)
             let (ms_st, ds_st) = (static_params(&ms.generics), static_params(&ds.generics));
-            // (each of the trait's parameters' types and its result's: one that names `'static` and the type
-            // parameter may imply the bound (`x: &'static T`, `x: W<'static, T>`); `x: T, s: &'static str` does not)
-            let pieces = sig_type_pieces(text(d));
-            let word = |p: &str, n: &str| {
-                p.match_indices(n).any(|(i, _)| {
-                    let id = |c: char| c.is_alphanumeric() || c == '_';
-                    !p[..i].ends_with(id) && !p[i + n.len()..].starts_with(id)
-                })
-            };
+            // (the trait's parameters' types and its result's, by their structure: `x: &'static T` and `x:
+            // W<'static, T>` may imply the bound; `x: T, s: &'static str` and `x: (T, &'static str)` do not)
             let names: Vec<&str> = ds.generics.params.iter().filter_map(|q| match q {
                 GParam::Ty(n, ..) => Some(n.as_str()),
                 _ => None,
             }).collect();
-            let implied = |n: &str| pieces.iter().any(|p| p.contains("'static") && word(p, n));
+            let implied = |n: &str| ds.params.iter().map(|p| &p.1).chain(ds.ret.as_ref()).any(|t| static_implies(t, n));
             if ms_st.iter().zip(&ds_st).zip(&names).any(|((m, d), n)| *m && !*d && !implied(n)) && !header_static {
                 let off = key.find("'static")?;
                 let line = key[..off].matches('\n').count() + 1;
@@ -10705,14 +11312,18 @@ const STD_ADTS: &[&str] = &[
 fn fn_body_start(t: &str) -> Option<usize> {
     let b = t.as_bytes();
     let mut d = 0i32;
-    for (i, &c) in b.iter().enumerate() {
-        match c {
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            // (not a bracket in a literal: `[u8; b'[' as usize]`)
+            b'\'' | b'"' if quote_end(b, i).is_some() => i = quote_end(b, i).unwrap_or(i),
             b'<' | b'(' | b'[' => d += 1,
             b'>' if i > 0 && b[i - 1] == b'-' => {}
             b'>' | b')' | b']' => d -= 1,
             b'{' if d <= 0 => return Some(i),
             _ => {}
         }
+        i += 1;
     }
     None
 }
@@ -11460,7 +12071,7 @@ impl Diagnostic {
     }
 }
 
-impl Session2 {
+impl Session {
     /// 型検査だけを行い、全診断を返す (`zustc check` と LSP)。到達しない関数も、総称関数は要求されたインスタンスごとに
     /// 検査する (コード生成までしてエラーを集め、結果はキャッシュに入れる: 次の検査・ビルドはそれを使う)。prelude の中の診断は出さない
     pub fn check(&mut self, src: &str) -> Vec<Diagnostic> {
@@ -11549,7 +12160,7 @@ impl Session2 {
                                         memo.ents.insert(c, ce.clone());
                                     } else {
                                         // (本体が変わったインスタンス: 要求し直して検査する)
-                                        let _ = crate::cache2::decode_blob(&ce.me, &a.prog, &insts);
+                                        let _ = crate::build_cache::decode_blob(&ce.me, &a.prog, &insts);
                                     }
                                 }
                                 continue;
@@ -11560,9 +12171,9 @@ impl Session2 {
                     let kc = k ^ CHECK_SALT;
                     n_keys += 1;
                     // (キャッシュにあれば検査済み: 読み戻すと要求していたインスタンスも要求し直す)
-                    let hit = match self.get(k).and_then(|d| crate::cache2::decode_blob(&d, &a.prog, &insts)) {
+                    let hit = match self.get(k).and_then(|d| crate::build_cache::decode_blob(&d, &a.prog, &insts)) {
                         Some(b) => Some(b),
-                        None if check_only => self.get(kc).and_then(|d| crate::cache2::decode_blob(&d, &a.prog, &insts)),
+                        None if check_only => self.get(kc).and_then(|d| crate::build_cache::decode_blob(&d, &a.prog, &insts)),
                         None => None,
                     };
                     match hit {
@@ -11636,7 +12247,7 @@ impl Session2 {
                             let bo = g.body_of(id);
                             let clo_facts = if g.kind_free.contains(&bo) || g.closure_rg.contains_key(&bo) { g.facts_of(bo) } else { vec![] };
                             let b = Blob { align: 1, code: vec![], relocs: vec![acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(id) }], datas: vec![], vtables: vec![], traps: vec![], line_base: None, code_ref: None, clo_facts };
-                            crate::cache2::encode_blob(&b, &a.prog, &*g, &mut me);
+                            crate::build_cache::encode_blob(&b, &a.prog, &*g, &mut me);
                         }
                         memo.ents.insert(name, ChkEnt { body, body_hash: bh, children, me, ok });
                     }
@@ -12285,6 +12896,139 @@ fn sized_error(sums: &[Summary], src: &str, items: &[SrcItem], user: usize) -> O
             if let Some((outer, x)) = find(t, &needs_sized) {
                 let pos = outer.map_or_else(|| format!("{}:1", it.line), |o| at(o));
                 return Some(format!("{pos}: {}", msg(x)));
+            }
+        }
+    }
+    None
+}
+
+/// An item's header: its text before the first `{` token (not one in a string or a comment: `#[doc = "{"]`)
+fn header_text(text: &str) -> &str {
+    let b = text.as_bytes();
+    let t = crate::lexer::tokenize(b);
+    match t.iter().find(|x| x.0 == 1 && b[x.1] == b'{') {
+        Some(x) => &text[..x.1],
+        None => text,
+    }
+}
+
+/// E0277, Sized: the program's definitions and signatures that put a maybe-unsized type where only a sized one may be
+fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user: usize) -> Option<String> {
+    let user_sm = |ii: usize| ii < user;
+    // (a parameter declared `?Sized` whose other bounds imply Sized is sized: `T: Clone + ?Sized`)
+    let implies_sized = |bs: &[String]| bs.iter().any(|b| {
+        let tr = b.split('<').next().unwrap_or(b).trim();
+        let tr = tr.rsplit("::").next().unwrap_or(tr);
+        matches!(tr, "Sized" | "Clone" | "Copy" | "Default" | "From" | "Into" | "TryFrom" | "TryInto" | "FromStr" | "FromIterator")
+            || prog.bound_implies(b, &["Sized", "Clone", "Copy", "Default"], false, 0)
+    });
+    let maybe_unsized = param_maybe_unsized;
+    // (E0277, Sized: a type parameter declared `?Sized`, or an unsized type, where only a sized type may be: a struct's
+    // field other than the last, an enum's or a union's field, an argument for a parameter not declared `?Sized`, a
+    // tuple's element other than the last, a slice's or array's element, a free fn's argument or result)
+    let size_msg = |t: Ty, gens: &[String]| {
+        // (a struct unsized by a parameter in its tail is named by that parameter, as rustc does)
+        let t = match t {
+            Ty::Struct(s) => prog.structs[s as usize].args.iter().rev().copied().find(|a| matches!(a, Ty::Param(_))).unwrap_or(t),
+            t => t,
+        };
+        let n = match t {
+            Ty::Param(i) => gens.get(i as usize).cloned().unwrap_or_default(),
+            t => crate::traits::display_ty(prog, t),
+        };
+        format!("the size for values of type `{n}` cannot be known at compilation time (E0277)")
+    };
+    let mut sids: Vec<u32> = (0..prog.structs.len() as u32).filter(|&s| prog.structs[s as usize].base.is_none() && prog.struct_item.get(s as usize).is_some_and(|&ii| user_sm(ii as usize))).collect();
+    sids.sort_by_key(|&s| prog.struct_item[s as usize]);
+    for sid in sids {
+        let sd = &prog.structs[sid as usize];
+        if prog.is_closure(sid) || prog.is_tuple(sid) || sd.placeholder.is_some() {
+            continue;
+        }
+        let ii = prog.struct_item[sid as usize] as usize;
+        let (Some(it), Some(sm)) = (items.get(ii), sums.get(ii)) else { continue };
+        let union = sm.unions.iter().any(|u| *u == sd.name || sd.name.ends_with(&format!("::{u}")));
+        let adt_b = |g: &str| sm.adt_bounds.iter().find(|(p, _)| p == g).map(|(_, b)| b.clone()).unwrap_or_default();
+        let param_may = |t: Ty| matches!(t, Ty::Param(i) if sm.adt_generics.get(i as usize).is_some_and(|g| sm.adt_unsized.contains(g) && !implies_sized(&adt_b(g))));
+        let may = |t: Ty| prog.maybe_unsized_with(t, &param_may);
+        let fields: Vec<&[(String, Ty, u32)]> = if sd.is_enum { sd.variants.iter().map(|v| v.fields.as_slice()).collect() } else { vec![sd.fields.as_slice()] };
+        for (vi, fs) in fields.iter().enumerate() {
+            for (fi, (_, ft, _)) in fs.iter().enumerate() {
+                let bad = if (sd.is_enum || union || fi + 1 < fs.len()) && may(*ft) { Some(*ft) } else { prog.sized_wf_with(*ft, &may, 0) };
+                if let Some(b) = bad {
+                    let text = blank_comments(src.get(it.start..it.end).unwrap_or(""));
+                    let (l, c) = field_pos(&text, sd.is_enum, vi, fi).unwrap_or((0, 0));
+                    return Some(format!("{}:{}: {}", it.line + l, c + 1, size_msg(b, &sm.adt_generics)));
+                }
+            }
+        }
+    }
+    for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
+        // (an impl's self type and trait arguments: `impl Foo for Option<[u8]>`)
+        if let Some(st) = &sm.impl_self_ty {
+            if matches!(items[ii].kind, ItemKind::Normal | ItemKind::ImplHeader) {
+                let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+                let gens: Vec<String> = gn.iter().map(|s| s.to_string()).collect();
+                // (the header's text only where the item writes `?Sized`: most impls do not, and reading every item's
+                // tokens costs the check of a large program)
+                let raw = src.get(items[ii].start..items[ii].end).unwrap_or("");
+                let head = if raw.contains("?Sized") { header_text(&blank_comments(raw)).to_string() } else { String::new() };
+                let param_may = |t: Ty| matches!(t, Ty::Param(i) if gens.get(i as usize).is_some_and(|n| maybe_unsized(&head, n)) && !implies_sized(&sm.impl_generics[i as usize].1));
+                let may = |t: Ty| prog.maybe_unsized_with(t, &param_may);
+                for t in std::iter::once(st).chain(sm.impl_trait_args.iter()) {
+                    let Ok(t) = prog.resolve_g(t, &gn) else { continue };
+                    if let Some(b) = prog.sized_wf_with(t, &may, 0) {
+                        return Some(format!("{}:1: {}", items[ii].line, size_msg(b, &gens)));
+                    }
+                }
+                // (a trait argument that may be unsized for a parameter of the program's trait not declared `?Sized`:
+                // `impl<T: ?Sized> Tr<T> for ()` with `trait Tr<T> {}`)
+                let tr = sm.impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
+                let tr = tr.map(|t| t.rsplit("::").next().unwrap_or(t));
+                if let Some((di, d)) = tr.and_then(|tr| sums[..user.min(sums.len())].iter().enumerate().find(|(_, s)| s.trait_decl.as_deref() == Some(tr))) {
+                    let tparams: Vec<&String> = d.trait_generics.iter().map(|g| &g.0).filter(|g| !g.starts_with('#') && *g != "Self").collect();
+                    // (the arguments written fill the leading parameters: the rest have defaults, `trait Tr<T, U = ()>`)
+                    if sm.impl_trait_args.len() <= tparams.len() {
+                        let dhead = || header_text(&blank_comments(src.get(items[di].start..items[di].end).unwrap_or(""))).to_string();
+                        for (k, a) in sm.impl_trait_args.iter().enumerate() {
+                            let Ok(a) = prog.resolve_g(a, &gn) else { continue };
+                            if may(a) && !maybe_unsized(&dhead(), tparams[k]) {
+                                return Some(format!("{}:1: {}", items[ii].line, size_msg(a, &gens)));
+                            }
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+        if sm.trait_decl.is_some() || !matches!(items[ii].kind, ItemKind::Normal | ItemKind::ImplMember(_)) {
+            continue;
+        }
+        // (a fn's signature, free or of an impl: `fn iceman(c: Vec<[i32]>)`, `fn g1<X: ?Sized>(x: X)`, `-> [u8]`. An
+        // impl's parameters are taken as sized: their `?Sized` is not known here)
+        for (_, sig) in &sm.fns {
+            if sig.trait_of.is_some() || sig.is_extern || !sig.has_body {
+                continue;
+            }
+            let gn: Vec<&str> = sig.generics.iter().map(|g| g.0.as_str()).collect();
+            let gens: Vec<String> = gn.iter().map(|s| s.to_string()).collect();
+            let param_may = |t: Ty| matches!(t, Ty::Param(i) if gens.get(i as usize).is_some_and(|n| sig.own_unsized.contains(n)) && !implies_sized(&sig.generics[i as usize].1));
+            let may = |t: Ty| prog.maybe_unsized_with(t, &param_may);
+            for (k, t) in sig.params.iter().chain([&sig.ret]).enumerate() {
+                let Ok(t) = prog.resolve_g(t, &gn) else { continue };
+                // (a value of the type itself: an argument, or the result)
+                let by_value = may(t) && !(k == sig.params.len() && matches!(t, Ty::Dyn(_)));
+                if let Some(b) = if by_value { Some(t) } else { prog.sized_wf_with(t, &may, 0) } {
+                    // (at the argument's type or the result's, as rustc: a signature may span lines)
+                    let part = if k == sig.params.len() { "r".to_string() } else { format!("p{k}") };
+                    let it = &items[ii];
+                    let at = src.get(it.start..it.end.min(src.len())).and_then(|t| sig_part(t, &part)).map(|o| it.start + o);
+                    let pos = match at {
+                        Some(at) => format!("{}:{}", src[..at].matches('\n').count() + 1, at - src[..at].rfind('\n').map_or(0, |p| p + 1) + 1),
+                        None => format!("{}:1", it.line),
+                    };
+                    return Some(format!("{pos}: {}", size_msg(b, &gens)));
+                }
             }
         }
     }

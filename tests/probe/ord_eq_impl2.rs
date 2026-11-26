@@ -1,4 +1,4 @@
-// 手書きの Ord / Eq (enum・Reverse・タプルと Option の中・配列の ==・境界 T: Eq)
+// Hand-written Ord / Eq (enums, Reverse, inside tuples and Option, == on arrays, bound T: Eq)
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 #[derive(Debug, Clone, Copy)]

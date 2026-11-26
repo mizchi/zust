@@ -147,7 +147,16 @@ impl St<'_> {
 pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
     // (a closing delimiter that does not close the innermost open one is rustc's lexer's error, before any of the
     // parser's: read for only when the split fails)
-    split_items(src).map_err(|e| mismatched_delim(src.as_bytes()).unwrap_or(e))
+    // (rustc 1.100 reports a closing delimiter with none open first, but a mismatched one only after a literal or a
+    // block comment the file ends in: `(1; }` then `/* x` is E0758 at the comment, `"abc` E0765 at the string)
+    split_items(src).map_err(|e| {
+        let b = src.as_bytes();
+        match mismatched_delim(b) {
+            Some(m) if m.contains(": mismatched closing delimiter") => unterminated_literal(b).unwrap_or(m),
+            Some(m) => m,
+            None => e,
+        }
+    })
 }
 
 /// The line (from 1) of b's first merge diff marker, `<<<<<<<` at a line's start outside strings and comments
@@ -283,6 +292,13 @@ fn split_items(src: &str) -> Result<Vec<SrcItem>, String> {
                     }
                 } else {
                     i += 1;
+                }
+            }
+            // (the file ends in it: rustc's E0758 at its start, also after the last item, where no item is left
+            // unsplit to report it. An unterminated literal before it is the error instead, as in rustc's lexer)
+            if d != 0 {
+                if let Some(e) = unterminated_literal(s) {
+                    return Err(e);
                 }
             }
             if s[st0..].starts_with(b"/**") && !s[st0..].starts_with(b"/***") && !s[st0..].starts_with(b"/**/") {
@@ -649,7 +665,10 @@ pub fn unterminated_literal(s: &[u8]) -> Option<String> {
             let (st, mut d) = (i, 0u32);
             loop {
                 if i + 1 >= n {
-                    return at(st, "unterminated block comment (E0758)");
+                    // (`/**` and `/*!` open a doc comment, which rustc names so; `/***` and `/**/` do not)
+                    let t = &s[st..];
+                    let doc = t.starts_with(b"/*!") || (t.starts_with(b"/**") && !t.starts_with(b"/***") && !t.starts_with(b"/**/"));
+                    return at(st, if doc { "unterminated block doc-comment (E0758)" } else { "unterminated block comment (E0758)" });
                 }
                 if s[i] == b'/' && s[i + 1] == b'*' {
                     d += 1;
@@ -1438,13 +1457,22 @@ fn hoist_kws(c: u8) -> &'static [&'static str] {
     }
 }
 
-/// An item keyword right after a brace or a `;` on a line (`f({ fn inner() {} })`): whether hoist_nested_items moves
-/// such an item depends on the rest of the source (its quick check looks for indented items only), so the incremental
-/// preprocessing, which hoists a chunk alone, cannot reuse chunks of a source that has one
+/// An item keyword right after a brace or a `;` on a line (`f({ fn inner() {} })`), which hoist_parts_at's quick
+/// check looks for besides indented ones. A text check: it also answers yes for a comment, a string or a one-line impl
+/// (`impl T for u8 { fn f() {} }`), which only costs the tokenizing that check would skip
 pub fn has_inline_item(src: &str) -> bool {
     // (the keywords hoist_parts_at looks for)
-    src.match_indices(['{', ';', '}']).any(|(i, _)| {
-        let mut t = src[i + 1..].trim_start_matches([' ', '\t']);
+    let b = src.as_bytes();
+    let at = |i: usize| -> bool {
+        // (most of these end a line: a look at the next byte decides them)
+        let mut j = i + 1;
+        while j < b.len() && (b[j] == b' ' || b[j] == b'\t') {
+            j += 1;
+        }
+        if j >= b.len() || !(b[j].is_ascii_lowercase() || b[j] == b'#') {
+            return false;
+        }
+        let mut t = &src[j..];
         // (after attributes on the same line too: `{ #[inline] fn f() {} }`)
         while let Some(rest) = t.strip_prefix("#[") {
             let Some(end) = rest.find(']') else { break };
@@ -1456,7 +1484,18 @@ pub fn has_inline_item(src: &str) -> bool {
             t = rest[end + 1..].trim_start_matches([' ', '\t']);
         }
         t.as_bytes().first().is_some_and(|&c| hoist_kws(c).iter().any(|k| t.starts_with(k)))
-    })
+    };
+    // (each of the three looked for alone: str::find of an ASCII char is a memchr)
+    for c in ['{', ';', '}'] {
+        let mut from = 0;
+        while let Some(k) = src[from..].find(c) {
+            if at(from + k) {
+                return true;
+            }
+            from += k + 1;
+        }
+    }
+    false
 }
 
 /// hoist_nested_items を、(元の場所を空白にした本文 (長さと改行は入力と同じ。名前を変えたときは改行だけ同じ),
@@ -1465,6 +1504,11 @@ pub fn has_inline_item(src: &str) -> bool {
 pub fn hoist_nested_items_parts(src: &str) -> Option<(String, Vec<(usize, String)>)> {
     hoist_parts_at(src, 0)
 }
+
+/// (namespaces of a hoisted item's name, for its renames)
+const HOIST_NS_VALUE: u8 = 0;
+const HOIST_NS_TYPE: u8 = 1;
+const HOIST_NS_BOTH: u8 = 2;
 
 /// Where a moved item's text begins: its first doc comment (`/// ..` / `/** .. */`) between the token before it (lo)
 /// and its first token (from), or that token. Between two tokens there are only whitespace and comments
@@ -1631,6 +1675,42 @@ fn brace_close(s: &[u8], toks: &[(u8, usize, usize)], k: usize) -> usize {
     toks.len().saturating_sub(1)
 }
 
+/// What is left of src's delimiters (`(` / `[` / `{`, by tokens: not those in strings, chars or comments) once those
+/// that match each other are taken away: the closers that close none of its own, in order, then the openers that
+/// none of its own close, in order. None when one closes another kind (`(]`). A text's delimiters match when what is
+/// left of its parts', in order, matches (prep_inc: per chunk, where a chunk can start inside an `impl` block);
+/// hoist_parts_at moves nothing out of a source whose do not
+pub fn delims_left(src: &str) -> Option<Vec<u8>> {
+    let s = src.as_bytes();
+    let mut closers: Vec<u8> = vec![];
+    let mut open: Vec<u8> = vec![];
+    for t in tokenize(s) {
+        if t.0 != 1 {
+            continue;
+        }
+        match s[t.1] {
+            c @ (b'(' | b'[' | b'{') => open.push(c),
+            c @ (b')' | b']' | b'}') => match open.pop() {
+                Some(o) if o == opener_of(c) => {}
+                Some(_) => return None,
+                None => closers.push(c),
+            },
+            _ => {}
+        }
+    }
+    closers.extend(open);
+    Some(closers)
+}
+
+/// The opening delimiter a closing one closes
+pub fn opener_of(c: u8) -> u8 {
+    match c {
+        b')' => b'(',
+        b']' => b'[',
+        _ => b'{',
+    }
+}
+
 /// depth: 名前を変えてやり直した回数 (壊れたソースで名前の変更が止まらないときは 8 回で止める)
 fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)> {
     // (速く飛ばす: 字下げした行頭の `fn ` などがなければ入れ子のアイテムはない)
@@ -1643,7 +1723,14 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     // (a proc macro's output is one line, marked (PM_MARK): the items in its bodies, `{#[link(..)] extern "C" {..}`,
     // are not at a line's start. Looked for only once this process expanded one)
     // (nor an anonymous const a `macro_rules!` expansion wrote on one line, `const _: () = { impl Tr for u8 {..} };`)
-    if !indented && !(PM_EXPANDED.load(std::sync::atomic::Ordering::Relaxed) && src.contains(PM_MARK)) && !src.contains("const _") {
+    // (nor an item after a `{` / `;` / `}` on its line, `fn main() { fn g() {} g() }`: looked for here too, so that
+    // whether it is moved does not depend on the rest of the source having an indented item (prep's incremental path
+    // preprocesses a source of the changed chunks and the others' skeletons))
+    if !indented
+        && !(PM_EXPANDED.load(std::sync::atomic::Ordering::Relaxed) && src.contains(PM_MARK))
+        && !src.contains("const _")
+        && !has_inline_item(src)
+    {
         return None;
     }
     let s = src.as_bytes();
@@ -1653,6 +1740,8 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     let is_sym = |k: usize, c: &[u8]| toks[k].0 == 1 && s[toks[k].1] == c[0];
     // 各位置の波括弧の深さと、関数の本体の深さのスタック
     let mut depth = 0i32;
+    // (a `}` with no `{` to close)
+    let mut unbalanced = false;
     let mut fn_bodies: Vec<(i32, usize)> = vec![];
     let mut pending_fn = false;
     // (the bodies of `const _: () = { .. };`, what derives and `#[wasm_bindgen]` wrap impls in: their items but their
@@ -1666,7 +1755,9 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     let mut nest = 0i32;
     let mut moves: Vec<(usize, usize)> = vec![];
     // 入れ子のアイテムの名前と、それを含む関数の本体 (開き括弧のトークン位置)。閉じた本体の (開き, 閉じ)
-    let mut nested_names: Vec<(Vec<u8>, usize)> = vec![];
+    // (and its namespace: HOIST_NS_VALUE (fn / static / const), HOIST_NS_TYPE (a braced struct, enum, trait, ..), or HOIST_NS_BOTH (a
+    // tuple or unit struct, and the rest))
+    let mut nested_names: Vec<(Vec<u8>, usize, u8)> = vec![];
     let mut bodies: Vec<(usize, usize)> = vec![];
     // (an item's scope is its innermost block, `{ struct Bar; } { struct Bar; }` two: the `{` before its statement,
     // found back from it, as items in bodies are few)
@@ -1905,14 +1996,46 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 moves.push((from, toks[e].2));
                 let nk = if matches!(t, b"static") && tok(ik + 1) == b"mut" { ik + 2 } else { ik + 1 };
                 if nk < toks.len() && toks[nk].0 == 0 && t != b"use" && t != b"impl" && !extern_block {
-                    nested_names.push((tok(nk).to_vec(), block_of(k)));
+                    let ns = match t {
+                        b"fn" | b"static" | b"const" => HOIST_NS_VALUE,
+                        b"enum" | b"union" | b"trait" | b"type" | b"mod" => HOIST_NS_TYPE,
+                        // (`struct S { .. }` names a type only; `struct S(..);` / `struct S;` a constructor too. The
+                        // first `{` / `(` / `;` past its generics tells)
+                        b"struct" => {
+                            let mut d = 0i32;
+                            let mut ns = HOIST_NS_BOTH;
+                            // (a `(` in a `where` clause, `where F: Fn(u8) {`, is a bound's, not a tuple struct's)
+                            let mut in_where = false;
+                            for q in nk + 1..e.min(toks.len()) {
+                                if toks[q].0 != 1 {
+                                    in_where |= d <= 0 && tok(q) == b"where";
+                                    continue;
+                                }
+                                match tok(q) {
+                                    b"<" => d += 1,
+                                    // (not the `>` of `->`, `F: Fn() -> ()`)
+                                    b">" if !(q >= 1 && toks[q - 1].0 == 1 && tok(q - 1) == b"-") => d -= 1,
+                                    b"{" if d <= 0 => {
+                                        ns = HOIST_NS_TYPE;
+                                        break;
+                                    }
+                                    b"(" if d <= 0 && !in_where => break,
+                                    b";" if d <= 0 => break,
+                                    _ => {}
+                                }
+                            }
+                            ns
+                        }
+                        _ => HOIST_NS_BOTH,
+                    };
+                    nested_names.push((tok(nk).to_vec(), block_of(k), ns));
                 }
                 // (an extern block's functions: names of the block's function, renamed like its other items when
                 // another function's block declares the name too; the declaration then keeps its symbol, link_name)
                 if extern_block {
                     for q in ik + 1..e {
                         if toks[q].0 == 0 && tok(q) == b"fn" && q + 1 < e && toks[q + 1].0 == 0 {
-                            nested_names.push((tok(q + 1).to_vec(), block_of(k)));
+                            nested_names.push((tok(q + 1).to_vec(), block_of(k), HOIST_NS_VALUE));
                         }
                     }
                 }
@@ -1959,6 +2082,9 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 }
                 b"}" => {
                     depth -= 1;
+                    if depth < 0 {
+                        unbalanced = true;
+                    }
                     if fn_bodies.last().is_some_and(|&(d, _)| d == depth) {
                         let (_, open) = fn_bodies.pop().unwrap();
                         if anons.last().is_some_and(|a| a.0 == open) {
@@ -1981,14 +2107,22 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
         }
         k += 1;
     }
+    // (nor a source whose braces do not match, `fn f() { fn g() {} pub f<`: the lexer reports where, at a line of the
+    // source's own, which an item moved past its last line would move the error away from (#188); and the renames of
+    // such a source's items, thousands of `fn`s in one unclosed body, could take seconds. prep_inc, which matches
+    // the parens and brackets too, never reuses chunks of such a source)
+    if unbalanced || depth != 0 {
+        return None;
+    }
     if moves.is_empty() {
         return None;
     }
     // (別々の関数の中の同じ名前のアイテム (`static TABLE`) は、外に出すとぶつかるので、
     //  その関数の本体の中でだけ `TABLE__h1` などに名前を変えてからやり直す)
     let mut renames: Vec<(usize, usize, Vec<u8>, Vec<u8>)> = vec![];
-    for (i, (n, b)) in nested_names.iter().enumerate() {
-        let dup = nested_names.iter().enumerate().any(|(j, (m, c))| j != i && m == n && c != b) || top_names.contains(n);
+    let mut rename_ns: Vec<u8> = vec![];
+    for (i, (n, b, ns)) in nested_names.iter().enumerate() {
+        let dup = nested_names.iter().enumerate().any(|(j, (m, c, _))| j != i && m == n && c != b) || top_names.contains(n);
         if !dup {
             continue;
         }
@@ -2015,10 +2149,81 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
             let mut nn = n.clone();
             nn.extend_from_slice(format!("__h{i}").as_bytes());
             renames.push((open, close, n.clone(), nn));
+            rename_ns.push(*ns);
         }
     }
     if !renames.is_empty() {
         // (名前を変えるトークン: その関数の本体の中だけを見る。外側の本体が先に来るので、内側のものが後で上書きする)
+        // (a local binding of a renamed name, `let m = || 7;`: it and its uses, from the end of its statement to the
+        // end of its block, are the local's and keep the name. Its initializer still sees the item)
+        let mut local_toks = vec![false; toks.len()];
+        for k in 0..toks.len() {
+            if !(toks[k].0 == 0 && tok(k) == b"let") {
+                continue;
+            }
+            let nk = if k + 1 < toks.len() && tok(k + 1) == b"mut" { k + 2 } else { k + 1 };
+            if nk >= toks.len() || toks[nk].0 != 0 || !renames.iter().any(|r| r.2.as_slice() == tok(nk)) {
+                continue;
+            }
+            local_toks[nk] = true;
+            // (the statement's `;`, then the block's `}`)
+            let mut d = 0i32;
+            let mut j = nk + 1;
+            while j < toks.len() {
+                if toks[j].0 == 1 {
+                    match tok(j) {
+                        b"(" | b"[" | b"{" => d += 1,
+                        b")" | b"]" | b"}" => {
+                            if d == 0 {
+                                break;
+                            }
+                            d -= 1;
+                        }
+                        b";" if d == 0 => break,
+                        _ => {}
+                    }
+                }
+                j += 1;
+            }
+            if j >= toks.len() || tok(j) != b";" {
+                continue;
+            }
+            let mut d = 0i32;
+            let mut q = j + 1;
+            while q < toks.len() {
+                if toks[q].0 == 1 {
+                    match tok(q) {
+                        // (a block in it that declares a value of the name, `{ fn n() .. n() }`: the item there. A
+                        // braced struct shadows no value)
+                        b"{" if nested_names.iter().any(|(nm, b, ns)| *b == q && *ns != HOIST_NS_TYPE && nm.as_slice() == tok(nk)) => {
+                            let mut e = 0i32;
+                            while q < toks.len() {
+                                if toks[q].0 == 1 && tok(q) == b"{" {
+                                    e += 1;
+                                } else if toks[q].0 == 1 && tok(q) == b"}" {
+                                    e -= 1;
+                                    if e == 0 {
+                                        break;
+                                    }
+                                }
+                                q += 1;
+                            }
+                        }
+                        b"{" => d += 1,
+                        b"}" => {
+                            if d == 0 {
+                                break;
+                            }
+                            d -= 1;
+                        }
+                        _ => {}
+                    }
+                } else if toks[q].0 == 0 && tok(q) == tok(nk) {
+                    local_toks[q] = true;
+                }
+                q += 1;
+            }
+        }
         let mut at: Vec<(usize, usize)> = vec![]; // (トークン, renames の番号)
         for (ri, r) in renames.iter().enumerate() {
             let mut k = r.0 + 1;
@@ -2029,8 +2234,92 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 k += 1;
             }
         }
-        // (同じトークンに複数あれば、元の順で最初のもの (renames.iter().find と同じ))
-        at.sort();
+        // (同じトークンに複数あれば、その位置を囲むいちばん内側の block のもの: Rust の名前の見え方と同じ。
+        //  `fn m` in a fn's body beside another `fn m` in a block of it: the block's tokens take the block's name, or the
+        //  two would be renamed alike on each redo)
+        // (in the namespace the token is in, where its neighbours tell: `m(` / `fn m` a value, `m::` / `struct m` /
+        // `-> m` a type. `fn m` beside `{ struct m {} m() }`: the call takes the fn's name, not the struct's)
+        let tok_ns = |k: usize| -> u8 {
+            let prev = if k >= 1 { tok(k - 1) } else { b"" };
+            let next = if k + 1 < toks.len() { tok(k + 1) } else { b"" };
+            // (a turbofish, `m::<u8>`: a call after it, `m::<u8>()`, is a fn's; a path on, `m::<u8>::mk()`, a type's)
+            let turbofish = k + 3 < toks.len() && next == b":" && tok(k + 2) == b":" && tok(k + 3) == b"<";
+            let after_turbofish = || -> &[u8] {
+                let mut d = 0i32;
+                for q in k + 3..toks.len() {
+                    if toks[q].0 != 1 {
+                        continue;
+                    }
+                    match tok(q) {
+                        b"<" => d += 1,
+                        b">" if !(toks[q - 1].0 == 1 && tok(q - 1) == b"-") => {
+                            d -= 1;
+                            if d == 0 {
+                                return if q + 1 < toks.len() { tok(q + 1) } else { b"" };
+                            }
+                        }
+                        b";" | b"{" | b"}" => break,
+                        _ => {}
+                    }
+                }
+                b""
+            };
+            if matches!(prev, b"fn" | b"static" | b"const") {
+                HOIST_NS_VALUE
+            } else if turbofish {
+                match after_turbofish() {
+                    b"(" => HOIST_NS_VALUE,
+                    b":" => HOIST_NS_TYPE,
+                    _ => HOIST_NS_BOTH,
+                }
+            } else if matches!(prev, b"struct" | b"enum" | b"union" | b"trait" | b"type" | b"mod" | b"impl" | b"dyn")
+                // (`m<T>`, generic arguments: a fn's name is not compared)
+                || next == b"<"
+                // (`-> m` and `m::`: a symbol is a token of one byte)
+                || (k >= 2 && prev == b">" && tok(k - 2) == b"-")
+                || (k + 2 < toks.len() && next == b":" && tok(k + 2) == b":")
+            {
+                HOIST_NS_TYPE
+            } else if prev == b":"
+                && !(k >= 2 && tok(k - 2) == b":")
+                && next != b":"
+                && (matches!(next, b"=" | b";" | b")") || (k >= 3 && matches!(tok(k - 3), b"let" | b"mut" | b"(" | b"|")))
+            {
+                // (an annotation, `let a: m = ..` / `let mut a: m;` / `fn h(x: m)`: not a struct literal's field,
+                // `S { f: m, .. }`, which none of these tells)
+                HOIST_NS_TYPE
+            } else if next == b"(" {
+                HOIST_NS_VALUE
+            } else if next == b"{"
+                && (matches!(prev, b"(" | b"," | b"{" | b";" | b"}" | b"return")
+                    || prev == b"=" && !(k >= 2 && toks[k - 2].0 == 1 && b"=!<>+-*/%&|^".contains(&s[toks[k - 2].1]))
+                    || prev == b">" && k >= 2 && tok(k - 2) == b"=")
+            {
+                // (a struct literal, `let a = m { .. }` / `{ m { .. } }` / `=> m { .. }`: not `x == m {` or
+                // `if m {`, where `{` opens a block)
+                HOIST_NS_TYPE
+            } else {
+                HOIST_NS_BOTH
+            }
+        };
+        let fits = |k: usize, ri: usize| {
+            let (a, b) = (tok_ns(k), rename_ns[ri]);
+            a == HOIST_NS_BOTH || b == HOIST_NS_BOTH || a == b
+        };
+        // (a local's tokens keep the name, but for a type's use, `let _: n = n {};`: a `let` shadows no type. Not
+        // `n <`, which is a comparison of the local, `if n < 3`, unless an annotation's, `x: n<u8>`)
+        at.retain(|&(k, _)| {
+            !local_toks[k] || (tok_ns(k) == HOIST_NS_TYPE && !(k + 1 < toks.len() && tok(k + 1) == b"<" && !(k >= 1 && tok(k - 1) == b":")))
+        });
+        // (a candidate of the other namespace stays only where none fits)
+        let mut has_fit = vec![false; toks.len()];
+        for &(k, ri) in &at {
+            if fits(k, ri) {
+                has_fit[k] = true;
+            }
+        }
+        at.retain(|&(k, ri)| fits(k, ri) || !has_fit[k]);
+        at.sort_by(|x, y| x.0.cmp(&y.0).then(renames[y.1].0.cmp(&renames[x.1].0)));
         at.dedup_by_key(|x| x.0);
         // (a foreign function's declaration, `fn abs(x: i32) -> i32;` with no body, renamed: it keeps its symbol, a
         // `#[link_name = "abs"]` before it unless it has one)
@@ -2125,7 +2414,8 @@ pub fn expand_thread_local(src: &str) -> Option<String> {
     let s = src.as_bytes();
     let toks = tokenize(s);
     let is_sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && s[toks[k].1] == c && toks[k].2 == toks[k].1 + 1;
-    let text = |a: usize, b: usize| -> String { String::from_utf8_lossy(&s[toks[a].1..toks[b - 1].2]).into_owned() };
+    // (the tokens a..b; none when b <= a: `thread_local! { static X: ]` has no type before its end)
+    let text = |a: usize, b: usize| -> String { if b <= a { String::new() } else { String::from_utf8_lossy(&s[toks[a].1..toks[b - 1].2]).into_owned() } };
     let mut out = String::new();
     let mut last = 0;
     let mut k = 0;

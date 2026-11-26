@@ -49,6 +49,10 @@ obligations, dyn coercions and auto traits (reports: [part 1](docs/reports/2026-
   (`-> Option<impl Tr>`) is not checked against its bounds; projections by a name std also defines (`T::Item`) and
   generic associated types are not normalized by the solver; type inference still uses `Program::assoc_of`.
 - E0119 against std's impls (`impl<S> Into<S> for GenX<S>`): std's impls are not clauses.
+- `Sized` ([report](docs/reports/2026-11-25-09-sized.md)): the prelude declares no `?Sized`, so only `Vec`, `Option`,
+  `Result` and the collections are checked of std's types (`ManuallyDrop<T>` of a `T: ?Sized` is not unsized); an
+  impl's own `?Sized` parameters are taken as sized at its methods' calls; an associated type's value is not checked
+  against the trait's implicit `Sized`.
 - Lifetimes in impl heads (fn pointers, higher-ranked bounds) need lifetimes in `Ty`.
 - Type inference through a projection whose definition depends on the trait's arguments, in generic code
   (unsized/issue-40231-*.rs).
@@ -130,6 +134,12 @@ rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
   items are not supported". Nested items written in a body are hoisted; those of an expression macro's expansion are
   not. Also `is_x86_feature_detected!` is `true` only for sse / sse2 (no detection at run time), and the vector types
   `__m128` / `__m128i` / `__m128d` / `v128` are one type, so impls of a trait for two of them conflict.
+- Hoisting renames a nested item that another block or the top level also names (`crates/syntax/src/lexer.rs`,
+  `hoist_parts_at`). Where a fn and a type of one name are both renamed, a use takes the innermost rename of the
+  namespace its neighbouring tokens tell (`m(`, `m::<u8>(`, `fn m` a value; `m::`, `m<`, `-> m`, `impl m`,
+  `let a: m`, `(x: m`, `|x: m|`, a struct literal a type). A struct literal's field value (`S { f: m, .. }`) and a
+  middle parameter (`fn h(a: u8, x: m, b: u8)`) look alike to it and take the innermost rename of either namespace,
+  which may be the wrong one. Resolving the names on the parsed AST would settle these.
 - Incremental preprocessing (`prep` with a `PrepMemo`) can differ from `prep_full` on unbalanced input: an item in a
   brace that an edit leaves open (`println!("{}", std::mem::size_o{ fn inner() {} }` inside `fn main`) is hoisted to
   the top level by the full pass but left in place by the chunked one. Found by `tests/prep_inc.rs` when
@@ -279,8 +289,33 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
 - Serialized const arguments drop a local's type annotation (`{ let x: u8 = !0; ... }` in `Buf<{ .. }>`), and a const
   fn's return type through an alias (`type Id<T> = T; const fn f() -> Id<u8>`) is not applied.
 
+## zurgo test against cargo test (cratebench)
+
+`cratebench/test.py` runs each cratebench crate's own tests under `cargo test` and `zurgo test`, and compares them
+test by test (`cratebench/test_result.md`). fnv, rustc-hash, cfg-if and adler2 match, and CI keeps them so
+(`--check`). Tracking issue for the rest: #200.
+
+- either does not build under zurgo yet. The first error is `conflicting implementations of trait AsMut`: a blanket
+  `impl<Target> AsMut<Target>` beside impls for unsized types, which rustc accepts because `Target` is `Sized`. Then
+  serde_core, through the dev-dependency serde_json: #197, #198, and std types the prelude lacks (`CString` /
+  `CStr`, net addresses, `SystemTime`, `LinkedList`, `RwLock`, `Weak`, `Bound`).
+- hex and itoa: their dev-dependency criterion needs two versions of one crate (#28). The error message names
+  `itoa v1.0.19` twice (#178).
+- Smaller gaps found on the way: inherent impls on instances of one type (associated fns, implicit `Sized`: #201),
+  an integer literal's type from a later use (#202), a Cursor seek past `i64::MAX` (#203), `Read` / `BufRead`
+  through `&mut &[u8]` (#173), and items the hoister misses (#198).
+
 ## Tooling
 
 - `tests/selfhost_compiler.sh` fails on main: rustc does not build the combined source
   (`tests/selfhost/build_compiler.py`), with 6 errors E0277 "can't compare `Ident` with `&str`" (e.g.
   `*i == *l.as_str()`).
+- `bench/rust_ui.py --check` checks nothing without `--baseline`: it exits 0 whatever passes. CI runs
+  `python3 bench/rust_ui.py --baseline bench/rust_ui_passing.txt --check`, which compares test by test and against
+  `bench/rust_ui_ratchet.txt`; run that locally before pushing a change to the compiler.
+- `tests/parse.rs` (`parses_like_syn`) compares zust's parse of the repository's own sources with syn's. zust counts a
+  destructuring assignment (`(a, b) = (c, d);`) as a `let`, so writing one in zust's sources fails the test; assign
+  the parts one by one, through temporaries when a part reads another (`let t = b; b = a; a = t;` for
+  `(a, b) = (b, a)`).
+- `scripts/docs_check.sh --update` may leave the pair `docs/language.md` / `docs/ja/language.md` unjudged
+  (`excerpt-budget`), and then fails with 3: the pair is large. A change there may need to be made smaller.

@@ -1,4 +1,4 @@
-// enum と match のサンプル (rustc でもそのままコンパイルできる)
+// A sample of enum and match (rustc can compile it as is too)
 unsafe extern "C" {
     fn putchar(c: i32) -> i32;
 }
@@ -42,7 +42,7 @@ enum Shape {
 
 impl Shape {
     fn area(&self) -> i64 {
-        // &self を match すると束縛は参照になる (デフォルト束縛モード)
+        // Matching on &self makes the bindings references (default binding modes)
         match self {
             Shape::Circle(r) => 3 * *r * *r,
             Shape::Rect { w, h } => *w * *h,
@@ -156,7 +156,7 @@ fn main() {
     let mut r2 = r;
     r2.scale(2);
     println_i64(r2.area()); // 48
-    println_i64(r.area()); // 12 (コピー)
+    println_i64(r.area()); // 12 (a copy)
     let mut p2 = p;
     p2.scale(10);
     println_i64(p2.area()); // (40-10)*(6-2) = 120

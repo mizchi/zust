@@ -1,6 +1,6 @@
-//! 差分の split (front::split_inc) が、毎回全体を split したものと同じになるか。
-//! 実際のソース (crates/{syntax,sema,core}/src/*.rs と examples/*.rs) に、乱数で編集 (文字の挿入・削除、引用符やコメントの開き、
-//! 関数の追加・削除) を続けて加え、各段で比べる
+//! Whether the incremental split (front::split_inc) is the same as splitting the whole every time.
+//! To real sources (crates/{syntax,sema,core}/src/*.rs and examples/*.rs), keeps applying random edits (inserting / deleting characters, opening quotes or comments,
+//! adding / removing fns), comparing at each step
 
 use zustc::front::split_inc;
 use zustc::lexer::{self, SrcItem};
@@ -40,12 +40,12 @@ fn edit(s: &str, r: &mut Rng) -> String {
         "impl S { fn m(&self) {} }\n", "r#\"", "b'x'", "'a", "\n#[derive(Clone)]\nstruct Q;\n",
     ];
     match r.below(3) {
-        // 挿入
+        // Insertion
         0 | 1 => {
             let t = snippets[r.below(snippets.len())];
             format!("{}{}{}", &s[..at], t, &s[at..])
         }
-        // 削除
+        // Deletion
         _ => {
             let end = char_floor(s, (at + 1 + r.below(40)).min(s.len()));
             let end = end.max(at);
@@ -88,13 +88,13 @@ fn split_inc_matches_full_split() {
                     checked += 1;
                 }
                 (Err(_), Err(_)) => {
-                    // (split できない編集は戻す: 正しいソースへの編集を多く試す)
+                    // (an edit that cannot be split is undone: try many edits to valid sources)
                     errs += 1;
                     cur = prev.clone();
                 }
                 (f, i) => panic!("ok / err differ after {step} edits: full {:?} inc {:?}", f.map(|v| v.len()), i.map(|v| v.len())),
             }
-            // (失敗したら memo は前の成功のまま: 次の編集はそこからの差分)
+            // (on a failure, memo stays at the previous success: the next edit is a diff from there)
             prev = cur.clone();
             cur = edit(&cur, &mut r);
         }

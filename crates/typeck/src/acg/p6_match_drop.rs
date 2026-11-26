@@ -1833,6 +1833,30 @@ impl Cx<'_> {
                         return Err(self.ref_mut_through_shared());
                     }
                     let (es, _) = self.prog.size_align(elem);
+                    // (`mut rest @ ..` of an array where the default binding mode is by reference: by value again before
+                    // edition 2024, as an identifier's binding is: the elements between, copied into an array of
+                    // their own (`let [mut b @ ..] = &[1u8];` makes b a `[u8; 1]`). Of `Copy` elements: others would
+                    // move out of the reference)
+                    let arr_n = match p.ty() {
+                        Ty::Array(_, n) => Some(n as usize),
+                        Ty::Ref(_, Ty::Array(_, n)) => Some(*n as usize),
+                        _ => None,
+                    };
+                    if let (false, true, BindMode::Ref(_), true, Some(n)) = (*by_ref, *mutable, mode, self.prog.edition < 2024, arr_n) {
+                        if borrowck::is_copy(self.prog, elem, 0) && !holds_mut_ref(self.prog, elem, 0) && pre.len() + post.len() <= n {
+                            let k = n - pre.len() - post.len();
+                            let at = Ty::Array(intern(elem), k as _);
+                            let start = self.b.ins().iadd_imm_s(base, pre.len() as i64 * es as i64);
+                            let tmp = self.temp(at);
+                            self.copy(tmp, start, at);
+                            if let Some(top) = self.at_binds.last_mut() {
+                                top.push((AtBind::Copy, rname.clone()));
+                            }
+                            self.bk.mut_next = Some(true);
+                            self.bind(rname.clone(), at, Some(tmp));
+                            return Ok(());
+                        }
+                    }
                     let start = self.b.ins().iadd_imm_s(base, pre.len() as i64 * es as i64);
                     let len_v = self.b.ins().iadd_imm_s(len, -((pre.len() + post.len()) as i64));
                     let fat = self.make_fat_v(start, len_v);

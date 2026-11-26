@@ -1,4 +1,4 @@
-// 組み込みっぽい no_std プログラム: リングバッファ・状態機械・trait とジェネリクス・volatile
+// An embedded-style no_std program: ring buffer, state machine, traits and generics, volatile
 #![no_std]
 #![no_main]
 

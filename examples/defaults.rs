@@ -1,5 +1,5 @@
-// Default のサンプル: #[derive(Default)]、手書きの impl Default、Default::default() / T::default() / i32::default() /
-// Vec::default()、構造体の更新記法 `..Default::default()` / `..base`、unwrap_or_default、std::mem::take / swap / replace
+// A Default sample: #[derive(Default)], a hand-written impl Default, Default::default() / T::default() / i32::default() /
+// Vec::default(), the struct update syntax `..Default::default()` / `..base`, unwrap_or_default, std::mem::take / swap / replace
 use std::collections::HashMap;
 
 #[derive(Debug, Default, Clone, PartialEq)]

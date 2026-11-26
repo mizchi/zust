@@ -1,6 +1,6 @@
-//! メモリ上の表 (名前 → ID など) 用の速いハッシュ (rustc の FxHasher と同じ方式)。
-//! 毎ビルド全識別子を引くので、std の SipHash では目に見えて遅い。
-//! キャッシュのキー (衝突してはいけない) には使わない。
+//! A fast hash for in-memory tables (name → ID, etc.) (the same scheme as rustc's FxHasher).
+//! Every build looks up all identifiers, so std's SipHash is visibly slow.
+//! Not used for cache keys (which must not collide).
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};

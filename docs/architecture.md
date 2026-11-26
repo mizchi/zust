@@ -11,14 +11,14 @@ share. The LSP uses core without the feature `build`, and does not depend on the
 | `crates/syntax` (`zust-syntax`) | front (the flow preprocessing → splitting into items (diff) → attaching the prelude, plus FrontMemo, the memory kept across edits) / lexer / parse (own syntax tree) / cfg / macros / ctors / prep (preprocessing diff) / srcmap / stub / types (item summary types), types_enc / enc (serialization) / ast_types / ast_closure / ast_summary (item summaries) / prelude (selection and prelude_lib.rs.in, build.rs) | base, proc-macro2 |
 | `crates/sema` (`zust-sema`) | program (tables of names, types, traits and impls; instances) / solver / ast_infer (type inference) / ast_consteval | syntax |
 | `crates/ir` (`zust-ir`) | Types for the instruction sequence (Type / Value / Block / Op …), and Recorder, which only records instructions (it remembers the types of values) | none |
-| `crates/typeck` (`zust-typeck`) | acg (records the syntax tree as an instruction sequence; type checking errors come out here) / cache2 (Blob serialization) | sema, ir, proc-macro2 |
+| `crates/typeck` (`zust-typeck`) | acg (records the syntax tree as an instruction sequence; type checking errors come out here) / build_cache (Blob serialization) | sema, ir, proc-macro2 |
 | `crates/codegen` (`zust-codegen`) | lower (rebuilds the record into minclif and turns it into machine code; for Cranelift it passes it to zust-clif) / link | typeck, minclif |
-| `crates/core` (`zust-core`) | driver2 (Session2: analysis, check, cache), and, with the feature `build` (default), driver2/build.rs (machine code, fork parallelization, objects, linking, workspaces). Re-exports the lower layers | typeck, (with build) codegen |
+| `crates/core` (`zust-core`) | session (`Session`: analysis, check, cache), and, with the feature `build` (default), session/build.rs (machine code, fork parallelization, objects, linking, workspaces). Re-exports the lower layers | typeck, (with build) codegen |
 | `crates/ide` (`zust-ide`) | Analysis for editors: symbols (symbols for documentSymbol / workspace/symbol) / navigate (definition, references, hover, completion; light type estimation from the token sequence and the definition table). Not used by the compiler itself | syntax |
-| `crates/analyzer` (`zust-analyzer`) | LSP server (binary `zust-analyzer`). Diagnostics come from driver2's check; everything else from ide. Workspace file contents are kept up to a memory limit | core (without build), ide, serde_json |
+| `crates/analyzer` (`zust-analyzer`) | LSP server (binary `zust-analyzer`). Diagnostics come from the session's check; everything else from ide. Workspace file contents are kept up to a memory limit | core (without build), ide, serde_json |
 | `crates/zurgo` (`zurgo`) | A Cargo-compatible driver (binary `zurgo`, [zurgo.md](zurgo.md)): its own TOML parser, Cargo.toml / Cargo.lock, the sources (members, paths, `$CARGO_HOME/registry/src`, the index cache), feature activation as cargo does it (the feature resolver for builds, the dependency resolver for `metadata`), and a zustc workspace (`CrateSpec`) built in process | `zustc` (the root crate) |
 | `crates/minclif` | A small x86-64 backend with a Cranelift-like API (register allocation, turning fields of stack structs into variables, ELF .o). `from_recording` rebuilds a record | ir |
-| `crates/clif` (`zust-clif`) | The Cranelift backend of driver2: turns the instruction sequence that minclif built into Cranelift IR and compiles it | minclif, cranelift |
+| `crates/clif` (`zust-clif`) | The Cranelift backend of the session: turns the instruction sequence that minclif built into Cranelift IR and compiles it | minclif, cranelift |
 | `.` (`zustc`) | The CLI, and re-exports of the above (for tests and benches). Does not depend on ide or lsp (only the bench lsp/* uses them, as dev-dependencies) | the above (except ide and lsp) |
 
 Each crate's lib.rs re-exports the modules of the lower layers (`pub use zust_syntax::*;` and so on). Inside files, paths are written like
@@ -29,13 +29,14 @@ the same way minclif decides them). check stops there. A build has codegen's low
 then turn it into machine code (minclif creates values and slots inside instructions, so the rebuilding side renumbers them.
 `ZUSTC_IR_VERIFY=1` checks that the value types match the record). The output machine code is byte-for-byte the same as before the split.
 
-The only path is **driver2** (`zustc x.rs` uses Cranelift; `--backend=minclif` uses minclif). build, check and the LSP all use driver2.
+There is one path, the **session** (`crates/core/src/session.rs`; `zustc x.rs` uses Cranelift, `--backend=minclif` uses minclif). build, check and the LSP all use it.
+Until 2026-11-25 it was called driver2, as the second driver; the reports written before then use that name.
 The first driver (syn + Cranelift, `crates/legacy`) was deleted on 2026-11-16 (it is in the git history).
 Self-hosting (tests/selfhost*.sh) combines the sources of base / syntax / sema / ir / typeck / codegen / core and minclif into one file and compiles it with zustc.
 
-## Processing flow (driver2)
+## Processing flow (the session)
 
-The current main path (driver2):
+The current main path (the session):
 
 ```
 src.rs ──srcmap (mod x; files)──▶ macros (macro_rules!) ──▶ flatten modules ──▶ lexer: items + hashes
@@ -52,11 +53,11 @@ src.rs ──srcmap (mod x; files)──▶ macros (macro_rules!) ──▶ flat
 | `crates/syntax/src/parse.rs` / `ast_*.rs` | Own syntax tree, item summaries, type inference, closure analysis, constant evaluation |
 | `crates/sema/src/program.rs` | Whole-program tables (signatures, layouts, trait implementations, instances) |
 | `crates/typeck/src/acg/` | One-pass lowering from the syntax tree to the instruction sequence (zust_ir::Recorder), and type checking. -O inlines small functions |
-| `crates/core/src/driver2.rs` / `cache2.rs` | `Session2`: cache (disk + memory), build / check / workspaces, fork parallelization, writing .o |
+| `crates/core/src/session.rs` / `build_cache.rs` | `Session`: cache (disk + memory), build / check / workspaces, fork parallelization, writing .o |
 | `crates/codegen/src/link.rs` | Extracts the link line from `cc -###`, saves it, and starts the linker directly |
 | `crates/minclif` | Instruction recording, register allocation, x86-64 machine code, ELF .o |
 | `crates/clif` | Recorded instruction sequence → Cranelift IR → machine code |
-| `crates/analyzer/src/lib.rs` | LSP server (holds one `Session2` per document and returns diagnostics from `check`; index of the workspace and std) |
+| `crates/analyzer/src/lib.rs` | LSP server (holds one `Session` per document and returns diagnostics from `check`; index of the workspace and std) |
 | `crates/ide/src/navigate.rs` / `symbols.rs` | Name resolution for definition, references, hover and completion; symbol lists |
 | `src/main.rs` | CLI (build / check / workspace build) |
 

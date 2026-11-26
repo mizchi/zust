@@ -1,5 +1,5 @@
-"""zustc 自身の crates/syntax/src/enc.rs と crates/base/src/fxhash.rs を 1 ファイルのプログラムにまとめる。
-main は enc_struct! で符号化できる struct を作って符号化・復号し、バイト列と結果を出す。FxHasher のハッシュも出す。"""
+"""Puts zustc's own crates/syntax/src/enc.rs and crates/base/src/fxhash.rs together into a program of 1 file.
+main makes a struct that enc_struct! can encode, encodes and decodes it, and prints the bytes and the result. It also prints FxHasher's hash."""
 enc = open("crates/syntax/src/enc.rs").read()
 fx = open("crates/base/src/fxhash.rs").read()
 print("""// 自動生成: tests/selfhost/build_enc.py (zustc の crates/syntax/src/enc.rs と crates/base/src/fxhash.rs をそのまま含む)

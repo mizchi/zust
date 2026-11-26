@@ -115,6 +115,7 @@ figcaption { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
 .table th, .table td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
 .table th { color: var(--muted); font-weight: 500; }
 .table .l { text-align: left; } .table td.wrap { white-space: normal; min-width: 240px; }
+.table tr.total td { font-weight: 600; }
 .fold summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .fold ul { color: var(--muted); font-size: 13px; max-width: 90ch; padding-left: 1.2em; }
 .foot { color: var(--muted); font-size: 12px; padding-block: 0 32px; }

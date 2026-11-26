@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# rustc で同じワークスペースを作る (比較用)
+# Builds the same workspace with rustc (for comparison)
 set -e
 cd "$(dirname "$0")"
 OUT=$1

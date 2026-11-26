@@ -1,6 +1,6 @@
-// クロージャのキャプチャ: 値として渡す変数と代入する変数が混ざるとき (FnMut)、
-// キャプチャした `&Vec<T>` を `&[T]` の引数に渡す、`&mut dyn FnMut` を受け渡して中で代入する、
-// matches! の guard の中のキャプチャ
+// Closure captures: when variables passed by value and variables assigned to are mixed (FnMut),
+// passing a captured `&Vec<T>` to a `&[T]` parameter, passing around a `&mut dyn FnMut` and assigning inside it,
+// captures inside a matches! guard
 fn cnt(caps: &[String]) -> usize { caps.len() }
 fn each(v: &[i32], f: &mut dyn FnMut(&i32)) { for x in v { f(x); } }
 fn twice(v: &[i32], f: &mut dyn FnMut(&i32)) { each(v, f); each(v, f); }

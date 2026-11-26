@@ -1,4 +1,4 @@
-// Rc / RefCell / Cell と、Vec や Rc を通した再帰型
+// Rc / RefCell / Cell, and recursive types through Vec and Rc
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;

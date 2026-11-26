@@ -725,16 +725,6 @@ impl Cx<'_> {
                 }
             }
         }
-        // `o.flatten()` (Option<Option<T>>): `o.unwrap_or(None)`
-        if method == "flatten" && margs.is_empty() {
-            if let Some(Ty::Struct(sid)) = self.peek(recv) {
-                let opt = |this: &Self, s: u32| this.prog.structs[this.prog.base_of(s) as usize].name == "Option";
-                if opt(self, sid) && matches!(self.prog.structs[sid as usize].args.first(), Some(Ty::Struct(i)) if opt(self, *i)) {
-                    let e = mcall(paren(recv.clone()), "unwrap_or", vec![path_expr("None")]);
-                    return self.expr(&e, expected);
-                }
-            }
-        }
         // `it.flatten()` (要素が &Vec<T> / &[T] / &[T; N]): `it.flat_map(|x| x.iter())`
         if method == "flatten" && margs.is_empty() {
             let item = self.peek(recv).filter(|&t| !self.prog.has_param(t)).and_then(|t| self.prog.assoc_of(t, "Item"));
@@ -2722,7 +2712,7 @@ impl Cx<'_> {
                 // the methods of the name are looked through)
                 let tr = tr0?;
                 let prog = self.prog;
-                let mut bl = prog.by_last.get(&m)?.iter().copied().filter(|&c| {
+                let mut bl = prog.fns_named(&m)?.iter().copied().filter(|&c| {
                     let bsig = &prog.sigs[c as usize];
                     matches!(bsig.self_ty, Some(Ty::Param(_))) && bsig.impl_trait.as_deref().is_some_and(|t| t.split('<').next().unwrap_or(t).trim() == tr)
                 });
@@ -3406,10 +3396,27 @@ impl Cx<'_> {
                 }
             }
             // (a closure passed by name where a bound wants `Fn` / `FnMut`: one that mutates its captures is only `FnMut`,
-            // one that moves them out only `FnOnce` (E0525, at the closure))
-            if let (Some(x), Expr::Path(None, _)) = (&fbt, strip_paren(a)) {
+            // one that moves them out only `FnOnce` (E0525, at the closure). Passed by reference, `&c` is an `Fn..` only
+            // where c is an `Fn`, `&mut c` only where c is an `FnMut`. Not where the parameter's type is the reference,
+            // `_: &F`: F is the closure's type there)
+            let by_ref = match strip_paren(a) {
+                Expr::Ref(m, inner) if matches!(strip_paren(inner), Expr::Path(None, _)) => Some((*m, &**inner)),
+                _ => None,
+            };
+            let named: Option<&Expr> = match (strip_paren(a), by_ref) {
+                (e @ Expr::Path(None, _), _) => Some(e),
+                (_, Some((_, inner))) => Some(inner),
+                _ => None,
+            };
+            let by_ref = by_ref.filter(|_| !matches!(pt, Ty::Ref(..)));
+            if let (Some(x), Some(a)) = (&fbt, named) {
                 let want = x.2.trim_start();
-                let kind = |k: &str| want.strip_prefix(k).is_some_and(|r| r.trim_start().starts_with('('));
+                let is_fn_bound = ["Fn", "FnMut", "FnOnce"].iter().any(|k| want.strip_prefix(k).is_some_and(|r| r.trim_start().starts_with('(')));
+                let kind = |k: &str| match by_ref {
+                    Some((false, _)) => k == "Fn" && is_fn_bound,
+                    Some((true, _)) => k == "FnMut" && is_fn_bound && !want.starts_with("Fn(") && !want.starts_with("Fn ("),
+                    None => want.strip_prefix(k).is_some_and(|r| r.trim_start().starts_with('(')),
+                };
                 if let Some(t @ Ty::Struct(_)) = self.peek(a) {
                     let has = if self.bk.fnonce.contains(&t) && (kind("Fn") || kind("FnMut")) {
                         Some("FnOnce")
@@ -3649,6 +3656,18 @@ impl Cx<'_> {
         for (a, b) in sol0.iter_mut().zip(&sol) {
             if a.is_none() {
                 *a = *b;
+            }
+        }
+        // (E0277: a type parameter of the program's fn that is not `?Sized` takes a sized type; a placeholder of a
+        // caller's `?Sized` parameter may be unsized (`fn f1<X: ?Sized>(x: &X) { f2::<X>(x) }`))
+        if let Some(ks) = self.prog.fn_sized_gens.get(&id) {
+            for &k in ks {
+                if let Some(t) = sol0.get(k).copied().flatten() {
+                    if self.prog.maybe_unsized(t) {
+                        let n = crate::traits::display_ty(self.prog, t);
+                        return Err(self.at(span, format!("the size for values of type `{n}` cannot be known at compilation time {}", crate::traits::SOLVED_NO)));
+                    }
+                }
             }
         }
         // (drop の要らない型の `__exr_drop_in_place::<T>` / `drop(x)` は何もしない: インスタンスも作らない)

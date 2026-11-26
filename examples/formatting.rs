@@ -1,5 +1,5 @@
-// format! / println! / write! のサンプル: {} / {:?} / {:#?}、幅・寄せ・0 埋め・16 進・名前つき引数・
-// {:>w$}、自前の impl fmt::Display、#[derive(Debug)] (struct / enum / タプル構造体 / ジェネリック)、to_string
+// A sample of format! / println! / write!: {} / {:?} / {:#?}, width, alignment, zero padding, hex, named arguments,
+// {:>w$}, a handwritten impl fmt::Display, #[derive(Debug)] (struct / enum / tuple struct / generic), to_string
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq)]

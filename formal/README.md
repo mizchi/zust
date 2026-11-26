@@ -9,7 +9,7 @@ Nothing here is part of the zust workspace or of the zustc build.
 
 | path | what | tool |
 |---|---|---|
-| `tla/CacheSave.tla` | two zustc processes saving the build cache (`Cache2::save`: write a tmp file of the process's own, rename) and a reader (`Cache2::open`) | idealis |
+| `tla/CacheSave.tla` | two zustc processes saving the build cache (`BuildCache::save`: write a tmp file of the process's own, rename) and a reader (`BuildCache::open`) | idealis |
 | `tla/ForkPool.tla` | the fork/pipe worker pool of the driver: fork failure, a child dying mid-record, full pipes, inherited write ends | idealis |
 | `tla/ArcDrop.tla` | the prelude's `Arc` refcount if zustc had threads, against `fetch_sub` | idealis |
 | `kani-prelude/` | the prelude's `Vec<T>`, copied from `crates/syntax/src/prelude_lib.rs.in` by `build.rs`, over a model of `realloc` / `free` | Kani |
