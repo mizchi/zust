@@ -5853,4 +5853,18 @@ impl dyn Obj { fn make<T: Default>(&self) -> T { T::default() } }
 fn g(x: &(dyn Obj + 'static)) -> impl std::fmt::Display { x.make::<u8>() }
 fn main() {}
 "#, &[], "rv9");
+    // (the fourth review's, checked with rustc 1.97: a default's trait parameters from the impl's trait arguments
+    // (`impl Ext<u8> for dyn Obj + '_`, `x.value()` with no annotation); an object that writes `'static` asks for it,
+    // as the default does (4:41, E0521 for rustc))
+    errors_at(r#"trait Obj {}
+trait Ext<T> { fn value(&self) -> Option<T> { None } }
+impl Ext<u8> for dyn Obj + '_ {}
+fn f(x: &dyn Obj) -> Option<u8> { let v = x.value(); v }
+trait Obj2<T> {}
+trait Ext2<T> { fn get(&self) -> Vec<T> { Vec::new() } }
+impl<T> Ext2<T> for dyn Obj2<T> + '_ {}
+fn g(y: &dyn Obj2<u16>) -> usize { let w = y.get(); w.len() }
+fn main() {}
+"#, &[], "rv10");
+    errors_at("trait Obj {}\ntrait Ext { fn e(&self) -> u8 { 1 } }\nimpl Ext for dyn Obj + 'static {}\nfn f<'a>(x: &'a (dyn Obj + 'a)) -> u8 { x.e() }\nfn main() {}\n", &[(4, "lifetime may not live long enough")], "rv11");
 }

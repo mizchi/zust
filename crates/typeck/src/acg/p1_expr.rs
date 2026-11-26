@@ -4573,7 +4573,8 @@ impl Cx<'_> {
                 if let Some(id) = self.prog.fn_by_p(&PPath::of(p), self.self_sid) {
                     let s = &self.prog.sigs[id as usize];
                     let tk = self.prog.names[id as usize].rsplit_once("::").map(|(t, _)| t.to_string()).filter(|t| self.prog.traits.contains_key(t));
-                    let obj = matches!(self.peek(first), Some(Ty::Ref(_, Ty::Dyn(_)) | Ty::Box(Ty::Dyn(_))));
+                    // (of the receiver's form: a `&self` method takes `&dyn Tr`, not a Box by value (E0308 then))
+                    let obj = matches!((s.params.first(), self.peek(first)), (Some(Ty::Ref(..)), Some(Ty::Ref(_, Ty::Dyn(_)))) | (Some(Ty::Box(_)), Some(Ty::Box(Ty::Dyn(_)))));
                     if let (Some(tk), true, true, true) = (tk, s.has_self, s.has_body, obj) {
                         let span = crate::parse::Span { start: p.pos, at: p.pos };
                         let recv = first.clone();

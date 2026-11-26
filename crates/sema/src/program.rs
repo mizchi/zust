@@ -2364,6 +2364,20 @@ impl Program {
                         p.ref_impl_pats.push((t, tr.clone(), gn.len(), sm.impl_generics.iter().map(|g| g.1.clone()).collect()));
                     }
                 }
+                // (`impl Ext<u8> for dyn Obj {}` of a generic trait of the program's: its arguments, for a default
+                // method's parameters through the object (`x.value()` with `fn value(&self) -> Option<T>`))
+                if sn.starts_with("__dyn_") && !sm.impl_trait_args.is_empty() && p.traits.contains_key(tr) {
+                    let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+                    let st = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok());
+                    let args: Option<Vec<Ty>> = sm.impl_trait_args.iter().map(|a| p.resolve_g(a, &gn).ok()).collect();
+                    if let (Some(st), Some(args)) = (st, args) {
+                        if sm.impl_trait_lts {
+                            p.impl_targs_lts.insert((tr.clone(), st));
+                        }
+                        p.impl_targs.entry(tr.clone()).or_default().push((st, args, gn.len()));
+                        p.impl_targ_bounds.entry(tr.clone()).or_default().push(sm.impl_generics.iter().map(|g| g.1.clone()).collect());
+                    }
+                }
                 continue;
             }
             // (marker traits the compiler knows without a declaration: `unsafe impl Send for P {}`)
