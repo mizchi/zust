@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795674176334,
+  "lastUpdate": 1795674799575,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -58988,6 +58988,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 38.292,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1d110890b480a55941bbca0f93ab4efbb7f997d4",
+          "message": "prelude: std::fmt::Write's impls come with the trait, not only with `write_str` (#148) (#231)\n\n`fn render<W: fmt::Write>(w: &mut W)` called with a `&mut String` failed with\n\"the trait bound `String: __FWr` is not satisfied (for `W`)\". The bound check\nwas right: the prelude had left `impl __FWr for String` out. Its member is\nchosen by its name, `write_str`, and a program that names the trait only in\na bound, or calls `write!(w, ..)` on a generic `W`, never names it. Writing\n`s.write_str(..)` anywhere in the program made the same code build.\n\nEvery impl of the trait has `write_str` and the trait's defaults call it, so\nthe selection now takes `write_str` with `__FWr`. It is checked in the\nselection loop, as the 128-bit helpers are, so a trait that comes in through\nanother prelude item brings it too.\n\ntests/probe/fmt_write_bound.rs (expected output from rustc): `write!` and\n`writeln!` into a generic `W: Write` / `W: fmt::Write`, and the bound alone.\nIt names no `write_str` (an impl of the program's own named it and hid the\nbug); on main it fails with the issue's error.\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T15:17:42+09:00",
+          "tree_id": "c19d024787d39670aa84aefa33ab2909fde5b54b",
+          "url": "https://github.com/mizchi/zust/commit/1d110890b480a55941bbca0f93ab4efbb7f997d4"
+        },
+        "date": 1795674798743,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 168.609,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 1.15,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 25.756,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 68.373,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.18,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 133.049,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 800.462,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 716.091,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.989,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 90.125,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 310.708,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.164,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 630.478,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3940.57,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 72.663,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 112.891,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 48.939,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 91.65,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 93.253,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 229.71,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 80.944,
             "unit": "ms"
           }
         ]
