@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795712373175,
+  "lastUpdate": 1795712375972,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -118371,6 +118371,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/1545b9ccd226983b8d58082c8a8140b499a6dec8"
         },
         "date": 1795711451173,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 92.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 69.444,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.939,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 73.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 92.471,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5b67f5e678785b3d3a9038e57662255963d7cde5",
+          "message": "Region check part 39: dyn Error's is, lets assigned through a deref, closures held as fn pointers, trait methods' elided results (#263)\n\nRegion check part 39: dyn Error's is, lets assigned through a deref, closures held as fn pointers, trait methods' elided results",
+          "timestamp": "2026-11-27T01:54:00+09:00",
+          "tree_id": "2ed14836b6b6acc8246d776d3248eb549d1897e9",
+          "url": "https://github.com/mizchi/zust/commit/5b67f5e678785b3d3a9038e57662255963d7cde5"
+        },
+        "date": 1795712375386,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
