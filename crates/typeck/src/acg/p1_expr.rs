@@ -3071,7 +3071,7 @@ impl Cx<'_> {
             Expr::MethodCall(r, m, ..) => {
                 if owned(r) {
                     let mut_self = match self.bk_rooted_at_pub(strip_paren(r), n) {
-                        Some((_, Some(Ty::Struct(sid)))) => self.prog.method(sid, m).is_some_and(|id| {
+                        Some((_, Some(Ty::Struct(sid)))) => self.prog.self_method_of(sid, m).or_else(|| self.prog.self_default_method(sid, m)).is_some_and(|id| {
                             let sg = &self.prog.sigs[id as usize];
                             sg.has_self && matches!(sg.params.first(), Some(Ty::Ref(true, _)))
                         }),
@@ -3160,8 +3160,9 @@ impl Cx<'_> {
             }
             Expr::MethodCall(r, m, ..) => {
                 if let Some(n) = hit(r) {
-                    let mut_self = match self.lookup(&n) {
-                        Some((_, Ty::Struct(sid))) => self.prog.method(sid, m).is_some_and(|id| {
+                    // (of the receiver's own type, as owned_mutation: `w.0.touch()` is the field's `touch`, not w's)
+                    let mut_self = match self.peek(strip_paren(r)) {
+                        Some(Ty::Struct(sid)) => self.prog.self_method_of(sid, m).or_else(|| self.prog.self_default_method(sid, m)).is_some_and(|id| {
                             let sg = &self.prog.sigs[id as usize];
                             sg.has_self && matches!(sg.params.first(), Some(Ty::Ref(true, _)))
                         }),

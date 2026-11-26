@@ -3423,7 +3423,7 @@ impl Cx<'_> {
                         },
                         _ => None,
                     };
-                    let Some(id) = sid.and_then(|sid| prog.method(sid, m)) else { continue };
+                    let Some(id) = sid.and_then(|sid| prog.self_method(sid, m)) else { continue };
                     let sig = &prog.sigs[id as usize];
                     let tys: Vec<&PTy> = gs.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None }).collect();
                     // (the method's own type parameters come after its impl's: the turbofish writes those)

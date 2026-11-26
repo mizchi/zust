@@ -1,0 +1,1 @@
+20:22: call to unsafe function `f` is unsafe and requires unsafe block (E0133)
