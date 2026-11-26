@@ -4042,6 +4042,7 @@ check-pass	lifetimes/dyn-trait-function-pointer-53419.rs
 check-pass	lifetimes/elided-lifetime-in-anon-const.rs
 compile-fail	lifetimes/elided-lifetime-in-const-param-type.rs
 check-pass	lifetimes/elided-lifetime-in-param-pat.rs
+check-pass	lifetimes/elided-lifetime-in-path-in-impl-Fn.rs
 check-pass	lifetimes/elided-lifetime-in-path-in-pat.rs
 check-pass	lifetimes/elided-lifetime-in-path-in-type-relative-expression.rs
 compile-fail	lifetimes/elided-self-lifetime-in-trait-fn.rs
@@ -7526,6 +7527,7 @@ run-pass	structs-enums/tag.rs
 run-pass	structs-enums/tuple-struct-constructor-pointer.rs
 run-pass	structs-enums/tuple-struct-destructuring.rs
 compile-fail	structs-enums/tuple-variant-as-struct-variant.rs
+run-pass	structs/basic-newtype-pattern.rs
 compile-fail	structs/default-field-values/non-exhaustive-ctor-not-found.rs
 compile-fail	structs/default-field-values/struct-fields-ice-147325.rs
 run-pass	structs/destructuring-struct-type-inference-8783.rs

@@ -181,7 +181,9 @@ pub fn rewrite_ctor_values(src: &str) -> Option<String> {
                 .iter()
                 .find(|a| a.0.is_empty() && a.1 == name)
                 // (or the value of a `let` / `const` / assignment: `let f: fn(isize) -> Foo = Foo;`, not `type A = Foo;`)
-                .filter(|_| (is_sym(p, b'(') && p >= 1 && toks[p - 1].0 == 0) || (eq && is_sym(last + 1, b';') && !(p >= 2 && tok(p - 2) == b"type".as_slice()) && !(p >= 1 && is_sym(p - 1, b'>'))))
+                // (not the argument of a fn pointer's type or an `Fn(..)` bound: `fn(Foo)`, `dyn Fn(Foo)` name the type)
+                .filter(|_| (is_sym(p, b'(') && p >= 1 && toks[p - 1].0 == 0 && !matches!(tok(p - 1), b"fn" | b"Fn" | b"FnMut" | b"FnOnce" | b"AsyncFn" | b"AsyncFnMut" | b"AsyncFnOnce"))
+                    || (eq && is_sym(last + 1, b';') && !(p >= 2 && tok(p - 2) == b"type".as_slice()) && !(p >= 1 && is_sym(p - 1, b'>'))))
                 .map(|a| a.2),
             (t, _) => ar.iter().find(|a| a.0 == t && a.1 == name).map(|a| a.2),
         };

@@ -3467,3 +3467,25 @@ fn a_line_continuation_and_a_named_width_argument() {
     assert!(errs("fn main() {\n    let width = 8;\n    let p = 2;\n    println!(\"[{:w$.pr$}]\", 1.5f64, w = width, pr = p);\n}\n").is_empty());
     assert_eq!(errs("fn main() {\n    let width = 8;\n    println!(\"{:w$}\", 1, w = width);\n    let _n: i32 = width;\n}\n").first().map(|e| e.0), Some(4));
 }
+
+#[test]
+fn a_tuple_struct_in_a_fn_pointer_type_or_an_fn_bound() {
+    // (`fn(Foo)` and `dyn Fn(Foo)` name the type: the rewrite of a tuple struct passed as a function (`.map(Foo)`)
+    // does not take them for a call's argument)
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    let foo = "struct Foo<'a>(&'a ());\n";
+    for body in [
+        "fn with_fn() -> fn(Foo) {\n    |_| ()\n}\n",
+        "fn with_impl_fn() -> impl Fn(Foo) {\n    |_| ()\n}\n",
+        "fn g(_: Box<dyn FnMut(Foo)>) {}\n",
+        "type F = fn(Foo);\nstruct S { f: fn(Foo) }\n",
+        "fn w<T>() where T: FnOnce(Foo) {}\n",
+    ] {
+        assert!(errs(&format!("{foo}{body}fn main() {{}}\n")).is_empty(), "{body}");
+    }
+    // (a tuple struct passed as a function is still its constructor)
+    assert!(errs("struct W(u8);\nfn main() {\n    let v: Vec<W> = vec![1u8].into_iter().map(W).collect();\n    let _ = v.len();\n}\n").is_empty());
+}
