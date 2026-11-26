@@ -835,7 +835,7 @@ impl Cx<'_> {
                 }
                 // (an overflow is the constant's error at compile time, as rustc's E0080: not a wrap or a panic at run
                 // time)
-                Err(e) if e.contains("overflow in constant") => return Err(format!("{}:1: in constant `{}`: {e}", SP.line, c.name)),
+                Err(e) if crate::program::const_eval_err(&e) => return Err(format!("{}:1: in constant `{}`: {e}", SP.line, c.name)),
                 Err(_) => {}
             }
         }
