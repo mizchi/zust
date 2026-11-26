@@ -1667,16 +1667,26 @@ impl Session {
                             }
                         }
                     }
-                    // (a proc-macro dependency under another name: its macros through that name, `derive::Describe`;
-                    // and a library under another name, the macros it re-exports: `f::answer!()` with `pub use
-                    // pm::answer;` in facade, `f = { package = "facade" }`)
-                    for (a, n) in &crates[i].aliases {
+                    // (the re-exports under this crate's names for the libraries: a library under another name gives
+                    // them under that name, `f::answer!()` with `pub use pm::answer;` in facade and `f = { package =
+                    // "facade" }`; a library's own name that the crate gives another dependency is that one's. Read from
+                    // the notes as the libraries gave them, so one name's routes are not copied to another's: with `f =
+                    // facade` and `g = f`, `g::answer!()` is the crate f's)
+                    let aliases = &crates[i].aliases;
+                    if !aliases.is_empty() {
                         for l in pms.iter_mut() {
-                            if l.name == *n {
+                            for v in std::mem::take(&mut l.via) {
+                                for (a, _) in aliases.iter().filter(|x| x.1 == v.0) {
+                                    l.via.push((a.clone(), v.1.clone(), v.2.clone()));
+                                }
+                                if !aliases.iter().any(|x| x.0 == v.0) {
+                                    l.via.push(v);
+                                }
+                            }
+                            // (a proc-macro dependency under another name: its macros through that name, `derive::Describe`)
+                            for (a, _) in aliases.iter().filter(|x| x.1 == l.name) {
                                 l.via.push((a.clone(), "*".to_string(), "*".to_string()));
                             }
-                            let more: Vec<(String, String, String)> = l.via.iter().filter(|v| v.0 == *n).map(|v| (a.clone(), v.1.clone(), v.2.clone())).collect();
-                            l.via.extend(more);
                         }
                     }
                 }

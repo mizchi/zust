@@ -999,3 +999,52 @@ fn proc_macro_through_a_renamed_library_runs_like_cargo() {
     assert!(ok, "zurgo run: {err}");
     assert_eq!(got, want);
 }
+
+/// Two libraries re-exporting proc macros of one name, each under another name, one of them under the other's own
+/// name: `f = { package = "facade" }` (pm_a's `answer!`) and `g = { package = "f" }` (pm_b's). `f::answer!()` is
+/// facade's and `g::answer!()` the crate f's, whatever order the names are given in
+#[test]
+fn proc_macros_through_libraries_renamed_to_each_others_names_run_like_cargo() {
+    let sc = Scratch::new("renamed-swap");
+    let pkg = |name: &str, more: &str| format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n{more}");
+    let pm = |v: u32| format!("extern crate proc_macro;\nuse proc_macro::TokenStream;\n#[proc_macro]\npub fn answer(_i: TokenStream) -> TokenStream {{\n    \"{v}u32\".parse().unwrap()\n}}\n");
+    sc.write(&[
+        ("pm_a/Cargo.toml", &pkg("pm_a", "[lib]\nproc-macro = true\n")),
+        ("pm_a/src/lib.rs", &pm(1)),
+        ("pm_b/Cargo.toml", &pkg("pm_b", "[lib]\nproc-macro = true\n")),
+        ("pm_b/src/lib.rs", &pm(2)),
+        ("facade/Cargo.toml", &pkg("facade", "[dependencies]\npm_a = { path = \"../pm_a\" }\n")),
+        ("facade/src/lib.rs", "pub use pm_a::answer;\n"),
+        ("f/Cargo.toml", &pkg("f", "[dependencies]\npm_b = { path = \"../pm_b\" }\n")),
+        ("f/src/lib.rs", "pub use pm_b::answer;\n"),
+        (
+            "app/Cargo.toml",
+            &pkg("app", "[workspace]\n[dependencies]\nf = { path = \"../facade\", package = \"facade\" }\ng = { path = \"../f\", package = \"f\" }\n"),
+        ),
+        ("app/src/main.rs", "fn main() {\n    println!(\"{} {}\", f::answer!(), g::answer!());\n}\n"),
+    ]);
+    let app = sc.0.join("app/Cargo.toml");
+    let t = sc.0.join("target");
+    let (ok, _, err) = cargo(&["generate-lockfile", "--offline"], &app, &t);
+    assert!(ok, "{err}");
+    let (ok, want, err) = cargo(&["run", "-q", "--offline"], &app, &t);
+    assert!(ok, "cargo run: {err}");
+    assert_eq!(want, "1 2\n");
+    let (ok, got, err) = zurgo(&["run"], &app, &t);
+    assert!(ok, "zurgo run: {err}");
+    assert_eq!(got, want);
+    // (each under the other's name: `f` is facade, `facade` the crate f)
+    sc.write(&[
+        (
+            "app/Cargo.toml",
+            &pkg("app", "[workspace]\n[dependencies]\nf = { path = \"../facade\", package = \"facade\" }\nfacade = { path = \"../f\", package = \"f\" }\n"),
+        ),
+        ("app/src/main.rs", "fn main() {\n    println!(\"{} {}\", f::answer!(), facade::answer!());\n}\n"),
+    ]);
+    let (ok, want, err) = cargo(&["run", "-q", "--offline"], &app, &t);
+    assert!(ok, "cargo run: {err}");
+    assert_eq!(want, "1 2\n");
+    let (ok, got, err) = zurgo(&["run"], &app, &t);
+    assert!(ok, "zurgo run: {err}");
+    assert_eq!(got, want);
+}
