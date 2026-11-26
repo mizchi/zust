@@ -232,6 +232,8 @@ struct Inf<'p> {
     mbase: crate::parse::Pos,
     /// the targets of the `AsRef<X>` bounds in scope (the function's and its root's): what `x.as_ref()` gives
     asref: Vec<String>,
+    /// the same of the `AsMut<X>` bounds
+    asmut: Vec<String>,
 }
 
 impl<'p> std::ops::Deref for Inf<'p> {
@@ -291,20 +293,29 @@ pub fn infer_ctx_margs(
 ) -> (Full, MacroArgs, TextTypes) {
 
     let clo_root = root.map(|(r, base)| (r, base, body as *const Block));
-    let asref_of = |g: &[(String, Vec<String>)]| -> Vec<String> {
-        g.iter()
-            .flat_map(|(_, bs)| bs.iter())
-            .filter_map(|b| {
-                let b: String = b.chars().filter(|c| !c.is_whitespace()).collect();
-                b.strip_prefix("AsRef<").and_then(|x| x.strip_suffix('>')).map(str::to_string)
-            })
-            .collect()
+    // (the targets of the `AsRef<X>` / `AsMut<X>` bounds; a bound is squeezed of white space only when it is one)
+    let (mut asref, mut asmut): (Vec<String>, Vec<String>) = (vec![], vec![]);
+    let mut as_targets = |g: &[(String, Vec<String>)]| {
+        for b in g.iter().flat_map(|(_, bs)| bs.iter()) {
+            let b = b.trim_start();
+            let into = if b.starts_with("AsRef") {
+                &mut asref
+            } else if b.starts_with("AsMut") {
+                &mut asmut
+            } else {
+                continue;
+            };
+            let b: String = b[5..].chars().filter(|c| !c.is_whitespace()).collect();
+            if let Some(x) = b.strip_prefix('<').and_then(|x| x.strip_suffix('>')) {
+                into.push(x.to_string());
+            }
+        }
     };
-    let mut asref = asref_of(&sig.generics);
+    as_targets(&sig.generics);
     if let Some((r, _)) = root {
-        asref.extend(asref_of(&prog.sigs[r as usize].generics));
+        as_targets(&prog.sigs[r as usize].generics);
     }
-    let mut s = Inf { s: Solver::new(prog, env), pending: vec![], keep: vec![], turbofish: None, clo_root, clo_keys: None, margs: Default::default(), exprs: vec![], mbase: Default::default(), asref };
+    let mut s = Inf { s: Solver::new(prog, env), pending: vec![], keep: vec![], turbofish: None, clo_root, clo_keys: None, margs: Default::default(), exprs: vec![], mbase: Default::default(), asref, asmut };
     s.ret = match ret {
         Some(t) if prog.has_param(t) => s.known_g(t, &mut vec![]),
         Some(t) => s.known(t),
@@ -2443,7 +2454,43 @@ impl Inf<'_> {
         None
     }
 
+    /// A method n with `self` of an impl for `Box<dyn tr>` (`impl MyTrait for Box<dyn O>`), where the receiver r is
+    /// such a Box (also behind references)
+    fn boxed_dyn_method(&mut self, r: u32, tr: &'static String, n: &str) -> Option<u32> {
+        let mut x = self.find(r);
+        for _ in 0..8 {
+            match self.shape[x as usize] {
+                Some(Shape::Ref(_, i)) => x = self.find(i),
+                Some(Shape::Bx(_)) => {
+                    let t = Ty::Box(crate::types::intern(Ty::Dyn(tr)));
+                    return self.prog.prim_method(t, n).filter(|&d| self.prog.sigs[d as usize].has_self);
+                }
+                _ => return None,
+            }
+        }
+        None
+    }
+
     fn method_call(&mut self, recv: &Expr, n: &str, tf: &Vec<GArg>, args: &[Expr]) -> u32 {
+        // (a Vec's `as_ref()` / `as_mut()`: `&[T]` / `&mut [T]` where the bounds in scope ask for slices alone, as the
+        // code generator's (a Vec is AsRef<Vec<T>> / AsMut<Vec<T>> too))
+        if matches!(n, "as_ref" | "as_mut") && args.is_empty() {
+            let bs = if n == "as_ref" { &self.asref } else { &self.asmut };
+            if !bs.is_empty() && bs.iter().all(|b| b.starts_with('[')) {
+                let r = self.expr(recv);
+                let rv = self.deref_expr(r);
+                let root = self.find(rv);
+                let vec = match self.shape[root as usize] {
+                    Some(Shape::Known(Ty::Struct(sid))) => self.is_vec(self.prog.base_of(sid)),
+                    Some(Shape::Adt(b, _, _)) => self.is_vec(b),
+                    _ => false,
+                };
+                if let Some(el) = self.elem_of(r).filter(|_| vec) {
+                    let sl = self.with(Shape::Slc(el));
+                    return self.with(Shape::Ref(n == "as_mut", sl));
+                }
+            }
+        }
         // (`s.as_ref()` on a `&str` / `String` (also through references, `&&str` of an `AsRef<str>` instance): `&str`,
         // or `&[u8]` where the bounds in scope ask for `AsRef<[u8]>` alone, as the code generator's as_ref gives)
         if n == "as_ref" && args.is_empty() {
@@ -2722,6 +2769,20 @@ impl Inf<'_> {
                     }
                     return self.known_g(ret, &mut pv);
                 }
+            } else if let Some(d) = self.boxed_dyn_method(r, tr, n) {
+                // (none of the object's: a method of an impl for the Box itself, `impl MyTrait for Box<dyn O>` through
+                // `val: &Box<dyn O>`)
+                let sig = &self.prog.sigs[d as usize];
+                let (ps, ret) = (sig.params[1..].to_vec(), sig.ret);
+                for (a, p) in avs.into_iter().zip(ps) {
+                    if !self.prog.has_param(p) {
+                        let k = self.known(p);
+                        self.unify(a, k);
+                    }
+                }
+                if !self.prog.has_param(ret) {
+                    return self.known(ret);
+                }
             }
             return self.var();
         }
@@ -2998,16 +3059,17 @@ impl Inf<'_> {
                 let sl = self.with(Shape::Slc(el));
                 self.with(Shape::Ref(n == "as_mut_slice", sl))
             }
-            // (an array's as_mut: its one AsMut is `AsMut<[T]>`; a Vec's has two, left to the use)
-            "as_mut" if args.is_empty() && {
+            // (an array's or a slice's as_ref / as_mut: its one AsRef / AsMut is `AsRef<[T]>` / `AsMut<[T]>` (bindgen's
+            // `self.storage.as_ref()[i]` of a `[u8; N]`); a Vec's have two, left to the use)
+            "as_ref" | "as_mut" if args.is_empty() && {
                 let mut t = self.resolve(r);
                 while let Some(Ty::Ref(_, i)) = t {
                     t = Some(*i);
                 }
-                matches!(t, Some(Ty::Array(..)))
+                matches!(t, Some(Ty::Array(..) | Ty::Slice(_)))
             } => {
                 let sl = self.with(Shape::Slc(el));
-                self.with(Shape::Ref(true, sl))
+                self.with(Shape::Ref(n == "as_mut", sl))
             }
             _ => self.var(),
         }

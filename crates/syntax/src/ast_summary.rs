@@ -525,6 +525,64 @@ fn expr_compact(e: &Expr) -> String {
 
 /// A fn signature (front.rs's parse_sig)
 /// `-> impl Trait + use<..>`: the precise capture list names the function's own parameters
+/// A receiver's type (`&Pair<&str, isize>`, `Box<Foo<'_>>`) that writes the impl's self type (by its name) with a
+/// lifetime elided in it, where the self type has a region: the position of its path
+fn elided_in_self_recv(rt: &PTy, o: &Owner) -> Option<crate::parse::Pos> {
+    fn syn_has_ref(t: &TySyn) -> bool {
+        match t {
+            TySyn::Ref(..) => true,
+            TySyn::App(_, ts) | TySyn::Tuple(ts) => ts.iter().any(syn_has_ref),
+            TySyn::Array(i, _) | TySyn::Slice(i) | TySyn::Ptr(_, i) => syn_has_ref(i),
+            _ => false,
+        }
+    }
+    fn elided(t: &PTy, depth: u32) -> bool {
+        if depth > 16 {
+            return false;
+        }
+        match t {
+            PTy::Ref(l, _, i) => matches!(l.as_deref(), None | Some("'_")) || elided(i, depth + 1),
+            PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => elided(i, depth + 1),
+            PTy::Tuple(ts) => ts.iter().any(|t| elided(t, depth + 1)),
+            PTy::Path(None, p) => p.segs.iter().all(|s| s.fn_args.is_none()) && p.segs.iter().any(|s| s.args.iter().any(|a| match a {
+                crate::parse::GArg::Lifetime(l) => l == "'_",
+                crate::parse::GArg::Ty(t) => elided(t, depth + 1),
+                _ => false,
+            })),
+            _ => false,
+        }
+    }
+    // (the self type has a region: a reference in it, or a lifetime of the header's in its slots)
+    // (not R_ELIDED_ADT, a path the header writes without lifetimes (`impl<'a> S`), which may have none)
+    let self_slots = o.regions.as_deref().map_or(0, |r| r.self_slots.iter().filter(|&&c| c != crate::types::R_ELIDED_ADT).count());
+    if self_slots == 0 && !syn_has_ref(&o.self_ty) {
+        return None;
+    }
+    if matches!(o.self_ty, TySyn::Ref(..) | TySyn::Ptr(..)) {
+        return None;
+    }
+    let mut t = rt;
+    loop {
+        match t {
+            PTy::Ref(_, _, i) => t = i,
+            PTy::Path(None, p) if p.segs.len() == 1 && matches!(p.segs[0].name.as_str(), "Box" | "Rc" | "Arc" | "Pin") => match p.segs[0].args.first() {
+                Some(crate::parse::GArg::Ty(i)) => t = i,
+                _ => return None,
+            },
+            _ => break,
+        }
+    }
+    let PTy::Path(None, p) = t else { return None };
+    let [s] = p.segs.as_slice() else { return None };
+    let base = o.base.rsplit("::").next().unwrap_or("");
+    if s.name != base || s.fn_args.is_some() {
+        return None;
+    }
+    // (`self: Foo` of `impl<'a> Foo<'a>`: its lifetime elided)
+    let bare = s.args.is_empty() && self_slots > 0;
+    (bare || elided(t, 0)).then_some(p.pos)
+}
+
 fn check_impl_ret(sig: &PSig, owner: Option<&Owner>) -> R<()> {
     let Some(PTy::Impl(bs)) = &sig.ret else { return Ok(()) };
     if !bs.iter().any(|b| matches!(b, Bound::Trait(_, p) if p.segs.last().is_some_and(|s| s.name != "use"))) {
@@ -615,6 +673,15 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
     // (E0261: a free fn's signature names only the lifetimes it declares; fn pointer, `impl` and `dyn` types may
     // bind their own (`for<'a>`) and are not looked into)
     // (a method's: its own and its impl's or trait's)
+    // (E0308 too: a receiver of the self type with an elided lifetime in it (`self: &Pair<&str, isize>` in `impl
+    // Pair<&str, isize>`, `self: Foo<'_>` or `self: Foo` in `impl<'a> Foo<'a>`): a lifetime of the method's
+    // own, not one of the impl's self type. Not in a fn pointer's or a `dyn Fn(&u8)`'s types, which bind theirs)
+    if let (Some(o), Some(rt)) = (owner.filter(|o| !o.is_trait), &sig.recv_ty) {
+        if let Some(p) = elided_in_self_recv(rt, o) {
+            let m = "mismatched `self` parameter type: its lifetimes are not the impl's (E0308)";
+            return Err(if p.line != 0 { format!("{}:{}: {m}", p.line, p.col + 1) } else { m.to_string() });
+        }
+    }
     if crate::regions::sig_names_lt(sig) {
         let outer: &[String] = owner.and_then(|o| o.regions.as_ref()).map(|r| r.lts.as_slice()).unwrap_or(&[]);
         let own: Vec<&str> = sig.generics.params.iter().filter_map(|g| match g {

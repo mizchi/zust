@@ -704,11 +704,29 @@ impl Cx<'_> {
             }
         }
         // `[T; N]::as_slice()` / `as_mut_slice()`: `&a[..]` / `&mut a[..]`
+        // (and a slice's `as_mut()` (`T: AsMut<[u8]> + ?Sized` at `[u8]`), a Vec's where it is its AsMut<[T]>, or
+        // its AsMut<Vec<T>>, the Vec itself: as_mut_of_vec)
         if margs.is_empty() && matches!(method, "as_slice" | "as_mut_slice" | "as_mut") {
-            if let Some(Ty::Array(..)) = self.peek(recv).map(|t| self.strip_refs(t)) {
+            let array = match self.peek(recv).map(|t| self.strip_refs(t)) {
+                Some(Ty::Array(..)) => true,
+                Some(Ty::Slice(_)) => method == "as_mut",
+                _ => false,
+            };
+            let of_vec = if method == "as_mut" && !array { self.as_mut_of_vec(recv, expected) } else { None };
+            if array || matches!(of_vec, Some((true, _))) {
                 let ix = Expr::Index(Box::new(paren(recv.clone())), Box::new(full_range()), crate::parse::Span::default());
                 let e = Expr::Ref(method != "as_slice", Box::new(ix));
                 return self.expr(&e, expected);
+            }
+            if of_vec.is_some() {
+                // (`&mut *v` through the receiver's references: `&mut **r` of an `r: &mut Vec<T>`)
+                let mut e = paren(recv.clone());
+                let mut t = self.peek(recv);
+                while let Some(Ty::Ref(_, i)) = t {
+                    e = paren(Expr::Unary("*".into(), Box::new(e), crate::parse::Span::default()));
+                    t = Some(*i);
+                }
+                return self.expr(&Expr::Ref(true, Box::new(e)), expected);
             }
         }
         // `x.hash(state)` (x: タプル / Option で Hash の impl がない): std と同じく要素を順に (Option は判別子 (isize) と中身)
@@ -2077,6 +2095,46 @@ impl Cx<'_> {
         })
     }
 
+    /// Which of a Vec's two built-in AsMut impls `recv.as_mut()` is (the receiver a Vec, through references):
+    /// `(true, T)` for AsMut<[T]>, `(false, Vec<T>)` for AsMut<Vec<T>>. The expected type tells (`&mut [T]` /
+    /// `&mut Vec<T>`; another `&mut X` is neither), or else the bounds of the function on the receiver's type
+    /// parameter (`S: AsMut<[u8]>`), when they name one of the two. None otherwise: no method, as before (rustc's
+    /// ambiguity is not told apart)
+    pub(crate) fn as_mut_of_vec(&self, recv: &Expr, expected: Option<Ty>) -> Option<(bool, Ty)> {
+        let t = self.peek(recv)?;
+        let base = self.strip_refs(t);
+        let Ty::Struct(sid) = base else { return None };
+        if self.prog.structs[self.prog.base_of(sid) as usize].name != "Vec" {
+            return None;
+        }
+        let elem = self.vec_fields(sid)?.2;
+        match expected {
+            Some(Ty::Ref(true, Ty::Slice(e))) if **e == elem => return Some((true, elem)),
+            Some(Ty::Ref(true, x)) if *x == base => return Some((false, base)),
+            Some(Ty::Ref(true, _)) => return None,
+            _ => {}
+        }
+        let (mut slice, mut itself) = (false, false);
+        for (pn, bs) in &self.prog.sigs[self.root as usize].generics {
+            let pt = self.env.params.iter().find(|(n, _)| n == pn).map(|p| p.1);
+            if !pt.is_some_and(|p| p == t || self.strip_refs(p) == base) {
+                continue;
+            }
+            for b in bs {
+                let b: String = b.chars().filter(|c| !c.is_whitespace()).collect();
+                if let Some(x) = b.strip_prefix("AsMut<") {
+                    slice |= x.starts_with('[');
+                    itself |= x.starts_with("Vec<");
+                }
+            }
+        }
+        match (slice, itself) {
+            (true, false) => Some((true, elem)),
+            (false, true) => Some((false, base)),
+            _ => None,
+        }
+    }
+
     /// 組み込みの AsRef の結果の型
     pub(crate) fn as_ref_ty(&self, recv: &Expr, expected: Option<Ty>) -> Option<Ty> {
         let (target, _, seq) = self.as_ref_target(recv, expected)?;
@@ -3283,7 +3341,32 @@ impl Cx<'_> {
             let n = r.slots.len().saturating_sub(1);
             sig.params.iter().zip(&r.slots[..n]).any(|(&t, s)| matches!(t, Ty::Ref(_, i) if mentions(self.prog, *i, k, 0)) && s.first() == Some(&crate::types::R_STATIC))
         });
-        by_outlives || by_trait || by_param || bounds.iter().any(|b| b.trim() == "'static")
+        // (or implied by a type of the signature whose struct or enum bounds its parameter by 'static: `fn foo<T>() ->
+        // IfaceToken<T>` with `struct IfaceToken<T: 'static>` (T: 'static holds in the body, in its closures too,
+        // borrowck/nested-closure-with-generic-ice.rs))
+        fn implies(prog: &crate::program::Program, t: Ty, k: u32, depth: u32) -> bool {
+            if depth > 12 {
+                return false;
+            }
+            match t {
+                Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) | Ty::Slice(i) | Ty::Array(i, _) => implies(prog, *i, k, depth + 1),
+                Ty::Struct(s) => {
+                    let b = prog.base_of(s);
+                    let args = &prog.structs[s as usize].args;
+                    // (also within the argument: `St<Option<T>>` and `St<&'a T>` need T: 'static too; not within a fn
+                    // pointer's types (`mentions` does not look there))
+                    let own = prog.adt_regions.get(&b).is_some_and(|ar| {
+                        args.iter().enumerate().any(|(j, &a)| {
+                            mentions(prog, a, k, 0) && prog.structs[b as usize].generics.get(j).is_some_and(|gn| ar.ty_outlives.iter().any(|x| x.0 == *gn && x.1 == crate::types::R_STATIC))
+                        })
+                    });
+                    own || args.iter().any(|&a| implies(prog, a, k, depth + 1))
+                }
+                _ => false,
+            }
+        }
+        let by_implied = !self.prog.adt_regions.is_empty() && sig.params.iter().chain(std::iter::once(&sig.ret)).any(|&t| implies(self.prog, t, k, 0));
+        by_outlives || by_trait || by_param || by_implied || bounds.iter().any(|b| b.trim() == "'static")
     }
 
     /// Program::trait_scopes at this function: the traits of a colliding name in scope where it is (the innermost
@@ -4694,7 +4777,7 @@ fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool
                     ("Rc", _) | ("MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard", false) => true,
                     // (a RefCell's guards share the cell's non-atomic borrow flag: neither Send nor Sync, as in std)
                     ("Ref" | "RefMut", _) => true,
-                    ("Cell" | "RefCell" | "UnsafeCell" | "LazyCell" | "__Rcvr__", true) => true,
+                    ("Cell" | "RefCell" | "UnsafeCell" | "LazyCell" | "OnceCell" | "__Rcvr__", true) => true,
                     ("Mutex", true) => args.iter().any(|&a| send(a, seen)),
                     ("Arc" | "RwLock" | "OnceLock", true) | ("Arc", false) => args.iter().any(|&a| send(a, seen) || sync_(a, seen)),
                     _ => args.iter().any(|&a| auto_trait_fails(prog, a, sync, seen, d + 1)),

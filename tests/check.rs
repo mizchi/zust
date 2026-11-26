@@ -4180,3 +4180,29 @@ fn unused_parens_levels() {
         }
     }
 }
+
+#[test]
+fn derive_names_are_macros_not_glob_items() {
+    // (#251: a derive's names are macros, in no namespace of a module's items. typenum's `#[derive(Eq, ..)]` beside the
+    // `pub type Eq<A, B>` that `operator_aliases::*` brings took the alias, flattened to
+    // `typenum__operator_aliases__Eq`: "cannot find derive macro". Each name is defined in two modules here, so that the
+    // flattening renames it; rustc 1.97 accepts the programs without an error, and reports the others' on the line
+    // given)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let mods = "mod operator_aliases {\n    pub type Eq<A, B> = (A, B);\n    pub type Cmp<A, B> = Result<A, B>;\n}\nmod other {\n    pub type Eq<A, B> = (B, A);\n    pub type Cmp = u8;\n}\n";
+    // (the glob's alias beside the derive, and the alias still the type)
+    let src = format!("{mods}use operator_aliases::*;\n#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug, Default)]\npub struct Greater;\nfn main() {{\n    let _: Eq<u8, u16> = (1u8, 2u16);\n    let _: Cmp<u8, u16> = Ok(1u8);\n    let _ = Greater == Greater;\n    println!(\"{{:?}}\", Greater.clone());\n}}\n");
+    assert_eq!(first(&src), None, "{src}");
+    let src = format!("{mods}use operator_aliases::*;\n#[derive(Eq, PartialEq)]\npub struct Greater;\nfn main() {{\n    let _: Eq<u8, u16> = 1u8;\n}}\n");
+    assert_eq!(first(&src).map(|d| (d.0, d.2)), Some((13, "mismatched types: expected `(u8, u16)`, found `u8`".to_string())), "{src}");
+    // (a glob's `type Debug`, `struct Clone` and `fn Hash`, the module's own `type Ord`, and std's derives by their
+    // paths)
+    let src = "mod a {\n    pub type Debug = u8;\n    pub struct Clone(pub u8);\n    pub fn Hash() {}\n    pub type Ord = u32;\n    #[derive(PartialEq, Eq, PartialOrd, Ord)]\n    pub struct K(pub Ord);\n}\nmod b {\n    pub type Debug = u16;\n    pub struct Clone;\n    pub fn Hash() {}\n    pub type Ord = i8;\n}\nuse a::*;\n#[derive(Debug, Clone, Hash, PartialEq, core::cmp::Eq)]\nstruct S(u8);\n#[derive(::core::fmt::Debug, std::clone::Clone)]\nstruct T;\nfn main() {\n    let d: Debug = 5;\n    let s = S(Clone(d).0);\n    Hash();\n    println!(\"{:?} {:?} {}\", s.clone(), T.clone(), a::K(1) < a::K(2));\n}\n";
+    assert_eq!(first(src), None, "{src}");
+    // (an unknown derive beside a glob's alias of its name: by the name as written, at its line)
+    let src = "mod a {\n    pub type Foo = u8;\n}\nmod b {\n    pub type Foo = u16;\n}\nuse a::*;\n#[derive(Debug, Foo)]\nstruct S;\nfn main() {\n    let _: Foo = 1;\n}\n";
+    assert_eq!(first(src).map(|d| (d.0, d.2)), Some((8, "cannot find derive macro `Foo` in this scope".to_string())), "{src}");
+}

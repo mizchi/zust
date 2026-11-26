@@ -1,6 +1,6 @@
 # Performance
 
-The KPIs were measured <!-- measured -->2026-11-26, 5b67f5e<!-- /measured --> by CI on each push to main (bench.yml runs
+The KPIs were measured <!-- measured -->2026-11-26, 898af8a<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py`, then `scripts/update_readme.py` writes them here and their summary in the
 [README](README.md#speed)). Times come from shared GitHub Actions runners and vary by about ±20%; the instruction
 counts (valgrind) do not. How to measure a change yourself: [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -13,19 +13,19 @@ In parentheses: the instruction count (valgrind), which does not vary with the r
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 128 ms | 573 ms |
-| no-op build | 0.6 ms (0.6 M) | 0.7 ms (0.6 M) |
-| build after editing one function | 16.5 ms (129.2 M) | 62.7 ms (611.5 M) |
-| `check` | 40 ms (796.4 M) | 183 ms (3922.3 M) |
+| cold build | 129 ms | 583 ms |
+| no-op build | 0.7 ms (0.5 M) | 0.7 ms (0.5 M) |
+| build after editing one function | 18.7 ms (129.5 M) | 71.5 ms (611.8 M) |
+| `check` | 42 ms (797.0 M) | 189 ms (3927.4 M) |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 22.4 MiB | 56.0 MiB |
+| cold build peak RSS | 22.7 MiB | 56.0 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 1.12 ms / 0.82 ms / 1.80 ms / 13.93 ms / 1.55 ms |
-| startup until indexed | 311 ms |
-| peak RSS | 133.2 MiB |
+| p50: definition, hover, completion, references, rename | 1.03 ms / 0.77 ms / 1.83 ms / 7.40 ms / 1.72 ms |
+| startup until indexed | 321 ms |
+| peak RSS | 104.9 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay

@@ -4091,6 +4091,7 @@ check-pass	lifetimes/elided-lifetime-in-param-pat.rs
 check-pass	lifetimes/elided-lifetime-in-path-in-impl-Fn.rs
 check-pass	lifetimes/elided-lifetime-in-path-in-pat.rs
 check-pass	lifetimes/elided-lifetime-in-path-in-type-relative-expression.rs
+compile-fail	lifetimes/elided-lifetime-mismatch-in-self-type.rs
 compile-fail	lifetimes/elided-self-lifetime-in-trait-fn.rs
 run-pass	lifetimes/enum-lifetime-container-10228.rs
 compile-fail	lifetimes/explicit-lifetime-required-14285.rs
@@ -6882,6 +6883,7 @@ check-pass	regions/relate-bound-region-ref-type-param.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429-2.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429.rs
 compile-fail	regions/wf-bound-region-in-local-issue-115175.rs
+compile-fail	regions/wf-bound-region-in-local-soundness-issue-148854.rs
 run-pass	regions/wf-bound-region-in-object-type.rs
 check-pass	repeat-expr/can-have-side-effects-consider-element.rs
 compile-fail	repeat-expr/copy-check-const-element-uninferred-count.rs
@@ -8460,6 +8462,7 @@ compile-fail	trimmed-paths/core-unicode.rs
 run-pass	trivial-bounds/trivial-bounds-object.rs
 compile-fail	try-block/try-block-in-edition2015.rs
 run-pass	try-block/try-is-identifier-edition2015.rs
+compile-fail	try-trait/bad-interconversion.rs
 compile-fail	try-trait/bad-question-mark-on-trait-object.rs
 compile-fail	try-trait/deep-try-chain-issue-153583.rs
 compile-fail	try-trait/incompatible-types-with-question-mark-51632.rs

@@ -1266,7 +1266,7 @@ impl Cx<'_> {
                     let each = |sy: bool| args.iter().map(|&a| (a, sy)).collect::<Vec<_>>();
                     return match name {
                         "Rc" => Ans::No,
-                        "Cell" | "RefCell" if sync => Ans::No,
+                        "Cell" | "RefCell" | "OnceCell" if sync => Ans::No,
                         "Cell" | "RefCell" | "Option" | "Vec" | "VecDeque" | "String" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "BinaryHeap" | "Result" | "PhantomData" => {
                             all(self, &each(sync), stack)
                         }

@@ -4318,6 +4318,35 @@ impl Cx<'_> {
         }
     }
 
+    /// e (a path, or a call of one) is a value of type t, an ADT that bounds a type parameter by 'static (`struct
+    /// St<T: 'static>`): t is well formed (`St::<T>(None)`, `En::A(x)` in a generic fn: T: 'static, E0310)
+    pub(crate) fn rg_ctor_wf(&mut self, e: &Expr, t: Ty) {
+        let prog = self.prog;
+        let Ty::Struct(sid) = t else { return };
+        if !prog.adt_regions.get(&prog.base_of(sid)).is_some_and(|r| r.ty_outlives.iter().any(|&(_, c)| c == R_STATIC)) {
+            return;
+        }
+        let path = match e {
+            Expr::Path(_, p) => p,
+            Expr::Call(f, _) => match strip(f) {
+                Expr::Path(_, p) => p,
+                _ => return,
+            },
+            _ => return,
+        };
+        // (a constructor or a variant: the path names the type (`St`, `En::A`, `Self`), not a fn returning it)
+        let name = &prog.structs[sid as usize].name;
+        let name = name.split('<').next().unwrap_or(name);
+        let short = name.rsplit("::").next().unwrap_or(name);
+        let n = path.segs.len();
+        let names_type = |k: usize| path.segs.get(k).is_some_and(|s| s.name == short || s.name == "Self");
+        if !(names_type(n - 1) || (n >= 2 && names_type(n - 2))) {
+            return;
+        }
+        let Some(tree) = self.rg.fresh(prog, t) else { return };
+        self.rg.wf_declared(prog, t, &tree, super::borrowck::pos(e));
+    }
+
     /// A tuple struct's value of type t built by its constructor (`B(a)`): the arguments flow into its fields
     pub(crate) fn rg_ctor(&mut self, c: &Expr, t: Ty, args: &[(usize, &Expr)]) {
         // (c: the call `Self(..)`)

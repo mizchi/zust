@@ -691,6 +691,10 @@ pub struct CrateCtx {
     pub map: crate::srcmap::SrcMap,
     /// 依存するクレート (推移的に全部。実行ファイルの panic の表がそれらの表を指す)
     pub deps: Vec<String>,
+    /// The dependencies this crate and those crates name otherwise (renamed ones, CrateSpec::aliases), as the
+    /// flattening of the modules reads them: `crate:alias=name`, `:alias=name` for a bin's own
+    /// (lexer::rename_module_collisions_in)
+    pub externs: Vec<String>,
     /// このクレートの feature (ワークスペース。None なら Options の features)
     pub features: Option<Vec<String>>,
     /// このクレートの cfg と `env!` の環境 (ワークスペース: CrateSpec の cfgs / env)
@@ -882,6 +886,7 @@ impl Session {
         let src0 = stripped.as_deref().unwrap_or(src0);
         let mut crates = self.ctx.deps.clone();
         crates.extend(self.ctx.lib.iter().cloned());
+        crates.extend(self.ctx.externs.iter().cloned());
         let cfg = self.opts.cfg_with(self.ctx.features.as_ref().unwrap_or(&self.opts.features));
         let renamed = crate::prep::std_renames(src0);
         crate::prep::moved_lines(renamed.as_deref().unwrap_or(src0), &crates, Some(&cfg))
@@ -920,6 +925,7 @@ impl Session {
         };
         let mut crates = self.ctx.deps.clone();
         crates.extend(self.ctx.lib.iter().cloned());
+        crates.extend(self.ctx.externs.iter().cloned());
         let mut fix = vec![];
         let cfg = self.opts.cfg_of(self.ctx.features.as_ref().unwrap_or(&self.opts.features), &self.ctx.cfgs, &self.ctx.env);
         crate::macros::BAD_FRAGMENT.with(|c| c.borrow_mut().take());
@@ -2000,6 +2006,9 @@ impl Session {
         let mut prog = Program::build_with_edition(&items, &mut sums, self.ctx.lib.is_none() && !lib_attr, user, self.opts.edition, deny_bare).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
+        if !prog.variant_shadowed.is_empty() {
+            imported_prelude_variants(&mut prog, &src, &items[..user]);
+        }
         if let Some(e) = cross_kind_duplicate(&prog, &src, &items, &sums, user) {
             return Err(e);
         }
@@ -5484,6 +5493,64 @@ fn dyn_in_signature(prog: &Program, src: &str, items: &[SrcItem]) -> Option<Stri
 /// E0428 for two of the program's items of one name and namespace that the build keeps in separate tables: a struct
 /// / enum, a trait or a type alias (types), a unit / tuple struct and a const / static / fn (values). At the later
 /// of the two. Costs a lookup for each of the program's structs, traits and aliases
+/// A bare variant name the program's own enum took from a prelude enum's (Program::build): the prelude's again where
+/// the program's imports bring that one into scope and not its own (`use std::ops::ControlFlow::*;` beside its own
+/// `enum Local { Break(u8) }`), and neither where they bring both (rustc's E0659 at a use). Read from the text of the
+/// program's `use` items: an import of `E::*`, `E::v` or `E::{.., v, ..}`. When the two enums have one name, the
+/// prelude's is the one imported through `std::` / `core::` / `alloc::`
+fn imported_prelude_variants(prog: &mut Program, src: &str, items: &[SrcItem]) {
+    // (each `use` item's text without white space, and whether its path starts at std / core / alloc)
+    let uses: Vec<(String, bool)> = items
+        .iter()
+        .filter_map(|it| {
+            let t: String = src.get(it.start..it.end)?.chars().filter(|c| !c.is_whitespace()).collect();
+            let t = t.strip_prefix("pub(crate)").or_else(|| t.strip_prefix("pub")).unwrap_or(&t).strip_prefix("use")?.to_string();
+            let t = t.strip_prefix("::").unwrap_or(&t).to_string();
+            let from_std = ["std::", "core::", "alloc::"].iter().any(|p| t.starts_with(p));
+            Some((t, from_std))
+        })
+        .collect();
+    if uses.is_empty() {
+        return;
+    }
+    let imports = |e: &str, v: &str, std_side: Option<bool>| {
+        let word = |c: char| c.is_alphanumeric() || c == '_';
+        uses.iter().filter(|(_, s)| std_side.is_none_or(|w| w == *s)).any(|(t, _)| {
+            t.match_indices(&format!("{e}::")).any(|(i, m)| {
+                if t[..i].chars().next_back().is_some_and(word) {
+                    return false;
+                }
+                let rest = &t[i + m.len()..];
+                let leaf = |x: &str| x == "*" || x == v;
+                match rest.strip_prefix('{') {
+                    Some(r) => r.split('}').next().unwrap_or("").split(',').any(leaf),
+                    None => leaf(rest.split(|c: char| !word(c) && c != '*').next().unwrap_or("")),
+                }
+            })
+        })
+    };
+    let shadowed = std::mem::take(&mut prog.variant_shadowed);
+    for (v, pre) in &shadowed {
+        let Some(Some(own)) = prog.variant_names.get(v).copied() else { continue };
+        let pname = prog.structs[pre.0 as usize].name.as_str();
+        let pname = pname.strip_prefix("__p_").unwrap_or(pname);
+        let oname = prog.structs[own.0 as usize].name.as_str();
+        let same = pname == oname;
+        let pre_in = imports(pname, v, same.then_some(true));
+        let own_in = imports(oname, v, same.then_some(false));
+        match (pre_in, own_in) {
+            (true, false) => {
+                prog.variant_names.insert(v.clone(), Some(*pre));
+            }
+            (true, true) => {
+                prog.variant_names.insert(v.clone(), None);
+            }
+            _ => {}
+        }
+    }
+    prog.variant_shadowed = shadowed;
+}
+
 fn cross_kind_duplicate<'p>(prog: &'p Program, src: &str, items: &[SrcItem], sums: &'p [Summary], user: usize) -> Option<String> {
     let user = user.min(sums.len());
     let mut first: Option<(usize, &'p str)> = None;
@@ -10692,6 +10759,7 @@ impl Session {
         let s = renamed.as_deref().unwrap_or(s);
         let mut crates = self.ctx.deps.clone();
         crates.extend(self.ctx.lib.iter().cloned());
+        crates.extend(self.ctx.externs.iter().cloned());
         let Ok(p) = crate::prep::prep_full(s, &crates, &mut vec![], Some(&cfg)) else { return e };
         match crate::prep::hoisted_line(&crate::prep::marked(p), d.line) {
             Some(l) => with_line(&e, l),
@@ -13295,6 +13363,21 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
     for i in &g.list {
         made.entry(i.base).or_default().push(i.args.clone());
     }
+    // (the names of the program's own structs and enums that bound a type parameter by 'static (`struct St<T:
+    // 'static>`): a fn of which instances are made whose body names one is checked with placeholders too, for the
+    // T: 'static its types need (an instance with `&'x u8` for T does not tell: its regions are fresh there))
+    let mut static_adts: Vec<&str> = p
+        .adt_regions
+        .iter()
+        .filter(|&(&b, r)| r.ty_outlives.iter().any(|&(_, c)| c == crate::types::R_STATIC) && p.struct_item.get(b as usize).is_some_and(|&i| i < p.prelude_from))
+        .map(|(&b, _)| {
+            let n = p.structs[b as usize].name.as_str();
+            let n = n.split('<').next().unwrap_or(n);
+            n.rsplit("::").next().unwrap_or(n)
+        })
+        .collect();
+    static_adts.sort_unstable();
+    static_adts.dedup();
     for id in 0..p.names.len() {
         let sig = &p.sigs[id];
         // (a trait's default method no impl uses: its `Self` is a placeholder too, bounded by the trait)
@@ -13304,15 +13387,21 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
         // (a fn of which instances are made: checked with them. Unless every instance gives a `Copy` type for a
         // parameter its bounds do not make `Copy` (`dup(1u32)` of `fn dup<T>(x: T) -> (T, T) { (x, x) }`): those hide
         // what moving a T does, so the body is checked with placeholders too)
-        let recheck = match made.get(&(id as u32)) {
+        let (recheck, recheck_static) = match made.get(&(id as u32)) {
             Some(insts) => {
                 let hides = |args: &Vec<Ty>| args.iter().zip(&sig.generics).any(|(&a, (_, bs))| !bs.iter().any(|b| b == "Copy") && acg::borrowck::is_copy(p, a, 0));
-                if !insts.iter().all(hides) {
+                let moves = insts.iter().all(hides);
+                // (and one whose body names a struct or an enum that bounds a type parameter by 'static, while one of
+                // its type parameters is not bounded by 'static)
+                let statics = !static_adts.is_empty()
+                    && sig.generics.iter().any(|(_, bs)| !bs.iter().any(|b| b == "'static"))
+                    && p.item_of[id].and_then(|ii| a.items.get(ii as usize)).and_then(|it| a.src.get(it.start..it.end)).is_some_and(|body| static_adts.iter().any(|n| names_word(body, n)));
+                if !moves && !statics {
                     continue;
                 }
-                true
+                (moves, statics)
             }
-            None => false,
+            None => (false, false),
         };
         // (not a dependency's: `is_ext` knows only concrete fns, the item's flag tells)
         if !p.item_of[id].is_some_and(|ii| ii < p.prelude_from && !a.ext_items.get(ii as usize).copied().unwrap_or(false)) {
@@ -13372,12 +13461,22 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
             if recheck {
                 g.recheck.insert(iid);
             }
+            if recheck_static {
+                g.recheck_static.insert(iid);
+            }
             if wheres {
                 g.where_bound.insert(iid);
             }
         }
     }
     std::mem::take(&mut g.pending)
+}
+
+/// Whether a text names w as a word of its own (`St` in `St::<T>(x)`, not in `Store`)
+fn names_word(text: &str, w: &str) -> bool {
+    let id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let b = text.as_bytes();
+    text.match_indices(w).any(|(i, _)| !(i > 0 && id(b[i - 1])) && !b.get(i + w.len()).is_some_and(|&c| id(c)))
 }
 
 /// A generic associated type's lifetimes and the outlives among them its text writes, inline (`<'a: 'b>`) or in its
