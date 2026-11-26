@@ -3571,3 +3571,16 @@ fn a_vtable_method_whose_where_clause_fails_and_or_patterns_of_one_binding_type(
     let tri = "enum Tri<S, T, U> {\n    V1(S),\n    V2(T),\n    V3(U),\n}\nuse Tri::*;\n";
     assert!(errs(&format!("{tri}fn main() {{\n    let (Ok((V1(a) | V2(a) | V3(a), b)) | Err(Ok((a, b)) | Err((a, b)))): Result<_, Result<_, _>> = Ok((V1(1), 1));\n    let _: i32 = a + b;\n}}\n")).is_empty());
 }
+
+#[test]
+fn assert_eq_of_two_calls_one_of_a_type_known_in_full() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (`Some(v)` against a call of a known type makes `let v = 46;` that type's)
+    assert!(errs("fn get() -> Option<&'static usize> {\n    None\n}\nfn main() {\n    let v = 46;\n    assert_eq!(get(), Some(&v));\n    let w = 1;\n    assert_eq!(get().copied(), Some(w));\n}\n").is_empty());
+    // (but not against a generic call whose type inference does not know: an integer literal is not an i32 yet)
+    let src = "pub trait K {\n    type V;\n}\npub struct N<T: K>(T, T::V);\nfn foo<T: K<V = Option<U>>, U: Clone>(n: &N<T>) -> Option<U> {\n    n.1.clone()\n}\nimpl K for i32 {\n    type V = Option<u32>;\n}\nfn main() {\n    let n: N<i32> = N(1, Some(22));\n    assert_eq!(foo(&n), Some(22));\n}\n";
+    assert!(errs(src).is_empty());
+}

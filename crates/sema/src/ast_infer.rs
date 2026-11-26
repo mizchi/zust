@@ -1676,11 +1676,13 @@ impl Inf<'_> {
                 let vb = self.expr(unsafe { &*b });
                 self.pos_record -= 1;
                 // (unified unless both sides are calls: a generic call's result (`foo(&node)` with V from an associated
-                // type) would take the other call's integer default (`Some(22)`))
+                // type) would take the other call's integer default (`Some(22)`). Unless one of them is of a type known
+                // in full: `assert_eq!(map.get(&k), Some(&v))` makes `let v = 46;` a usize)
                 let simple = |e: &Expr| !matches!(e, Expr::Call(..) | Expr::MethodCall(..));
                 // SAFETY: as above
                 // (as `==` does: `&[u8]` against `[1, 2, 3]` only makes the elements one type)
-                if simple(unsafe { &*a }) || simple(unsafe { &*b }) {
+                let unify = simple(unsafe { &*a }) || simple(unsafe { &*b }) || self.known_in_full(va, 0) || self.known_in_full(vb, 0);
+                if unify {
                     self.seq_unify(va, vb);
                 }
             }

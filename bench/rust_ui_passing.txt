@@ -94,6 +94,7 @@ run-pass	array-slice-vec/slice-of-multi-ref.rs
 compile-fail	array-slice-vec/slice-pat-type-mismatches.rs
 check-pass	array-slice-vec/slice-subslice-ref-lifetime.rs
 compile-fail	array-slice-vec/slice-to-vec-comparison.rs
+run-pass	array-slice-vec/slice_binary_search.rs
 check-pass	array-slice-vec/slice_is_sorted_by_borrow.rs
 compile-fail	array-slice-vec/subslice-only-once-semantic-restriction.rs
 check-pass	array-slice-vec/subslice-range-return-ref.rs
@@ -7976,6 +7977,7 @@ run-pass	threads-sendsync/issue-4448.rs
 compile-fail	threads-sendsync/rc-is-not-send.rs
 run-pass	threads-sendsync/send-resource.rs
 run-pass	threads-sendsync/send-type-inference.rs
+run-pass	threads-sendsync/send_str_treemap.rs
 run-pass	threads-sendsync/sendable-class.rs
 run-pass	threads-sendsync/sendfn-is-a-block.rs
 run-pass	threads-sendsync/sendfn-spawn-with-fn-arg.rs

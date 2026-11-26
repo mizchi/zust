@@ -714,6 +714,23 @@ impl Solver<'_> {
             }
         }
     }
+    /// v's type is known in full, before any default: no variable is left in it, not even an integer literal's that
+    /// resolve would make an i32 (depth stops a cycle of shapes)
+    pub fn known_in_full(&mut self, v: u32, depth: u32) -> bool {
+        if depth > 64 {
+            return false;
+        }
+        let r = self.find(v);
+        match self.shape[r as usize] {
+            Some(Shape::Known(t)) => !self.prog.has_param(t),
+            Some(Shape::Ref(_, i) | Shape::Bx(i) | Shape::Arr(i, _) | Shape::Slc(i) | Shape::Ptr(_, i)) => self.known_in_full(i, depth + 1),
+            Some(Shape::Adt(_, st, l)) => (st..st + l).all(|k| {
+                let a = self.adt_args[k as usize];
+                self.known_in_full(a, depth + 1)
+            }),
+            _ => false,
+        }
+    }
     /// 型変数 v の型 (まだ分からなければ None)。形の循環 (無限の型) があっても止まるように、深さを数える
     pub fn resolve(&mut self, v: u32) -> Option<Ty> {
         if self.resolve_depth > 256 {
