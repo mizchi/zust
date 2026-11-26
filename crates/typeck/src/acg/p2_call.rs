@@ -4283,6 +4283,12 @@ impl Cx<'_> {
         if cargs.is_empty() || qself.is_some() {
             return None;
         }
+        // (`std::fmt::Write::write_str(&mut s, ..)`: as `Write::write_str(&mut s, ..)`, the trait's last two segments,
+        // as the type inference reads it)
+        if let Some(k) = self.prog.std_trait_path_skip(p) {
+            let tail = crate::parse::Path { global: false, segs: p.segs[k..].to_vec(), pos: p.pos };
+            return self.prim_method_call(&Expr::Call(Box::new(Expr::Path(None, tail)), cargs.clone()));
+        }
         // `Trait::m(&x, a)` / `crate::m::Trait::m(..)` (self を取るユーザ trait のメソッド): `x.m(a)` に
         {
             let pp = PPath::of(p);
