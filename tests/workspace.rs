@@ -271,3 +271,158 @@ fn unused_parens_in_a_library_and_not_in_dependencies() {
     assert_eq!(run(&out.join("main"), &dir, 0).0, "2\n");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A crate's own items that zustc lost (#254). The flattening renames every item of a crate (`rng__u32`), and
+/// - a fn named like a primitive type (getrandom's `pub fn u32() -> Result<u32, Error>`, fastrand's macro-made `u8`
+///   that the root's `pub use global_rng::*;` brings) took the type `u32`, a number's suffix (`0u8`) and `u32::MAX`
+///   with it;
+/// - `self` first in a `use` tree (`use crate::unicode::Sign::{self, Minus}`, num-bigint) brings the enum, and a path in
+///   a tree's braces (`pub use crate::{hir::visitor::visit, unicode::Sign as S};` beside `use crate::unicode;`,
+///   regex-syntax) goes on from the tree's prefix;
+/// - a macro's body that passes `*self => $i` to another macro (num-traits) keeps its `self`.
+/// The expected output is rustc's
+#[test]
+fn crate_items_named_like_primitives_and_use_trees() {
+    let dir = std::env::temp_dir().join(format!("zustc_ws_254_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let put = |p: &str, t: &str| {
+        let f = dir.join(p);
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(f, t).unwrap();
+    };
+    put(
+        "rng/lib.rs",
+        r#"mod global_rng;
+pub mod hir;
+mod unicode;
+pub use global_rng::*;
+
+#[derive(Debug)]
+pub struct Error(u8);
+
+pub fn u32() -> Result<u32, Error> {
+    if u8(1..3) == 2 { Ok(u32::MAX) } else { Err(Error(0u8)) }
+}
+
+pub fn show() -> String {
+    let c = 0x41u8 as char;
+    format!("{c} {:?} {:?} {}", u32(), char('c'), u16(0..7))
+}
+"#,
+    );
+    put(
+        "rng/global_rng.rs",
+        r#"macro_rules! integer {
+    ($t:tt) => {
+        pub fn $t(range: core::ops::Range<$t>) -> $t {
+            range.end - 1 as $t
+        }
+    };
+}
+
+integer!(u8);
+integer!(u16);
+
+pub fn char(c: char) -> char {
+    if c > 'z' { 0u8 as char } else { c }
+}
+"#,
+    );
+    put(
+        "rng/unicode.rs",
+        r#"#[derive(Debug)]
+pub struct CaseFoldError(());
+
+#[derive(Clone, Copy, Debug)]
+pub enum Sign {
+    Minus,
+    Plus,
+}
+
+pub fn fold(n: u8) -> Result<u8, CaseFoldError> {
+    if n > 3 { Err(CaseFoldError(())) } else { Ok(n) }
+}
+"#,
+    );
+    put(
+        "rng/hir.rs",
+        r#"use crate::unicode;
+use crate::unicode::Sign::{self, Minus, Plus};
+
+pub use crate::unicode::CaseFoldError;
+pub use crate::{hir::visitor::visit, unicode::Sign as S};
+
+mod visitor {
+    pub fn visit(n: u8) -> u8 {
+        n * 2
+    }
+}
+
+pub trait ToInt {
+    fn to_i8(&self) -> Option<i8>;
+}
+
+macro_rules! unchecked {
+    ($float:expr => $int:ty) => {
+        $float as $int
+    };
+}
+
+macro_rules! impl_to_int {
+    ($f:ident : $(fn $method:ident -> $i:ident;)*) => {
+        impl ToInt for $f {
+            $(
+                fn $method(&self) -> Option<$i> {
+                    if *self < 128.0 { Some(unchecked!(*self => $i)) } else { None }
+                }
+            )*
+        }
+    };
+}
+
+impl_to_int!(f32: fn to_i8 -> i8;);
+
+pub fn fold(n: u8) -> core::result::Result<Sign, CaseFoldError> {
+    unicode::fold(visit(n)).map(|x| if x > 1 { Plus } else { Minus })
+}
+
+pub fn flip(s: S) -> Sign {
+    match s {
+        Sign::Minus => Plus,
+        Sign::Plus => Minus,
+    }
+}
+"#,
+    );
+    put(
+        "app/main.rs",
+        r#"use rng::hir::ToInt;
+
+fn main() {
+    println!("{}", rng::show());
+    println!("{:?} {:?} {:?}", rng::hir::fold(1), rng::hir::fold(2).is_err(), rng::hir::flip(rng::hir::S::Plus));
+    println!("{:?} {:?} {}", 3.5f32.to_i8(), 200.0f32.to_i8(), rng::u8(4..9));
+}
+"#,
+    );
+    let spec = |name: &str, root: &str, deps: &[&str]| zustc::session::CrateSpec {
+        name: name.to_string(),
+        root: dir.join(root),
+        display: root.to_string(),
+        lib: deps.is_empty(),
+        deps: deps.iter().map(|d| d.to_string()).collect(),
+        features: vec![],
+        exe: (!deps.is_empty()).then(|| name.to_string()),
+        cfgs: vec![],
+        env: vec![],
+        proc_macro: None,
+        test: false,
+    };
+    let out = dir.join("t");
+    // (no forked workers: the other tests of this file run in threads beside this one)
+    let mut s = zustc::session::Session::new(zustc::session::Options { jobs: 1, ..Default::default() });
+    s.build_workspace(&[spec("rng", "rng/lib.rs", &[]), spec("app", "app/main.rs", &["rng"])], &out).unwrap();
+    let (got, err, code) = run(&out.join("app"), &dir, 0);
+    assert_eq!((got.as_str(), code), ("A Ok(4294967295) 'c' 6\nOk(Plus) true Minus\nSome(3) None 8\n", Some(0)), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
