@@ -4045,6 +4045,7 @@ compile-fail	lifetimes/elided-lifetime-in-const-param-type.rs
 check-pass	lifetimes/elided-lifetime-in-param-pat.rs
 check-pass	lifetimes/elided-lifetime-in-path-in-pat.rs
 check-pass	lifetimes/elided-lifetime-in-path-in-type-relative-expression.rs
+compile-fail	lifetimes/elided-lifetime-mismatch-in-self-type.rs
 compile-fail	lifetimes/elided-self-lifetime-in-trait-fn.rs
 run-pass	lifetimes/enum-lifetime-container-10228.rs
 compile-fail	lifetimes/explicit-lifetime-required-14285.rs
@@ -6806,6 +6807,7 @@ check-pass	regions/relate-bound-region-ref-type-param.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429-2.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429.rs
 compile-fail	regions/wf-bound-region-in-local-issue-115175.rs
+compile-fail	regions/wf-bound-region-in-local-soundness-issue-148854.rs
 run-pass	regions/wf-bound-region-in-object-type.rs
 check-pass	repeat-expr/can-have-side-effects-consider-element.rs
 compile-fail	repeat-expr/copy-check-const-element-uninferred-count.rs
