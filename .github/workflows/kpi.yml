@@ -47,6 +47,7 @@ jobs:
       base_hit: ${{ steps.base_cache.outputs.cache-hit }}
       parts: ${{ steps.parts.outputs.parts }}
       env: ${{ steps.keys.outputs.env }}
+      installer: ${{ steps.keys.outputs.installer }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -71,6 +72,9 @@ jobs:
         run: |
           env_now="$(rustc -V) | $(valgrind --version) | ${ImageOS:-} | $(ldd --version 2>&1 | sed -n 1p)"
           echo "env=$env_now" | tee -a "$GITHUB_OUTPUT"
+          # (the head's installer, for the measuring jobs, the base's too: a fork's head commit is not in the base's
+          # checkout)
+          echo "installer=$(base64 -w0 scripts/ci_install_valgrind.sh)" >> "$GITHUB_OUTPUT"
           kpi_key() {
             { echo "$env_now"
               git ls-tree -r "$1" -- crates src cratebench Cargo.toml Cargo.lock build.rs .cargo bench \
@@ -161,12 +165,12 @@ jobs:
           key: apt-valgrind-ubuntu-24.04-v1
       - name: Install wild, and valgrind in the background
         env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          INSTALLER: ${{ needs.plan.outputs.installer }}
         run: |
           command -v wild || cargo install --locked wild-linker@0.11.0
           # (as in ci.yml: the build does not need valgrind; nothing of the step's output stays open in the background.
-          # The head's script, for the base too, as plan installed it)
-          git show "$HEAD_SHA:scripts/ci_install_valgrind.sh" > ~/ci_install_valgrind.sh
+          # The head's script, which plan passes on, for the base too, as plan installed it)
+          echo "$INSTALLER" | base64 -d > ~/ci_install_valgrind.sh
           { bash ~/ci_install_valgrind.sh >~/valgrind-install.log 2>&1 </dev/null && echo 0 || echo 1; } >~/valgrind-install.done 2>/dev/null &
       - name: Build
         run: cargo build --release --workspace
