@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795727990530,
+  "lastUpdate": 1795727993374,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -88396,6 +88396,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 133.363,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3711c3bfbfd6136678c02b197008f28be07f3acf",
+          "message": "Region check part 40: OnceCell, constructors' WF, called generic fns, elided receiver lifetimes (#278)\n\nRegion check part 40: OnceCell, constructors' WF, called generic fns, elided receiver lifetimes",
+          "timestamp": "2026-11-27T06:11:33+09:00",
+          "tree_id": "4e7516f94cd431e2e57cfdc209bf0cb435a35242",
+          "url": "https://github.com/mizchi/zust/commit/3711c3bfbfd6136678c02b197008f28be07f3acf"
+        },
+        "date": 1795727992651,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.834,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.726,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.377,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 7.053,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.785,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.773,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 2.384,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 263.848,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 133.453,
             "unit": "MiB"
           }
         ]
