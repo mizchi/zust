@@ -547,6 +547,9 @@ pub struct Program {
     /// And the ones with no parameters, `impl Marker for dyn Obj<u8>`: (trait, the object's first trait as written,
     /// without spaces), which only that object implements (not `dyn Obj<u16>`)
     pub dyn_impls_exact: FxSet<(String, String)>,
+    /// Of both, the ones whose object writes a lifetime (`impl Tr for dyn Obj + '_`), by the trait and the object's
+    /// trait's name: the others are for `dyn Obj + 'static` only
+    pub dyn_impls_lt: FxSet<(String, String)>,
     /// traits implemented for fn pointers (`impl Tr for fn(A) -> B`; generic ones count for every fn pointer)
     pub fnptr_impls: HashSet<(Option<Ty>, String)>,
     /// Supertraits (`trait Bar: Foo`)
@@ -1409,6 +1412,7 @@ impl Program {
             ref_impl_pats: vec![],
             dyn_impls: FxSet::default(),
             dyn_impls_exact: FxSet::default(),
+            dyn_impls_lt: FxSet::default(),
             fnptr_impls: Default::default(),
             deny_unreachable: false,
             deny_must_use: false,
@@ -2329,12 +2333,21 @@ impl Program {
             // parameters by the object as written)
             if sn.starts_with("__dyn_") {
                 if let Some(TySyn::Dyn(d)) = &sm.impl_self_ty {
+                    // (whether its object writes a lifetime other than 'static: the header's regions say, as the
+                    // text the summary keeps of the object does not)
+                    let any_lt = !sm.hdr_regions.as_deref().is_some_and(|r| r.self_slots.first() == Some(&crate::types::R_STATIC));
                     if sm.impl_generics.is_empty() {
                         p.dyn_impls_exact.insert((tr.clone(), dyn_first(d)));
+                        if any_lt {
+                            p.dyn_impls_lt.insert((tr.clone(), dyn_first(d)));
+                        }
                     } else {
                         let first = d.split('+').next().unwrap_or(d).trim();
                         let name = first.split(|c: char| c == '(' || c == '<').next().unwrap_or(first).trim();
                         p.dyn_impls.insert((tr.clone(), name.rsplit("::").next().unwrap_or(name).to_string()));
+                        if any_lt {
+                            p.dyn_impls_lt.insert((tr.clone(), name.rsplit("::").next().unwrap_or(name).to_string()));
+                        }
                     }
                 }
             }
@@ -3762,7 +3775,8 @@ impl Program {
         // (`impl dyn Tr { fn m(&self) }`: `__dyn_Tr::m`)
         if let Ty::Dyn(s) = t {
             let p = s.split('+').next().unwrap_or("").trim();
-            let p = p.split('<').next().unwrap_or(p).rsplit("::").next().unwrap_or(p);
+            // (`ObjectTrait < u8 >` as the object's text spaces it: the name alone)
+            let p = p.split('<').next().unwrap_or(p).rsplit("::").next().unwrap_or(p).trim();
             if let Some(&id) = self.index.get(&format!("__dyn_{p}::{name}")) {
                 return Some(id);
             }

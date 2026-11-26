@@ -4380,6 +4380,29 @@ impl Cx<'_> {
         self.rg_took_call(mc);
     }
 
+    /// The tree of the receiver of a call through a trait object to a method of `impl dyn Tr` (rg.recv): a
+    /// reference's as it is, a Box's content or an object place borrowed for the call. need_static: the impl is for
+    /// `dyn Tr + 'static`, which the object's lifetime (its tree's last region) must outlive
+    pub(crate) fn rg_dyn_recv(&mut self, mc: &Expr, need_static: bool) {
+        self.rg.recv = None;
+        if !self.rg_on() {
+            return;
+        }
+        let Expr::MethodCall(recv, ..) = mc else { return };
+        let Some((rty, mut rtr)) = self.rt_expr(recv) else { return };
+        if matches!(rty, Ty::Box(_) | Ty::Dyn(_)) {
+            let r = self.rg.var();
+            if let (Ty::Box(_), Some(n)) = (rty, place_text(recv)) {
+                self.rg.loans.push((r, format!("*{n}"), super::borrowck::pos(recv)));
+            }
+            rtr.insert(0, r);
+        }
+        if let (true, Some(&obj)) = (need_static, rtr.last()) {
+            self.rg.edge(obj, STATIC, super::borrowck::pos(recv));
+        }
+        self.rg.recv = Some((rtr, super::borrowck::pos(recv)));
+    }
+
     /// A tuple literal of type t: its elements' trees, side by side (the tuple is covariant in them)
     pub(crate) fn rg_tuple(&mut self, e: &Expr, t: Ty) {
         if !self.rg_on() {

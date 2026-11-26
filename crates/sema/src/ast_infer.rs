@@ -2467,11 +2467,22 @@ impl Inf<'_> {
             dt = Some(*i);
         }
         if let Some(Ty::Dyn(tr)) = dt {
+            // (the trait's method, else one of `impl dyn Tr { .. }` / `impl X for dyn Tr`: `__dyn_Tr::m`)
             let decl = self
                 .prog
                 .traits
                 .get(tr)
-                .and_then(|ds| ds.iter().copied().find(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(n)));
+                .and_then(|ds| ds.iter().copied().find(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(n)))
+                .or_else(|| self.prog.prim_method(Ty::Dyn(tr), n).filter(|&d| self.prog.sigs[d as usize].has_self))
+                // (or a default method of a trait the object implements, `impl MyTrait for dyn Tr {}`)
+                .or_else(|| {
+                    self.prog.traits.iter().filter(|(t2, _)| self.prog.implements(Ty::Dyn(tr), t2)).find_map(|(_, ids)| {
+                        ids.iter().copied().find(|&d| {
+                            let s = &self.prog.sigs[d as usize];
+                            s.has_body && s.has_self && self.prog.names[d as usize].rsplit("::").next() == Some(n)
+                        })
+                    })
+                });
             if let Some(d) = decl {
                 let sig = &self.prog.sigs[d as usize];
                 let (ps, ret) = (sig.params[1..].to_vec(), sig.ret);

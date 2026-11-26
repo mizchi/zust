@@ -3502,12 +3502,68 @@ impl Cx<'_> {
     }
 
     pub(crate) fn dyn_method_call_on(&mut self, fat: Value, tr: &str, mc: &Expr, recv_ty: Option<Ty>) -> R<V> {
-        let Expr::MethodCall(_, name, _, margs, _) = mc else { return err(SP, "internal: expected a method call") };
+        let Expr::MethodCall(_, name, tf, margs, _) = mc else { return err(SP, "internal: expected a method call") };
+        let tr_full = tr;
         let (trn, targs) = self.dyn_trait_args(tr);
         let binds = if tr.contains('=') { self.dyn_bindings(tr) } else { vec![] };
         let tr = trn.as_str();
         let decls = self.prog.dyn_methods(tr);
         let Some(idx) = decls.iter().position(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(name.as_str())) else {
+            // (not in the vtable: an inherent method of `impl dyn Tr { .. }`, or one of another trait's impl for the
+            // object, `impl X for dyn Tr`: `__dyn_Tr::m`, called with the pair as its `&self`)
+            let base = tr.rsplit("::").next().unwrap_or(tr);
+            if let Some(&id) = self.prog.index.get(&format!("__dyn_{base}::{name}")) {
+                let s = &self.prog.sigs[id as usize];
+                if let (true, Some(&Ty::Ref(m, _))) = (s.has_self, s.params.first()) {
+                    // (the receiver as the object it is, so the impl's parameters are solved from its arguments:
+                    // `dyn ObjectTrait<u8>` for `impl<T> MyTrait<T> for dyn ObjectTrait<T>`)
+                    let st = Ty::Ref(m, intern(Ty::Dyn(crate::types::intern_str(tr_full))));
+                    let args: Vec<&Expr> = margs.iter().collect();
+                    // (the receiver's tree for the region check, as rg_dyn_call takes it: the reference and the
+                    // object's lifetime; a Box's content or an object place borrowed for the call)
+                    if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && s.regions.as_deref().is_some_and(Self::callee_needs_static) {
+                        self.rg_late_on();
+                    }
+                    self.rg_dyn_recv(mc, false);
+                    let tf = (!tf.is_empty()).then_some(tf.as_slice());
+                    return self.call_fn(id, Some((fat, st)), &args, tf, None, SP);
+                }
+            }
+            // (a default method of a trait the object implements, `impl MyTrait for dyn Tr {}`: with Self the object.
+            // An impl whose object writes no lifetime is for `dyn Tr + 'static`, which the receiver's must then be)
+            let obj = Ty::Dyn(crate::types::intern_str(tr_full));
+            // (the trait `Tr::m(x)` names, else every trait the object implements with a default of the name: more
+            // than one is ambiguous (E0034), as rustc's method lookup finds)
+            let named = self.explicit_traits.get(&(mc as *const Expr as usize)).cloned();
+            let mut dflts: Vec<(String, u32)> = self
+                .prog
+                .traits
+                .iter()
+                .filter(|(t2, _)| named.as_ref().is_none_or(|n| *t2 == n) && self.prog.implements(obj, t2))
+                .filter_map(|(t2, ids)| {
+                    ids.iter()
+                        .copied()
+                        .find(|&d| {
+                            let s = &self.prog.sigs[d as usize];
+                            s.has_body && s.has_self && matches!(s.params.first(), Some(Ty::Ref(..))) && self.prog.names[d as usize].rsplit("::").next() == Some(name.as_str())
+                        })
+                        .map(|d| (t2.clone(), d))
+                })
+                .collect();
+            if dflts.len() > 1 {
+                return err(SP, "multiple applicable items in scope (E0034)");
+            }
+            if let Some((t2, d)) = dflts.pop() {
+                let Some(&Ty::Ref(m, _)) = self.prog.sigs[d as usize].params.first() else { return err(SP, "internal: a default method's receiver") };
+                let need_static = !self.prog.dyn_impls_lt.contains(&(t2, base.to_string()));
+                if need_static && !self.rg.on && self.rg.eligible && self.inline_depth == 0 {
+                    self.rg_late_on();
+                }
+                self.rg_dyn_recv(mc, need_static);
+                let args: Vec<&Expr> = margs.iter().collect();
+                let tf = (!tf.is_empty()).then_some(tf.as_slice());
+                return self.call_fn(d, Some((fat, Ty::Ref(m, intern(obj)))), &args, tf, None, SP);
+            }
             return err(SP, format!("no method named `{name}` found for `dyn {tr}`"));
         };
         let ds = &self.prog.sigs[decls[idx] as usize];
@@ -4471,6 +4527,26 @@ impl Cx<'_> {
                 }
             }
             return self.expr(e, expected);
+        }
+        // (`MyTrait::use_self(val)` of a trait's default method, with val a trait object: the method call with the
+        // trait named, so the impl for the object (`impl MyTrait for dyn Obj {}`, for `dyn Obj + 'static`) is the one
+        // called, as in a module, where the path names the default itself)
+        if let (Expr::Path(None, p), Some(first)) = (&**func, cargs.first()) {
+            if p.segs.len() == 2 && !p.global && p.segs[0].args.is_empty() {
+                if let Some(id) = self.prog.fn_by_p(&PPath::of(p), self.self_sid) {
+                    let s = &self.prog.sigs[id as usize];
+                    let tk = self.prog.names[id as usize].rsplit_once("::").map(|(t, _)| t.to_string()).filter(|t| self.prog.traits.contains_key(t));
+                    let obj = matches!(self.peek(first), Some(Ty::Ref(_, Ty::Dyn(_)) | Ty::Box(Ty::Dyn(_))));
+                    if let (Some(tk), true, true, true) = (tk, s.has_self, s.has_body, obj) {
+                        let span = crate::parse::Span { start: p.pos, at: p.pos };
+                        let recv = first.clone();
+                        let m = Expr::MethodCall(Box::new(Expr::Paren(Box::new(recv))), p.segs[1].name.clone(), p.segs[1].args.clone(), cargs[1..].to_vec(), span);
+                        let m = self.keep_expr(m);
+                        self.explicit_traits.insert(m as *const Expr as usize, tk);
+                        return self.expr(m, expected);
+                    }
+                }
+            }
         }
         // `Trait::method(x, args)` (`Clone::clone(&s)`, `Add::add(a, b)`): the method call `x.method(args)`
         if let (Expr::Path(None, p), Some(first)) = (&**func, cargs.first()) {
