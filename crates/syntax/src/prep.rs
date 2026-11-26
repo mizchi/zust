@@ -6,8 +6,8 @@
 //! - Every preprocessing step rewrites token by token using what is collected from the whole file (macro definitions, element counts of tuple structs and variants, the module tree and `use`s,
 //!   names of nested items), and does not change the number of lines (moved items are appended at the end).
 //!   What is collected depends only on item declarations, so the same things are collected from a "skeleton" with the expressions inside fn bodies blanked out (nested items, `use`s,
-//!   `macro_rules!`, calls of user macros, and brackets and `;` are kept; the number of lines is the same), and the fn signatures too (`fn name() {`: no name, module,
-//!   macro or arity is collected from one).
+//!   `macro_rules!`, calls of user macros that may make an item, and brackets and `;` are kept; the number of lines is the same), and the fn signatures too (`fn name() {`:
+//!   no name, module, macro or arity is collected from one).
 //! - If the whole skeleton is the same as last time, unchanged chunks use the previous results, and only the changed chunks are preprocessed in a source where the rest is turned into
 //!   skeleton, and cut out by lines. If the skeleton changed (a declaration changed), the whole is preprocessed again.
 //! - `ZUSTC_PREP_VERIFY=1` compares with a full preprocessing every time. `ZUSTC_NO_PREP_INC=1` does not use the incremental path.
@@ -261,8 +261,8 @@ pub struct PrepMemo {
     key: u64,
     /// Hash of the whole skeleton
     fp: u64,
-    /// Chunk hash → names of the macros defined in it
-    names: FxMap<u64, Vec<String>>,
+    /// Chunk hash → the macros defined in it
+    names: FxMap<u64, Vec<MacroDef>>,
     /// Chunk hash → what is left of its delimiters once those that match are taken away (lexer::delims_left)
     delims: FxMap<u64, Option<Vec<u8>>>,
     /// (chunk hash, hash of the set of macro names) → (skeleton, its hash, whether it keeps something where the full
@@ -509,30 +509,107 @@ fn chunk_diff(old: &str, st: &[(usize, u64, Levels)], new: &str) -> Option<Vec<(
     Some(out)
 }
 
-/// Names of the macros defined in a chunk
-fn macro_names(t: &str) -> Vec<String> {
+/// A macro a chunk defines: its name, whether its rules may make an item (they have an item's keyword), and the
+/// macros they call
+#[derive(Clone)]
+struct MacroDef {
+    name: String,
+    items: bool,
+    calls: Vec<String>,
+}
+
+/// The keywords an item starts with (or has: `impl`, `extern`): tokens without any of them make no item
+const ITEM_WORDS: [&[u8]; 14] = [b"fn", b"struct", b"enum", b"impl", b"trait", b"mod", b"use", b"static", b"const", b"macro_rules", b"macro", b"type", b"union", b"extern"];
+
+/// Whether the tokens a..b have an item's keyword, and the macros they call (`name!`)
+fn items_and_calls(s: &[u8], toks: &[(u8, usize, usize)], a: usize, b: usize) -> (bool, Vec<String>) {
+    let mut items = false;
+    let mut calls: Vec<String> = vec![];
+    for m in a..b.min(toks.len()) {
+        if toks[m].0 != 0 {
+            continue;
+        }
+        let w = &s[toks[m].1..toks[m].2];
+        items |= ITEM_WORDS.contains(&w);
+        if m + 1 < toks.len() && toks[m + 1].0 == 1 && s[toks[m + 1].1] == b'!' {
+            let w = String::from_utf8_lossy(w).into_owned();
+            if !calls.contains(&w) {
+                calls.push(w);
+            }
+        }
+    }
+    (items, calls)
+}
+
+/// A std macro that expands to an expression (not `include!`, `thread_local!`, `cfg_select!`, which can give items)
+fn std_expr_macro(n: &str) -> bool {
+    lexer::is_std_macro(n) && !matches!(n, "include" | "thread_local" | "global_asm" | "cfg_select" | "cfg_match")
+}
+
+/// The macros defined in a chunk
+fn macro_defs(t: &str) -> Vec<MacroDef> {
     let mut v = vec![];
     if !t.contains("macro_rules") {
         return v;
     }
     let s = t.as_bytes();
     let toks = lexer::tokenize(s);
+    let n = toks.len();
+    let opens = |k: usize| k < n && toks[k].0 == 1 && matches!(s[toks[k].1], b'(' | b'[' | b'{');
     let mut k = 0;
-    while k + 2 < toks.len() {
+    while k + 2 < n {
         if toks[k].0 == 0 && &s[toks[k].1..toks[k].2] == b"macro_rules" && toks[k + 1].0 == 1 && s[toks[k + 1].1] == b'!' && toks[k + 2].0 == 0 {
-            v.push(String::from_utf8_lossy(&s[toks[k + 2].1..toks[k + 2].2]).into_owned());
+            let name = String::from_utf8_lossy(&s[toks[k + 2].1..toks[k + 2].2]).into_owned();
+            // (its rules: the brackets after the name, to the one that closes them; none read, it may make anything)
+            let (items, calls) = if opens(k + 3) {
+                let mut d = 0i32;
+                let mut e = k + 3;
+                while e < n {
+                    if toks[e].0 == 1 {
+                        match s[toks[e].1] {
+                            b'(' | b'[' | b'{' => d += 1,
+                            b')' | b']' | b'}' => {
+                                d -= 1;
+                                if d == 0 {
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    e += 1;
+                }
+                items_and_calls(s, &toks, k + 4, e)
+            } else {
+                (true, vec![])
+            };
+            v.push(MacroDef { name, items, calls });
         }
         k += 1;
     }
     v
 }
 
-/// Skeleton: within fn bodies, removes the tokens that are not items / calls of user macros (and thread_local!) / brackets / `;`.
+/// The macros whose calls make no item: no rules of theirs have an item's keyword, and they call only such macros and
+/// std's that expand to expressions (to a fixed point; for a name defined twice, all its definitions). Sorted as names
+fn item_free(defs: &[MacroDef], names: &[String]) -> Vec<String> {
+    let mut free: Vec<String> = names.iter().filter(|n| defs.iter().filter(|d| &d.name == *n).all(|d| !d.items)).cloned().collect();
+    loop {
+        let was = free.clone();
+        free.retain(|n| defs.iter().filter(|d| &d.name == n).all(|d| d.calls.iter().all(|c| was.contains(c) || (!names.contains(c) && std_expr_macro(c)))));
+        if free.len() == was.len() {
+            return free;
+        }
+    }
+}
+
+/// Skeleton: within fn bodies, removes the tokens that are not items / calls of user macros that may make one (and thread_local!) /
+/// brackets / `;` (free: the macros whose calls make no item, item_free).
 /// The number of newlines stays the same (newlines inside removed tokens and whitespace are kept). With the hash of what
 /// it keeps as written, and whether it keeps something out of the place it was in (odd): attributes after a token that
 /// ends no statement (`fo#[cfg(any())] mod m {..}`, which the full preparation does not read as the item's, but the
 /// skeleton, which blanks `fo`, would), or a `mod m { .. }` where no statement starts. A chunk of such is not reused
-fn skeleton(t: &str, names: &[String]) -> (String, u64, bool) {
+fn skeleton(t: &str, names: &[String], free: &[String]) -> (String, u64, bool) {
     let s = t.as_bytes();
     let toks = lexer::tokenize(s);
     let n = toks.len();
@@ -669,6 +746,14 @@ fn skeleton(t: &str, names: &[String]) -> (String, u64, bool) {
                 && is_sym(k + 1, b'!')
                 && (is_sym(k + 2, b'(') || is_sym(k + 2, b'[') || is_sym(k + 2, b'{'))
                 && (w == b"thread_local" || names.iter().any(|x| x.as_bytes() == w));
+            // (except a call of a macro that makes no item (item_free), with no item in its input and only calls of such
+            // macros: an expression, which no other chunk's output reads. Blanked as the body's other expressions are:
+            // `sum_all!(a, b, c)` calling itself took a round of expansion over the whole reduced source per argument)
+            let mac = mac
+                && !(free.iter().any(|x| x.as_bytes() == w) && {
+                    let (items, calls) = items_and_calls(s, &toks, k + 3, end_of(k, true));
+                    !items && calls.iter().all(|c| free.contains(c) || (!names.contains(c) && std_expr_macro(c)))
+                });
             if (stmt_start && item_kw) || inline_mod || mac {
                 // (with the attributes before it, `#[cfg(..)] fn f() {}`: what they say decides what is moved)
                 let mut a = k;
@@ -1532,26 +1617,32 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
         return Ok(None);
     }
     memo.delims = new_delims;
-    // Macro names
+    // Macro names, and those whose calls make no item
     let mut names: Vec<String> = vec![];
-    let mut new_names: FxMap<u64, Vec<String>> = FxMap::default();
+    let mut defs: Vec<MacroDef> = vec![];
+    let mut new_names: FxMap<u64, Vec<MacroDef>> = FxMap::default();
     for j in 0..nchunk {
         let v = match memo.names.get(&hs[j]) {
             Some(v) => v.clone(),
-            None => macro_names(text_of(j)),
+            None => macro_defs(text_of(j)),
         };
         for x in &v {
-            if !names.contains(x) {
-                names.push(x.clone());
+            if !names.contains(&x.name) {
+                names.push(x.name.clone());
             }
+            defs.push(x.clone());
         }
         new_names.insert(hs[j], v);
     }
     memo.names = new_names;
     names.sort();
+    let free = item_free(&defs, &names);
     let mut nh = FNV0;
     for x in &names {
         nh = fnv(mix(nh, 3), x.as_bytes());
+    }
+    for x in &free {
+        nh = fnv(mix(nh, 4), x.as_bytes());
     }
     // Skeletons, and the hash of the whole
     let mut fp = mix(key, nh);
@@ -1563,7 +1654,7 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
             None => match new_skel.get(&k) {
                 Some(e) => (e.0.clone(), e.1, e.2),
                 None => {
-                    skeleton(text_of(j), &names)
+                    skeleton(text_of(j), &names, &free)
                 }
             },
         };

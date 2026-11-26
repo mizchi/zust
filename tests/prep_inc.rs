@@ -294,3 +294,34 @@ fn main() { let _ = edited(); }
     assert!(base != in_body && in_body != again && again != in_sig);
     assert_eq!(through_memo(&[base.to_string(), in_body, again, in_sig]), vec![false, true, false]);
 }
+
+/// A call in a body of a macro that makes no item (`sum!` calling itself) is blanked in the skeletons; one that may
+/// make an item is kept: a macro with an item's keyword in its rules (`mk!`), one that calls such a macro
+/// (`via!`), and a call of an item-free macro whose input has an item (`wrap!({ fn inner() .. })`, moved out of the
+/// body after the expansion, and numbered with the others). An edit in another body is still preprocessed as the full
+/// preparation does it, and an edit of a blanked call reuses the other chunks
+#[test]
+fn prep_inc_item_free_macro_calls() {
+    let base = "\
+macro_rules! sum { () => { 0u64 }; ($x:expr $(, $r:expr)*) => { $x + sum!($($r),*) }; }
+macro_rules! mk { ($n:ident) => {{ fn $n() -> u64 { 1 } $n() }}; }
+macro_rules! via { ($n:ident) => { mk!($n) }; }
+macro_rules! wrap { ($e:expr) => { $e }; }
+fn a() -> u64 {
+    sum!(1, 2, 3, 4) + mk!(made) + via!(also)
+}
+fn b() -> u64 {
+    wrap!({ fn inner() -> u64 { 2 } inner() })
+}
+fn c() -> u64 {
+    let q = sum!(5, 6);
+    q
+}
+fn main() { let _ = a() + b() + c(); }
+";
+    let in_c = base.replace("    q\n}", "    let _z = 1;\n    q\n}");
+    let again = in_c.replace("let _z = 1;", "let _z = 2;");
+    let in_a = again.replace("sum!(1, 2, 3, 4)", "sum!(1, 2, 3, 4, 5)");
+    assert!(base != in_c && in_c != again && again != in_a);
+    assert_eq!(through_memo(&[base.to_string(), in_c, again, in_a]), vec![false, true, true]);
+}
