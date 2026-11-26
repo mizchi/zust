@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795678987228,
+  "lastUpdate": 1795678990258,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -114687,6 +114687,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/5a9aceff6b0d4ad67d38a3b63af09f8980576e8b"
         },
         "date": 1795676377450,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 80,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 75.758,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 88.889,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 68.75,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 89.813,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "eba656622a70939f18bafe75b435167be5c2bf7c",
+          "message": "selfhost: the build scripts take in the modules the sources now use (#212) (#234)\n\nEach tests/selfhost/build_*.py pastes a fixed list of zustc's sources into\none file, and the sources have started using modules missing from those\nlists: ast_summary uses regions and wf (#212); parse uses regions and\nfxhash; ast_types uses ast_summary; program uses simd_sig; macros uses pm,\nfxhash and parts of proc_macro2 that tests/selfhost/mini_pm2.rs lacked.\nbuild_minclif.py searched for a comment that is now in English.\n\nThe scripts now take in those modules, mini_pm2.rs has the missing pieces\n(printing tokens as proc_macro2 does), and build_minclif.py finds the\nEnglish comment. rustc now builds the combined source of all 11 steps\n(before: 4, lexer, prelude, link, enc). `link` and `minclif` pass end to\nend; the other steps still fail where zustc compiles its own sources\n(prelude gaps listed in the PR and in TODO.md), so #212 stays open.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-26T16:36:52+09:00",
+          "tree_id": "bba5af59f1703a47448fc9b28a880bbdbc407497",
+          "url": "https://github.com/mizchi/zust/commit/eba656622a70939f18bafe75b435167be5c2bf7c"
+        },
+        "date": 1795678989531,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
