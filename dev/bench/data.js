@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795673813301,
+  "lastUpdate": 1795673815894,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -84292,6 +84292,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 131.605,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "181a2c28f9ea69e7854cdd41190d3ac17e3df08e",
+          "message": "zurgo check: every crate's errors at once, not only the first (#216)\n\n`zurgo check` prepares the crates as `zurgo build` does (build scripts and proc macros run), then type checks each one in dependency order with Session::check and prints all its errors, one `file:line:col: message` line each, instead of compiling it. A crate's errors do not stop the crates that depend on it. A crate that cannot be prepared (unreadable or unexpandable source, a failing build script, a proc-macro crate that cannot be read or does not build, or, without the proc-macro server, one that uses a stub's macro) has that error, the crates that use it are reported as not checked, and the others are checked. No objects or fingerprints are written. A build stops as before.\n\nOn wasm-bindgen 0.2.130 for wasm32: 63 errors in one run (~11 s), where a build shows one. KPIs within ±0.6%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9hDiRLf4kwKxcyPQ7u",
+          "timestamp": "2026-11-26T15:01:52+09:00",
+          "tree_id": "97d18e5d771017bfacc0fd1eacd805d4914d5ccf",
+          "url": "https://github.com/mizchi/zust/commit/181a2c28f9ea69e7854cdd41190d3ac17e3df08e"
+        },
+        "date": 1795673815363,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.215,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.831,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.846,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 14.627,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.806,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.248,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 6.452,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 336.628,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 130.402,
             "unit": "MiB"
           }
         ]
