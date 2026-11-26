@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795711446155,
+  "lastUpdate": 1795711448928,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -87712,6 +87712,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 134.754,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1545b9ccd226983b8d58082c8a8140b499a6dec8",
+          "message": "cratebench/survey: what to fix, ranked by what each fix holds back; tiers in TODO.md (#255)\n\nEvery error, and every reason zurgo cannot plan or build a crate, is given the fix it needs. The first matching row of the new cratebench/survey/issues.tsv sets that fix. Otherwise:\n- a name zustc cannot find becomes a prelude addition (#250) or a crate's own item zustc lost (#254), judged by whether its own package defines it;\n- anything else is grouped by its text without names.\n\nEach surveyed crate that does not build shares its downloads equally among the fixes its graph needs. A fix's \"holds back\" is the sum of its shares.\n\nCRATES_SUPPORT.md gets \"What to fix, by importance\", and results.json gets `fixes`. The dashboard shows a chart and a table with issue links.\n\nTODO.md gets \"Crate coverage: what to fix next\" at the top: the top fixes, the issues with their tiers (T0 >= 2%, T1 >= 1%, T2 less; the labels on GitHub), and the next ones to file. survey.py writes it, and the crate survey's publish job commits it.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T01:38:07+09:00",
+          "tree_id": "65caa368456a3a66346e83f02d8a1730ee966704",
+          "url": "https://github.com/mizchi/zust/commit/1545b9ccd226983b8d58082c8a8140b499a6dec8"
+        },
+        "date": 1795711448547,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.352,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 1.059,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 2.071,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 16.751,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.659,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.32,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 11.427,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 359.496,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 134.285,
             "unit": "MiB"
           }
         ]
