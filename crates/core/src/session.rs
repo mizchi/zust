@@ -2506,18 +2506,21 @@ impl Session {
                 let Ok(st) = prog.resolve_g(st, &gn) else { continue };
                 let rigid: Vec<Ty> = sm.impl_generics.iter().enumerate().map(|(k, (g, bs))| Ty::Struct(prog.placeholder(u32::MAX - ii as u32, k as u32, g, bs))).collect();
                 let (st, v) = (prog.subst(st, &rigid), prog.subst(v, &rigid));
-                // (the definition's line: the member item that defines it)
-                let line = (0..items.len().min(sums.len()))
-                    .find(|&jj| matches!(items[jj].kind, ItemKind::ImplMember(h) if h as usize == ii) && sums[jj].assocs.iter().any(|a| a.name == n))
-                    .map_or(items[ii].line, |jj| items[jj].line);
+                // (the definition's line: the member item that defines it. Looked for only for an error: a search of
+                // every item for each definition was quadratic in a program of many impls)
+                let line = || {
+                    (0..items.len().min(sums.len()))
+                        .find(|&jj| matches!(items[jj].kind, ItemKind::ImplMember(h) if h as usize == ii) && sums[jj].assocs.iter().any(|a| a.name == n))
+                        .map_or(items[ii].line, |jj| items[jj].line)
+                };
                 for b in &bounds {
                     match prog.tdb.assoc_bound(&prog, v, b, st) {
                         (_, Some((proj, got, want))) => {
-                            return Err(format!("{line}:1: type mismatch resolving `{proj} == {}`: it is `{}` (E0271)", prog.tn(want).replace('#', ""), prog.tn(got).replace('#', "")));
+                            return Err(format!("{}:1: type mismatch resolving `{proj} == {}`: it is `{}` (E0271)", line(), prog.tn(want).replace('#', ""), prog.tn(got).replace('#', "")));
                         }
                         (crate::traits::Ans::No, None) => {
                             let tn = crate::traits::display_ty(&prog, v);
-                            return Err(format!("{line}:1: {} (E0277)", crate::traits::not_held(&tn, b)));
+                            return Err(format!("{}:1: {} (E0277)", line(), crate::traits::not_held(&tn, b)));
                         }
                         _ => {}
                     }
