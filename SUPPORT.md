@@ -23,6 +23,7 @@ same run.
 |---|---|---|
 | tests/ui | [table in the README](README.md#coverage-of-rustcs-test-suite) | |
 | real crates | fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6) | |
+| crates.io's top crates, by category | [CRATES_SUPPORT.md](CRATES_SUPPORT.md) and the [dashboard](https://mizchi.github.io/zust/crates/) | written by CI from `cratebench/survey/survey.py` |
 | zust-analyzer against rust-analyzer | 99.0% agreement on zustc's own sources (rust-analyzer: 98.9%) | a snapshot measured by hand (2026-11-18), not by CI: [PERFORMANCE.md](PERFORMANCE.md#against-rustc-relax-and-rust-analyzer-snapshots) |
 
 ## Language

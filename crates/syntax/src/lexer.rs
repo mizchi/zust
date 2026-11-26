@@ -309,7 +309,8 @@ fn split_items(src: &str) -> Result<Vec<SrcItem>, String> {
         }
         let start = i;
         // 文字列系リテラル (接頭辞 b / r / br / c / cr を含む)
-        if let Some(end) = string_lit(s, i) {
+        // (looked for only where one can start: most tokens start with another byte)
+        if let Some(end) = string_lit_at(s, i) {
             i = end;
             tok!(start, i, 1u8);
             continue;
@@ -733,6 +734,13 @@ pub fn unterminated_literal(s: &[u8]) -> Option<String> {
         }
     }
     None
+}
+
+/// string_lit, looked for only at the bytes a string, byte or C string literal starts with (`"`, `b`, `r`, `c`): the
+/// others are most tokens, and string_lit is not inlined
+#[inline(always)]
+fn string_lit_at(s: &[u8], i: usize) -> Option<usize> {
+    if matches!(s.get(i), Some(b'"' | b'b' | b'r' | b'c')) { string_lit(s, i) } else { None }
 }
 
 /// 位置 i から文字列リテラルが始まっていればその終端を返す。
@@ -1377,7 +1385,7 @@ pub fn tokenize(s: &[u8]) -> Vec<(u8, usize, usize)> {
             }
             continue;
         }
-        if let Some(end) = string_lit(s, i) {
+        if let Some(end) = string_lit_at(s, i) {
             toks.push((2, i, end));
             i = end;
             continue;
@@ -2594,6 +2602,11 @@ pub fn root_traits(src: &str) -> Vec<String> {
 
 /// trait_scopes, with whether src contains `mod` already known (one search of the text for both uses)
 pub fn trait_scopes_with(src: &str, has_mod: bool) -> Vec<(u32, u32, Vec<String>)> {
+    trait_scopes_in(src, has_mod, None)
+}
+
+/// trait_scopes_with, with src's tokens (`tokenize(src)`) when the caller has them already
+pub fn trait_scopes_in(src: &str, has_mod: bool, src_toks: Option<&[(u8, usize, usize)]>) -> Vec<(u32, u32, Vec<String>)> {
     if !has_mod || !src.contains("trait") {
         return vec![];
     }
@@ -2625,7 +2638,14 @@ pub fn trait_scopes_with(src: &str, has_mod: bool) -> Vec<(u32, u32, Vec<String>
         }
     }
     let s = src.as_bytes();
-    let toks = tokenize(s);
+    let own;
+    let toks: &[(u8, usize, usize)] = match src_toks {
+        Some(t) => t,
+        None => {
+            own = tokenize(s);
+            &own
+        }
+    };
     let tok = |k: usize| -> &[u8] { &s[toks[k].1..toks[k].2] };
     let is_sym = |k: usize, c: u8| toks[k].0 == 1 && s[toks[k].1] == c && toks[k].2 == toks[k].1 + 1;
     let is_id = |k: usize, w: &[u8]| toks[k].0 == 0 && tok(k) == w;

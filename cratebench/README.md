@@ -2,6 +2,9 @@
 
 crates.io の小さなクレートを zustc でビルドできるか・どのくらい速いかを rustc と比べる。
 
+crates.io の上位のクレートをカテゴリごとに広く調べるのは [survey/](survey/README.md) (submodule を使わず、一時ディレクトリで。結果は
+[../CRATES_SUPPORT.md](../CRATES_SUPPORT.md))。
+
 - `vendor/<名前>/`: クレートの上流のリポジトリ (git submodule)。crates.io の配布物と `src/` が同じコミットに固定してある。
   取ってくるには、リポジトリの根で `git submodule update --init cratebench/vendor`
 

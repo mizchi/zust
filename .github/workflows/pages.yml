@@ -3,16 +3,19 @@ name: Pages
 # The site on GitHub Pages (served from the gh-pages branch):
 #   /            site/index.html, an introduction to zust
 #   /dashboard/  site/dashboard/, the development retrospective; its data comes from scripts/retro/extract.py
+#   /crates/     site/crates/, which crates zustc builds; its data is cratebench/survey/results.json and history.tsv,
+#                which the Crate survey workflow commits
 #   /dev/bench/  written by the Benchmark workflow (github-action-benchmark); left as it is here
-# It runs after each benchmark run, since the tests/ui pass rates on the dashboard come from that run's results.
+# It runs after each benchmark run, since the tests/ui pass rates on the dashboard come from that run's results, and after
+# each crate survey (its commit to main says [skip ci], which a push trigger would not see).
 on:
   workflow_run:
-    workflows: [Benchmark]
+    workflows: [Benchmark, Crate survey]
     types: [completed]
     branches: [main]
   push:
     branches: [main]
-    paths: [site/**, scripts/retro/**, .github/workflows/pages.yml]
+    paths: [site/**, scripts/retro/**, cratebench/survey/results.json, cratebench/survey/history.tsv, .github/workflows/pages.yml]
   workflow_dispatch:
 
 concurrency:
@@ -44,7 +47,10 @@ jobs:
             --jq '.[] | {number, title, head: .head.ref, base: .base.ref, draft} | tojson' > out/pulls.jsonl
           python3 scripts/retro/extract.py --out out/site/dashboard/data --pulls out/pulls.jsonl
       - name: Assemble the site
-        run: cp -R site/. out/site/
+        run: |
+          cp -R site/. out/site/
+          mkdir -p out/site/crates/data
+          cp cratebench/survey/results.json cratebench/survey/history.tsv out/site/crates/data/
       - name: Render the social cards (og:image) from the same data
         run: |
           mkdir -p out/site/dev/bench
@@ -64,12 +70,12 @@ jobs:
           git worktree add -B gh-pages ../pages origin/gh-pages
           for i in 1 2 3 4; do
             (cd ../pages && git reset -q --hard origin/gh-pages)
-            rm -rf ../pages/dashboard ../pages/og
+            rm -rf ../pages/dashboard ../pages/crates ../pages/og
             cp -R out/site/. ../pages/
             cd ../pages
-            git add -A index.html style.css nav.js dashboard og og-home.png og-dashboard.png
+            git add -A index.html style.css nav.js dashboard crates og og-home.png og-dashboard.png
             if git diff --cached --quiet; then echo "site unchanged"; exit 0; fi
-            git commit -q -m "site: / and /dashboard/ from ${GITHUB_SHA::7}"
+            git commit -q -m "site: /, /dashboard/ and /crates/ from ${GITHUB_SHA::7}"
             if git push -q origin gh-pages; then echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"; exit 0; fi
             cd - >/dev/null
             sleep $((i * 5))
