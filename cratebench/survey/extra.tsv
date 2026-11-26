@@ -1,0 +1,19 @@
+# Crates surveyed besides the top N, or again with other features: name, features (comma-separated; `-default` turns
+# the default features off; empty: the defaults), category, why. `survey.py list` adds them to crates.tsv with their
+# latest stable version, after the top N. Every row must build with rustc on x86_64 Linux.
+tokio	full	async	the async runtime as applications use it (the top-N row has tokio's default features: none)
+serde	derive	serialization	serde as most crates depend on it (its derive macros re-exported)
+clap	derive	cli-log-errors	clap as most programs depend on it
+embassy-executor	platform-std,executor-thread	embedded	the embedded async executor, on its std platform
+embassy-sync	-	embedded	embassy's channels, mutexes and signals (no_std)
+embassy-time	std,generic-queue-8	embedded	embassy's timers, with the std time driver
+embassy-futures	-	embedded	select / join without an allocator
+embassy-embedded-hal	-	embedded	shared buses over embedded-hal
+embedded-hal	-	embedded	the embedded HAL traits
+embedded-hal-async	-	embedded	the async embedded HAL traits
+embedded-io	-	embedded	no_std Read / Write
+heapless	-	embedded	fixed-capacity collections (no_std)
+critical-section	std	embedded	critical sections, with the std implementation
+static_cell	-	embedded	statically allocated cells
+nb	-	embedded	non-blocking I/O results
+defmt	-	embedded	the embedded logging framework (a library; its linker script is for firmware)

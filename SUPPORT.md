@@ -16,6 +16,8 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
 
 - [x] tests/ui: the [table in the README](README.md#coverage-of-rustcs-test-suite)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
+- [ ] crates.io's top crates, by category: [CRATES_SUPPORT.md](CRATES_SUPPORT.md) (written by CI from
+  `cratebench/survey/survey.py`) and the [dashboard](https://mizchi.github.io/zust/crates/)
 - [x] zust-analyzer answers like rust-analyzer: 99.0% agreement on zustc's own sources (rust-analyzer: 98.9%). This is
   a snapshot measured by hand (2026-11-18), not by CI:
   [PERFORMANCE.md](PERFORMANCE.md#against-rustc-relax-and-rust-analyzer-snapshots)
