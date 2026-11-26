@@ -2508,6 +2508,7 @@ compile-fail	dyn-compatibility/supertrait-mentions-GAT.rs
 compile-fail	dyn-compatibility/supertrait-mentions-Self.rs
 compile-fail	dyn-compatibility/taint-const-eval.rs
 compile-fail	dyn-keyword/dyn-2015-edition-keyword-ident-lint.rs
+check-pass	dyn-keyword/dyn-2015-no-warnings-without-lints.rs
 compile-fail	dyn-keyword/dyn-2018-edition-lint.rs
 compile-fail	dyn-keyword/dyn-2021-edition-error.rs
 compile-fail	dyn-keyword/dyn-angle-brackets.rs
@@ -5518,6 +5519,7 @@ run-pass	or-patterns/slice-patterns.rs
 run-pass	or-patterns/struct-like.rs
 compile-fail	or-patterns/while-parsing-this-or-pattern.rs
 run-pass	overloaded/fixup-deref-mut.rs
+run-pass	overloaded/overloaded-autoderef-count.rs
 run-pass	overloaded/overloaded-autoderef-vtable.rs
 run-pass	overloaded/overloaded-autoderef.rs
 run-pass	overloaded/overloaded-calls-object-one-arg.rs
@@ -6899,6 +6901,7 @@ compile-fail	resolve/fn-item-cant-capture-dynamic-env.rs
 compile-fail	resolve/function-module-ambiguity-error-71406.rs
 compile-fail	resolve/generic-params-from-outer-item-suggestion.rs
 check-pass	resolve/generic-struct-and-fn-share-name.rs
+run-pass	resolve/global-scope-resolution.rs
 check-pass	resolve/hidden_glob_reexports.rs
 compile-fail	resolve/ice-inconsistent-resolution-151213.rs
 compile-fail	resolve/ice-inconsistent-resolution-with-import-separators-issue-147208.rs

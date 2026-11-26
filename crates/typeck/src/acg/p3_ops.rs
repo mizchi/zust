@@ -462,8 +462,10 @@ impl Cx<'_> {
             let mut lhs = None;
             let simple = matches!(root, Expr::Path(..) | Expr::Block(..));
             if plain || generic || lt0.is_none() || !simple {
-                let p = self.place(left)?;
-                lhs = Some(p);
+                let pm = std::mem::replace(&mut self.bk.place_mut, true);
+                let p = self.place(left);
+                self.bk.place_mut = pm;
+                lhs = Some(p?);
             }
             let lt1 = lhs.map(|p| p.ty()).or(lt0);
             let rhint = if matches!(op, "<<" | ">>") { self.peek(right) } else { lt1 };
@@ -472,7 +474,12 @@ impl Cx<'_> {
             let (r, rt) = self.expr(right, rhint.or(lt1)).map_err(|m| self.int_float_op(e, right, m))?;
             let p = match lhs {
                 Some(p) => p,
-                None => self.place(left)?,
+                None => {
+                    let pm = std::mem::replace(&mut self.bk.place_mut, true);
+                    let p = self.place(left);
+                    self.bk.place_mut = pm;
+                    p?
+                }
             };
             let t = p.ty();
             // (an unsuffixed literal takes the place's type, which type inference may not have reached: `c[0] *= 10`
@@ -1832,7 +1839,10 @@ impl Cx<'_> {
         let shared_pin = self.prog.structs[base as usize].name == "Pin"
             && self.prog.struct_item.get(base as usize).is_none_or(|&i| i >= self.prog.prelude_from)
             && matches!(self.prog.structs[sid as usize].args.first(), Some(Ty::Ref(false, _)));
-        let m = if !shared_pin && self.prog.method(sid, "deref_mut").is_some() { "deref_mut" } else { "deref" };
+        // (a place read or borrowed shared is reached by `deref`, one written or borrowed `&mut` by `deref_mut`, as rustc
+        // does: a Deref with effects counts them (`let _ = p.x;` calls `deref` once))
+        let shared = shared_pin || !self.bk.place_mut && self.prog.method(sid, "deref").is_some();
+        let m = if !shared && self.prog.method(sid, "deref_mut").is_some() { "deref_mut" } else { "deref" };
         let did = self.prog.method(sid, m)?;
         if !matches!(self.prog.sigs[did as usize].ret, Ty::Ref(_, i) if !i.is_fat() && !matches!(i, Ty::Str | Ty::Slice(_) | Ty::Dyn(_))) {
             return None;

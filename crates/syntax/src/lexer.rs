@@ -3905,7 +3905,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             //  (two distinct is ambiguous): libc's unix sees `time_t` of linux_like/linux/gnu/b64; a definition is its own)
             // (the first segment of a path that goes on is a type or module: `E::V(..)`)
             let w = if j > k { NS_TYPE } else { want };
-            let nn = in_block().or_else(|| if is_def { renamed_in(sc, n) } else { names.lookup(sc, n, w) });
+            // (`::f` / `::E::V` whose first segment names no module: an item of the crate root, as in 2015)
+            let nn = if leading { names.lookup(usize::MAX, n, w) } else { in_block().or_else(|| if is_def { renamed_in(sc, n) } else { names.lookup(sc, n, w) }) };
             // (not a macro's name: `use core::panic as p;` then `p!()` stays as it is written)
             let std_path = |nn: &[u8]| [&b"std::"[..], b"core::", b"alloc::"].iter().any(|p| nn.starts_with(p));
             // (a name before a `:` only when it is no field: the walk back to a `where` is for a name that is renamed)

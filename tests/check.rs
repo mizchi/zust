@@ -3727,3 +3727,17 @@ fn a_raw_method_name_in_an_impl_and_a_string_behind_an_rc() {
     let src = "use std::cell::RefCell;\nuse std::rc::Rc;\nfn main() {\n    let s = Rc::new(\"foo\".to_string());\n    assert_eq!(&**s, \"foo\");\n    let m = Rc::new(RefCell::new(String::from(\"x\")));\n    assert_eq!(&**m.borrow(), \"x\");\n}\n";
     assert!(errs(src).is_empty(), "{:?}", errs(src));
 }
+
+#[test]
+fn a_path_from_the_crate_root_names_the_root_s_item_beside_a_module_s_own() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (`::f` in module m is the root's `f`, as in 2015, not m's: their types tell them apart)
+    let src = "pub fn f() -> u8 {\n    1\n}\nmod m {\n    pub fn f() -> String {\n        String::new()\n    }\n    pub fn g() -> u8 {\n        let _s: String = f();\n        ::f() + crate::f()\n    }\n}\nfn main() {\n    m::g();\n}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+    // (`::outer::dyn::dyn` from a macro in another module, a path from the root that a module name starts)
+    let src = "mod outer {\n    pub mod inner {\n        pub struct S;\n    }\n}\nmod user {\n    pub fn make() -> ::outer::inner::S {\n        ::outer::inner::S\n    }\n}\nfn main() {\n    let _ = user::make();\n}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+}
