@@ -458,7 +458,7 @@ impl Cx<'_> {
         // decided before anything is evaluated, so the user's deref runs once; only for the structs Program found such a
         // deref of)
         if let Some(Ty::Struct(sid)) = self.peek(recv).map(|t| self.strip_refs(t)).filter(|t| matches!(t, Ty::Struct(s) if !self.prog.deref_to_seq.is_empty() && self.prog.deref_to_seq.contains(&self.prog.base_of(*s)))) {
-            if self.prog.self_method(sid, method).is_none() && self.prog.default_method(sid, method).is_none() {
+            if self.prog.self_method(sid, method).is_none() && self.prog.self_default_method(sid, method).is_none() {
                 if let Some(did) = self.prog.method(sid, "deref") {
                     if let Ty::Ref(_, target @ (Ty::Array(..) | Ty::Slice(_) | Ty::Str)) = self.prog.sigs[did as usize].ret {
                         // (`deref_mut` for a method that takes `&mut self` (`c.reverse()`), as autoderef takes it)
@@ -476,7 +476,7 @@ impl Cx<'_> {
             // (`(&*g).m()`, or `(&mut *g).m()` for a RefMut's when m takes `&mut self` (as autoderef picks `deref` or
             // `deref_mut`): a method that takes self by value moves out of a reference, an error (E0507) as through
             // any reference)
-            if self.prog.self_method(sid, method).is_none() && self.prog.default_method(sid, method).is_none() {
+            if self.prog.self_method(sid, method).is_none() && self.prog.self_default_method(sid, method).is_none() {
                 let mutable = deref_mut && self.takes_mut_self(target, method);
                 let deref = Expr::Unary("*".into(), recv.clone(), Default::default());
                 let inner = Expr::Paren(Box::new(Expr::Ref(mutable, Box::new(deref))));
@@ -900,7 +900,7 @@ impl Cx<'_> {
             let by_value = !matches!(self.prog.sigs[bid as usize].params.first(), Some(Ty::Ref(..)));
             if let Some(rt @ Ty::Ref(rm, Ty::Struct(sid))) = pt {
                 let ref_own = self.prog.method(*sid, &format!("__ref_{method}")).is_some();
-                let inherent = self.prog.method(*sid, method).is_some_and(|id| {
+                let inherent = self.prog.self_method(*sid, method).is_some_and(|id| {
                     let s = &self.prog.sigs[id as usize];
                     s.impl_trait.is_none() && s.trait_of.is_none() && matches!(s.params.first(), Some(Ty::Ref(m, _)) if *m == rm)
                 });
@@ -1105,7 +1105,7 @@ impl Cx<'_> {
         // `a.max(b)` / `a.min(b)` (Ord を実装した struct / タプル / String): prelude の __exr_max / __exr_min
         if matches!(method, "max" | "min") && margs.len() == 1 && self.prog.index.contains_key("__exr_max") {
             if let Some(Ty::Struct(sid)) = self.peek(recv) {
-                if self.prog.self_method(sid, method).is_none() && self.prog.default_method(sid, method).is_none() {
+                if self.prog.self_method(sid, method).is_none() && self.prog.self_default_method(sid, method).is_none() {
                     let f = if method == "max" { "__exr_max" } else { "__exr_min" };
                     let e = Expr::Call(Box::new(path_expr(f)), vec![recv.clone(), margs[0].clone()]);
                     return self.expr(&e, expected);
@@ -1127,7 +1127,7 @@ impl Cx<'_> {
         }
         // (メソッドがなく、Deref の先が構造体でない (`PathBuf` → str): `recv.deref().m(..)` にして str などのメソッドを探す)
         if let Some(Ty::Struct(sid)) = self.peek(recv).map(|t| self.strip_refs(t)) {
-            if self.prog.self_method(sid, method).is_none() && self.prog.default_method(sid, method).is_none() {
+            if self.prog.self_method(sid, method).is_none() && self.prog.self_default_method(sid, method).is_none() {
                 if let Some(did) = self.prog.method(sid, "deref") {
                     if matches!(self.prog.sigs[did as usize].ret, Ty::Ref(_, Ty::Str | Ty::Slice(_))) {
                         let d = mcall(paren(recv.clone()), "deref", vec![]);
@@ -1450,7 +1450,7 @@ impl Cx<'_> {
             }
             // (a method with `self`: an associated function of the name is none, `v.get(i)` beside `impl Wire for Vec<T>
             // { fn get(r: &[u8]) -> Self }` is the inherent `get` (self_method))
-            if let Some(id) = self.prog.self_method(sid, &name).or_else(|| self.prog.default_method(sid, &name)) {
+            if let Some(id) = self.prog.self_method(sid, &name).or_else(|| self.prog.self_default_method(sid, &name)) {
                 // (inherent overloads, in impls for other instances of the type: the one for this receiver's, before its
                 // receiver is borrowed (or not) as that method takes self)
                 break (a, o, sid, self.prog.inherent_overload_for(id, Ty::Struct(sid)));
@@ -1492,8 +1492,8 @@ impl Cx<'_> {
                 return Ok((Some(tmp), t));
             }
             let sname = self.prog.structs[sid as usize].name.clone();
-            // (only an associated function of the name: rustc's note)
-            if self.prog.method(sid, &name).is_some() {
+            // (only an associated function of the name, or a trait's default one: rustc's note)
+            if self.prog.method(sid, &name).or_else(|| self.prog.default_method(sid, &name)).is_some_and(|d| !self.prog.sigs[d as usize].has_self) {
                 return err(SP, format!("`{sname}::{name}` is an associated function, not a method"));
             }
             return err(SP, format!("no method named `{name}` found for `{sname}`"));
@@ -1854,7 +1854,7 @@ impl Cx<'_> {
         if !self.prog.struct_item.get(base as usize).is_some_and(|&i| i < self.prog.prelude_from) || self.prog.is_placeholder(sid) {
             return None;
         }
-        if self.prog.method(sid, m).is_some() || self.prog.default_method(sid, m).is_some() {
+        if self.prog.self_method(sid, m).is_some() || self.prog.self_default_method(sid, m).is_some() {
             return None;
         }
         // (a method of an impl for a reference to it (`impl RefTouch for &mut W`) with a reference receiver: the
@@ -1883,7 +1883,7 @@ impl Cx<'_> {
             }
             seen.push(at);
             match at {
-                Ty::Struct(s) if self.prog.method(s, m).is_none() && self.prog.default_method(s, m).is_none() && self.guard_of(at).is_none() => match deref_target(s) {
+                Ty::Struct(s) if self.prog.self_method(s, m).is_none() && self.prog.self_default_method(s, m).is_none() && self.guard_of(at).is_none() => match deref_target(s) {
                     Some(n) => at = n,
                     None => break,
                 },
@@ -1893,7 +1893,7 @@ impl Cx<'_> {
         // (a program's struct without m: none of the prelude's `&mut self` methods takes_mut_self knows by name is its)
         if let Ty::Struct(s) = at {
             let user = self.prog.struct_item.get(self.prog.base_of(s) as usize).is_some_and(|&i| i < self.prog.prelude_from);
-            if user && self.prog.method(s, m).is_none() && self.prog.default_method(s, m).is_none() {
+            if user && self.prog.self_method(s, m).is_none() && self.prog.self_default_method(s, m).is_none() {
                 return None;
             }
         }
@@ -1903,7 +1903,7 @@ impl Cx<'_> {
     pub(crate) fn takes_mut_self(&self, t: Ty, m: &str) -> bool {
         let t = self.strip_refs(t);
         if let Ty::Struct(ts) = t {
-            if let Some(id) = self.prog.method(ts, m).or_else(|| self.prog.default_method(ts, m)) {
+            if let Some(id) = self.prog.self_method(ts, m).or_else(|| self.prog.self_default_method(ts, m)) {
                 return matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(true, _)));
             }
         }

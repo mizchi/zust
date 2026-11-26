@@ -4,9 +4,12 @@
 // methods (`v.first()` calls `self.get(0)`). The function is still called by its path (`<Vec<u8> as Wire>::get(..)`,
 // `Wire::get(..)`, `T::get(..)`), and a method of the same trait (`put(&self)`) by a method call. Also an
 // inherent associated function beside a trait's method of the same name (`s.f()` is the trait's), and a type's
-// associated function beside the method of what the type derefs to (`m.val()` is the target's).
+// associated function beside the method of what the type derefs to (`m.val()` is the target's): also a trait's default
+// one (`d.val()`), and with a `DerefMut` to a `&mut self` method (`e.edit()` goes through the user's `deref_mut`). A
+// type with an associated `partial_cmp` / `cmp` and a derived PartialOrd / Ord compares by its fields (`a.partial_cmp(&b)`,
+// `a < b`).
 
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 mod helper {
     pub trait Decode: Sized {
@@ -57,6 +60,7 @@ impl Tr for S {
 struct Inner(i32);
 impl Inner {
     fn val(&self) -> i32 { self.0 * 2 }
+    fn edit(&mut self) { self.0 += 1 }
 }
 struct W(Inner);
 impl Deref for W {
@@ -68,6 +72,45 @@ trait Mk {
 }
 impl Mk for W {
     fn val(x: i32) -> Self { W(Inner(x)) }
+}
+
+// (a trait's default associated function beside the method of what the type derefs to)
+struct D(Inner);
+impl Deref for D {
+    type Target = Inner;
+    fn deref(&self) -> &Inner { &self.0 }
+}
+trait Dflt {
+    fn val() -> i32 { 5 }
+}
+impl Dflt for D {}
+
+// (an associated function beside the `&mut self` method of what the type derefs to with DerefMut)
+struct E(Inner, u32);
+impl Deref for E {
+    type Target = Inner;
+    fn deref(&self) -> &Inner { &self.0 }
+}
+impl DerefMut for E {
+    fn deref_mut(&mut self) -> &mut Inner {
+        self.1 += 1;
+        &mut self.0
+    }
+}
+impl E {
+    fn edit() -> i32 { 9 }
+}
+
+// (an associated `partial_cmp` / `cmp` beside a derived PartialOrd / Ord)
+#[derive(PartialEq, PartialOrd, Debug)]
+struct P(i32, i32);
+impl P {
+    fn partial_cmp() -> i32 { 3 }
+}
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+struct Q(u8);
+impl Q {
+    fn cmp(x: i32) -> i32 { x }
 }
 
 fn total(v: &Vec<u8>) -> u32 {
@@ -119,4 +162,14 @@ fn main() {
     println!("{} {}", s.f(), S::f(&s));
     let m = W::val(21);
     println!("{}", m.val());
+    let d = D(Inner(4));
+    println!("{} {}", d.val(), <D as Dflt>::val());
+    let mut e = E(Inner(1), 0);
+    e.edit();
+    e.edit();
+    println!("{} {} {}", e.0 .0, e.1, E::edit());
+
+    let (a, b) = (P(1, 2), P(1, 3));
+    println!("{:?} {:?} {} {} {}", a.partial_cmp(&b), b.partial_cmp(&a), a < b, a >= b, P::partial_cmp());
+    println!("{:?} {:?} {}", Q(4).cmp(&Q(2)), Q(1).max(Q(3)), Q::cmp(7));
 }

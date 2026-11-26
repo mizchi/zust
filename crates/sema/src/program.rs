@@ -3801,12 +3801,19 @@ impl Program {
 
     /// When struct sid has no method named name, the default method of a trait it implements
     pub fn default_method(&self, sid: u32, name: &str) -> Option<u32> {
-        let r = self.default_method_inner(sid, name);
+        let r = self.default_method_inner(sid, name, false);
         // (or else a blanket impl's method)
         r.or_else(|| self.blanket.get(name).copied())
     }
 
-    fn default_method_inner(&self, sid: u32, name: &str) -> Option<u32> {
+    /// default_method for a method call: one with `self`, as self_method. A trait's default associated function
+    /// without it (`fn val() -> i32 { 5 }`) is no method candidate: `w.val()` goes on to what w derefs to
+    pub fn self_default_method(&self, sid: u32, name: &str) -> Option<u32> {
+        let r = self.default_method_inner(sid, name, true);
+        r.or_else(|| self.blanket.get(name).copied().filter(|&b| self.sigs[b as usize].has_self))
+    }
+
+    fn default_method_inner(&self, sid: u32, name: &str, self_only: bool) -> Option<u32> {
         let sid = self.base_of(sid);
         let mut found = None;
         for (s, tr) in &self.impls {
@@ -3818,6 +3825,7 @@ impl Program {
             };
             for &d in decls {
                 if self.sigs[d as usize].has_body
+                    && (!self_only || self.sigs[d as usize].has_self)
                     && self.names[d as usize].rsplit("::").next() == Some(name)
                 {
                     found = Some(d);

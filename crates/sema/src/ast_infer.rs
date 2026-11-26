@@ -2380,7 +2380,7 @@ impl Inf<'_> {
             _ => None,
         };
         // (a method with `self`: an associated function of the name is none (self_method))
-        let mut callee = sid.and_then(|sid| self.prog.self_method(sid, n).or_else(|| self.prog.default_method(sid, n)));
+        let mut callee = sid.and_then(|sid| self.prog.self_method(sid, n).or_else(|| self.prog.self_default_method(sid, n)));
         let mut rv = rv;
         let mut sid = sid;
         let mut hops = 0;
@@ -2398,7 +2398,7 @@ impl Inf<'_> {
                     Some(Shape::Adt(b, _, _)) => Some(b),
                     _ => None,
                 };
-                callee = sid.and_then(|sid| self.prog.self_method(sid, n).or_else(|| self.prog.default_method(sid, n)));
+                callee = sid.and_then(|sid| self.prog.self_method(sid, n).or_else(|| self.prog.self_default_method(sid, n)));
             } else {
                 break;
             }

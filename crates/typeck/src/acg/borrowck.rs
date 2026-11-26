@@ -4216,7 +4216,7 @@ impl Cx<'_> {
                 _ => None,
             },
             Expr::MethodCall(r, m, _, args, _) => match self.bk_rooted_at(r, n).and_then(|x| x.1).or_else(|| self.peek(r)).map(|t| self.strip_refs(t)) {
-                Some(Ty::Struct(sid)) => self.prog.method(sid, m).filter(|&id| self.prog.sigs[id as usize].has_self).map(|id| (&args[..], self.prog.sigs[id as usize].params.get(1..).unwrap_or(&[]))),
+                Some(Ty::Struct(sid)) => self.prog.self_method(sid, m).map(|id| (&args[..], self.prog.sigs[id as usize].params.get(1..).unwrap_or(&[]))),
                 _ => None,
             },
             _ => None,
@@ -4255,7 +4255,7 @@ impl Cx<'_> {
             // (a `&mut self` method of the place (`v.push(4)`): captured by `&mut`)
             Expr::MethodCall(r, m, ..) => {
                 if let Some((p, Some(Ty::Struct(sid)))) = self.bk_rooted_at(r, n) {
-                    let mut_self = self.prog.method(sid, m).is_some_and(|id| {
+                    let mut_self = self.prog.self_method(sid, m).is_some_and(|id| {
                         let sg = &self.prog.sigs[id as usize];
                         sg.has_self && matches!(sg.params.first(), Some(Ty::Ref(true, _)))
                     });
@@ -4322,7 +4322,7 @@ impl Cx<'_> {
             Expr::MethodCall(r, m, ..) => {
                 if let Some((_, rt)) = self.bk_rooted_at(r, n) {
                     let by_value = match rt {
-                        Some(Ty::Struct(sid)) => self.prog.method(sid, m).is_none_or(|id| {
+                        Some(Ty::Struct(sid)) => self.prog.self_method(sid, m).is_none_or(|id| {
                             let sg = &self.prog.sigs[id as usize];
                             !(sg.has_self && matches!(sg.params.first(), Some(Ty::Ref(..))))
                         }),

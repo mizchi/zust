@@ -1266,7 +1266,7 @@ impl Cx<'_> {
                 }
                 let user = ["partial_cmp", "cmp"]
                     .into_iter()
-                    .find(|m| !self.prog.is_tuple(sid) && self.prog.method(sid, m).is_some());
+                    .find(|m| !self.prog.is_tuple(sid) && self.prog.self_method(sid, m).is_some());
                 if let Some(m) = user {
                     // A hand-written impl: `__exr_pord_i32(&__a.partial_cmp(__b))`
                     let r = Ty::Ref(false, intern(t));
