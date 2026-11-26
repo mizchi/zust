@@ -1265,10 +1265,13 @@ impl Cx<'_> {
                 Some(sub) => self.pat_test(sub, p, fail),
                 None => Ok(()),
             },
-            Pat::Ref(_, inner) => {
+            Pat::Ref(pm, inner) => {
                 let Ty::Ref(_, _) = p.ty() else {
                     return err(SP, format!("mismatched types: `{}` is not a reference", self.prog.tn(p.ty())));
                 };
+                if let Some(m) = self.ref_pat_mutability_err(*pm, p.ty()) {
+                    return err(SP, m);
+                }
                 let (q, _) = self.pat_deref_once(p);
                 self.pat_test(inner, q, fail)
             }
@@ -1582,6 +1585,16 @@ impl Cx<'_> {
     }
 
     /// n names the unit struct t is (no fields, no variants)
+    /// A `&` pattern on a `&mut` value, or a `&mut` pattern on a `&` one: the types differ in mutability (E0308)
+    fn ref_pat_mutability_err(&self, pat_mut: bool, t: Ty) -> Option<String> {
+        let Ty::Ref(m, i) = t else { return None };
+        if !self.user_code || m == pat_mut {
+            return None;
+        }
+        let (want, found) = if m { ("&mut ", "&_") } else { ("&", "&mut _") };
+        Some(format!("mismatched types: expected `{want}{}`, found `{found}` (types differ in mutability)", self.prog.tn(*i)))
+    }
+
     /// Whether n names a unit struct of the program (`struct S;`, not generic)
     pub(crate) fn unit_struct_named(&self, n: &str) -> bool {
         !self.prog.unit_structs.is_empty() && self.prog.unit_structs.contains(n) && self.prog.struct_index.get(n).is_some_and(|&sid| self.prog.structs[sid as usize].generics.is_empty())
@@ -1595,6 +1608,14 @@ impl Cx<'_> {
 
     /// 判定に通った後で、パターン中の名前を束縛する
     pub(crate) fn pat_bind(&mut self, pat: &Pat, p: Place, mode: BindMode) -> R<()> {
+        // (a destructuring assignment, `(x, y) = &(1, 2);` (parse::destructure_assign's `let` of `__exr_da` names): no
+        // default binding mode takes a reference off its right side (E0308))
+        if let (Pat::Tuple(_) | Pat::Slice(_), Ty::Ref(..)) = (pat, p.ty()) {
+            if destructure_assign_pat(pat) {
+                let shape = if matches!(pat, Pat::Tuple(_)) { "a tuple" } else { "an array" };
+                return err(SP, format!("mismatched types: expected `{}`, found {shape}", self.prog.tn(p.ty())));
+            }
+        }
         match pat {
             // (`let PhantomData::<(A, B)> = x`: a unit struct's turbofish names the type the value has)
             Pat::Path(path) if path.segs.last().is_some_and(|s| !s.args.is_empty()) && self.variant_on(path, p.ty()).is_none() => {
@@ -1723,6 +1744,9 @@ impl Cx<'_> {
                 let t = p.ty();
                 if matches!(t, Ty::Struct(_) | Ty::Array(..) | Ty::Unit | Ty::Bool | Ty::Char | Ty::F32 | Ty::F64) || t.is_int() {
                     return err(SP, format!("mismatched types: expected `{}`, found `&_`", self.prog.tn(t)));
+                }
+                if let Some(m) = self.ref_pat_mutability_err(*pm, t) {
+                    return err(SP, m);
                 }
                 let (q, _) = self.pat_deref_once(p);
                 let saved = self.bk_pat_proj(borrowck::ref_deref(*pm));
@@ -3274,4 +3298,13 @@ fn e0023(m: String, variant: bool) -> String {
     let (Ok(a), Ok(b)) = (n.parse::<usize>(), r.parse::<usize>()) else { return m };
     let f = |k: usize| if k == 1 { "field" } else { "fields" };
     format!("this pattern has {a} {}, but the corresponding tuple {} has {b} {} (E0023)", f(a), if variant { "variant" } else { "struct" }, f(b))
+}
+
+/// The pattern of a destructuring assignment's `let` (parse::destructure_assign): its names are `__exr_da..`
+fn destructure_assign_pat(p: &Pat) -> bool {
+    match p {
+        Pat::Tuple(ps) | Pat::Slice(ps) => ps.iter().any(destructure_assign_pat),
+        Pat::Ident(_, _, n, _) => n.starts_with("__exr_da"),
+        _ => false,
+    }
 }

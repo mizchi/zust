@@ -2266,6 +2266,7 @@ build-pass	derives/six-hundred-fields.rs
 compile-fail	derives/ufcs-in-derive-hash.rs
 compile-fail	destructuring-assignment/bad-expr-lhs.rs
 compile-fail	destructuring-assignment/bad-let-in-destructure.rs
+compile-fail	destructuring-assignment/default-match-bindings-forbidden.rs
 run-pass	destructuring-assignment/let-binding-tuple-destructuring.rs
 compile-fail	destructuring-assignment/non-exhaustive-destructure.rs
 compile-fail	destructuring-assignment/note-unsupported.rs
@@ -3986,6 +3987,7 @@ compile-fail	let-else/let-else-binding-explicit-mut-borrow.rs
 check-pass	let-else/let-else-binding-explicit-mut-pass.rs
 compile-fail	let-else/let-else-binding-explicit-mut.rs
 compile-fail	let-else/let-else-binding-immutable.rs
+compile-fail	let-else/let-else-break-help-issue-142602.rs
 compile-fail	let-else/let-else-check.rs
 compile-fail	let-else/let-else-deref-coercion.rs
 compile-fail	let-else/let-else-destructuring.rs
@@ -5093,6 +5095,7 @@ compile-fail	moves/use_of_moved_value_copy_suggestions.rs
 compile-fail	mut/mut-cant-alias.rs
 compile-fail	mut/mut-cross-borrowing.rs
 compile-fail	mut/mut-pattern-internal-mutability.rs
+compile-fail	mut/mut-pattern-mismatched.rs
 compile-fail	mut/mut-suggestion.rs
 compile-fail	mut/mutable-class-fields-2.rs
 compile-fail	mut/mutable-class-fields.rs

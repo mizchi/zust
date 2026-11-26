@@ -3417,3 +3417,24 @@ fn patterns_of_another_type_than_the_value() {
     // (the scrutinee's type is inferred from the literal without taking its reference off: `[u8; 4]`)
     assert_eq!(first("fn load<L>() -> Option<L> {\n    todo!()\n}\nfn main() {\n    while let Some(tag) = load() {\n        match &tag {\n            b\"NAME\" => {}\n            _ => {}\n        }\n    }\n}\n"), None);
 }
+
+#[test]
+fn reference_patterns_breaks_and_destructuring_of_another_type() {
+    // (rustc's E0308 for each)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let line = |src: &str| first(src).map(|x| x.0);
+    // (a `&` pattern on a `&mut` value and a `&mut` one on a `&` value: the types differ in mutability)
+    assert_eq!(line("fn main() {\n    let foo = &mut 1;\n    let &_ = foo;\n}\n"), Some(3));
+    assert_eq!(line("fn main() {\n    let bar = &1;\n    match bar {\n        &mut _ => {}\n    }\n}\n"), Some(4));
+    assert_eq!(first("fn main() {\n    let mut v = vec![1, 2];\n    for &mut x in v.iter_mut() { let _ = x; }\n    for &x in v.iter() { let _ = x; }\n    let w = vec![(1, &2)];\n    for &(a, &b) in w.iter() { let _ = (a, b); }\n}\n"), None);
+    // (`break;` makes a loop's value `()`: a `break 3` after it, or before it, is another type)
+    assert_eq!(line("fn main() {\n    let _a = loop {\n        if true {\n            break;\n        }\n        break 3;\n    };\n}\n"), Some(6));
+    assert_eq!(line("fn main() {\n    let _a = loop {\n        if true {\n            break 1;\n        }\n        break;\n    };\n}\n"), Some(6));
+    assert_eq!(first("fn main() {\n    let _b = loop { break; };\n    let _c: i32 = loop { if true { break 2; } break 3; };\n    loop { if true { break; } break; }\n    while true { break; }\n}\n"), None);
+    // (a destructuring assignment takes no reference off its right side)
+    assert_eq!(line("fn main() {\n    let mut x = &0;\n    let mut y = &0;\n    (x, y) = &(1, 2);\n    let _ = (x, y);\n}\n"), Some(4));
+    assert_eq!(first("fn main() {\n    let (mut a, mut b) = (1, 2);\n    (a, b) = (b, a);\n    [a, b] = [5, 6];\n    let r = &(7, 8);\n    (a, b) = *r;\n    let _ = (a, b);\n}\n"), None);
+}

@@ -1568,7 +1568,18 @@ impl Cx<'_> {
                 if let (Some(_), Some(kind)) = (value, self.loops[li].no_value) {
                     return Err(self.at(*pos, format!("`break` with value from a `{kind}` loop (E0571)")));
                 }
-                // `break v`: 値を評価してから抜ける (型は最初の break で決まる)
+                // (`break;` out of a `loop` or a labeled block: its value is `()`, which a `break 3` after it must be too, as
+                // one before it must have been (E0308))
+                if value.is_none() && self.loops[li].no_value.is_none() {
+                    match self.loops[li].val {
+                        Some(w) if w != Ty::Unit && w != Ty::Never => {
+                            return Err(self.at(*pos, format!("mismatched types: expected `{}`, found `()`", self.prog.tn(w))));
+                        }
+                        Some(_) => {}
+                        None => self.loops[li].val = Some(Ty::Unit),
+                    }
+                }
+                // `break v`: evaluate the value, then leave (its type is the first break's)
                 let mut args = vec![];
                 if let Some(e) = value {
                     let want = self.loops[li].val;
