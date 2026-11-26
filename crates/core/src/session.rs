@@ -1942,7 +1942,7 @@ impl Session {
             }
         }
         unsafe_impls(&src, &items[..user_src])?;
-        let mut prog = Program::build_with_edition(&items, &sums, self.ctx.lib.is_none() && !lib_attr, user, self.opts.edition, deny_bare).map_err(|e| name_line(&e, &src, &items))?;
+        let mut prog = Program::build_with_edition(&items, &mut sums, self.ctx.lib.is_none() && !lib_attr, user, self.opts.edition, deny_bare).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
         if let Some(e) = cross_kind_duplicate(&prog, &src, &items, &sums, user) {
