@@ -17,7 +17,7 @@ needs one filed first (then add it to [cratebench/survey/issues.tsv](cratebench/
 
 <!-- crate-priorities -->
 
-Survey of 2026-11-26 16:58 UTC on `5b67f5e`: 38 of 273 crates build (13.5% of their downloads); 391 errors in 168 packages.
+Survey of 2026-11-26 21:14 UTC on `ff4ec00`: 38 of 273 crates build (13.5% of their downloads); 391 errors in 168 packages.
 
 | # | fix | issue | holds back | crates it alone unblocks |
 |---:|---|---|---:|---:|
@@ -30,8 +30,8 @@ Survey of 2026-11-26 16:58 UTC on `5b67f5e`: 38 of 273 crates build (13.5% of th
 | 7 | mismatched types (to sort by cause) | [#259](https://github.com/mizchi/zust/issues/259) | 3.0% | 1 |
 | 8 | prelude: type `Layout` | [#250](https://github.com/mizchi/zust/issues/250) | 2.8% | 5 |
 | 9 | macro expansion too deep at a crate's first line | [#252](https://github.com/mizchi/zust/issues/252) | 2.5% | 4 |
-| 10 | prelude: type `Once` | [#250](https://github.com/mizchi/zust/issues/250) | 2.1% | 6 |
-| 11 | a derive's name resolved to a glob-imported type | [#251](https://github.com/mizchi/zust/issues/251) | 2.1% | 4 |
+| 10 | duplicate definition of `…` | none yet | 2.4% | 4 |
+| 11 | prelude: type `Once` | [#250](https://github.com/mizchi/zust/issues/250) | 2.1% | 6 |
 | 12 | prelude: `impl Error for fmt::Error` | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 2 |
 
 By issue, with its tier (the issue's label: **T0** holds back 2% or more of the surveyed downloads with all its fixes, **T1** 1% or more, **T2** less; relabel an issue when its tier here changes):
@@ -47,7 +47,6 @@ By issue, with its tier (the issue's label: **T0** holds back 2% or more of the 
 | T0 | [#257](https://github.com/mizchi/zust/issues/257) | 4.3% | 1 | parser: syntax zustc does not parse |
 | T0 | [#259](https://github.com/mizchi/zust/issues/259) | 3.0% | 1 | mismatched types (to sort by cause) |
 | T0 | [#252](https://github.com/mizchi/zust/issues/252) | 2.5% | 1 | macro expansion too deep at a crate's first line |
-| T0 | [#251](https://github.com/mizchi/zust/issues/251) | 2.1% | 1 | a derive's name resolved to a glob-imported type |
 | T1 | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 1 | prelude: `impl Error for fmt::Error` |
 | T1 | [#260](https://github.com/mizchi/zust/issues/260) | 1.9% | 1 | `missing generics for` a type used without its parameters |
 | T1 | [#261](https://github.com/mizchi/zust/issues/261) | 1.6% | 1 | false E0277: a bound zustc does not see |
@@ -58,7 +57,7 @@ By issue, with its tier (the issue's label: **T0** holds back 2% or more of the 
 | T2 | [#28](https://github.com/mizchi/zust/issues/28) | 0.7% | 1 | zurgo: two versions of one crate in a graph |
 | T2 | [#253](https://github.com/mizchi/zust/issues/253) | 0.7% | 1 | a fn pointer cast to `*mut ()` in a static |
 
-No issue yet, the next to file: `…` is only allowed in impls (1.0%); unsupported path in constant (0.8%); cannot evaluate `…` in a constant (0.7%); closure may outlive the current function, but it borrows `…`… (0.7%); the trait bound `…` is not satisfied (for `…`) (0.6%).
+No issue yet, the next to file: duplicate definition of `…` (2.4%); `…` is only allowed in impls (1.0%); unsupported path in constant (0.8%); cannot evaluate `…` in a constant (0.7%); closure may outlive the current function, but it borrows `…`… (0.7%).
 
 <!-- /crate-priorities -->
 
@@ -225,9 +224,9 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
 - Cargo graphs: `crates/zurgo` ([#28](https://github.com/mizchi/zust/issues/28), [docs/zurgo.md](docs/zurgo.md))
   reads Cargo.toml / Cargo.lock, turns on features as cargo does and builds path and crates.io packages (M0); runs
   build scripts and gives their cfgs, `rustc-env` and `OUT_DIR` to the crates (M1). thiserror 2's library builds.
-  Builds for wasm32 too (one module per bin, run with cargo's runner variable). Left: two versions of one crate and
-  renamed dependencies (zustc's workspace has one name per crate), a crate's own edition, link instructions of build
-  scripts. `zurgo test` runs each test in a process of its own ([#96](https://github.com/mizchi/zust/issues/96));
+  Builds for wasm32 too (one module per bin, run with cargo's runner variable). Left: two versions of one crate
+  (zustc's workspace has one name per crate; renamed dependencies are `extern=ALIAS=NAME`, #249), a crate's own
+  edition, link instructions of build scripts. `zurgo test` runs each test in a process of its own ([#96](https://github.com/mizchi/zust/issues/96));
   left there: doc tests, `test = false`, building only the chosen targets.
   - What the caches do not see yet:
     - the process environment that an `env!($k)` made by a macro reads (the crate's own environment is in its

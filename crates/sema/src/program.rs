@@ -920,6 +920,11 @@ pub struct Insts {
     /// Of those, the instances of fns that instances were made of with `Copy` types only (session's
     /// placeholder_wave): checked for what moving a T does, nothing else
     pub recheck: FxSet<u32>,
+    /// Of those, the instances of fns that instances were made of whose bodies name a struct or an enum of the
+    /// program's that bounds a type parameter by 'static (session's placeholder_wave): checked for the T: 'static
+    /// that its well-formedness needs (E0310), nothing else (an instance's T may be a type with a region the check
+    /// takes as fresh)
+    pub recheck_static: FxSet<u32>,
     /// Of those, the instances of fns that a where clause bounds (the fn's, its impl's): a parameter's bounds there
     /// may not be its own (`where &'a T: Trait`)
     pub where_bound: FxSet<u32>,
@@ -1031,6 +1036,7 @@ impl Insts {
             imp_cache: HashMap::default(),
             lenient: false,
             recheck: FxSet::default(),
+            recheck_static: FxSet::default(),
             where_bound: FxSet::default(),
             kind_free: FxSet::default(),
             fx_log: vec![],
@@ -3832,9 +3838,11 @@ impl Program {
                 if self.impls.contains(&(b, if sync { "Sync" } else { "Send" }.to_string())) {
                     return true;
                 }
+                // (the prelude's, not a program's own type of the name)
+                let ours = self.struct_item.get(b as usize).is_some_and(|&i| i >= self.prelude_from);
                 match name {
-                    "Rc" => return false,
-                    "Cell" | "RefCell" | "LazyCell" if sync => return false,
+                    "Rc" if ours => return false,
+                    "Cell" | "RefCell" | "LazyCell" | "OnceCell" if sync && ours => return false,
                     // (the prelude's own types hold raw pointers: what they hold decides)
                     _ => {}
                 }

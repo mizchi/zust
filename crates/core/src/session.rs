@@ -691,6 +691,10 @@ pub struct CrateCtx {
     pub map: crate::srcmap::SrcMap,
     /// 依存するクレート (推移的に全部。実行ファイルの panic の表がそれらの表を指す)
     pub deps: Vec<String>,
+    /// The dependencies this crate and those crates name otherwise (renamed ones, CrateSpec::aliases), as the
+    /// flattening of the modules reads them: `crate:alias=name`, `:alias=name` for a bin's own
+    /// (lexer::rename_module_collisions_in)
+    pub externs: Vec<String>,
     /// このクレートの feature (ワークスペース。None なら Options の features)
     pub features: Option<Vec<String>>,
     /// このクレートの cfg と `env!` の環境 (ワークスペース: CrateSpec の cfgs / env)
@@ -882,6 +886,7 @@ impl Session {
         let src0 = stripped.as_deref().unwrap_or(src0);
         let mut crates = self.ctx.deps.clone();
         crates.extend(self.ctx.lib.iter().cloned());
+        crates.extend(self.ctx.externs.iter().cloned());
         let cfg = self.opts.cfg_with(self.ctx.features.as_ref().unwrap_or(&self.opts.features));
         let renamed = crate::prep::std_renames(src0);
         crate::prep::moved_lines(renamed.as_deref().unwrap_or(src0), &crates, Some(&cfg))
@@ -920,6 +925,7 @@ impl Session {
         };
         let mut crates = self.ctx.deps.clone();
         crates.extend(self.ctx.lib.iter().cloned());
+        crates.extend(self.ctx.externs.iter().cloned());
         let mut fix = vec![];
         let cfg = self.opts.cfg_of(self.ctx.features.as_ref().unwrap_or(&self.opts.features), &self.ctx.cfgs, &self.ctx.env);
         crate::macros::BAD_FRAGMENT.with(|c| c.borrow_mut().take());
@@ -10516,6 +10522,7 @@ impl Session {
         let s = renamed.as_deref().unwrap_or(s);
         let mut crates = self.ctx.deps.clone();
         crates.extend(self.ctx.lib.iter().cloned());
+        crates.extend(self.ctx.externs.iter().cloned());
         let Ok(p) = crate::prep::prep_full(s, &crates, &mut vec![], Some(&cfg)) else { return e };
         match crate::prep::hoisted_line(&crate::prep::marked(p), d.line) {
             Some(l) => with_line(&e, l),
@@ -12942,6 +12949,21 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
     for i in &g.list {
         made.entry(i.base).or_default().push(i.args.clone());
     }
+    // (the names of the program's own structs and enums that bound a type parameter by 'static (`struct St<T:
+    // 'static>`): a fn of which instances are made whose body names one is checked with placeholders too, for the
+    // T: 'static its types need (an instance with `&'x u8` for T does not tell: its regions are fresh there))
+    let mut static_adts: Vec<&str> = p
+        .adt_regions
+        .iter()
+        .filter(|&(&b, r)| r.ty_outlives.iter().any(|&(_, c)| c == crate::types::R_STATIC) && p.struct_item.get(b as usize).is_some_and(|&i| i < p.prelude_from))
+        .map(|(&b, _)| {
+            let n = p.structs[b as usize].name.as_str();
+            let n = n.split('<').next().unwrap_or(n);
+            n.rsplit("::").next().unwrap_or(n)
+        })
+        .collect();
+    static_adts.sort_unstable();
+    static_adts.dedup();
     for id in 0..p.names.len() {
         let sig = &p.sigs[id];
         // (a trait's default method no impl uses: its `Self` is a placeholder too, bounded by the trait)
@@ -12951,15 +12973,21 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
         // (a fn of which instances are made: checked with them. Unless every instance gives a `Copy` type for a
         // parameter its bounds do not make `Copy` (`dup(1u32)` of `fn dup<T>(x: T) -> (T, T) { (x, x) }`): those hide
         // what moving a T does, so the body is checked with placeholders too)
-        let recheck = match made.get(&(id as u32)) {
+        let (recheck, recheck_static) = match made.get(&(id as u32)) {
             Some(insts) => {
                 let hides = |args: &Vec<Ty>| args.iter().zip(&sig.generics).any(|(&a, (_, bs))| !bs.iter().any(|b| b == "Copy") && acg::borrowck::is_copy(p, a, 0));
-                if !insts.iter().all(hides) {
+                let moves = insts.iter().all(hides);
+                // (and one whose body names a struct or an enum that bounds a type parameter by 'static, while one of
+                // its type parameters is not bounded by 'static)
+                let statics = !static_adts.is_empty()
+                    && sig.generics.iter().any(|(_, bs)| !bs.iter().any(|b| b == "'static"))
+                    && p.item_of[id].and_then(|ii| a.items.get(ii as usize)).and_then(|it| a.src.get(it.start..it.end)).is_some_and(|body| static_adts.iter().any(|n| names_word(body, n)));
+                if !moves && !statics {
                     continue;
                 }
-                true
+                (moves, statics)
             }
-            None => false,
+            None => (false, false),
         };
         // (not a dependency's: `is_ext` knows only concrete fns, the item's flag tells)
         if !p.item_of[id].is_some_and(|ii| ii < p.prelude_from && !a.ext_items.get(ii as usize).copied().unwrap_or(false)) {
@@ -13019,12 +13047,22 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
             if recheck {
                 g.recheck.insert(iid);
             }
+            if recheck_static {
+                g.recheck_static.insert(iid);
+            }
             if wheres {
                 g.where_bound.insert(iid);
             }
         }
     }
     std::mem::take(&mut g.pending)
+}
+
+/// Whether a text names w as a word of its own (`St` in `St::<T>(x)`, not in `Store`)
+fn names_word(text: &str, w: &str) -> bool {
+    let id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let b = text.as_bytes();
+    text.match_indices(w).any(|(i, _)| !(i > 0 && id(b[i - 1])) && !b.get(i + w.len()).is_some_and(|&c| id(c)))
 }
 
 /// A generic associated type's lifetimes and the outlives among them its text writes, inline (`<'a: 'b>`) or in its
