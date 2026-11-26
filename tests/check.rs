@@ -3600,3 +3600,14 @@ fn raw_pointer_coercions_at_a_tail_and_in_a_comparison() {
     let e = errs("fn c(x: &i32) -> *mut i32 {\n    x\n}\nfn main() {\n    let _ = c(&1);\n}\n");
     assert!(e.iter().any(|m| m.contains("mismatched types")), "{e:?}");
 }
+
+#[test]
+fn line_and_column_are_u32s_and_a_float_s_constants_its_type() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (`(column!(), line!())` beside `(0, 0)`: the literals are u32s; `x == f32::NAN` makes x an f32)
+    let src = "fn main() {\n    let c = || (column!(), line!());\n    let a = if true { c() } else { (0, 0) };\n    assert_eq!(a, (1, 2));\n    let x = 42.0;\n    let _b = x == f32::NAN;\n    let d = 1;\n    let _e = d == f64::MANTISSA_DIGITS;\n}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+}

@@ -1424,6 +1424,15 @@ impl Inf<'_> {
                         match Ty::from_suffix(segs[0]).or(if segs[0] == "char" { Some(Ty::Char) } else { None }) {
                             Some(_) if segs.len() == 2 && segs[1] == "BITS" => self.known(Ty::U32),
                             Some(t) if segs.len() == 2 => self.known(t),
+                            // (a float's constants: `x == f32::NAN` makes `let x = 42.0;` an f32)
+                            None if segs.len() == 2 && matches!(segs[0], "f32" | "f64") && segs[1].starts_with(|c: char| c.is_ascii_uppercase()) => {
+                                let f = if segs[0] == "f32" { Ty::F32 } else { Ty::F64 };
+                                self.known(match segs[1] {
+                                    "RADIX" | "MANTISSA_DIGITS" | "DIGITS" => Ty::U32,
+                                    "MIN_EXP" | "MAX_EXP" | "MIN_10_EXP" | "MAX_10_EXP" => Ty::I32,
+                                    _ => f,
+                                })
+                            }
                             // (`std::marker::PhantomData` / `m::S`: a unit struct through a module path)
                             _ => match self.prog.struct_index.get(*segs.last().unwrap()).copied() {
                                 Some(sid)
@@ -1627,6 +1636,10 @@ impl Inf<'_> {
 
     fn macro_expr(&mut self, p: &Path, g: &str) -> u32 {
         let name = if p.segs.len() == 1 { p.segs[0].name.as_str() } else { "" };
+        // (`(column!(), line!())` beside `(0, 0)`: the literals are u32s too)
+        if matches!(name, "line" | "column") {
+            return self.known(Ty::U32);
+        }
         if name == "format" && self.prog.struct_index.contains_key("String") {
             self.fmt_width_vars(g);
             let ss = self.prog.struct_index["String"];

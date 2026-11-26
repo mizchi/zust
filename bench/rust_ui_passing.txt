@@ -4426,6 +4426,7 @@ check-pass	lint/rfc-2383-lint-reason/expect_lint_from_macro.rs
 check-pass	lint/rfc-2383-lint-reason/expect_multiple_lints.rs
 compile-fail	lint/rfc-2383-lint-reason/expect_nested_lint_levels.rs
 check-pass	lint/rfc-2383-lint-reason/expect_on_fn_params.rs
+check-pass	lint/rfc-2383-lint-reason/expect_tool_lint_rfc_2383.rs
 check-pass	lint/rfc-2383-lint-reason/expect_unfulfilled_expectation.rs
 check-pass	lint/rfc-2383-lint-reason/expect_unused_inside_impl_block.rs
 check-pass	lint/rfc-2383-lint-reason/expect_warnings.rs
