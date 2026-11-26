@@ -1298,7 +1298,11 @@ impl Inf<'_> {
                     let selfm = ds
                         .iter()
                         .any(|&d| self.prog.sigs[d as usize].has_self && self.prog.names[d as usize].rsplit("::").next() == Some(ms.as_str()));
-                    if selfm && !matches!(tr.as_str(), "Ord" | "PartialOrd" | "PartialEq" | "Eq") {
+                    // (not of a trait implemented for `[T]` / `str` whose method has a name they have one of their
+                    // own: `It::iter(s)` is the impl's, which `s.iter()` would not be. The path call is typed by the
+                    // trait's method)
+                    let on_seq = || self.prog.prim_impls.iter().any(|(pt, t)| t == tr && matches!(pt, Ty::Slice(_) | Ty::Str) && Program::std_inherent(*pt, ms));
+                    if selfm && !matches!(tr.as_str(), "Ord" | "PartialOrd" | "PartialEq" | "Eq") && !on_seq() {
                         let recv = match &args[0] {
                             Expr::Ref(_, e) => (**e).clone(),
                             a => a.clone(),
@@ -2733,7 +2737,7 @@ impl Inf<'_> {
                 }
             }
             if let Some(t) = self.resolve(rv) {
-                if let Some(id) = self.prog.prim_method(t, n) {
+                if let Some(id) = self.prog.prim_method(t, n).filter(|_| !crate::program::Program::std_inherent(t, n)) {
                     return self.apply_recv(Some(id), avs, rv);
                 }
             }

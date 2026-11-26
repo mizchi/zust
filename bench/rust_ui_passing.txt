@@ -3277,6 +3277,7 @@ check-pass	generic-associated-types/issue-93262.rs
 check-pass	generic-associated-types/issue-93341.rs
 check-pass	generic-associated-types/issue-93342.rs
 check-pass	generic-associated-types/issue-93874.rs
+run-pass	generic-associated-types/iterable.rs
 compile-fail	generic-associated-types/mismatched-where-clause-regions.rs
 compile-fail	generic-associated-types/missing-bounds.rs
 compile-fail	generic-associated-types/missing_lifetime_args.rs
@@ -4971,6 +4972,7 @@ run-pass	mir/mir_coercion_casts.rs
 run-pass	mir/mir_constval_adts.rs
 run-pass	mir/mir_early_return_scope.rs
 run-pass	mir/mir_fat_ptr.rs
+run-pass	mir/mir_heavy_promoted.rs
 run-pass	mir/mir_match_arm_guard.rs
 run-pass	mir/mir_match_test.rs
 run-pass	mir/mir_small_agg_arg.rs

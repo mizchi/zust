@@ -255,6 +255,15 @@ impl Cx<'_> {
                     .map(Some)
             }
             "len" | "is_empty" => {
+                // (a constant array's length, from its type: its value is not built (`TEST_DATA.len()` of a 32 MiB
+                // `[u8; N]` would be on the stack))
+                if let (Ty::Array(_, n), Some(_)) = (rt, self.const_of(&*mc_recv)) {
+                    if n < crate::types::CONST_LEN_BASE {
+                        let len = self.b.ins().iconst(types::I64, n as i64);
+                        let c = if name == "len" { (len, Ty::Usize) } else { (self.b.ins().icmp_imm_u(IntCC::Equal, len, 0), Ty::Bool) };
+                        return Ok(Some((Some(c.0), c.1)));
+                    }
+                }
                 let (_, len, _) = self.indexable(&*mc_recv)?;
                 if name == "len" {
                     Ok(Some((Some(len), Ty::Usize)))

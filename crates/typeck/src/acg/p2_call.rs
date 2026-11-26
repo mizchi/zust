@@ -2246,7 +2246,11 @@ impl Cx<'_> {
         }
         let name = method.clone();
         // str / スライス / 配列への trait 実装 (`impl Hash for str` / `for [T]`): 受け手は &str / &[T] (fat) か &[T; N]
+        // (not of a name `[T]` / `str` has a method of its own: that one first)
         if matches!(t, Ty::Str | Ty::Slice(_) | Ty::Array(..)) {
+            if matches!(t, Ty::Str | Ty::Slice(_)) && crate::program::Program::std_inherent(t, &name) {
+                return Ok(None);
+            }
             let Some(id) = self.prog.prim_self_method(t, &name) else {
                 return Ok(None);
             };
@@ -2602,6 +2606,16 @@ impl Cx<'_> {
             return err(span, format!(
                 "cannot transmute between types of different sizes, or dependently-sized types (E0512): `{}` ({} bits) to `{}` ({} bits)",
                 self.prog.tn(from), a * 8, self.prog.tn(to), b * 8));
+        }
+        // (fn pointers whose parameters or result zustc passes differently: an aggregate (a struct, an enum) by
+        // address, a number in a register. A call through the result would read a register as an address)
+        if let (Ty::Fn(f), Ty::Fn(g)) = (from, to) {
+            let differs = |x: Ty, y: Ty| x.is_agg() != y.is_agg();
+            if differs(f.ret, g.ret) || f.params.iter().zip(&g.params).any(|(&x, &y)| differs(x, y)) {
+                return err(span, format!(
+                    "transmuting `{}` to `{}` is not supported: zustc passes an aggregate by address, a number in a register",
+                    self.prog.tn(from), self.prog.tn(to)));
+            }
         }
         Ok(())
     }
@@ -4328,6 +4342,13 @@ impl Cx<'_> {
                         // (a primitive receiver with an impl of this trait: `<u32 as Tr>::m(&x)`, which a builtin
                         // method of the same name (`to_string`) cannot take over as `x.m()` would let it)
                         if let Some(t) = self.peek(&recv).map(|t| self.strip_refs(t)) {
+                            // (`It::iter(s)` with s: &[u8] and `impl It for [u8]`: that impl's, not the slice's own
+                            // `iter`, which `s.iter()` is)
+                            if matches!(t, Ty::Slice(_) | Ty::Str) && crate::program::Program::std_inherent(t, &ms) {
+                                if let Ok(Expr::Path(q, qp)) = crate::parse::parse_expr(&format!("<{} as {tr}>::{ms}", self.prog.tn(t))) {
+                                    return Some(Expr::Call(Box::new(Expr::Path(q, qp)), cargs.clone()));
+                                }
+                            }
                             if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) {
                                 let key = format!("{}::{ms}", self.ty_key(t));
                                 if self.trait_candidate(&key, &tr).is_some() {

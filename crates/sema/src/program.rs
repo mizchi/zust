@@ -3667,6 +3667,42 @@ impl Program {
     /// A method of primitive type t (from a trait impl, or else the trait's default method)
     /// prim_method for a method call: of the functions of that name, one that takes self (`impl Foo for isize`
     /// with `fn new() -> bool` and `impl Bar for isize` with `fn new(&self) -> bool`: `1.new()` is Bar's)
+    /// Whether name is a method std's `[T]` or `str` has of its own, which a receiver `&[T]` / `&str` (t, through
+    /// references) takes before a trait's method of the name: inherent methods come first in rustc's probe, and a
+    /// trait impl for `[T]` may call it (`impl It for [T] { fn iter(&self) -> .. { self.iter() } }`)
+    pub fn std_inherent(t: Ty, name: &str) -> bool {
+        let mut t = t;
+        while let Ty::Ref(_, i) = t {
+            t = *i;
+        }
+        match t {
+            Ty::Slice(_) => matches!(
+                name,
+                "len" | "is_empty" | "first" | "first_mut" | "last" | "last_mut" | "split_first" | "split_first_mut" | "split_last"
+                    | "split_last_mut" | "get" | "get_mut" | "get_unchecked" | "get_unchecked_mut" | "as_ptr" | "as_mut_ptr" | "swap"
+                    | "reverse" | "iter" | "iter_mut" | "windows" | "chunks" | "chunks_mut" | "chunks_exact" | "chunks_exact_mut"
+                    | "rchunks" | "split_at" | "split_at_mut" | "split" | "split_mut" | "splitn" | "rsplit" | "contains"
+                    | "starts_with" | "ends_with" | "strip_prefix" | "strip_suffix" | "binary_search" | "binary_search_by"
+                    | "binary_search_by_key" | "sort" | "sort_by" | "sort_by_key" | "sort_by_cached_key" | "sort_unstable"
+                    | "sort_unstable_by" | "sort_unstable_by_key" | "rotate_left" | "rotate_right" | "fill" | "fill_with"
+                    | "clone_from_slice" | "copy_from_slice" | "copy_within" | "swap_with_slice" | "to_vec" | "into_vec" | "repeat"
+                    | "concat" | "join" | "first_chunk" | "split_first_chunk" | "is_sorted" | "is_sorted_by" | "is_sorted_by_key"
+                    | "partition_point" | "is_ascii" | "to_ascii_uppercase" | "to_ascii_lowercase" | "eq_ignore_ascii_case"
+            ),
+            Ty::Str => matches!(
+                name,
+                "len" | "is_empty" | "is_char_boundary" | "as_bytes" | "as_ptr" | "get" | "split_at" | "chars" | "char_indices" | "bytes"
+                    | "split_whitespace" | "split_ascii_whitespace" | "lines" | "contains" | "starts_with" | "ends_with" | "find"
+                    | "rfind" | "split" | "split_inclusive" | "rsplit" | "split_terminator" | "splitn" | "rsplitn" | "split_once"
+                    | "rsplit_once" | "matches" | "match_indices" | "trim" | "trim_start" | "trim_end" | "trim_matches"
+                    | "trim_start_matches" | "trim_end_matches" | "strip_prefix" | "strip_suffix" | "parse" | "is_ascii"
+                    | "eq_ignore_ascii_case" | "replace" | "replacen" | "to_lowercase" | "to_uppercase" | "repeat"
+                    | "to_ascii_uppercase" | "to_ascii_lowercase"
+            ),
+            _ => false,
+        }
+    }
+
     pub fn prim_self_method(&self, t: Ty, name: &str) -> Option<u32> {
         // (`impl<T> Fake for T {}`: the trait's methods are methods of every type, numbers too)
         let Some(id) = self.prim_method(t, name) else {

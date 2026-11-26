@@ -3895,3 +3895,20 @@ fn a_dyn_call_s_where_clause_an_unsafe_drop_in_place_patterns_through_references
     let src = "fn main() {\r\n    let s = b\"a\r\nb\";\r\n    let _: &[u8; 3] = s;\r\n    let t = r\"a\r\nb\";\r\n    assert_eq!(t.len(), 3);\r\n}\r\n";
     assert_eq!(first(src), None);
 }
+
+#[test]
+fn a_transmute_of_fn_pointers_that_pass_differently_and_a_constant_array_s_len() {
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    // (a fn returning an enum, an aggregate zustc returns by address, as one returning a number in a register: a call
+    // through it would read the register as an address)
+    let src = "#[repr(u32)]\nenum Foo {\n    A = 0,\n    B = 23,\n}\nextern \"C\" fn foo(_x: usize) -> Foo {\n    Foo::B\n}\nfn main() {\n    let _f: extern \"C\" fn(usize) -> u32 = unsafe { std::mem::transmute(foo as extern \"C\" fn(usize) -> Foo) };\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.2.contains("is not supported"))), Some((10, true)));
+    let src = "fn f(x: u32) -> u32 {\n    x\n}\nfn main() {\n    let _g: fn(i32) -> i32 = unsafe { std::mem::transmute(f as fn(u32) -> u32) };\n}\n";
+    assert_eq!(first(src), None);
+    // (a constant array's length from its type: a 32 MiB array is not built on the stack for it)
+    let src = "const DATA: [u8; 32 * 1024 * 1024] = [42; 32 * 1024 * 1024];\nfn main() {\n    assert_eq!(DATA.len(), 32 << 20);\n    assert!(!DATA.is_empty());\n}\n";
+    assert_eq!(first(src), None);
+}
