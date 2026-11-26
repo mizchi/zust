@@ -1220,6 +1220,12 @@ pub fn std_renames(src: &str) -> Option<String> {
         if !(match m { "atomic" => has_atomic, "fmt" => has_fmt_write, _ => has_mpsc }) || !src.contains(name) {
             continue;
         }
+        // (nothing is renamed without a `m::name` path or a `use` that may import the name from m (imports_from
+        // holds for every one the scans below take): those read the whole source several times, for a program that
+        // has the name only otherwise (`Write` a variant, and `fmt` a module))
+        if !src.contains(&format!("{m}::{name}")) && !imports_from(src, m, name) {
+            continue;
+        }
         let (mut imported, mut other) = (false, false);
         for st in src.split(';') {
             // (skip the comment lines and attributes in front: the first `use` follows the file's header)
