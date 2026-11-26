@@ -262,10 +262,11 @@ pub struct PrepMemo {
     fp: u64,
     /// Chunk hash → names of the macros defined in it
     names: FxMap<u64, Vec<String>>,
-    /// Chunk hash → whether its delimiters match (lexer::delims_match)
-    delims: FxMap<u64, bool>,
-    /// (chunk hash, hash of the set of macro names) → (skeleton, its hash)
-    skel: FxMap<(u64, u64), (String, u64)>,
+    /// Chunk hash → what is left of its delimiters once those that match are taken away (lexer::delims_left)
+    delims: FxMap<u64, Option<Vec<u8>>>,
+    /// (chunk hash, hash of the set of macro names) → (skeleton, its hash, whether it keeps something where the full
+    /// preparation may read it otherwise (skeleton))
+    skel: FxMap<(u64, u64), (String, u64, bool)>,
     /// The previous input and the chunk start positions (position, hash of what encloses it, levels)
     chunks: Option<(String, Vec<(usize, u64, Levels)>, bool)>,
     /// (chunk hash, hash of what encloses it (mod / impl / trait), index among identical ones) → result
@@ -527,8 +528,10 @@ fn macro_names(t: &str) -> Vec<String> {
 
 /// Skeleton: within fn bodies, removes the tokens that are not items / calls of user macros (and thread_local!) / brackets / `;`.
 /// The number of newlines stays the same (newlines inside removed tokens and whitespace are kept). With the hash of what
-/// it keeps as written
-fn skeleton(t: &str, names: &[String]) -> (String, u64) {
+/// it keeps as written, and whether it keeps something out of the place it was in (odd): attributes after a token that
+/// ends no statement (`fo#[cfg(any())] mod m {..}`, which the full preparation does not read as the item's, but the
+/// skeleton, which blanks `fo`, would), or a `mod m { .. }` where no statement starts. A chunk of such is not reused
+fn skeleton(t: &str, names: &[String]) -> (String, u64, bool) {
     let s = t.as_bytes();
     let toks = lexer::tokenize(s);
     let n = toks.len();
@@ -537,6 +540,7 @@ fn skeleton(t: &str, names: &[String]) -> (String, u64) {
     // (what each token is, for the hash: 0 outside the bodies, 1 in a body (kept only if a bracket or `;`), 2 in an item
     // or macro call a body keeps)
     let mut kind = vec![0u8; n];
+    let mut odd = false;
     let mut depth = 0i32;
     let mut pending_fn = false;
     let mut bodies: Vec<i32> = vec![];
@@ -664,6 +668,12 @@ fn skeleton(t: &str, names: &[String]) -> (String, u64) {
                     }
                     a = j - 1;
                 }
+                if a < k && a > 0 && !(is_sym(a - 1, b'{') || is_sym(a - 1, b'}') || is_sym(a - 1, b';')) {
+                    odd = true;
+                }
+                if inline_mod && !stmt_start {
+                    odd = true;
+                }
                 for m in a..k {
                     blank[m] = false;
                     kind[m] = 2;
@@ -740,7 +750,7 @@ fn skeleton(t: &str, names: &[String]) -> (String, u64) {
                     let holds_item = (eq + 1..e).any(|m| {
                         toks[m].0 == 0
                             && m > 0
-                            && (is_sym(m - 1, b'{') || is_sym(m - 1, b'}') || is_sym(m - 1, b';'))
+                            && (is_sym(m - 1, b'{') || is_sym(m - 1, b'}') || is_sym(m - 1, b';') || is_sym(m - 1, b']'))
                             && matches!(
                                 &s[toks[m].1..toks[m].2],
                                 b"fn" | b"struct" | b"enum" | b"const" | b"use" | b"static" | b"impl" | b"trait" | b"type" | b"mod" | b"union" | b"macro_rules" | b"pub" | b"unsafe" | b"async" | b"extern"
@@ -867,7 +877,7 @@ fn skeleton(t: &str, names: &[String]) -> (String, u64) {
         out.extend_from_slice(&s[last..]);
         h = fnv(h, &s[last..]);
     }
-    (String::from_utf8(out).unwrap_or_else(|_| t.to_string()), h)
+    (String::from_utf8(out).unwrap_or_else(|_| t.to_string()), h, odd)
 }
 
 /// Splits the result of preprocessing per chunk (lines: each chunk's start line (0-based), the last is the total line count).
@@ -1349,17 +1359,27 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
     }
     // (a source whose delimiters do not match is preprocessed whole, which moves no item out of a body
     // (hoist_parts_at): a source of the changed chunks and the others' skeletons might match where it does not.
-    // They match when each chunk's do, which is looked at once per chunk)
-    let mut new_delims: FxMap<u64, bool> = FxMap::default();
+    // What is left of each chunk's, read once per chunk, is matched in order: a chunk can start inside an `impl`,
+    // whose `{` an earlier one has)
+    let mut new_delims: FxMap<u64, Option<Vec<u8>>> = FxMap::default();
+    let mut open: Vec<u8> = vec![];
     for j in 0..nchunk {
-        let ok = match memo.delims.get(&hs[j]) {
-            Some(&ok) => ok,
-            None => lexer::delims_match(text_of(j)),
+        let left = match memo.delims.get(&hs[j]) {
+            Some(l) => l.clone(),
+            None => lexer::delims_left(text_of(j)),
         };
-        new_delims.insert(hs[j], ok);
-        if !ok {
-            return Ok(None);
+        let Some(l) = &left else { return Ok(None) };
+        for &c in l {
+            if matches!(c, b'(' | b'[' | b'{') {
+                open.push(c);
+            } else if open.pop() != Some(lexer::opener_of(c)) {
+                return Ok(None);
+            }
         }
+        new_delims.insert(hs[j], left);
+    }
+    if !open.is_empty() {
+        return Ok(None);
     }
     memo.delims = new_delims;
     // Macro names
@@ -1385,18 +1405,21 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
     }
     // Skeletons, and the hash of the whole
     let mut fp = mix(key, nh);
-    let mut new_skel: FxMap<(u64, u64), (String, u64)> = FxMap::default();
+    let mut new_skel: FxMap<(u64, u64), (String, u64, bool)> = FxMap::default();
     for j in 0..nchunk {
         let k = (hs[j], nh);
         let e = match memo.skel.remove(&k) {
             Some(e) => e,
             None => match new_skel.get(&k) {
-                Some(e) => (e.0.clone(), e.1),
+                Some(e) => (e.0.clone(), e.1, e.2),
                 None => {
                     skeleton(text_of(j), &names)
                 }
             },
         };
+        if e.2 {
+            return Ok(None);
+        }
         fp = mix(mix(fp, starts[j].1), e.1);
         new_skel.insert(k, e);
     }

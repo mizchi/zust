@@ -230,3 +230,26 @@ fn prep_inc_item_in_a_const_initializer() {
     let srcs = vec![base.to_string(), edited, again];
     assert_eq!(through_memo(&srcs), vec![false, true]);
 }
+
+/// A multi-line impl block: its chunks start inside it (each method a chunk), so a chunk's delimiters do not match
+/// alone, the impl's `{` in one and its `}` in another. An edit in a method still reuses the other chunks
+#[test]
+fn prep_inc_reuses_chunks_in_an_impl_block() {
+    let base = "struct T(u8);\nimpl T {\n    fn a(&self) -> u8 {\n        self.0\n    }\n    fn b(&self) -> u8 {\n        2\n    }\n}\nmod m {\n    pub fn c() -> u8 {\n        3\n    }\n}\nfn main() {\n    let _ = T(1).a() + T(1).b() + m::c();\n}\n";
+    let edited = base.replace("        2\n", "        let q = 2;\n        q\n");
+    let again = edited.replace("let q = 2;", "let q = 4;");
+    assert!(base != edited && edited != again);
+    let srcs = vec![base.to_string(), edited, again];
+    assert_eq!(through_memo(&srcs), vec![false, true]);
+}
+
+/// An item after an attribute in a const's initializer (`{ #[inline] fn inner() .. }`) keeps the initializer in the
+/// skeleton too
+#[test]
+fn prep_inc_attributed_item_in_a_const_initializer() {
+    let base = "fn inner() -> u8 { 0 }\nconst F: fn() -> u8 = { #[inline] fn inner() -> u8 { 1 } inner };\nfn other() -> u8 { fn inner() -> u8 { 2 } inner() + 1 }\nfn main() { let _ = (F(), other()); }\n";
+    let edited = base.replace("inner() + 1", "inner() + 3");
+    let again = edited.replace("inner() + 3", "inner() + 4");
+    let srcs = vec![base.to_string(), edited, again];
+    assert_eq!(through_memo(&srcs), vec![false, true]);
+}

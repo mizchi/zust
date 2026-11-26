@@ -1462,8 +1462,17 @@ fn hoist_kws(c: u8) -> &'static [&'static str] {
 /// (`impl T for u8 { fn f() {} }`), which only costs the tokenizing that check would skip
 pub fn has_inline_item(src: &str) -> bool {
     // (the keywords hoist_parts_at looks for)
-    src.match_indices(['{', ';', '}']).any(|(i, _)| {
-        let mut t = src[i + 1..].trim_start_matches([' ', '\t']);
+    let b = src.as_bytes();
+    let at = |i: usize| -> bool {
+        // (most of these end a line: a look at the next byte decides them)
+        let mut j = i + 1;
+        while j < b.len() && (b[j] == b' ' || b[j] == b'\t') {
+            j += 1;
+        }
+        if j >= b.len() || !(b[j].is_ascii_lowercase() || b[j] == b'#') {
+            return false;
+        }
+        let mut t = &src[j..];
         // (after attributes on the same line too: `{ #[inline] fn f() {} }`)
         while let Some(rest) = t.strip_prefix("#[") {
             let Some(end) = rest.find(']') else { break };
@@ -1475,7 +1484,18 @@ pub fn has_inline_item(src: &str) -> bool {
             t = rest[end + 1..].trim_start_matches([' ', '\t']);
         }
         t.as_bytes().first().is_some_and(|&c| hoist_kws(c).iter().any(|k| t.starts_with(k)))
-    })
+    };
+    // (each of the three looked for alone: str::find of an ASCII char is a memchr)
+    for c in ['{', ';', '}'] {
+        let mut from = 0;
+        while let Some(k) = src[from..].find(c) {
+            if at(from + k) {
+                return true;
+            }
+            from += k + 1;
+        }
+    }
+    false
 }
 
 /// hoist_nested_items を、(元の場所を空白にした本文 (長さと改行は入力と同じ。名前を変えたときは改行だけ同じ),
@@ -1655,34 +1675,40 @@ fn brace_close(s: &[u8], toks: &[(u8, usize, usize)], k: usize) -> usize {
     toks.len().saturating_sub(1)
 }
 
-/// Whether the delimiters of src (`(` / `[` / `{`, by tokens: not those in strings, chars or comments) match:
+/// What is left of src's delimiters (`(` / `[` / `{`, by tokens: not those in strings, chars or comments) once those
+/// that match each other are taken away: the closers that close none of its own, in order, then the openers that
+/// none of its own close, in order. None when one closes another kind (`(]`). A text's delimiters match when what is
+/// left of its parts', in order, matches (prep_inc: per chunk, where a chunk can start inside an `impl` block);
 /// hoist_parts_at moves nothing out of a source whose do not
-pub fn delims_match(src: &str) -> bool {
-    delims_match_toks(src.as_bytes(), &tokenize(src.as_bytes()))
-}
-
-fn delims_match_toks(s: &[u8], toks: &[(u8, usize, usize)]) -> bool {
+pub fn delims_left(src: &str) -> Option<Vec<u8>> {
+    let s = src.as_bytes();
+    let mut closers: Vec<u8> = vec![];
     let mut open: Vec<u8> = vec![];
-    for t in toks {
+    for t in tokenize(s) {
         if t.0 != 1 {
             continue;
         }
         match s[t.1] {
             c @ (b'(' | b'[' | b'{') => open.push(c),
-            c @ (b')' | b']' | b'}') => {
-                let want = match c {
-                    b')' => b'(',
-                    b']' => b'[',
-                    _ => b'{',
-                };
-                if open.pop() != Some(want) {
-                    return false;
-                }
-            }
+            c @ (b')' | b']' | b'}') => match open.pop() {
+                Some(o) if o == opener_of(c) => {}
+                Some(_) => return None,
+                None => closers.push(c),
+            },
             _ => {}
         }
     }
-    open.is_empty()
+    closers.extend(open);
+    Some(closers)
+}
+
+/// The opening delimiter a closing one closes
+pub fn opener_of(c: u8) -> u8 {
+    match c {
+        b')' => b'(',
+        b']' => b'[',
+        _ => b'{',
+    }
 }
 
 /// depth: 名前を変えてやり直した回数 (壊れたソースで名前の変更が止まらないときは 8 回で止める)
@@ -1709,17 +1735,13 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     }
     let s = src.as_bytes();
     let toks = tokenize(s);
-    // (nor a source whose delimiters do not match, `fn f() { fn g() {} pub f<`: the lexer reports where, at a line of
-    // the source's own, which an item moved past its last line would move the error away from (#188); and the
-    // renames of such a source's items, thousands of `fn`s in one unclosed body, could take seconds)
-    if !delims_match_toks(s, &toks) {
-        return None;
-    }
     let tok = |k: usize| -> &[u8] { &s[toks[k].1..toks[k].2] };
     // (記号のトークンは 1 byte)
     let is_sym = |k: usize, c: &[u8]| toks[k].0 == 1 && s[toks[k].1] == c[0];
     // 各位置の波括弧の深さと、関数の本体の深さのスタック
     let mut depth = 0i32;
+    // (a `}` with no `{` to close)
+    let mut unbalanced = false;
     let mut fn_bodies: Vec<(i32, usize)> = vec![];
     let mut pending_fn = false;
     // (the bodies of `const _: () = { .. };`, what derives and `#[wasm_bindgen]` wrap impls in: their items but their
@@ -2060,6 +2082,9 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 }
                 b"}" => {
                     depth -= 1;
+                    if depth < 0 {
+                        unbalanced = true;
+                    }
                     if fn_bodies.last().is_some_and(|&(d, _)| d == depth) {
                         let (_, open) = fn_bodies.pop().unwrap();
                         if anons.last().is_some_and(|a| a.0 == open) {
@@ -2081,6 +2106,13 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
             }
         }
         k += 1;
+    }
+    // (nor a source whose braces do not match, `fn f() { fn g() {} pub f<`: the lexer reports where, at a line of the
+    // source's own, which an item moved past its last line would move the error away from (#188); and the renames of
+    // such a source's items, thousands of `fn`s in one unclosed body, could take seconds. prep_inc, which matches
+    // the parens and brackets too, never reuses chunks of such a source)
+    if unbalanced || depth != 0 {
+        return None;
     }
     if moves.is_empty() {
         return None;
