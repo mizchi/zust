@@ -21,7 +21,7 @@ Survey of 2026-11-26 15:59 UTC on `5498281e`: 38 of 273 crates build (13.5% of t
 
 | # | fix | issue | holds back | crates it alone unblocks |
 |---:|---|---|---:|---:|
-| 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | [#254](https://github.com/mizchi/zust/issues/254) | 11.2% | 14 |
+| 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | [#254](https://github.com/mizchi/zust/issues/254) | 10.9% | 14 |
 | 2 | `impl<T: Tr> Tr for &T` | [#144](https://github.com/mizchi/zust/issues/144) | 7.1% | 12 |
 | 3 | zurgo: renamed dependencies | [#249](https://github.com/mizchi/zust/issues/249) | 5.3% | 15 |
 | 4 | methods zustc does not find (std methods the prelude lacks; lookup) | [#256](https://github.com/mizchi/zust/issues/256) | 4.9% | 4 |
@@ -38,8 +38,8 @@ By issue, with its tier (the issue's label: **T0** holds back 2% or more of the 
 
 | tier | issue | holds back | fixes | the largest |
 |---|---|---:|---:|---|
-| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 14.5% | 24 | prelude: type `Layout` |
-| T0 | [#254](https://github.com/mizchi/zust/issues/254) | 11.2% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
+| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 15.2% | 26 | prelude: type `Layout` |
+| T0 | [#254](https://github.com/mizchi/zust/issues/254) | 10.9% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
 | T0 | [#144](https://github.com/mizchi/zust/issues/144) | 7.1% | 1 | `impl<T: Tr> Tr for &T` |
 | T0 | [#249](https://github.com/mizchi/zust/issues/249) | 5.3% | 1 | zurgo: renamed dependencies |
 | T0 | [#256](https://github.com/mizchi/zust/issues/256) | 4.9% | 1 | methods zustc does not find (std methods the prelude lacks; lookup) |

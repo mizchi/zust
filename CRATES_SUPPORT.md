@@ -44,7 +44,7 @@ Every error, grouped by the fix it needs ([issues.tsv](cratebench/survey/issues.
 
 | # | fix | issue | holds back | crates | alone | packages | errors | example |
 |---:|---|---|---:|---:|---|---:|---:|---|
-| 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | #254 | 11.2% | 57 | 14: getrandom, log, socket2, regex-syntax, num-traits … | 22 | 27 | anyhow 1.0.105: src/error.rs:919:1: cannot find type `Backtrace` |
+| 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | #254 | 10.9% | 55 | 14: getrandom, log, socket2, regex-syntax, num-traits … | 21 | 26 | anyhow 1.0.105: src/error.rs:919:1: cannot find type `Backtrace` |
 | 2 | `impl<T: Tr> Tr for &T` | #144 | 7.1% | 43 | 12: futures-core, futures-task, futures-channel, futures-sink, futures-io … | 16 | 16 | allocator-api2 0.2.22: src/stable/alloc/mod.rs:378:1: impls for references to a type parameter (`imp… |
 | 3 | zurgo: renamed dependencies | #249 | 5.3% | 15 | 15: digest, sha2, rustls, rustls-webpki, reqwest … | 15 | 15 | digest: `digest` renames its dependency `crypto-common` to `common`: renamed dependencies are not su… |
 | 4 | methods zustc does not find (std methods the prelude lacks; lookup) | #256 | 4.9% | 49 | 4: anstyle, unicode-width, atomic-waker, critical-section[std] | 24 | 51 | anstyle 1.0.14: src/style.rs:111:31: no method named `fmt` found for `anstyle__effect__EffectsDispla… |
@@ -85,7 +85,7 @@ Every error, grouped by the fix it needs ([issues.tsv](cratebench/survey/issues.
 | 39 | prelude: trait `Binary` | #250 | 0.5% | 3 | 0 | 1 | 1 | either 1.19.0: src/lib.rs:1703:1: cannot find trait `Binary` |
 | 40 | unsupported item | — | 0.5% | 3 | 3: portable-atomic, derive_more, static_cell | 2 | 2 | derive_more 2.1.1: src/lib.rs:476:1: unsupported item |
 
-90 fixes; 48 have no tracking issue yet (together 14.6%). The top ones without an issue are the next to file.
+91 fixes; 47 have no tracking issue yet (together 14.2%). The top ones without an issue are the next to file.
 
 ## Packages with errors
 

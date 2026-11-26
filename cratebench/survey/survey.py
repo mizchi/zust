@@ -645,19 +645,31 @@ def issue_rules():
     return tuple(rows)
 
 
-def fix_of(msg, own):
-    """an error's fix: (its name, its issue or None). `own`: missing()'s classes of the names zustc cannot find"""
+def owner_of(pkg, what, name, known):
+    """whether the package defines the name zustc cannot find (each package on its own: one that defines `Error`
+    does not make another's missing `Error` its own); without its sources, the class a run gave the name"""
+    d = defines(pkg, name) if pkg else None
+    return known.get((what, name)) if d is None else d
+
+
+def fix_of(msg, pkg, known):
+    """an error's fix: (its name, its issue or None). `pkg`: the package the error is in (`name version`, or None);
+    `known`: the classes results.json kept of the names zustc cannot find"""
     for pat, num, title in issue_rules():
         if pat.search(msg):
             return title, num
     m = MISSING.search(msg)
     if m:
-        o = own.get((m.group(1), m.group(2)))
+        o = owner_of(pkg, m.group(1), m.group(2), known)
         if o is False:
             return f"prelude: {m.group(1)} `{m.group(2)}`", 250
         if o is True:
             return "a crate's own item zustc cannot find (resolution, cfg, a macro's output)", 254
     return kind_of(msg), None
+
+
+# (a build's first error: `name version: ` when it is a dependency's, then zurgo's `crate`: name or probe, a path)
+BUILD_ENVELOPE = re.compile(r"^(?:(?P<pkg>[\w.+-]+ \d[^ :]*): )?(?:[\w.+-]+: (?=\S+\.rs:\d+:\d+: ))?")
 
 
 def fixes(res):
@@ -667,7 +679,7 @@ def fixes(res):
     that needs one fix only is *alone* for it: fixing it makes the crate check (or plan, or build), until the next error
     shows"""
     s = summarize(res)
-    own = {(m["what"], m["name"]): m.get("own") for m in missing(res)}
+    known = {(m["what"], m["name"]): m.get("own") for m in res.get("missing") or []}
     F = {}
 
     def entry(key, num, example):
@@ -676,7 +688,7 @@ def fixes(res):
     pkg_fixes = {}
     for k, v in s["with_err"].items():
         for e in v["errors"]:
-            key, num = fix_of(e, own)
+            key, num = fix_of(e, k, known)
             g = entry(key, num, f"{k}: {e}")
             g["packages"].add(k)
             g["errors"] += 1
@@ -684,8 +696,12 @@ def fixes(res):
     for c in sorted(s["C"], key=lambda c: c["rank"]):
         need = set()
         if c["status"] in ("graph-fail", "build-fail", "timeout"):
-            msg = re.sub(r"^[\w.+-]+ \d[^:]*: ", "", c["first_error"])
-            key, num = fix_of(msg, own)
+            # (the message without its envelope: the dependency's name, zurgo's probe name, so that one error in
+            #  several probes is one fix; the package it names, or the crate's own, for the name's class)
+            m = BUILD_ENVELOPE.match(c["first_error"])
+            msg = c["first_error"][m.end():]
+            pkg = m.group("pkg") or f'{c["name"]} {c["version"]}'
+            key, num = fix_of(msg, pkg, known)
             if num is None and c["status"] == "build-fail":
                 key = "build: " + key
             g = entry(key, num, f'{c["id"]}: {c["first_error"]}')
