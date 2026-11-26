@@ -5710,3 +5710,35 @@ fn main() {}
     errors_at("trait Tr<'a, T> { fn f(); }\nimpl<'a, T> Tr<'a, T>\nfor () { fn f() where T: 'a {} }\nfn main() {}\n", &[(3, e)], "rw13");
     errors_at("trait Tr<'a, T> { fn f(); }\nimpl<'a, T> Tr<'a, for<'b> fn(&'b T)>\nfor () { fn f() where T: 'a {} }\nfn main() {}\n", &[(3, e)], "rw14");
 }
+
+#[test]
+fn part37_review_impl_where_clauses_3() {
+    // (#221's third review, each checked with rustc 1.97. Accepted: a `b'['` in an array length before the method's
+    // body, and a bound that a signature's type gives with the header's outlives (`x: &'b T` and `'b: 'a` give
+    // `T: 'a`))
+    errors_at(r#"trait Tr<'a, T> {
+    fn f(_: [u8; b'[' as usize]) where T: 'a;
+}
+impl<'a, T> Tr<'a, T> for () {
+    fn f(_: [u8; b'[' as usize]) where T: 'a {}
+}
+trait Tb<'a, 'b: 'a, T> {
+    fn f(_: &'b T);
+}
+impl<'a, 'b: 'a, T> Tb<'a, 'b, T> for () {
+    fn f(_: &'b T) where T: 'a {}
+}
+fn main() {}
+"#, &[], "rw15");
+    // (stricter: a default with a `b'>'` in it is read as the default, so the impl's `U: 'a` is compared, 7:21)
+    errors_at(r#"trait Has<A> {}
+impl Has<[u8; b'>' as usize]> for () {}
+trait Tr<'a, T: Has<[u8; b'>' as usize]> = ()> {
+    fn f();
+}
+impl<'a, U> Tr<'a> for (U,) {
+    fn f() where U: 'a {}
+}
+fn main() {}
+"#, &[(7, "impl has stricter requirements than trait")], "rw16");
+}

@@ -10473,14 +10473,17 @@ fn top_semi(t: &str) -> Option<usize> {
 fn top_eq(it: &str) -> Option<usize> {
     let b = it.as_bytes();
     let mut d = 0i32;
-    for i in 0..b.len() {
+    let mut i = 0;
+    while i < b.len() {
         match b[i] {
+            b'\'' | b'"' if quote_end(b, i).is_some() => i = quote_end(b, i).unwrap_or(i),
             b'>' if i > 0 && b[i - 1] == b'-' => {}
             b'<' | b'(' | b'[' | b'{' => d += 1,
             b'>' | b')' | b']' | b'}' => d -= 1,
             b'=' if d == 0 => return Some(i),
             _ => {}
         }
+        i += 1;
     }
     None
 }
@@ -10726,6 +10729,16 @@ fn stricter_impl_where(src: &str, items: &[SrcItem]) -> Option<String> {
             match parse_sig(&sg) {
                 Some(fs) => tys.extend(fs.recv_ty.into_iter().chain(fs.params.into_iter().map(|p| p.1)).chain(fs.ret)),
                 None => loose.extend(text_pieces),
+            }
+        }
+        // (what the signatures' types imply of the impl's parameters and lifetimes, as facts, so the outlives below
+        // go through them: `x: &'b T` gives `T: 'b`, which with the header's `'b: 'a` gives `T: 'a`)
+        let lts: Vec<String> = impl_names.iter().filter(|n| n.starts_with('\'')).cloned().chain(["'static".to_string()]).collect();
+        for n in &impl_names {
+            for l in &lts {
+                if n != l && tys.iter().any(|t| wf_implies(t, n, l)) {
+                    facts.push((n.clone(), l.clone()));
+                }
             }
         }
         let outlives = |x: &str, y: &str| -> bool {
@@ -11218,14 +11231,18 @@ const STD_ADTS: &[&str] = &[
 fn fn_body_start(t: &str) -> Option<usize> {
     let b = t.as_bytes();
     let mut d = 0i32;
-    for (i, &c) in b.iter().enumerate() {
-        match c {
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            // (not a bracket in a literal: `[u8; b'[' as usize]`)
+            b'\'' | b'"' if quote_end(b, i).is_some() => i = quote_end(b, i).unwrap_or(i),
             b'<' | b'(' | b'[' => d += 1,
             b'>' if i > 0 && b[i - 1] == b'-' => {}
             b'>' | b')' | b']' => d -= 1,
             b'{' if d <= 0 => return Some(i),
             _ => {}
         }
+        i += 1;
     }
     None
 }
