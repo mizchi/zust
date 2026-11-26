@@ -1716,6 +1716,36 @@ fn errors_at_their_statement() {
     assert_eq!(first(&format!("{u}fn f(u: U) {{\n    let U {{ a: _ }} = u;\n    unsafe {{ let U {{ b }} = u; }}\n}}\nfn main() {{}}\n")), None, "wildcard and unsafe");
 }
 
+#[test]
+fn bare_return_at_its_keyword() {
+    // (E0069 at the `return`, also where it has no statement of its own: a match arm, also of a value or in a
+    // closure, an argument (issue #177); the statement forms stay where they were, and a `return` with a value is
+    // blamed at the value. Each expected line, column and message is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e0069 = "`return;` in a function whose return type is not `()` (E0069)";
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    for (src, line, col) in [
+        ("fn c(n: u8) -> u8 {\n    match n {\n        0 => return,\n        k => k,\n    }\n}\nfn main() { c(0); }\n", 3, 14),
+        ("fn c(n: Option<u8>) -> u8 {\n    let x = match n { Some(k) => k, None => return };\n    x\n}\nfn main() { c(None); }\n", 2, 45),
+        ("fn c(n: u8) -> u8 {\n    let _ = Some(return);\n    n\n}\nfn main() { c(0); }\n", 2, 18),
+        ("fn c(n: u8) -> ! {\n    match n {\n        0 => return,\n        _ => loop {},\n    }\n}\nfn main() { c(0); }\n", 3, 14),
+        ("fn c(n: u8) -> u8 {\n    let f = || -> u8 { match n { 0 => return, k => k } };\n    f()\n}\nfn main() { c(0); }\n", 2, 39),
+        // (a statement's own `return`, a block's tail: where they were)
+        ("fn c(b: bool) -> u8 {\n    let x = if b { return } else { 1 };\n    x\n}\nfn main() { c(true); }\n", 2, 20),
+        ("fn c(b: bool) -> u8 {\n    if b { return; }\n    1\n}\nfn main() { c(true); }\n", 2, 12),
+        ("fn c(n: Option<u8>) -> u8 {\n    let Some(k) = n else { return };\n    k\n}\nfn main() { c(None); }\n", 2, 28),
+        ("fn c() -> u8 {\n    loop { if true { return; } }\n}\nfn main() { c(); }\n", 2, 22),
+        ("fn c() -> u8 {\n    let x = 1;\n    return;\n}\nfn main() { c(); }\n", 3, 5),
+    ] {
+        assert_eq!(first(src), at(line, col, e0069), "{src}");
+    }
+    let src = "fn c(n: u8) -> u8 {\n    match n {\n        0 => return \"x\",\n        k => k,\n    }\n}\nfn main() { c(0); }\n";
+    assert_eq!(first(src), at(3, 21, "mismatched types: expected `u8`, found `&str`"), "with a value");
+}
+
 /// An impl is for a type only when the type meets the impl's bounds, its where clauses' too (issue #2): nested goals of
 /// traits of the program's. Also a trait's supertraits must be implemented by an impl's self type, and an impl for a
 /// reference is not for the type it refers to. Each was checked against rustc 1.97

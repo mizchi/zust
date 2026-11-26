@@ -123,7 +123,7 @@ fn diverging_macro(p: &Path) -> bool {
 /// 必ず発散する式 (`return` / `break` / `continue` / `panic!(..)`)
 fn diverges(e: &Expr) -> bool {
     match e {
-        Expr::Return(_) | Expr::Break(..) | Expr::Continue(..) => true,
+        Expr::Return(..) | Expr::Break(..) | Expr::Continue(..) => true,
         Expr::Macro(p, _, _) => diverging_macro(p),
         _ => false,
     }
@@ -1558,7 +1558,7 @@ impl Inf<'_> {
                 self.block(b);
                 self.known(Ty::Unit)
             }
-            Expr::Return(x) => {
+            Expr::Return(x, _) => {
                 if let Some(x) = x {
                     let v = self.expr(x);
                     let ret = self.ret;

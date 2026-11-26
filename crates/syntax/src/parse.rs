@@ -450,7 +450,8 @@ pub enum Expr {
     /// (the last field: where its label is, else where the keyword is)
     Break(Option<String>, Option<Box<Expr>>, Pos),
     Continue(Option<String>, Pos),
-    Return(Option<Box<Expr>>),
+    /// (the last field: where the keyword is)
+    Return(Option<Box<Expr>>, Pos),
     /// (the last field: where the closure starts)
     Closure(bool, Vec<(Pat, Option<Ty>)>, Option<Box<Ty>>, Box<Expr>, Pos),
     Tuple(Vec<Expr>),
@@ -2508,9 +2509,10 @@ impl Parser {
                 if self.in_const {
                     return Err(self.err_plain("return statement outside of function body (E0572)"));
                 }
+                let kw = self.pos();
                 self.i += 1;
                 let v = if self.expr_follows() { Some(Box::new(self.expr(ss)?)) } else { None };
-                return Ok(Expr::Return(v));
+                return Ok(Expr::Return(v, kw));
             }
             "break" => {
                 let kw = self.pos();
@@ -3787,8 +3789,8 @@ impl Counts {
                 self.expr(x);
                 self.block(b);
             }
-            Expr::Break(_, v, _) | Expr::Return(v) => {
-                if matches!(e, Expr::Return(_)) {
+            Expr::Break(_, v, _) | Expr::Return(v, _) => {
+                if matches!(e, Expr::Return(..)) {
                     self.returns += 1;
                 }
                 if let Some(v) = v {

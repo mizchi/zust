@@ -887,7 +887,7 @@ pub fn value_pos(e: &Expr) -> Sp {
 pub fn value_origin(e: &Expr) -> Sp {
     fn diverges(e: &Expr) -> bool {
         match e {
-            Expr::Return(_) | Expr::Break(..) | Expr::Continue(..) => true,
+            Expr::Return(..) | Expr::Break(..) | Expr::Continue(..) => true,
             Expr::Macro(p, _, _) => p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")),
             Expr::Block(_, _, b) => match b.stmts.last() {
                 Some(Stmt::Expr(x, _)) => diverges(x),
@@ -962,7 +962,7 @@ pub fn expr_start(e: &Expr) -> Sp {
         Expr::Closure(.., p) => *p,
         // (no position of their own: that of their first part, usually on the same line)
         Expr::Ref(_, x) | Expr::RawRef(_, x) | Expr::Repeat(x, _) | Expr::Let(_, x) | Expr::Match(x, _) | Expr::If(x, _, _) => expr_start(x),
-        Expr::While(_, x, _) | Expr::For(_, _, x, _) | Expr::Return(Some(x)) | Expr::Break(_, Some(x), _) => expr_start(x),
+        Expr::While(_, x, _) | Expr::For(_, _, x, _) | Expr::Return(Some(x), _) | Expr::Break(_, Some(x), _) => expr_start(x),
         // (`break` / `continue` / `break 'a`: the keyword, or the label when there is one)
         Expr::Break(_, None, p) | Expr::Continue(_, p) => *p,
         Expr::Array(es) | Expr::Tuple(es) => es.first().map_or(SP, expr_start),
