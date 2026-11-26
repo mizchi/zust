@@ -2583,9 +2583,12 @@ impl String {
 // (このファイルは zustc だけがコンパイルする。アダプタの struct には、関連型を決めるための
 //  使わない型パラメータを持たせている: `Map<I, F, B>` の B など)
 
-// (len は実装する側が書く。std の既定の実装 (size_hint から) はない)
-pub trait ExactSizeIterator {
-    fn len(&self) -> usize;
+// (len's default is std's: the lower bound of size_hint)
+pub trait ExactSizeIterator: Iterator {
+    fn len(&self) -> usize {
+        let (lower, _) = self.size_hint();
+        lower
+    }
 }
 
 // (the trait, for a program's `impl DoubleEndedIterator for X`: the prelude's own iterators keep next_back as a method of
@@ -2602,6 +2605,10 @@ pub trait FusedIterator {
 pub trait Iterator {
     type Item;
     fn next(&mut self) -> Option<Self::Item>;
+    // (std's default: no bound known; an iterator of a program's that knows them writes its own)
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, None)
+    }
     fn map<B, F: FnMut(Self::Item) -> B>(self, f: F) -> Map<Self, F, B> {
         Map { iter: self, f: f }
     }
