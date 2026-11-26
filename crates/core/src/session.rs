@@ -728,6 +728,10 @@ pub struct CrateCtx {
     pub map: crate::srcmap::SrcMap,
     /// 依存するクレート (推移的に全部。実行ファイルの panic の表がそれらの表を指す)
     pub deps: Vec<String>,
+    /// The dependencies this crate and those crates name otherwise (renamed ones, CrateSpec::aliases), as the
+    /// flattening of the modules reads them: `crate:alias=name`, `:alias=name` for a bin's own
+    /// (lexer::rename_module_collisions_in)
+    pub externs: Vec<String>,
     /// このクレートの feature (ワークスペース。None なら Options の features)
     pub features: Option<Vec<String>>,
     /// このクレートの cfg と `env!` の環境 (ワークスペース: CrateSpec の cfgs / env)
@@ -919,6 +923,7 @@ impl Session {
         let src0 = stripped.as_deref().unwrap_or(src0);
         let mut crates = self.ctx.deps.clone();
         crates.extend(self.ctx.lib.iter().cloned());
+        crates.extend(self.ctx.externs.iter().cloned());
         let cfg = self.opts.cfg_with(self.ctx.features.as_ref().unwrap_or(&self.opts.features));
         let renamed = crate::prep::std_renames(src0);
         crate::prep::moved_lines(renamed.as_deref().unwrap_or(src0), &crates, Some(&cfg))
@@ -957,6 +962,7 @@ impl Session {
         };
         let mut crates = self.ctx.deps.clone();
         crates.extend(self.ctx.lib.iter().cloned());
+        crates.extend(self.ctx.externs.iter().cloned());
         let mut fix = vec![];
         let cfg = self.opts.cfg_of(self.ctx.features.as_ref().unwrap_or(&self.opts.features), &self.ctx.cfgs, &self.ctx.env);
         crate::macros::BAD_FRAGMENT.with(|c| c.borrow_mut().take());
@@ -10559,6 +10565,7 @@ impl Session {
         let s = renamed.as_deref().unwrap_or(s);
         let mut crates = self.ctx.deps.clone();
         crates.extend(self.ctx.lib.iter().cloned());
+        crates.extend(self.ctx.externs.iter().cloned());
         let Ok(p) = crate::prep::prep_full(s, &crates, &mut vec![], Some(&cfg)) else { return e };
         match crate::prep::hoisted_line(&crate::prep::marked(p), d.line) {
             Some(l) => with_line(&e, l),

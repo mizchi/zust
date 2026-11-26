@@ -273,6 +273,23 @@ impl<'a> Runner<'a> {
         v
     }
 
+    /// zustc's dependencies of n (externs of `kind`): the library names, and the renamed ones (the name used, the
+    /// library's name; CrateSpec::aliases)
+    fn zustc_deps(&self, n: Node, kind: DepKind) -> (Vec<String>, Vec<(String, String)>) {
+        let mut deps: Vec<String> = vec![];
+        let mut aliases: Vec<(String, String)> = vec![];
+        for (e, t) in self.externs(n, kind) {
+            let Some(lib) = self.g.pkgs[t.0].m.lib.as_ref() else { continue };
+            if e != lib.name {
+                aliases.push((e, lib.name.clone()));
+            }
+            if !deps.contains(&lib.name) {
+                deps.push(lib.name.clone());
+            }
+        }
+        (deps, aliases)
+    }
+
     fn compile_zustc(&self, n: Node, script: &Path, dir: &Path, closure: &[Node], outs: &BTreeMap<Node, Option<Output>>) -> R<PathBuf> {
         let mut crates: Vec<CrateSpec> = vec![];
         for &m in closure {
@@ -284,13 +301,7 @@ impl<'a> Runner<'a> {
             if crates.iter().any(|c| c.name == lib.name) {
                 return Err(format!("two versions of `{}` among its build-dependencies", p.name));
             }
-            let mut deps = vec![];
-            for (e, t) in self.externs(m, DepKind::Normal) {
-                if Some(&e) != self.g.pkgs[t.0].m.lib.as_ref().map(|l| &l.name) {
-                    return Err(format!("`{}` renames a dependency", p.name));
-                }
-                deps.push(e);
-            }
+            let (deps, aliases) = self.zustc_deps(m, DepKind::Normal);
             let (cfgs, env) = crate_env(p, &lib.name, outs.get(&m).cloned().flatten().as_ref());
             crates.push(CrateSpec {
                 name: lib.name.clone(),
@@ -298,6 +309,7 @@ impl<'a> Runner<'a> {
                 display: lib.path.display().to_string(),
                 lib: true,
                 deps,
+                aliases,
                 features: self.r.nodes[&m].features.iter().cloned().collect(),
                 exe: None,
                 cfgs,
@@ -307,13 +319,7 @@ impl<'a> Runner<'a> {
             });
         }
         let pk = &self.g.pkgs[n.0].m;
-        let mut deps = vec![];
-        for (e, t) in self.externs(n, DepKind::Build) {
-            if Some(&e) != self.g.pkgs[t.0].m.lib.as_ref().map(|l| &l.name) {
-                return Err(format!("it renames its build-dependency `{}`", self.g.pkgs[t.0].m.name));
-            }
-            deps.push(e);
-        }
+        let (deps, aliases) = self.zustc_deps(n, DepKind::Build);
         let (cfgs, mut env) = crate_env(pk, "build_script_build", None);
         env.retain(|(k, _)| k != "OUT_DIR");
         crates.push(CrateSpec {
@@ -322,6 +328,7 @@ impl<'a> Runner<'a> {
             display: script.display().to_string(),
             lib: false,
             deps,
+            aliases,
             // (the package's features: cargo compiles build.rs with them too)
             features: self.r.nodes[&n].features.iter().cloned().collect(),
             exe: Some("build-script-build".into()),

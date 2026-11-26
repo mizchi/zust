@@ -3,8 +3,9 @@
 //!
 //! Build scripts run first (build_script.rs); their cfgs and environment, and cargo's `CARGO_PKG_*`, go to each
 //! crate. A proc-macro dependency is a stub library (proc_macro_stub.rs): using one of its macros is an error
-//! (mizchi/zust#29). Not yet (mizchi/zust#28): two versions of one library and renamed dependencies (zustc's
-//! workspace has one name per crate).
+//! (mizchi/zust#29). A renamed dependency (`common = { package = "crypto-common" }`) is the library under another
+//! name in its dependent alone (CrateSpec::aliases, rustc's `--extern common=..`). Not yet (mizchi/zust#28): two
+//! versions of one library (zustc's workspace has one name per crate).
 
 use crate::build_script::{self, Compiler, Runner};
 use crate::proc_macro_stub;
@@ -283,6 +284,7 @@ fn plan_keeping(g: &Graph, o: &BuildOpts, mut errs: Option<&mut Vec<(String, Str
                 display: stub.display().to_string(),
                 lib: true,
                 deps: vec![],
+                aliases: vec![],
                 features: vec![],
                 exe: None,
                 cfgs: vec![],
@@ -311,13 +313,15 @@ fn plan_keeping(g: &Graph, o: &BuildOpts, mut errs: Option<&mut Vec<(String, Str
         }
         lib_of.insert(lib.name.clone(), n.0);
         let (cfgs, env) = build_script::crate_env(&pk.m, &lib.name, bs_out.get(&n));
+        let (deps, aliases) = deps_of(g, &r, n, false);
         node_of.push(n);
         crates.push(CrateSpec {
             name: lib.name.clone(),
             root: lib.path.clone(),
             display: display(&lib.path),
             lib: true,
-            deps: deps_of(g, &r, n, false)?,
+            deps,
+            aliases,
             features: r.nodes[&n].features.iter().cloned().collect(),
             exe: None,
             cfgs,
@@ -342,7 +346,7 @@ fn plan_keeping(g: &Graph, o: &BuildOpts, mut errs: Option<&mut Vec<(String, Str
             if !missing_features(g, &r, n, b).is_empty() {
                 continue;
             }
-            let mut deps = deps_of(g, &r, n, false)?;
+            let (mut deps, aliases) = deps_of(g, &r, n, false);
             if let Some(l) = &pk.m.lib {
                 deps.insert(0, l.name.clone());
             }
@@ -364,6 +368,7 @@ fn plan_keeping(g: &Graph, o: &BuildOpts, mut errs: Option<&mut Vec<(String, Str
                 display: display(&b.path),
                 lib: false,
                 deps,
+                aliases,
                 features: r.nodes[&n].features.iter().cloned().collect(),
                 exe: Some(b.name.clone()),
                 cfgs,
@@ -386,7 +391,7 @@ fn plan_keeping(g: &Graph, o: &BuildOpts, mut errs: Option<&mut Vec<(String, Str
         for &m in &selected {
             let pk = &g.pkgs[m];
             let n = (m, false);
-            let dev = deps_of(g, &r, n, true)?;
+            let (dev, dev_aliases) = deps_of(g, &r, n, true);
             let lib = pk.m.lib.as_ref().filter(|l| !l.is_proc_macro());
             let mut units: Vec<(String, &crate::manifest::Target, bool)> = vec![];
             if let Some(l) = lib {
@@ -422,6 +427,7 @@ fn plan_keeping(g: &Graph, o: &BuildOpts, mut errs: Option<&mut Vec<(String, Str
                     // (the lib's own unit tests are the lib: a dev-dependency on the package itself is left out)
                     deps.retain(|d| *d != l.name);
                 }
+                let aliases: Vec<(String, String)> = dev_aliases.iter().filter(|x| deps.contains(&x.1)).cloned().collect();
                 let kind = if t.kind.iter().any(|k| k == "test") { "test" } else if t.kind.iter().any(|k| k == "bin") { "bin" } else { "lib" };
                 let mut name = format!("{}_{kind}_test", t.name.replace('-', "_"));
                 while lib_of.contains_key(&name) || crates.iter().any(|c| c.name == name) {
@@ -456,6 +462,7 @@ fn plan_keeping(g: &Graph, o: &BuildOpts, mut errs: Option<&mut Vec<(String, Str
                     display: display(&t.path),
                     lib: false,
                     deps,
+                    aliases,
                     features: r.nodes[&n].features.iter().cloned().collect(),
                     exe: Some(format!("{exe}.test")),
                     cfgs,
@@ -574,10 +581,12 @@ fn pm_reach(g: &Graph, r: &resolve::Resolved, n: Node, memo: &mut BTreeMap<Node,
     v
 }
 
-/// The extern names of a node's normal dependencies (as zustc's workspace names them: the library names)
+/// A node's normal dependencies, as zustc's workspace names them (the library names), and those it renames: (the
+/// name it uses, the library's name), rustc's `--extern common=..` (`common = { package = "crypto-common" }`)
 /// (`dev`: the dev-dependencies too, for a test crate)
-fn deps_of(g: &Graph, r: &resolve::Resolved, n: Node, dev: bool) -> R<Vec<String>> {
+fn deps_of(g: &Graph, r: &resolve::Resolved, n: Node, dev: bool) -> (Vec<String>, Vec<(String, String)>) {
     let mut out: Vec<String> = vec![];
+    let mut aliases: Vec<(String, String)> = vec![];
     for &(ei, t) in &r.nodes[&n].edges {
         let d = g.decl(n.0, &g.edges[n.0][ei]);
         if d.kind != crate::manifest::DepKind::Normal && !(dev && d.kind == crate::manifest::DepKind::Dev) {
@@ -586,17 +595,14 @@ fn deps_of(g: &Graph, r: &resolve::Resolved, n: Node, dev: bool) -> R<Vec<String
         let to = &g.pkgs[t.0].m;
         let Some(lib) = &to.lib else { continue };
         let name = extern_name(d, to);
-        if name != lib.name {
-            return Err(format!(
-                "`{}` renames its dependency `{}` to `{}`: renamed dependencies are not supported yet (mizchi/zust#28)",
-                g.pkgs[n.0].m.name, to.name, d.name
-            ));
+        if name != lib.name && !aliases.iter().any(|x| x.0 == name) {
+            aliases.push((name, lib.name.clone()));
         }
-        if !out.contains(&name) {
-            out.push(name);
+        if !out.contains(&lib.name) {
+            out.push(lib.name.clone());
         }
     }
-    Ok(out)
+    (out, aliases)
 }
 
 /// The workspace as `zustc build` reads it (`-v`)
@@ -630,7 +636,16 @@ fn ws_text_in(crates: &[CrateSpec], redact: bool) -> String {
         if c.test {
             e.push_str(" test=true");
         }
-        s.push_str(&format!("{} {} {} {}{f}{e}\n", if c.lib { "lib" } else { "bin" }, c.name, c.root.display(), c.deps.join(" ")));
+        // (a dependency under another name: `extern=common=crypto_common`, in its place)
+        let deps: Vec<String> = c
+            .deps
+            .iter()
+            .map(|d| match c.aliases.iter().filter(|x| x.1 == *d).map(|x| format!("extern={}={d}", x.0)).collect::<Vec<_>>() {
+                v if v.is_empty() => d.clone(),
+                v => v.join(" "),
+            })
+            .collect();
+        s.push_str(&format!("{} {} {} {}{f}{e}\n", if c.lib { "lib" } else { "bin" }, c.name, c.root.display(), deps.join(" ")));
     }
     s
 }
