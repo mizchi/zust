@@ -50,6 +50,8 @@ fn is_builtin_scalar_method(n: &str) -> bool {
             | "rem_euclid"
             | "div_euclid"
             | "next_multiple_of"
+            | "div_ceil"
+            | "wrapping_add_signed"
             | "next_power_of_two"
             | "isqrt"
             | "try_into"
@@ -505,6 +507,26 @@ impl Inf<'_> {
             let k = self.known_g(p, &mut pv);
             self.unify(a, k);
         }
+        self.known_g(ret, &mut pv)
+    }
+
+    /// apply_helper for a slice helper of the prelude (`__exr_slice_splitn<T, F>(s: &[T], ..)`): its first type
+    /// parameter is the receiver's element el
+    fn apply_seq_helper(&mut self, id: u32, el: u32, args: Vec<u32>) -> u32 {
+        let sig = &self.prog.sigs[id as usize];
+        let (params, ret, ng) = (sig.params[1.min(sig.params.len())..].to_vec(), sig.ret, sig.generics.len());
+        let mut pv: Vec<Option<u32>> = vec![None; ng];
+        if let Some(p) = pv.first_mut() {
+            *p = Some(el);
+        }
+        for (a, p) in args.into_iter().zip(params) {
+            let k = self.known_g(p, &mut pv);
+            self.unify(a, k);
+        }
+        // (a closure's parameter type through the bound, `F: FnMut(&T) -> bool`: `[1, 0, 2].splitn(2, |x: &u8| ..)`
+        // makes the elements u8, as apply_recv does)
+        let prog = self.prog;
+        self.unify_fn_bounds(&prog.sigs[id as usize].generics, &mut pv);
         self.known_g(ret, &mut pv)
     }
 
@@ -2847,6 +2869,20 @@ impl Inf<'_> {
         match n {
             "len" => self.known(Ty::Usize),
             "is_empty" | "contains" => self.known(Ty::Bool),
+            // (the prelude's `__exr_slice_<n>(s, ..)`, its T the element: `Option<(&T, &[T])>`, `SliceSplitN<T, F>`)
+            "split_first" | "split_last" | "splitn" if self.prog.index.contains_key(&format!("__exr_slice_{n}")) => {
+                let id = self.prog.index[&format!("__exr_slice_{n}")];
+                self.apply_seq_helper(id, el, avs)
+            }
+            // (a slice's to_owned is its to_vec; an array's, a clone of it, is left to the use)
+            "to_owned" if self.prog.struct_index.contains_key("Vec") && {
+                let d = self.deref_expr(r);
+                let root = self.find(d);
+                matches!(self.shape[root as usize], Some(Shape::Slc(_)))
+            } => {
+                let vb = self.prog.struct_index["Vec"];
+                self.adt(vb, vec![el])
+            }
             "to_vec" if self.prog.struct_index.contains_key("Vec") => {
                 let vb = self.prog.struct_index["Vec"];
                 self.adt(vb, vec![el])
@@ -3035,9 +3071,26 @@ impl Inf<'_> {
                 }
                 rv
             }
-            "rem_euclid" | "div_euclid" | "next_multiple_of" => {
+            "rem_euclid" | "div_euclid" | "next_multiple_of" | "div_ceil" => {
                 for a in avs {
                     self.unify(a, rv);
+                }
+                rv
+            }
+            // (the argument is the signed type of the receiver's width)
+            "wrapping_add_signed" => {
+                let st = match self.resolve(rv) {
+                    Some(Ty::U8) => Some(Ty::I8),
+                    Some(Ty::U16) => Some(Ty::I16),
+                    Some(Ty::U32) => Some(Ty::I32),
+                    Some(Ty::U64) => Some(Ty::I64),
+                    Some(Ty::U128) => Some(Ty::I128),
+                    Some(Ty::Usize) => Some(Ty::Isize),
+                    _ => None,
+                };
+                for a in avs.into_iter().filter(|_| st.is_some()) {
+                    let k = self.known(st.unwrap_or(Ty::Isize));
+                    self.unify(a, k);
                 }
                 rv
             }

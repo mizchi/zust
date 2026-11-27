@@ -1431,6 +1431,58 @@ fn __exr_slice_split_at_mut<T>(s: &mut [T], mid: usize) -> (&mut [T], &mut [T]) 
     unsafe { (core::slice::from_raw_parts_mut(p, mid), core::slice::from_raw_parts_mut(p.add(mid), n - mid)) }
 }
 
+// `s.split_first()` / `s.split_last()`: the end element and the rest, None when s is empty
+fn __exr_slice_split_first<T>(s: &[T]) -> Option<(&T, &[T])> {
+    if s.len() == 0 {
+        return None;
+    }
+    unsafe { Some((&*s.as_ptr(), core::slice::from_raw_parts(s.as_ptr().add(1), s.len() - 1))) }
+}
+
+fn __exr_slice_split_last<T>(s: &[T]) -> Option<(&T, &[T])> {
+    let n = s.len();
+    if n == 0 {
+        return None;
+    }
+    unsafe { Some((&*s.as_ptr().add(n - 1), core::slice::from_raw_parts(s.as_ptr(), n - 1))) }
+}
+
+// `s.splitn(n, |x| ..)`: at most n pieces between the elements pred takes, the last one the rest
+pub struct SliceSplitN<T, F> {
+    ptr: *const T,
+    len: usize,
+    n: usize,
+    pred: F,
+}
+
+impl<T, F: FnMut(&T) -> bool> Iterator for SliceSplitN<T, F> {
+    type Item = &[T];
+    fn next(&mut self) -> Option<&[T]> {
+        if self.n == 0 {
+            return None;
+        }
+        self.n -= 1;
+        if self.n > 0 {
+            let mut i = 0;
+            while i < self.len {
+                if (self.pred)(unsafe { &*self.ptr.add(i) }) {
+                    let piece = unsafe { core::slice::from_raw_parts(self.ptr, i) };
+                    self.ptr = unsafe { self.ptr.add(i + 1) };
+                    self.len -= i + 1;
+                    return Some(piece);
+                }
+                i += 1;
+            }
+            self.n = 0;
+        }
+        Some(unsafe { core::slice::from_raw_parts(self.ptr, self.len) })
+    }
+}
+
+fn __exr_slice_splitn<T, F: FnMut(&T) -> bool>(s: &[T], n: usize, pred: F) -> SliceSplitN<T, F> {
+    SliceSplitN { ptr: s.as_ptr(), len: s.len(), n: n, pred: pred }
+}
+
 fn __exr_slice_windows<T>(s: &[T], n: usize) -> Windows<T> {
     if n == 0 {
         panic!("window size must be non-zero");
@@ -1449,6 +1501,10 @@ impl<T> ChunksExact<T> {
     pub fn remainder(&self) -> &[T] {
         let k = self.len - self.len % self.n;
         unsafe { core::slice::from_raw_parts(self.ptr.add(k), self.len - k) }
+    }
+    // (ExactSizeIterator's: the whole chunks still to come)
+    pub fn len(&self) -> usize {
+        (self.len - self.i) / self.n
     }
 }
 
@@ -3769,6 +3825,10 @@ impl<T> Iter<T> {
     pub fn len(&self) -> usize {
         self.len - self.i
     }
+    // (Iterator's, exact as std's for a slice)
+    pub fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len - self.i, Some(self.len - self.i))
+    }
     pub fn as_slice(&self) -> &[T] {
         unsafe { core::slice::from_raw_parts(self.ptr.add(self.i), self.len - self.i) }
     }
@@ -3966,6 +4026,16 @@ impl Chars {
         let (c, _) = __exr_decode_at::<()>(self.ptr, j);
         self.len = j;
         Some(c)
+    }
+    // (DoubleEndedIterator's: the characters from the back)
+    pub fn rfold<B, F: FnMut(B, char) -> B>(self, init: B, f: F) -> B {
+        let mut it = self;
+        let mut f = f;
+        let mut acc = init;
+        while let Some(c) = it.next_back() {
+            acc = f(acc, c);
+        }
+        acc
     }
 }
 
@@ -5711,6 +5781,13 @@ impl<T> MaybeUninit<T> {
     pub unsafe fn assume_init_ref(&self) -> &T {
         &self.value
     }
+    // (a bitwise copy of the value, which stays where it is: the caller must not use both, as std's)
+    pub unsafe fn assume_init_read(&self) -> T {
+        unsafe { (&self.value as *const T).read() }
+    }
+    pub unsafe fn assume_init_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
 }
 
 pub unsafe fn __core_unreachable_unchecked() -> ! {
@@ -5746,7 +5823,7 @@ pub trait Read {
         while at < buf.len() {
             let n = self.read(&mut buf[at..])?;
             if n == 0 {
-                return Err(IoError { code: -3 });
+                return Err(IoError { code: -3, os: false });
             }
             at += n;
         }
@@ -5767,7 +5844,7 @@ pub trait Write {
         while at < buf.len() {
             let n = self.write(&buf[at..])?;
             if n == 0 {
-                return Err(IoError { code: -4 });
+                return Err(IoError { code: -4, os: false });
             }
             at += n;
         }
@@ -5870,7 +5947,7 @@ fn __exr_cursor_seek(len: usize, pos: &mut u64, to: SeekFrom) -> Result<u64, IoE
             *pos = n;
             Ok(n)
         }
-        None => Err(IoError { code: 22 }),
+        None => Err(IoError { code: 22, os: true }),
     }
 }
 
@@ -6019,9 +6096,11 @@ impl<R: Read> Read for BufReader<R> {
 }
 
 // std::io::Error: OS のエラー (errno) か、種類とメッセージ (code < 0: InvalidData など)
+// (os: whether code is an errno, apart from the kinds' codes: `from_raw_os_error(0)` and `(-1)` are OS errors too (#256))
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct IoError {
     code: i32,
+    os: bool,
 }
 
 unsafe extern "C" {
@@ -6076,13 +6155,18 @@ fn __exr_io_kind<G>(code: i32) -> &str {
 
 impl IoError {
     pub fn last_os_error() -> IoError {
-        IoError { code: unsafe { *__exr_errno_location() } }
+        IoError { code: unsafe { *__exr_errno_location() }, os: true }
+    }
+    pub fn from_raw_os_error(code: i32) -> IoError {
+        IoError { code: code, os: true }
     }
     pub fn raw_os_error(&self) -> Option<i32> {
-        if self.code > 0 { Some(self.code) } else { None }
+        if self.os { Some(self.code) } else { None }
     }
     fn __message(&self) -> &str {
-        if self.code == -1 {
+        if self.os {
+            __exr_cstr::<()>(unsafe { __exr_strerror(self.code) })
+        } else if self.code == -1 {
             "stream did not contain valid UTF-8"
         } else if self.code == -3 {
             "failed to fill whole buffer"
@@ -6103,9 +6187,9 @@ impl IoError {
 impl Display for IoError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
         __exr_fmt_str::<()>(f, self.__message());
-        if self.code > 0 {
+        if self.os {
             __exr_fmt_str::<()>(f, " (os error ");
-            __exr_fmt_int::<()>(f, self.code as u64, false);
+            __exr_fmt_int::<()>(f, (self.code as i64).unsigned_abs(), self.code < 0);
             __exr_fmt_str::<()>(f, ")");
         }
         Ok(())
@@ -6114,11 +6198,12 @@ impl Display for IoError {
 
 impl Debug for IoError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
-        if self.code > 0 {
+        if self.os {
             __exr_fmt_str::<()>(f, "Os { code: ");
-            __exr_fmt_int::<()>(f, self.code as u64, false);
+            __exr_fmt_int::<()>(f, (self.code as i64).unsigned_abs(), self.code < 0);
             __exr_fmt_str::<()>(f, ", kind: ");
-            __exr_fmt_str::<()>(f, __exr_io_kind::<()>(self.code));
+            // (an errno's kind; the kinds' own codes are below 0, which no errno names)
+            __exr_fmt_str::<()>(f, __exr_io_kind::<()>(if self.code > 0 { self.code } else { 0 }));
             __exr_fmt_str::<()>(f, ", message: ");
             __exr_fmt_str_debug::<()>(f, self.__message());
             __exr_fmt_str::<()>(f, " }");
@@ -6228,7 +6313,7 @@ pub fn __exr_fs_read_to_string<P>(path: P) -> Result<String, IoError> {
     let v = __exr_fs_read(path)?;
     match String::from_utf8(v) {
         Ok(s) => Ok(s),
-        Err(_) => Err(IoError { code: -1 }),
+        Err(_) => Err(IoError { code: -1, os: false }),
     }
 }
 
@@ -6362,6 +6447,32 @@ impl<T> Deref for Cow<T> {
             Cow::Borrowed(s) => *s,
             Cow::Owned(v) => v.as_slice(),
         }
+    }
+}
+
+// (`s.into()` / `Cow::from(v)`: std's `From<&[T]>` / `From<Vec<T>>`, and `From<&str>` / `From<String>` for
+// `Cow<str>` (#256))
+impl<T> From<&[T]> for Cow<T> {
+    fn from(s: &[T]) -> Cow<T> {
+        Cow::Borrowed(s)
+    }
+}
+
+impl<T> From<Vec<T>> for Cow<T> {
+    fn from(v: Vec<T>) -> Cow<T> {
+        Cow::Owned(v)
+    }
+}
+
+impl From<&str> for __CowStr {
+    fn from(s: &str) -> __CowStr {
+        __CowStr::Borrowed(s)
+    }
+}
+
+impl From<String> for __CowStr {
+    fn from(s: String) -> __CowStr {
+        __CowStr::Owned(s)
     }
 }
 
@@ -7579,7 +7690,7 @@ impl Command {
                     __exr_close(out[0]);
                     __exr_close(err[0]);
                 }
-                return Err(IoError { code: e });
+                return Err(IoError { code: e, os: true });
             }
             Ok((pid, out[0], err[0]))
         }
@@ -8116,6 +8227,16 @@ fn __exr_fmt_ok<G>() -> Result<(), __FmtError> {
     Ok(())
 }
 fn __exr_debug<T>(x: &T, f: &mut Formatter) {}
+// (`x.fmt(f)` / `Display::fmt(&x, f)` of a value with no fmt of its own to call (a number, a str, a derive): what `{}`
+// / `{:?}` writes, with f's flags)
+fn __exr_display_fmt<T>(x: &T, f: &mut Formatter) -> Result<(), __FmtError> {
+    __exr_display(x, f);
+    Ok(())
+}
+fn __exr_debug_fmt<T>(x: &T, f: &mut Formatter) -> Result<(), __FmtError> {
+    __exr_debug(x, f);
+    Ok(())
+}
 
 impl Display for String {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
@@ -10600,6 +10721,10 @@ impl Waker {
     }
     pub fn wake(self) {}
     pub fn wake_by_ref(&self) {}
+    // (every Waker here is the no-op one, which std's will_wake also finds the same: its data and vtable)
+    pub fn will_wake(&self, _other: &Waker) -> bool {
+        true
+    }
 }
 
 pub struct Context<'a> {
@@ -10949,7 +11074,7 @@ impl<T> Mutex<T> {
     pub const fn new(v: T) -> Mutex<T> {
         Mutex { val: v, locked: false }
     }
-    pub fn lock(&self) -> Result<MutexGuard<T>, ()> {
+    pub fn lock(&self) -> Result<MutexGuard<T>, PoisonError<MutexGuard<T>>> {
         let m = &self.locked as *const bool as *mut bool;
         if !__exr_green_wait(|| unsafe { !*m }) {
             panic!("deadlock: every thread is waiting");
@@ -10959,11 +11084,46 @@ impl<T> Mutex<T> {
         }
         Ok(MutexGuard { p: &self.val as *const T as *mut T, m: m })
     }
-    pub fn into_inner(self) -> Result<T, ()> {
+    pub fn into_inner(self) -> Result<T, PoisonError<T>> {
         Ok(self.val)
     }
-    pub fn get_mut(&mut self) -> Result<&mut T, ()> {
+    pub fn get_mut(&mut self) -> Result<&mut T, PoisonError<&mut T>> {
         Ok(&mut self.val)
+    }
+}
+
+// `std::sync::PoisonError`, the Err of a Mutex's lock: none comes here (a panic ends the program, so no lock is left
+// poisoned), but a program handles it, `Err(e) => e.into_inner()` (#256)
+pub struct PoisonError<T> {
+    guard: T,
+}
+
+impl<T> PoisonError<T> {
+    pub fn new(guard: T) -> PoisonError<T> {
+        PoisonError { guard: guard }
+    }
+    pub fn into_inner(self) -> T {
+        self.guard
+    }
+    pub fn get_ref(&self) -> &T {
+        &self.guard
+    }
+    pub fn get_mut(&mut self) -> &mut T {
+        &mut self.guard
+    }
+}
+
+impl<T> Debug for PoisonError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_str::<()>(f, "PoisonError { .. }");
+        Ok(())
+    }
+}
+
+impl<T> Display for PoisonError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_str::<()>(f, "poisoned lock: another task failed inside");
+        Ok(())
     }
 }
 
@@ -11397,6 +11557,10 @@ impl<T> Debug for Vec<T> {
 impl String {
     fn pop_byte(&mut self) {
         self.vec.len -= 1;
+    }
+    // (unsafe as in std: the caller keeps the bytes UTF-8)
+    pub unsafe fn as_mut_vec(&mut self) -> &mut Vec<u8> {
+        &mut self.vec
     }
 }
 // --- 順序 (Ordering / 大小比較の glue。型ごとの比較の本体は codegen が作る __exr_cmp) ---
@@ -14216,6 +14380,18 @@ fn __exr_str_eq_ignore_ascii_case<G>(s: &str, t: &str) -> bool {
     true
 }
 
+fn __exr_str_is_ascii<G>(s: &str) -> bool {
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] >= 0x80 {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
 fn __exr_str_replace<G>(s: &str, from: &str, to: &str) -> String {
     __exr_str_replacen::<()>(s, from, to, !0usize)
 }
@@ -14497,6 +14673,8 @@ fn __exr_str_is_char_boundary<G>(s: &str, i: usize) -> bool {
 }
 
 // `s.split("ab")` (区切りが &str)
+// (an empty separator matches at every char boundary, the start and the end too, as std's: `"ab".split("")` is
+// `["", "a", "b", ""]`; emp: its match at i is still to come (#256))
 pub struct SplitStr {
     p: *const u8,
     len: usize,
@@ -14504,6 +14682,7 @@ pub struct SplitStr {
     sep: *const u8,
     slen: usize,
     done: bool,
+    emp: bool,
 }
 
 impl Iterator for SplitStr {
@@ -14513,6 +14692,21 @@ impl Iterator for SplitStr {
             return None;
         }
         let st = self.i;
+        if self.slen == 0 {
+            // (the next match: at i, or one char past it; none past the end)
+            let m = if self.emp {
+                st
+            } else if st < self.len {
+                let b0 = unsafe { *self.p.add(st) };
+                st + if b0 < 0x80 { 1 } else if b0 < 0xE0 { 2 } else if b0 < 0xF0 { 3 } else { 4 }
+            } else {
+                self.done = true;
+                return Some(__exr_sub::<()>(unsafe { self.p.add(st) }, 0));
+            };
+            self.emp = false;
+            self.i = m;
+            return Some(__exr_sub::<()>(unsafe { self.p.add(st) }, m - st));
+        }
         let mut k = self.i;
         while k + self.slen <= self.len {
             let mut j = 0;
@@ -14616,7 +14810,32 @@ fn __exr_str_rsplit_once<G>(s: &str, p: &str) -> Option<(&str, &str)> {
 }
 
 fn __exr_str_split_str<G>(s: &str, t: &str) -> SplitStr {
-    SplitStr { p: s.as_ptr(), len: s.len(), i: 0, sep: t.as_ptr(), slen: t.len(), done: false }
+    SplitStr { p: s.as_ptr(), len: s.len(), i: 0, sep: t.as_ptr(), slen: t.len(), done: false, emp: true }
+}
+
+// `s.splitn(n, pat)`: at most n pieces, the last one the rest (a char pattern comes as its UTF-8)
+pub struct SplitNStr {
+    it: SplitStr,
+    n: usize,
+}
+
+impl Iterator for SplitNStr {
+    type Item = &str;
+    fn next(&mut self) -> Option<&str> {
+        if self.n == 0 || self.it.done {
+            return None;
+        }
+        self.n -= 1;
+        if self.n == 0 {
+            self.it.done = true;
+            return Some(__exr_sub::<()>(unsafe { self.it.p.add(self.it.i) }, self.it.len - self.it.i));
+        }
+        self.it.next()
+    }
+}
+
+fn __exr_str_splitn<G>(s: &str, n: usize, t: &str) -> SplitNStr {
+    SplitNStr { it: __exr_str_split_str::<()>(s, t), n: n }
 }
 
 // `s.char_indices()` / `s.bytes()`
