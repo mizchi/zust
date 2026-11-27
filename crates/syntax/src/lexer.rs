@@ -4968,11 +4968,16 @@ fn ns_key(n: &[u8], ns: u8) -> Vec<u8> {
 /// The item of the other namespace than ns that module m's name n is, when it is another than nn (one namespace's
 /// item found first): libc's `fn sigaction` and the `struct sigaction` a glob of the same module brings
 fn other_ns_item(names: &Names, m: usize, n: &[u8], ns: u8, nn: &[u8]) -> Option<(Vec<u8>, u8)> {
-    // (only through a glob of m's: m's own items and imports of the name are one namespace's)
-    if ns != NS_TYPE && ns != NS_VALUE || !names.adj.contains_key(&m) {
+    if ns != NS_TYPE && ns != NS_VALUE {
         return None;
     }
     let other = NS_ANY ^ ns;
+    // (only through a glob of m's, or m's own import of the other namespace's item under `name#t` / `name#v`: a
+    // re-export by name, `pub use crate::api::Entry;`, of a fn and a glob's struct. m's own items and its other
+    // imports of the name are one namespace's)
+    if !names.adj.contains_key(&m) && !(names.ns_imports && names.imports.contains_key(&(m, ns_key(n, other)))) {
+        return None;
+    }
     match names.item_at(m, m, n, other) {
         GlobHit::Item(n2, ns2) if n2 != nn && ns2 & other != 0 => Some((n2, other)),
         _ => None,

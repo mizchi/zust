@@ -3959,18 +3959,16 @@ impl Program {
     }
 
     /// The types of alias n's parameters a use leaves out (after vals), from their defaults, which may name the
-    /// parameters before them
+    /// parameters before them. Any other name in a default is the type where the alias is declared, never a generic
+    /// parameter of the user's (`type Pair<T, E = Error>` used as `Pair<u8>` in `fn make<Error>()` is the struct)
     #[cold]
     #[inline(never)]
-    fn fill_alias_defaults(&self, n: &str, g: &[String], vals: &mut Vec<Ty>, names: &dyn Fn(&str) -> Option<Ty>) -> R<()> {
+    fn fill_alias_defaults(&self, n: &str, g: &[String], vals: &mut Vec<Ty>) -> R<()> {
         let ds = self.alias_defaults[n].clone();
         for d in &ds[vals.len()..] {
             let d = d.as_ref().ok_or("an alias parameter without a default")?;
             let k = vals.len();
-            let v = self.resolve_with(d, &|x| match g.iter().position(|y| y == x).filter(|&i| i < k) {
-                Some(i) => Some(vals[i]),
-                None => names(x),
-            })?;
+            let v = self.resolve_with(d, &|x| g.iter().position(|y| y == x).filter(|&i| i < k).map(|i| vals[i]))?;
             vals.push(v);
         }
         Ok(())
@@ -4276,6 +4274,10 @@ impl Program {
                     if g.is_empty() {
                         return self.resolve_with(t, names);
                     }
+                    // (every parameter with a default: `Bytes` for `type Bytes<T = u8>`, as `Bytes<>`)
+                    if self.alias_fills(n, 0) {
+                        return self.resolve_with(&TySyn::App(n.clone(), vec![]), names);
+                    }
                 }
                 match self.struct_index.get(n) {
                     Some(&id) if self.structs[id as usize].generics.is_empty() => Ty::Struct(id),
@@ -4326,7 +4328,7 @@ impl Program {
                 let (g, t) = self.aliases[n].clone();
                 let mut vals = args.iter().map(r).collect::<R<Vec<Ty>>>()?;
                 if vals.len() < g.len() {
-                    self.fill_alias_defaults(n, &g, &mut vals, names)?;
+                    self.fill_alias_defaults(n, &g, &mut vals)?;
                 }
                 return self.resolve_with(&t, &|x| match g.iter().position(|y| y == x) {
                     Some(i) => Some(vals[i]),
