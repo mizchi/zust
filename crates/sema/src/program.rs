@@ -3953,6 +3953,24 @@ impl Program {
         self.alias_defaults.insert(n.to_string(), ds.to_vec());
     }
 
+    /// The types of alias n's parameters a use leaves out (after vals), from their defaults, which may name the
+    /// parameters before them
+    #[cold]
+    #[inline(never)]
+    fn fill_alias_defaults(&self, n: &str, g: &[String], vals: &mut Vec<Ty>, names: &dyn Fn(&str) -> Option<Ty>) -> R<()> {
+        let ds = self.alias_defaults[n].clone();
+        for d in &ds[vals.len()..] {
+            let d = d.as_ref().ok_or("an alias parameter without a default")?;
+            let k = vals.len();
+            let v = self.resolve_with(d, &|x| match g.iter().position(|y| y == x).filter(|&i| i < k) {
+                Some(i) => Some(vals[i]),
+                None => names(x),
+            })?;
+            vals.push(v);
+        }
+        Ok(())
+    }
+
     /// Whether alias n's type parameters from the k-th on all have defaults (a use may give only the first k)
     pub fn alias_fills(&self, n: &str, k: usize) -> bool {
         self.alias_defaults.get(n).is_some_and(|ds| k < ds.len() && ds[k..].iter().all(Option::is_some))
@@ -4303,15 +4321,7 @@ impl Program {
                 let (g, t) = self.aliases[n].clone();
                 let mut vals = args.iter().map(r).collect::<R<Vec<Ty>>>()?;
                 if vals.len() < g.len() {
-                    let ds = self.alias_defaults[n].clone();
-                    for d in &ds[vals.len()..] {
-                        let d = d.as_ref().ok_or("an alias parameter without a default")?;
-                        let v = self.resolve_with(d, &|x| match g.iter().position(|y| y == x).filter(|&i| i < vals.len()) {
-                            Some(i) => Some(vals[i]),
-                            None => names(x),
-                        })?;
-                        vals.push(v);
-                    }
+                    self.fill_alias_defaults(n, &g, &mut vals, names)?;
                 }
                 return self.resolve_with(&t, &|x| match g.iter().position(|y| y == x) {
                     Some(i) => Some(vals[i]),

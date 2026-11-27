@@ -3810,6 +3810,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         }
         let mut found_any = vec![];
         let mut rest = vec![];
+        // (the other namespace's items of the names found, other_ns_item: (scope, key, item, namespace))
+        let mut seconds = vec![];
         {
             let names = names_with!(&final_globs, &map);
             for p in std::mem::take(&mut pending) {
@@ -3817,8 +3819,12 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 match names.item_at(p.2, p.2, &p.3, p.5) {
                     GlobHit::Item(nn, ns) => {
                         // (not for a `self` entry, which is the module (the type namespace) only)
-                        let second = if p.5 == NS_ANY { other_ns_item(&names, p.2, &p.3, ns, &nn) } else { None };
-                        found_any.push((p, nn, ns, second))
+                        if p.5 == NS_ANY && p.4.is_none() {
+                            if let Some((n2, other)) = other_ns_item(&names, p.2, &p.3, ns, &nn) {
+                                seconds.push((p.0, ns_key(&p.1, other), n2, other));
+                            }
+                        }
+                        found_any.push((p, nn, ns))
                     }
                     _ => rest.push(p),
                 }
@@ -3828,16 +3834,15 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         if found_any.is_empty() {
             break;
         }
-        for (p, nn, ns, second) in found_any {
+        for (sc, k2, n2, other) in seconds {
+            import_ns.insert((sc, k2.clone()), other);
+            imports.push((sc, k2, n2));
+        }
+        for (p, nn, ns) in found_any {
             let ns = ns & p.5;
             match p.4 {
                 Some((o, c)) => block_imports.push((o, c, p.1, nn, p.0, ns)),
                 None => {
-                    if let Some((n2, other)) = second {
-                        let k2 = ns_key(&p.1, other);
-                        import_ns.insert((p.0, k2.clone()), other);
-                        imports.push((p.0, k2, n2));
-                    }
                     import_ns.insert((p.0, p.1.clone()), ns);
                     imports.push((p.0, p.1, nn));
                 }
