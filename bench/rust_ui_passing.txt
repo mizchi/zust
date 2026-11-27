@@ -3028,6 +3028,7 @@ compile-fail	fmt/format-string-error.rs
 compile-fail	fmt/format-string-wrong-order.rs
 compile-fail	fmt/ifmt-bad-arg.rs
 compile-fail	fmt/ifmt-bad-format-args.rs
+compile-fail	fmt/ifmt-unimpl.rs
 compile-fail	fmt/ifmt-unknown-trait.rs
 compile-fail	fmt/incorrect-separator.rs
 compile-fail	fmt/issue-103826.rs

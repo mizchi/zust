@@ -606,8 +606,7 @@ pub struct Program {
     pub use_names: FxSet<String>,
     /// the fmt traits the program's `use` declarations import (fn bodies' too; of the whole program, not each
     /// scope's): 1 Display, 2 Debug (`use std::fmt::Debug;`, `use core::fmt::{self, Display as _}`; a glob `fmt::*`
-    /// all), then 4 LowerHex, 8 UpperHex, 16 Binary, 32 Octal, 64 LowerExp, 128 UpperExp. Which one `x.fmt(f)` calls
-    /// where x's type has more than one (#256)
+    /// both). Which one `x.fmt(f)` calls where x's type has both (#256)
     pub fmt_imports: u8,
     /// a constant with a lowercase name exists (`const or: usize`): an identifier pattern of any case may name one;
     /// without, only an uppercase one is looked up
@@ -2943,23 +2942,16 @@ impl Program {
             }; // derived built-in traits
             for &d in decls {
                 let m = p.names[d as usize].rsplit("::").next().unwrap();
-                // (the fmt traits' methods are `S::<Display>::fmt` / `S::<LowerHex>::fmt`)
-                let fmt_tr = crate::ast_summary::is_fmt_trait(tr);
-                let found = if fmt_tr {
+                // (Display / Debug methods are `S::<Display>::fmt`)
+                let found = if matches!(tr.as_str(), "Display" | "Debug") {
                     p.index
                         .contains_key(&format!("{}::<{tr}>::{m}", p.structs[*sid as usize].name))
                 } else {
                     p.method(*sid, m).is_some()
                 };
-                // (the impl's method against the trait's: the number of parameters (E0050) and the kind of receiver (E0053);
-                // a fmt trait's by its qualified name, as a program's own `Binary` with a method of another arity has it)
-                let impl_m = if fmt_tr {
-                    p.index.get(&format!("{}::<{tr}>::{m}", p.structs[*sid as usize].name)).copied()
-                } else {
-                    p.method(*sid, m)
-                };
-                {
-                    if let Some(mi) = impl_m.filter(|&mi| p.sigs[mi as usize].impl_trait.as_deref() == Some(tr.as_str()) && mi != d) {
+                // (the impl's method against the trait's: the number of parameters (E0050) and the kind of receiver (E0053))
+                if !matches!(tr.as_str(), "Display" | "Debug") {
+                    if let Some(mi) = p.method(*sid, m).filter(|&mi| p.sigs[mi as usize].impl_trait.as_deref() == Some(tr.as_str()) && mi != d) {
                         let (ds, ms) = (&p.sigs[d as usize], &p.sigs[mi as usize]);
                         let line = p.item_of[mi as usize].map_or(String::new(), |ii| format!("{}:1: ", items[ii as usize].line));
                         // (E0185 / E0186: a receiver on one side only)
@@ -3591,22 +3583,9 @@ impl Program {
                 return matches!(tr, "Sized" | "Send" | "Sync" | "Unpin") || bs.iter().any(|b| b == tr || name(b) == name(tr));
             }
         }
-        // (std's fmt traits of numbers and pointers: Binary / LowerHex / UpperHex / Octal of the integers, LowerExp /
-        // UpperExp of the integers and floats, each of `&T` / `&mut T` when T's; Pointer of references, raw pointers
-        // and Box. A program's own impls are asked below)
-        match tr {
-            "Binary" | "LowerHex" | "UpperHex" | "Octal" | "LowerExp" | "UpperExp" => {
-                if t.is_int() || (t.is_float() && matches!(tr, "LowerExp" | "UpperExp")) {
-                    return true;
-                }
-                if let Ty::Ref(_, i) = t {
-                    if self.implements(*i, tr) {
-                        return true;
-                    }
-                }
-            }
-            "Pointer" if matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_)) => return true,
-            _ => {}
+        // (std's Pointer of references, raw pointers and Box, whose address the compiler writes itself)
+        if tr == "Pointer" && matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_)) {
+            return true;
         }
         if matches!(t, Ty::Ref(..)) && !self.ref_impls.is_empty() && self.ref_impls.contains(&(t, tr.to_string())) {
             return true;
