@@ -1966,11 +1966,11 @@ impl Cx<'_> {
                         return Ok((Some(fat), to));
                     }
                     // (a cast may drop an object's auto traits, not add them (E0804): the value behind the pointer may not
-                    // have them)
-                    (Ty::Ptr(_, Ty::Dyn(g)), Ty::Ptr(_, Ty::Dyn(w))) if g != w && crate::types::dyn_autos(g).0 == crate::types::dyn_autos(w).0 && !self.dyn_coerces(g, w) => {
-                        let (_, ws, wy) = crate::types::dyn_autos(w);
-                        let (_, gs, _) = crate::types::dyn_autos(g);
-                        let added = if ws && !gs { "Send" } else if wy { "Sync" } else { "Send" };
+                    // have them. As rustc's, only an object with a principal trait: one of auto traits alone (`dyn Sync`
+                    // as `dyn Send + Sync`) has no methods to call)
+                    (Ty::Ptr(_, Ty::Dyn(g)), Ty::Ptr(_, Ty::Dyn(w))) if g != w && dyn_norm(g).0.is_some() && dyn_norm(g).0 == dyn_norm(w).0 && !self.dyn_coerces(g, w) => {
+                        let ((_, gs, _), (_, ws, _)) = (dyn_norm(g), dyn_norm(w));
+                        let added = if ws && !gs { "Send" } else { "Sync" };
                         return err(SP, format!("cannot add auto trait `{added}` to dyn bound via pointer cast (E0804)"));
                     }
                     (Ty::Ptr(..), Ty::Ptr(..)) => return Ok((v, to)),
@@ -3230,15 +3230,7 @@ impl Cx<'_> {
     /// `want` has is one `got` has, written or by its trait's supertraits (`trait Job: Send`: a `dyn Job` is a `dyn Job +
     /// Send`). An object of auto traits alone is the set of them (`dyn Send + Sync` is a `dyn Sync`)
     pub(crate) fn dyn_coerces(&self, got: &str, want: &str) -> bool {
-        fn norm(s: &str) -> (Option<&str>, bool, bool) {
-            let (c, send, sync) = crate::types::dyn_autos(s);
-            match c {
-                "Send" => (None, true, sync),
-                "Sync" => (None, send, true),
-                c => (Some(c), send, sync),
-            }
-        }
-        let ((gc, gs, gy), (wc, ws, wy)) = (norm(got), norm(want));
+        let ((gc, gs, gy), (wc, ws, wy)) = (dyn_norm(got), dyn_norm(want));
         let gives = |a: &str| gc.is_some_and(|c| self.prog.tdb.gives_auto(self.prog, c, a) == Some(true));
         gc == wc && (!ws || gs || gives("Send")) && (!wy || gy || gives("Sync"))
     }
@@ -5078,5 +5070,16 @@ fn has_ref(t: Ty, depth: u32) -> bool {
         Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => has_ref(*i, depth + 1),
         Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&x| has_ref(x, depth + 1)),
         _ => false,
+    }
+}
+
+/// A trait object's principal trait (None for an auto-only object: `dyn Send`, `dyn Sync`, `dyn Send + Sync`) and
+/// whether it names Send and Sync.
+fn dyn_norm(s: &str) -> (Option<&str>, bool, bool) {
+    let (c, send, sync) = crate::types::dyn_autos(s);
+    match c {
+        "Send" => (None, true, sync),
+        "Sync" => (None, send, true),
+        c => (Some(c), send, sync),
     }
 }

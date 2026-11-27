@@ -40,7 +40,9 @@ keeps them, as rustc does.
   as one it has (a `Box<dyn Job>` of `trait Job: Send` is a `Box<dyn Job + Send>`), and an object of auto traits alone
   is the set of them (`Box<dyn Send + Sync>` is a `Box<dyn Sync>`).
 - A pointer cast may drop an object's auto traits, not add them: `*const dyn Job as *const (dyn Job + Send)` is E0804,
-  as rustc's (cast/ptr-to-trait-obj-add-auto.rs passes).
+  as rustc's (cast/ptr-to-trait-obj-add-auto.rs passes). As rustc's, this is for an object with a principal trait: one
+  of auto traits alone has no methods, and `*const dyn Sync as *const (dyn Send + Sync)` is accepted
+  (tests/security/send_dyn_ptr_cast_auto_only.rs; before, `dyn Send` to `dyn Send + Sync` was refused).
 - The program's own structs with fields are judged by their fields, not their type arguments (a `Maker<Rc<u32>>` of
   a `fn() -> T` field is Send).
 - A `static`'s type must be Sync (E0277). That check now comes after the auto traits of the program's traits'

@@ -36,7 +36,9 @@ Send かつ Sync とみなしていた。そのため、`Rc` を持つ `Box<dyn 
   それを決めるのは `dyn_coerces` である。オブジェクトのトレイトがスーパートレイトとして持つ auto trait は、持つものと数える（`trait Job: Send` の
   `Box<dyn Job>` は `Box<dyn Job + Send>` である）。auto trait だけのオブジェクトは、その集合とみなす（`Box<dyn Send + Sync>` は `Box<dyn Sync>` である）。
 - ポインタのキャストは、オブジェクトの auto trait を外せるが足せない。`*const dyn Job as *const (dyn Job + Send)` は rustc と同じく E0804 である
-  （cast/ptr-to-trait-obj-add-auto.rs が通る）。
+  （cast/ptr-to-trait-obj-add-auto.rs が通る）。rustc と同じく、これは主トレイトのあるオブジェクトについてである。auto trait だけのオブジェクトには
+  メソッドがなく、`*const dyn Sync as *const (dyn Send + Sync)` は受け付ける（tests/security/send_dyn_ptr_cast_auto_only.rs。前は
+  `dyn Send` から `dyn Send + Sync` を拒んでいた）。
 - フィールドを持つプログラム自身の構造体は、型引数ではなくフィールドで判定する（`fn() -> T` のフィールドの `Maker<Rc<u32>>` は Send）。
 - `static` の型は Sync でなければならない（E0277）。この検査を、プログラムのトレイトのスーパートレイトの auto trait を読んだ後に移した。
   そのため、`trait Stage: Sync` の `&dyn Stage` は Sync になる（consts/issue-54582.rs）。
