@@ -595,7 +595,8 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "Layout" | "LayoutError" | "__LayoutAlign" | "Infallible" | "Condvar" | "ControlFlow"
                         | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError"
                         | "SplitNStr" | "SliceSplitN" | "PoisonError"
-                        | "File" | "OpenOptions" | "Metadata" | "FileType" | "Permissions" | "FpCategory" => Some(w),
+                        | "File" | "OpenOptions" | "Metadata" | "FileType" | "Permissions" | "FpCategory"
+                        | "TryLockError" => Some(w),
                         // (std::num's NonZero types: their impls only with them)
                         w if w.starts_with("NonZero") => Some(w),
                         // HashMap's iterators (HmIter and so on) only when HashMap is used
@@ -640,6 +641,7 @@ const SHADOWABLE: &[&str] = &[
     "File", "OpenOptions", "Metadata", "FileType", "Permissions", "RawFd", "AsRawFd", "FromRawFd", "IntoRawFd",
     "MetadataExt", "OpenOptionsExt", "PermissionsExt", "FpCategory",
     "Binary", "Octal", "LowerHex", "UpperHex", "LowerExp", "UpperExp",
+    "LockResult", "TryLockResult", "TryLockError",
 ];
 
 /// Whether the prelude's item of the name is renamed when the program defines one (SHADOWABLE, hashed: asked for each
@@ -1857,6 +1859,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     if need.contains("Cow") || need.contains("Mutex") || need.contains("RwLock") {
         op_impls.push("Deref");
+    }
+    // (the prelude's TryLockError impls From<PoisonError<T>>)
+    if need.contains("TryLockError") {
+        op_impls.push("From");
     }
     // (the prelude's Cow impls From: `"x".into()` as a `Cow<str>`)
     if need.contains("Cow") {
