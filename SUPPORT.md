@@ -1,14 +1,10 @@
 # What is supported
 
-Each area is measured by rustc's own UI tests (`tests/ui` of rust-lang/rust 1.100.0, run by `bench/rust_ui.py`) in the
-tests/ui directories named in the comment next to the number:
-
-- **pass tests**: run-pass + check-pass + build-pass tests that pass (built and run with the same output, or accepted)
-- **compile-fail**: compile-fail tests that zustc rejects with an error at a line an annotation points at
-
-Both count only the tests `bench/rust_ui.py` can ask zustc to handle (no nightly features, auxiliary crates, special
-flags or targets other than Linux x86-64), so 100% does not mean every test of a directory passes. They were measured
-<!-- measured -->2026-11-26, 022713c<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
+The percentages are rustc's own UI tests that pass in that area: run-pass + check-pass + build-pass of the tests/ui
+directories named in the comment next to the number (`ui:`), or compile-fail (`cf:`). They count only the tests
+`bench/rust_ui.py` can ask zustc to handle (no nightly features, auxiliary crates, special flags or targets other than
+Linux x86-64), so 100% does not mean every test of a directory passes. They were measured
+<!-- measured -->2026-11-27, b18f94f<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
 `scripts/update_readme.py` writes them here). The totals for each kind of test are in the
 [README](README.md#coverage-of-rustcs-test-suite), the subset of the language in prose is in
 [docs/language.md](docs/language.md), and the [reports](docs/reports/) explain each step.
