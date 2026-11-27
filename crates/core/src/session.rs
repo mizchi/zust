@@ -256,7 +256,8 @@ fn use_end(sb: &[u8], b: usize, stop: usize) -> usize {
 }
 
 /// The fmt traits the items' `use` declarations import (fn bodies' too), by each declaration's use tree, its comments
-/// left out (use_tree_fmt): 1 Display, 2 Debug; a glob of a `fmt` path both. Only a name under a `fmt` path: a trait
+/// left out (use_tree_fmt): 1 Display, 2 Debug, then 4 LowerHex, 8 UpperHex, 16 Binary, 32 Octal, 64 LowerExp, 128
+/// UpperExp; a glob of a `fmt` path all. Only a name under a `fmt` path: a trait
 /// of the program's named Debug is not std's (Program::fmt_imports)
 fn fmt_imports(src: &str, items: &[SrcItem]) -> u8 {
     let sb = src.as_bytes();
@@ -337,7 +338,7 @@ fn use_tree_fmt(toks: &[&str], k: &mut usize, prefix: &mut Vec<String>, mask: &m
             "*" => {
                 *k += 1;
                 if prefix.last().is_some_and(|p| p == "fmt") {
-                    *mask |= 3;
+                    *mask = !0;
                 }
                 break;
             }
@@ -357,6 +358,12 @@ fn use_tree_fmt(toks: &[&str], k: &mut usize, prefix: &mut Vec<String>, mask: &m
                     match name {
                         "Display" => *mask |= 1,
                         "Debug" => *mask |= 2,
+                        "LowerHex" => *mask |= 4,
+                        "UpperHex" => *mask |= 8,
+                        "Binary" => *mask |= 16,
+                        "Octal" => *mask |= 32,
+                        "LowerExp" => *mask |= 64,
+                        "UpperExp" => *mask |= 128,
                         _ => {}
                     }
                 }

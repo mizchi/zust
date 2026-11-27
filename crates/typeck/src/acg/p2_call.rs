@@ -402,6 +402,29 @@ impl Cx<'_> {
         if self.prog.prim_method(base, "fmt").is_some() || self.prog.blanket.contains_key("fmt") || self.prog.user_traits.iter().any(user_fmt) {
             return Ok(None);
         }
+        // (`x.fmt(f)` of a number with LowerHex / Binary / LowerExp .. the one fmt trait in scope (imported, or the impl's
+        // own): that one's, `ff` of a u8 under `use std::fmt::LowerHex;`; with another in scope too, rustc's E0034, the
+        // ordinary lookup)
+        if self.explicit_trait.is_none() && (base.is_int() || base.is_float()) && self.param_fmt_bound(recv).is_none() {
+            let inside = self.prog.sigs.get(self.root as usize).and_then(|s| s.impl_trait.as_deref()).map(|t| t.split('<').next().unwrap_or(t).trim().rsplit("::").next().unwrap_or(t));
+            const TRS: [&str; 8] = ["Display", "Debug", "LowerHex", "UpperHex", "Binary", "Octal", "LowerExp", "UpperExp"];
+            let imp = self.prog.fmt_imports;
+            let applies = |k: usize| k < 2 || k >= 6 || base.is_int();
+            let scope: Vec<usize> = (0..8).filter(|&k| applies(k) && (imp & (1 << k) != 0 || inside == Some(TRS[k]))).collect();
+            let pick = match inside.and_then(|t| scope.iter().copied().find(|&k| TRS[k] == t)) {
+                Some(k) => Some(k),
+                None if scope.len() == 1 => Some(scope[0]),
+                None if scope.iter().any(|&k| k >= 2) => return Ok(None),
+                None => None,
+            };
+            if let Some(k) = pick.filter(|&k| k >= 2) {
+                self.explicit_trait = Some(("fmt".to_string(), TRS[k].to_string()));
+                if let Some(r) = self.radix_fmt_method(recv, t, f, expected)? {
+                    return Ok(Some(r));
+                }
+                self.explicit_trait = None;
+            }
+        }
         let tr = match self.explicit_trait.as_ref().filter(|(m, _)| m == "fmt") {
             Some((_, tr)) if matches!(tr.as_str(), "Display" | "Debug") => tr.clone(),
             Some(_) => return Ok(None),

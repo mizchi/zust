@@ -606,7 +606,8 @@ pub struct Program {
     pub use_names: FxSet<String>,
     /// the fmt traits the program's `use` declarations import (fn bodies' too; of the whole program, not each
     /// scope's): 1 Display, 2 Debug (`use std::fmt::Debug;`, `use core::fmt::{self, Display as _}`; a glob `fmt::*`
-    /// both). Which one `x.fmt(f)` calls where x's type has both (#256)
+    /// all), then 4 LowerHex, 8 UpperHex, 16 Binary, 32 Octal, 64 LowerExp, 128 UpperExp. Which one `x.fmt(f)` calls
+    /// where x's type has more than one (#256)
     pub fmt_imports: u8,
     /// a constant with a lowercase name exists (`const or: usize`): an identifier pattern of any case may name one;
     /// without, only an uppercase one is looked up

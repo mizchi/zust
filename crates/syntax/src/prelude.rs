@@ -1660,7 +1660,8 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             need.insert(t);
         }
     }
-    if need.contains("fmt") && (sc.has(".fmt") || sc.has("::fmt")) {
+    // (spaced as the tokens allow too, `core :: fmt :: LowerHex :: fmt(x, f)`)
+    if need.contains("fmt") && (sc.has(".fmt") || sc.has("::fmt") || sc.has(":: fmt") || sc.has(". fmt")) {
         need.extend(["__exr_display_fmt", "__exr_debug_fmt"]);
         // (and the radix / exponent / pointer traits' `fmt::LowerHex::fmt(x, f)` of a number or a pointer)
         if ["Binary", "LowerHex", "UpperHex", "Octal", "LowerExp", "UpperExp", "Pointer"].iter().any(|t| sc.has(t)) {
