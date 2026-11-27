@@ -7971,6 +7971,7 @@ run-pass	threads-sendsync/issue-29488.rs
 run-pass	threads-sendsync/issue-4446.rs
 run-pass	threads-sendsync/issue-4448.rs
 run-pass	threads-sendsync/issue-8827.rs
+run-pass	threads-sendsync/issue-9396.rs
 compile-fail	threads-sendsync/rc-is-not-send.rs
 run-pass	threads-sendsync/send-resource.rs
 run-pass	threads-sendsync/send-type-inference.rs
@@ -7984,11 +7985,13 @@ run-pass	threads-sendsync/spawn2.rs
 check-pass	threads-sendsync/sync-send-atomics.rs
 run-pass	threads-sendsync/task-comm-0.rs
 run-pass	threads-sendsync/task-comm-1.rs
+run-pass	threads-sendsync/task-comm-10.rs
 run-pass	threads-sendsync/task-comm-11.rs
 run-pass	threads-sendsync/task-comm-12.rs
 run-pass	threads-sendsync/task-comm-13.rs
 run-pass	threads-sendsync/task-comm-14.rs
 run-pass	threads-sendsync/task-comm-15.rs
+run-pass	threads-sendsync/task-comm-16.rs
 run-pass	threads-sendsync/task-comm-17.rs
 run-pass	threads-sendsync/task-comm-3.rs
 run-pass	threads-sendsync/task-comm-4.rs
