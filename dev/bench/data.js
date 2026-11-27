@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795758643403,
+  "lastUpdate": 1795758645960,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -146305,6 +146305,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/20474e3c86372fad792de7ff96bdab2a1b62f4d7"
         },
         "date": 1795757299602,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.86,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1919,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.93,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1558,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 73.68,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5442,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1a10d35b3796b9636d504e57a780a009e24cd1d1",
+          "message": "syntax: crate items zustc lost, part 2: alias default type parameters, a name of two namespaces imported once, `if let E::V` in a macro (#288)\n\nThe three #254 rows that #277 left out:\n\n- miniz_oxide: an alias's default type parameters fill a use that gives fewer arguments. `type Result<T, E = Error>` can be used as `Result<()>`, and a default may name an earlier parameter. The alias summary keeps the defaults (`adt_defaults`), and `Program::alias_defaults` fills the missing ones.\n- signal-hook-registry: `use libc::sigaction;` now imports both namespaces' items when they differ: the fn, and the struct a glob brings in. The other namespace's item goes under `name#t` / `name#v`, and a lookup of that namespace reads that key first. Only modules with globs are asked, and a `{self}` entry gets no second import.\n- encoding_rs: in a macro body, the `E` of `if let E::V = r` is a path segment, not a binding, so hygiene no longer renames it. An ident counts as a path segment only when the `:` after it is joined to the next one, so `let x: ::std::primitive::u8` stays a hygienic binding.\n\nDeferred to #293: a bare generic alias with defaults used as a const's integer type.\n\nPart of #254.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T05:44:35Z",
+          "tree_id": "b4e628b729dd91c9ff50722b8900337170d3f26e",
+          "url": "https://github.com/mizchi/zust/commit/1a10d35b3796b9636d504e57a780a009e24cd1d1"
+        },
+        "date": 1795758645570,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
