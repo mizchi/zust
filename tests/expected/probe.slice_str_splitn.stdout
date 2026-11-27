@@ -1,0 +1,22 @@
+Some(97) Some(100) [98, 99]
+Some(98) Some(99) None
+None None
+Some((1, [2, 3])) Some((3, [1, 2]))
+Some((4, [5]))
+([120, 61, 49], [121, 61, 50, 38, 122]) ([120, 61, 49], [])
+[[97], [98], [44, 99]]
+0
+[97, 32, 98] [97, 98]
+[104, 101, 108, 33]
+Some(("ab", "cd")) None
+Some("1.97: x") None
+["a", "b", "c,d"]
+["abc"] 0
+true false true
+4 2 3 0
+5 255 4
+-Zallow-features=a,b
+[Named { name: "a", n: 1 }, Named { name: "b", n: 2 }] [Named { name: "a", n: 1 }] 3
+hello world yz
+["", "ab"] ["", "a", "b", ""] ["", "h", "éy"] ["", ""] ["", "a", "b", ""]
+["a", "b"] ["v", "w"] [0, 2]
