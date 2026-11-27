@@ -17,13 +17,13 @@ needs one filed first (then add it to [cratebench/survey/issues.tsv](cratebench/
 
 <!-- crate-priorities -->
 
-Survey of 2026-11-27 05:53 UTC on `1a10d35`: 45 of 273 crates build (16.4% of their downloads); 515 errors in 180 packages.
+Survey of 2026-11-27 06:09 UTC on `0277886`: 45 of 273 crates build (16.4% of their downloads); 514 errors in 180 packages.
 
 | # | fix | issue | holds back | crates it alone unblocks |
 |---:|---|---|---:|---:|
 | 1 | `impl<T: Tr> Tr for &T` | [#144](https://github.com/mizchi/zust/issues/144) | 7.2% | 12 |
 | 2 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | [#254](https://github.com/mizchi/zust/issues/254) | 6.8% | 8 |
-| 3 | parser: syntax zustc does not parse | [#257](https://github.com/mizchi/zust/issues/257) | 4.8% | 3 |
+| 3 | parser: syntax zustc does not parse | [#257](https://github.com/mizchi/zust/issues/257) | 4.9% | 3 |
 | 4 | mismatched types (to sort by cause) | [#259](https://github.com/mizchi/zust/issues/259) | 4.5% | 1 |
 | 5 | duplicate definition of `…` | none yet | 4.2% | 6 |
 | 6 | `missing generics for` a type used without its parameters | [#260](https://github.com/mizchi/zust/issues/260) | 2.4% | 1 |
@@ -38,10 +38,10 @@ By issue, with its tier (the issue's label: **T0** holds back 2% or more of the 
 
 | tier | issue | holds back | fixes | the largest |
 |---|---|---:|---:|---|
-| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 11.3% | 26 | prelude: type `File` |
+| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 11.6% | 26 | prelude: type `File` |
 | T0 | [#144](https://github.com/mizchi/zust/issues/144) | 7.2% | 1 | `impl<T: Tr> Tr for &T` |
 | T0 | [#254](https://github.com/mizchi/zust/issues/254) | 6.8% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
-| T0 | [#257](https://github.com/mizchi/zust/issues/257) | 4.8% | 1 | parser: syntax zustc does not parse |
+| T0 | [#257](https://github.com/mizchi/zust/issues/257) | 4.9% | 1 | parser: syntax zustc does not parse |
 | T0 | [#259](https://github.com/mizchi/zust/issues/259) | 4.5% | 1 | mismatched types (to sort by cause) |
 | T0 | [#260](https://github.com/mizchi/zust/issues/260) | 2.4% | 1 | `missing generics for` a type used without its parameters |
 | T0 | [#252](https://github.com/mizchi/zust/issues/252) | 2.3% | 1 | macro expansion too deep at a crate's first line |
