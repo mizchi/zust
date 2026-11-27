@@ -266,7 +266,9 @@ fn gated_trait(h: usize) -> Option<&'static str> {
                     return None;
                 }
                 it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).find(|w| {
-                    matches!(*w, "Hasher" | "Hash" | "__BoolThen" | "__AsBytes" | "__PathExt" | "__AsPathStr" | "BufRead" | "Read" | "Seek" | "Write" | "__FWr" | "ExactSizeIterator" | "BuildHasher")
+                    matches!(*w, "Hasher" | "Hash" | "__BoolThen" | "__AsBytes" | "__PathExt" | "__AsPathStr" | "BufRead" | "Read" | "Seek" | "Write" | "__FWr" | "ExactSizeIterator" | "BuildHasher"
+                        // (std::os::unix's: `size()` / `mode()` / `as_raw_fd()` of a program's own are no reason for them)
+                        | "MetadataExt" | "OpenOptionsExt" | "PermissionsExt" | "AsRawFd" | "FromRawFd" | "IntoRawFd")
                 })
             })
             .collect()
@@ -577,7 +579,8 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "Duration" | "AtomicPtr" | "RangeTo" | "RangeToInclusive" | "Fuse" | "Wrapping" | "Saturating"
                         | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList" | "Thread" | "Once" | "OnceState"
                         | "Layout" | "LayoutError" | "__LayoutAlign" | "Infallible" | "Condvar" | "ControlFlow"
-                        | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError" => Some(w),
+                        | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError"
+                        | "File" | "OpenOptions" | "Metadata" | "FileType" | "Permissions" => Some(w),
                         // (std::num's NonZero types: their impls only with them)
                         w if w.starts_with("NonZero") => Some(w),
                         // HashMap's iterators (HmIter and so on) only when HashMap is used
@@ -619,7 +622,16 @@ const SHADOWABLE: &[&str] = &[
     "FromStr", "CString", "CStr", "NulError", "LinkedList", "Ipv4Addr", "Ipv6Addr", "IpAddr", "SocketAddrV4", "SocketAddrV6",
     "SocketAddr", "AddrParseError", "RwLock", "SystemTime", "SystemTimeError", "Bound", "Arguments", "Thread", "ThreadId",
     "Once", "OnceState", "Layout", "LayoutError", "Condvar", "ControlFlow", "Repeat",
+    "File", "OpenOptions", "Metadata", "FileType", "Permissions", "RawFd", "AsRawFd", "FromRawFd", "IntoRawFd",
+    "MetadataExt", "OpenOptionsExt", "PermissionsExt",
 ];
+
+/// Whether the prelude's item of the name is renamed when the program defines one (SHADOWABLE, hashed: asked for each
+/// type a program defines, 1200 times in a large one)
+fn is_shadowable(w: &str) -> bool {
+    static S: OnceLock<crate::fxhash::FxSet<&'static str>> = OnceLock::new();
+    S.get_or_init(|| SHADOWABLE.iter().copied().collect()).contains(w)
+}
 
 /// A name as it was before the compiler renamed it: `__u_Iter`, a program's type named as a prelude type
 /// (rename_user_collisions), is `Iter`; `__p_ThreadId`, the prelude's renamed against a program's (rename_shadowed),
@@ -629,7 +641,7 @@ pub fn unrenamed(name: &str) -> &str {
     if let Some(n) = name.strip_prefix("__u_").filter(|n| prelude_type_names().contains(*n)) {
         return n;
     }
-    if let Some(n) = name.strip_prefix("__p_").filter(|n| SHADOWABLE.contains(n)) {
+    if let Some(n) = name.strip_prefix("__p_").filter(|n| is_shadowable(n)) {
         return n;
     }
     name
@@ -664,7 +676,7 @@ pub fn rename_user_collisions(src: &str, user_items: &[SrcItem]) -> Option<Strin
     let mut hit: Vec<&str> = vec![];
     for it in user_items {
         if let Some(w) = type_def_name(src, it) {
-            if prelude_type_names().contains(w) && !SHADOWABLE.contains(&w) && !hit.contains(&w) {
+            if prelude_type_names().contains(w) && !is_shadowable(w) && !hit.contains(&w) {
                 hit.push(w);
             }
         }
@@ -846,7 +858,7 @@ pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
                 let w = &user_src[a..e];
                 // (not in a comment or a string: a doc comment's `# struct IpAddr;`, `#[doc = " # struct IpAddr;"]`
                 // defines nothing. Looked at only for a name that would count)
-                if SHADOWABLE.contains(&w) && !defined.contains(&w) && lex_to(b, &mut lk, &mut ls, i) == LexAt::Code {
+                if is_shadowable(w) && !defined.contains(&w) && lex_to(b, &mut lk, &mut ls, i) == LexAt::Code {
                     defined.push(w);
                 }
                 i = e.max(i + 1);
