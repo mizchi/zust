@@ -42,6 +42,7 @@ compile-fail	argument-suggestions/complex.rs
 compile-fail	argument-suggestions/disjoint-spans-issue-151607.rs
 compile-fail	argument-suggestions/display-is-suggestable.rs
 compile-fail	argument-suggestions/extern-fn-arg-names.rs
+compile-fail	argument-suggestions/extra_arguments.rs
 compile-fail	argument-suggestions/invalid_arguments.rs
 compile-fail	argument-suggestions/issue-100154.rs
 compile-fail	argument-suggestions/issue-100478.rs
@@ -6617,6 +6618,7 @@ compile-fail	recursion/recursion_limit/invalid_digit.rs
 compile-fail	recursion/recursion_limit/invalid_digit_type.rs
 compile-fail	recursion/recursion_limit/no-value.rs
 compile-fail	recursion/recursion_limit/overflow.rs
+compile-fail	recursion/recursion_limit/zero.rs
 run-pass	recursion/recursive-enum-box.rs
 compile-fail	recursion/recursive-enum.rs
 run-pass	recursion/recursive-struct-with-raw-pointer-field.rs
