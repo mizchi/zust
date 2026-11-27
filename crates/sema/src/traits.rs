@@ -91,7 +91,7 @@ pub struct Clause {
 }
 
 /// The program's impls of its own traits, by trait name
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct TraitDb {
     pub clauses: FxMap<String, Vec<Clause>>,
     /// the program's traits (only these are solved here; the rest are asked of `implements`)
