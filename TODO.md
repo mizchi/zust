@@ -17,7 +17,7 @@ needs one filed first (then add it to [cratebench/survey/issues.tsv](cratebench/
 
 <!-- crate-priorities -->
 
-Survey of 2026-11-27 20:12 UTC on `bbba99b`: 45 of 273 crates build (16.4% of their downloads); 943 errors in 178 packages.
+Survey of 2026-11-27 20:44 UTC on `f63b1d3`: 45 of 273 crates build (16.4% of their downloads); 942 errors in 177 packages.
 
 | # | fix | issue | holds back | crates it alone unblocks |
 |---:|---|---|---:|---:|
@@ -30,17 +30,17 @@ Survey of 2026-11-27 20:12 UTC on `bbba99b`: 45 of 273 crates build (16.4% of th
 | 7 | false E0276 in bitflags' impls | [#264](https://github.com/mizchi/zust/issues/264) | 2.7% | 4 |
 | 8 | `missing generics for` a type used without its parameters | [#260](https://github.com/mizchi/zust/issues/260) | 2.4% | 1 |
 | 9 | value paths zustc cannot resolve | [#265](https://github.com/mizchi/zust/issues/265) | 2.2% | 0 |
-| 10 | prelude: type `Instant` | [#250](https://github.com/mizchi/zust/issues/250) | 2.1% | 6 |
-| 11 | cannot infer an `impl Trait` return type | [#262](https://github.com/mizchi/zust/issues/262) | 2.0% | 5 |
-| 12 | prelude: `impl Error for fmt::Error` | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 2 |
+| 10 | cannot infer an `impl Trait` return type | [#262](https://github.com/mizchi/zust/issues/262) | 2.0% | 5 |
+| 11 | prelude: `impl Error for fmt::Error` | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 2 |
+| 12 | cannot evaluate `…` in a constant | none yet | 1.8% | 3 |
 
 By issue, with its tier (the issue's label: **T0** holds back 2% or more of the surveyed downloads with all its fixes, **T1** 1% or more, **T2** less; relabel an issue when its tier here changes):
 
 | tier | issue | holds back | fixes | the largest |
 |---|---|---:|---:|---|
-| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 7.6% | 26 | prelude: type `Instant` |
 | T0 | [#254](https://github.com/mizchi/zust/issues/254) | 7.4% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
 | T0 | [#144](https://github.com/mizchi/zust/issues/144) | 7.2% | 1 | `impl<T: Tr> Tr for &T` |
+| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 7.1% | 27 | prelude: type `LockResult` |
 | T0 | [#259](https://github.com/mizchi/zust/issues/259) | 6.9% | 1 | mismatched types (to sort by cause) |
 | T0 | [#257](https://github.com/mizchi/zust/issues/257) | 5.0% | 1 | parser: syntax zustc does not parse |
 | T0 | [#261](https://github.com/mizchi/zust/issues/261) | 2.7% | 1 | false E0277: a bound zustc does not see |
