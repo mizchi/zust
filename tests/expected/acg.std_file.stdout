@@ -1,0 +1,17 @@
+hello
+world
+len 17 file true dir false readonly false
+size 17 nlink 1 type bits 100000
+"world" at 11
+end-5 = 12 "more\n"
+after set_len: 5
+same file: true fds differ: true
+create_new: File exists (os error 17) Some(17)
+no access mode: must specify at least one of read, write, or append access None
+create without write: creating or truncating a file requires write or append access None
+Custom { kind: InvalidInput, error: "append and truncate cannot both be enabled" }
+missing: No such file or directory (os error 2) Some(2) Os { code: 2, kind: NotFound, message: "No such file or directory" }
+mode 644
+through fd 1
+fd 1
+removed: true

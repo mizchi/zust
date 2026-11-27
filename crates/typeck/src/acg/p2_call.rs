@@ -4713,11 +4713,21 @@ impl Cx<'_> {
                 }
             }
         }
-        let t = Ty::prim(ty)?;
+        // (`Self::is_nan(self)` in an impl for a number type: std's inherent method only, as below. Not in a trait's
+        // default method, whose `Self` is any type of the trait's: `Self::count_ones(self)` there is the trait's)
+        let self_prim = ty == "Self";
+        // (`root`: the fn being lowered, the one a closure is in, and an inlined callee's own while it is expanded)
+        if self_prim && self.prog.sigs.get(self.root as usize).is_some_and(|s| s.trait_of.is_some()) {
+            return None;
+        }
+        let t = if self_prim { self.env.self_ty.filter(|t| t.is_int() || t.is_float())? } else { Ty::prim(ty)? };
         if t == Ty::Char || t == Ty::Bool {
             return None;
         }
         let ms = p.segs[1].name.as_str();
+        if self_prim && !crate::acg::p8_misc::prim_builtin(t, ms) {
+            return None;
+        }
         let pp = PPath::of(p);
         // `i64::from(7u32)` / `u32::from('a')`: 数値への変換はキャスト (広げる変換だけが書ける)
         // (also beside the program's `impl From<J> for f64`, for a number: a program cannot implement From of a
@@ -4734,14 +4744,19 @@ impl Cx<'_> {
         if ms.starts_with("from") || ms.starts_with("try_from") || ms == "default" || ms == "new" {
             return None;
         }
-        if self.prog.fn_by_p(&pp, self.self_sid).is_some() {
-            return None;
+        // (the program's own `T::m` stays as written, unless it is a trait impl's method and std has an inherent one of
+        // the name, which a path reaches first: `impl Float for f32 { fn classify(self) -> FpCategory {
+        // Self::classify(self) } }` (num-traits) calls f32's)
+        if let Some(id) = self.prog.fn_by_p(&pp, self.self_sid) {
+            if !(self.prog.sigs[id as usize].impl_trait.is_some() && crate::acg::p8_misc::prim_builtin(t, ms)) {
+                return None;
+            }
         }
         let mut args = cargs.iter();
         let a0 = args.next()?;
         let rest: Vec<Expr> = args.cloned().collect();
         // (リテラルは型を付ける: `i32::pow(2, 10)` の 2 は i32)
-        let recv = if matches!(a0, Expr::Lit(_, _)) { paren(Expr::Cast(Box::new(a0.clone()), ty_named(ty))) } else { paren(a0.clone()) };
+        let recv = if matches!(a0, Expr::Lit(_, _)) { paren(Expr::Cast(Box::new(a0.clone()), ty_named(&self.prog.tn(t)))) } else { paren(a0.clone()) };
         Some(Expr::MethodCall(Box::new(recv), ms.to_string(), vec![], rest, crate::parse::Span::default()))
     }
 }

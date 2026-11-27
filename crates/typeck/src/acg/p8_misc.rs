@@ -887,17 +887,8 @@ impl Cx<'_> {
         let name = method.to_string();
         let _ = clif_ty(t);
         let f32 = t == Ty::F32;
-        let lib1 = [
-            "exp", "exp2", "ln", "log10", "log2", "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
-            "cbrt", "round", "exp_m1", "ln_1p",
-        ];
-        let lib2 = ["powf", "atan2", "hypot"];
-        let known = [
-            "sqrt", "abs", "floor", "ceil", "trunc", "fract", "mul_add", "copysign", "min", "max", "is_nan", "is_finite", "is_infinite",
-            "is_sign_negative", "is_sign_positive", "signum", "to_bits", "recip", "to_degrees", "to_radians", "clamp", "powi", "log",
-            "total_cmp", "abs_sub", "is_normal",
-        ];
-        if !(known.contains(&name.as_str()) || lib1.contains(&name.as_str()) || lib2.contains(&name.as_str())) {
+        let (lib1, lib2) = (FLOAT_LIB1, FLOAT_LIB2);
+        if !(FLOAT_BUILTINS.contains(&name.as_str()) || lib1.contains(&name.as_str()) || lib2.contains(&name.as_str())) {
             return Ok(None);
         }
         // The receiver (its pointee if a reference)
@@ -1008,6 +999,23 @@ impl Cx<'_> {
                 let c2 = self.b.ins().fcmp(FloatCC::GreaterThanOrEqual, ab, mp);
                 (Some(self.b.ins().band(c1, c2)), Ty::Bool)
             }
+            // (below the smallest normal and not zero: NaN compares as neither)
+            "is_subnormal" => {
+                let ab = self.b.ins().fabs(a);
+                let mp = fc(self, if f32 { f32::MIN_POSITIVE as f64 } else { f64::MIN_POSITIVE });
+                let z = fc(self, 0.0);
+                let c1 = self.b.ins().fcmp(FloatCC::LessThan, ab, mp);
+                let c2 = self.b.ins().fcmp(FloatCC::GreaterThan, ab, z);
+                (Some(self.b.ins().band(c1, c2)), Ty::Bool)
+            }
+            // (the prelude's __exr_fp_classify, of the bits: an f32's widened to f64 would make its subnormals normal)
+            "classify" => {
+                let it = if f32 { types::I32 } else { types::I64 };
+                let bits = self.b.ins().bitcast(it, MemFlagsData::new(), a);
+                let bits = if f32 { self.b.ins().uextend(types::I64, bits) } else { bits };
+                let fl = self.b.ins().iconst(types::I8, f32 as i64);
+                self.call_named("__exr_fp_classify", vec![Ty::Unit], &[(bits, Ty::U64), (fl, Ty::Bool)], span)?
+            }
             "is_sign_negative" | "is_sign_positive" => {
                 let it = if f32 { types::I32 } else { types::I64 };
                 let bits = self.b.ins().bitcast(it, MemFlagsData::new(), a);
@@ -1113,3 +1121,24 @@ impl Cx<'_> {
     }
 }
 
+/// The float methods float_method builds in: libm's of one argument and of two, and its own (std's inherent ones:
+/// before a trait's method of the name, by path too)
+pub(crate) const FLOAT_LIB1: &[&str] = &[
+    "exp", "exp2", "ln", "log10", "log2", "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
+    "cbrt", "round", "exp_m1", "ln_1p",
+];
+pub(crate) const FLOAT_LIB2: &[&str] = &["powf", "atan2", "hypot"];
+pub(crate) const FLOAT_BUILTINS: &[&str] = &[
+    "sqrt", "abs", "floor", "ceil", "trunc", "fract", "mul_add", "copysign", "min", "max", "is_nan", "is_finite", "is_infinite",
+    "is_sign_negative", "is_sign_positive", "signum", "to_bits", "recip", "to_degrees", "to_radians", "clamp", "powi", "log",
+    "total_cmp", "abs_sub", "is_normal", "is_subnormal", "classify",
+];
+
+/// Whether `t.m(..)` of a number type t is a method codegen builds in (std's inherent method)
+pub(crate) fn prim_builtin(t: Ty, m: &str) -> bool {
+    if t.is_float() {
+        FLOAT_BUILTINS.contains(&m) || FLOAT_LIB1.contains(&m) || FLOAT_LIB2.contains(&m)
+    } else {
+        t.is_int() && crate::acg::p4_methods::INT_BUILTINS.contains(&m)
+    }
+}
