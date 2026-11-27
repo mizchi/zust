@@ -2,8 +2,8 @@
 //! rustc's build), built with both backends. They cover threads that wait for one spawned after them or for main
 //! (channel, pingpong), a Mutex another thread holds (mutex), a spin on an atomic flag (flag), many and nested threads
 //! (nested), a program with no threads at all (single), many threads at once on every primitive, where a total is
-//! exact only when each operation is atomic (parallel), a panic in a spawned thread (panic), and thread_local! values
-//! of each thread (tls).
+//! exact only when each operation is atomic (parallel), a panic in a spawned thread (panic), thread_local! values of
+//! each thread (tls), and what a panic, a disconnect or a lock does at the edges (edges).
 #![cfg(feature = "acg")]
 
 #[path = "common/par.rs"]
@@ -21,7 +21,7 @@ fn build(src: &str, out: &std::path::Path, cl: bool) -> Result<zustc::session::B
 fn threads_like_rustc() {
     let dir = std::env::temp_dir().join(format!("threads_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let names = ["channel", "pingpong", "producers", "mutex", "flag", "nested", "single", "parallel", "panic", "tls"];
+    let names = ["channel", "pingpong", "producers", "mutex", "flag", "nested", "single", "parallel", "panic", "tls", "edges"];
     let cases: Vec<(&str, bool)> = names.iter().flat_map(|&n| [(n, false), (n, true)]).collect();
     let bad: Vec<String> = par::par_map(&cases, |&(name, cl)| -> Option<String> {
         let src = std::fs::read_to_string(format!("tests/threads/{name}.rs")).unwrap();

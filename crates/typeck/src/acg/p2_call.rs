@@ -2224,7 +2224,20 @@ impl Cx<'_> {
     }
 
     fn check_spawn_closure(&self, c: &Expr) -> R<()> {
-        let Expr::Closure(mv, _, _, _, cpos) = strip_paren(c) else { return Ok(()) };
+        let Expr::Closure(mv, _, _, _, cpos) = strip_paren(c) else {
+            // (a closure held in a local, `let f = move || ..; spawn(f)`: its captures, the fields of its type, run on
+            // the other thread just the same)
+            if let Some(t) = self.peek(c) {
+                if not_send(self.prog, t) {
+                    let bad = match t {
+                        Ty::Struct(sid) => self.prog.structs[sid as usize].fields.iter().map(|f| f.1).find(|&f| not_send(self.prog, f)),
+                        _ => None,
+                    };
+                    return Err(self.at(value_pos(c), format!("`{}` cannot be sent between threads safely", self.prog.tn(bad.unwrap_or(t)))));
+                }
+            }
+            return Ok(());
+        };
         for n in crate::ast_closure::free_vars(strip_paren(c)) {
             let Some((_, t)) = self.lookup(&n) else { continue };
             if not_send(self.prog, t) {

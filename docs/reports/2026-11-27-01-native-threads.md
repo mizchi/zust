@@ -67,7 +67,23 @@ knows about atomics.
 - A spawned thread's panic: the message names it `<unnamed>`, the note comes once, then the thread marks its packet
   as panicked, drops its thread-locals and ends with `pthread_exit` (also from the SIGILL handler of an overflow trap).
   `join` gives `Err(Any { .. })`.
-- `print!` / `println!` take a lock around the line once a thread has been spawned.
+- `print!` / `println!` take a lock around the line once a thread has been spawned. The lock is reentrant, and a
+  `StdoutLock` holds it for its life, as std's.
+- What a panic, a disconnect or a lock does at the edges, as std's (from the review of the pull request):
+  - thread_local! values are dropped in reverse of the order their thread made them; one whose drop has begun cannot
+    be reached again (`with` panics, `try_with` gives `AccessError`); one first made by another's drop is dropped
+    too; a drop that panics aborts the program ("thread local panicked on drop");
+  - a spawned thread that panics while it runs a `Once`'s closure poisons it, so the threads that wait wake:
+    `call_once` then panics, `call_once_force` runs again and sees `is_poisoned()`, and `OnceLock` runs the next
+    caller's initializer; a `StdoutLock` it holds is let go;
+  - a `sync_channel(0)` send whose receiver goes before it takes the value fails with it; a dropped receiver drops the
+    values left in the queue; the channels' errors are std's `SendError` (its Debug does not need `T: Debug`),
+    `RecvError` and `TryRecvError`;
+  - `RwLock`'s Debug takes a read lock without waiting, and prints `<locked>` while a writer holds it;
+  - a closure held in a local before `spawn(f)` is checked for `Send` as one written in the call
+    (tests/security/send_rc_named_closure_thread.rs);
+  - a failed `pthread_create` frees what it was given; a failed `pthread_key_create` is a panic in `spawn`, and a
+    failed `pthread_setspecific` in a new thread aborts.
 
 The thread-aware parts of the panic and print paths go through one hook (`__EXR_THREAD_HOOK`), which the first spawn
 sets. A program with no threads has none and does what it did before; it pays one static and a test of it in the
@@ -86,6 +102,7 @@ so their impls come only with them.
   - `panic`: an index out of bounds, an overflow trap and a `panic!` in spawned threads. Each ends only its thread, its
     `join` gives `Err`, its thread-locals are dropped, and the note comes once.
   - `tls`: each thread's own `thread_local!` values, and their drops when the thread ends.
+  - `edges`: the cases of the list above, as rustc's build prints them.
 - The deadlock programs (a relock, a park nothing unparks, a `call_once` in its own closure, a Condvar nothing
   notifies) now wait forever, as std's do. The test checks that each is still running after 2 s and printed nothing
   rustc's did not. They used to panic with "deadlock".
@@ -109,7 +126,7 @@ so their impls come only with them.
 
 In TODO.md, "Threads":
 
-- No poisoning, and no drops of a panicking thread's values. Both need unwinding.
+- No poisoning of a Mutex or RwLock, and no drops of a panicking thread's values. Both need unwinding.
 - No `thread::scope`, `Builder`, timeouts (`park_timeout`, `recv_timeout`, `wait_timeout`), `Mutex::try_lock`.
 - The main thread's thread-locals are not dropped at exit.
 - The location an `unwrap` reports is one static, which another thread may overwrite meanwhile.

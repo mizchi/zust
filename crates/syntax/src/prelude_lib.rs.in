@@ -7884,7 +7884,12 @@ fn __exr_out_str<G>(s: &str) {
 }
 
 impl Stdout {
+    // (with threads, the stdout lock for the guard's life (reentrant: its thread prints through it); _x: 1 when taken)
     pub fn lock(&self) -> StdoutLock {
+        if let Some(h) = unsafe { __EXR_THREAD_HOOK } {
+            h(2);
+            return StdoutLock { _x: 1 };
+        }
         StdoutLock { _x: 0 }
     }
     pub fn write_str(&mut self, s: &str) -> Result<(), IoError> {
@@ -7896,6 +7901,16 @@ impl Stdout {
             __exr_fflush(core::ptr::null_mut());
         }
         Ok(())
+    }
+}
+
+impl Drop for StdoutLock {
+    fn drop(&mut self) {
+        if self._x == 1 {
+            if let Some(h) = unsafe { __EXR_THREAD_HOOK } {
+                h(3);
+            }
+        }
     }
 }
 
@@ -9647,9 +9662,15 @@ struct __ThreadCtx {
     // (the packet while the thread still holds it: a panic marks it and lets it go)
     packet: *mut __PacketHead,
     run: Option<Box<dyn FnMut()>>,
-    // (the thread_local! values made on this thread, by key, and their drops)
+    // (the thread_local! values made on this thread, by key (1 once destroyed), their drops, and the keys in the order
+    // the values were made: they are dropped newest first)
     tls: Vec<*mut u8>,
     tls_drop: Vec<Option<fn(*mut u8)>>,
+    tls_order: Vec<usize>,
+    // (the thread_local! values are being dropped: a panic now aborts, as std's)
+    ending: bool,
+    // (the states of the Onces whose closures this thread runs: a panic poisons them, so the threads that wait wake)
+    onces: Vec<*mut u32>,
 }
 
 static mut __EXR_MAIN_THREAD: __ThreadInner = __ThreadInner { refs: 1, id: 1, park: 0 };
@@ -9672,7 +9693,16 @@ fn __exr_alloc_ok(n: usize) -> *mut u8 {
 fn __exr_new_ctx(th: *mut __ThreadInner) -> *mut __ThreadCtx {
     let c = __exr_alloc_ok(core::mem::size_of::<__ThreadCtx>()) as *mut __ThreadCtx;
     unsafe {
-        c.write(__ThreadCtx { th: th, packet: 0usize as *mut __PacketHead, run: None, tls: Vec::new(), tls_drop: Vec::new() });
+        c.write(__ThreadCtx {
+            th: th,
+            packet: 0usize as *mut __PacketHead,
+            run: None,
+            tls: Vec::new(),
+            tls_drop: Vec::new(),
+            tls_order: Vec::new(),
+            ending: false,
+            onces: Vec::new(),
+        });
     }
     c
 }
@@ -9694,19 +9724,23 @@ fn __exr_thread_ctx() -> *mut __ThreadCtx {
     }
 }
 
-// (runs the thread_local! drops of a thread that ends, newest first, and frees its context)
+// (runs the thread_local! drops of a thread that ends, newest first, and frees its context. As std's: a value whose
+// drop has begun cannot be reached again (its `with` panics, its `try_with` gives Err), one first made by a drop is
+// dropped too, and a drop that panics aborts the program)
 fn __exr_thread_end(c: *mut __ThreadCtx) {
     unsafe {
-        let mut k = (*c).tls.len();
-        while k > 0 {
-            k -= 1;
+        (*c).ending = true;
+        loop {
+            let k = match (*c).tls_order.pop() {
+                Some(k) => k,
+                None => break,
+            };
             let p = (*c).tls[k];
-            if !p.is_null() {
-                if let Some(d) = (*c).tls_drop[k] {
-                    d(p);
-                }
-                __exr_free(p);
+            (*c).tls[k] = 1usize as *mut u8;
+            if let Some(d) = (*c).tls_drop[k] {
+                d(p);
             }
+            __exr_free(p);
         }
         __exr_thread_release((*c).th);
         __exr_drop_in_place(c);
@@ -9733,8 +9767,35 @@ fn __exr_tls_drop<T>(p: *mut u8) {
     __exr_drop_in_place(p as *mut Option<T>);
 }
 
-// (this thread's value of the key: None until the thread_local!'s `with` sets it. A spawned thread drops its values
-// when it ends; the main thread's live to the end of the program)
+// `std::thread::AccessError`: the Err of a thread_local!'s `try_with` once the thread's value is being dropped
+pub struct AccessError {
+    __ae: u8,
+}
+
+impl Debug for AccessError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.buf.push_str("AccessError");
+        Ok(())
+    }
+}
+
+impl Display for AccessError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.pad("already destroyed")
+    }
+}
+
+pub fn __exr_access_error() -> AccessError {
+    AccessError { __ae: 0 }
+}
+
+// (`with` on a thread_local! whose value is being dropped or was)
+pub fn __exr_tls_destroyed() -> ! {
+    panic!("cannot access a Thread Local Storage value during or after destruction: AccessError");
+}
+
+// (this thread's value of the key: None until the thread_local!'s `with` sets it; null once its drop has begun. A
+// spawned thread drops its values when it ends; the main thread's live to the end of the program)
 pub fn __exr_tls_slot<T>(k: &__TlsKey) -> *mut Option<T> {
     let kp = &k.__tk as *const usize as *mut usize;
     let mut i = __exr_atomic_load(kp);
@@ -9750,17 +9811,24 @@ pub fn __exr_tls_slot<T>(k: &__TlsKey) -> *mut Option<T> {
             (*c).tls_drop.push(None);
         }
         let mut p = (*c).tls[i - 1];
+        // (destroyed: none)
+        if p as usize == 1 {
+            return 0usize as *mut Option<T>;
+        }
         if p.is_null() {
             p = __exr_alloc_ok(core::mem::size_of::<Option<T>>());
             (p as *mut Option<T>).write(None);
             (*c).tls[i - 1] = p;
             (*c).tls_drop[i - 1] = Some(__exr_tls_drop::<T>);
+            (*c).tls_order.push(i - 1);
         }
         p as *mut Option<T>
     }
 }
 
 static mut __EXR_OUT_LOCK: u32 = 0;
+static mut __EXR_OUT_OWNER: usize = 0;
+static mut __EXR_OUT_DEPTH: u32 = 0;
 // (whether a panic has been reported)
 static mut __EXR_PANICKED: u32 = 0;
 
@@ -9770,15 +9838,29 @@ static mut __EXR_PANICKED: u32 = 0;
 // return); the main thread's goes on to exit(101)
 fn __exr_thread_hook(q: u32) -> bool {
     unsafe {
-        if q == 2 {
-            __exr_lock(&mut __EXR_OUT_LOCK as *mut u32);
-            return true;
-        }
-        if q == 3 {
-            __exr_unlock(&mut __EXR_OUT_LOCK as *mut u32);
-            return true;
-        }
         let c = __exr_pthread_getspecific(__EXR_TLS_KEY) as *mut __ThreadCtx;
+        // (the stdout lock is reentrant, as std's: a StdoutLock's thread prints through it. The owner is the thread's
+        // context, 1 for the main thread)
+        if q == 2 || q == 3 {
+            let me = if c.is_null() { 1 } else { c as usize };
+            let owner = &mut __EXR_OUT_OWNER as *mut usize;
+            if q == 2 {
+                if __exr_atomic_load(owner) == me {
+                    __EXR_OUT_DEPTH += 1;
+                } else {
+                    __exr_lock(&mut __EXR_OUT_LOCK as *mut u32);
+                    __exr_atomic_store(owner, me);
+                    __EXR_OUT_DEPTH = 1;
+                }
+            } else {
+                __EXR_OUT_DEPTH -= 1;
+                if __EXR_OUT_DEPTH == 0 {
+                    __exr_atomic_store(owner, 0);
+                    __exr_unlock(&mut __EXR_OUT_LOCK as *mut u32);
+                }
+            }
+            return true;
+        }
         if q == 0 {
             __exr_err_str::<()>(if c.is_null() { "\nthread 'main' panicked" } else { "\nthread '<unnamed>' panicked" });
             return true;
@@ -9790,6 +9872,21 @@ fn __exr_thread_hook(q: u32) -> bool {
         }
         if c.is_null() {
             return false;
+        }
+        if (*c).ending {
+            __exr_err_str::<()>("fatal runtime error: thread local panicked on drop, aborting\n");
+            __exr_abort();
+        }
+        // (a StdoutLock it holds is let go, as std's guard would be on unwinding)
+        if __exr_atomic_load(&mut __EXR_OUT_OWNER as *mut usize) == c as usize {
+            __EXR_OUT_DEPTH = 0;
+            __exr_atomic_store(&mut __EXR_OUT_OWNER as *mut usize, 0);
+            __exr_unlock(&mut __EXR_OUT_LOCK as *mut u32);
+        }
+        // (the Onces this thread was running: poisoned, and their waiters woken)
+        while let Some(o) = (*c).onces.pop() {
+            __exr_atomic_store(o, 4);
+            __exr_futex_wake_all(o);
         }
         let pk = (*c).packet;
         if !pk.is_null() {
@@ -9806,12 +9903,37 @@ fn __exr_thread_hook(q: u32) -> bool {
     true
 }
 
+// (__EXR_ONCE_HOOK: a spawned thread's Once begun (true) or done (false), for its panic to poison)
+fn __exr_once_track(o: *mut u32, begin: bool) {
+    unsafe {
+        let c = __exr_pthread_getspecific(__EXR_TLS_KEY) as *mut __ThreadCtx;
+        if c.is_null() {
+            return;
+        }
+        if begin {
+            (*c).onces.push(o);
+        } else {
+            let mut k = (*c).onces.len();
+            while k > 0 {
+                k -= 1;
+                if (*c).onces[k] == o {
+                    (*c).onces.remove(k);
+                    break;
+                }
+            }
+        }
+    }
+}
+
 // (the first spawn, on the only thread there is: no other one can race it)
 fn __exr_threads_init() {
     unsafe {
         if __EXR_TLS_READY == 0 {
-            __exr_pthread_key_create(&mut __EXR_TLS_KEY as *mut u32, 0usize as *const u8);
+            if __exr_pthread_key_create(&mut __EXR_TLS_KEY as *mut u32, 0usize as *const u8) != 0 {
+                panic!("failed to spawn thread: no thread-local key is left");
+            }
             __EXR_THREAD_HOOK = Some(__exr_thread_hook);
+            __EXR_ONCE_HOOK = Some(__exr_once_track);
             __exr_atomic_store(&mut __EXR_TLS_READY as *mut u32, 1);
         }
     }
@@ -9820,7 +9942,11 @@ fn __exr_threads_init() {
 extern "C" fn __exr_thread_start(arg: *mut u8) -> *mut u8 {
     unsafe {
         let c = arg as *mut __ThreadCtx;
-        __exr_pthread_setspecific(__EXR_TLS_KEY, arg);
+        // (without its context the thread could not tell itself from the main thread: std aborts on such a failure)
+        if __exr_pthread_setspecific(__EXR_TLS_KEY, arg) != 0 {
+            __exr_err_str::<()>("fatal runtime error: failed to set a thread's context, aborting\n");
+            __exr_abort();
+        }
         {
             let mut f = (*c).run.take().unwrap();
             f();
@@ -9950,6 +10076,13 @@ pub fn __core_spawn<T, F: FnOnce() -> T>(f: F) -> JoinHandle<T> {
         __exr_pthread_create(&mut pt, attr.as_ptr() as *const u8, __exr_thread_start, c as *mut u8)
     };
     if r != 0 {
+        // (no thread holds them: the closure (and its captures), the context, the packet and the Thread go now)
+        unsafe {
+            __exr_drop_in_place(c);
+            __exr_free(c as *mut u8);
+            __exr_free(pk as *mut u8);
+            __exr_free(th as *mut u8);
+        }
         panic!("failed to spawn thread: Os {{ code: {}, kind: WouldBlock, message: \"Resource temporarily unavailable\" }}", r);
     }
     JoinHandle { pk: pk, pt: pt, th: Thread { __th: th } }
@@ -10404,6 +10537,47 @@ pub struct __Sndr<T> {
     c: Arc<__Chan<T>>,
 }
 
+// std's errors of the channels: a send's to a receiver that is gone (the value comes back; its Debug does not need
+// T's), a recv's when every sender is gone, a try_recv's
+pub struct SendError<T>(pub T);
+
+impl<T> Debug for SendError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.buf.push_str("SendError { .. }");
+        Ok(())
+    }
+}
+
+impl<T> Display for SendError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.pad("sending on a closed channel")
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecvError;
+
+impl Display for RecvError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.pad("receiving on a closed channel")
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TryRecvError {
+    Empty,
+    Disconnected,
+}
+
+impl Display for TryRecvError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        match self {
+            TryRecvError::Empty => f.pad("receiving on an empty channel"),
+            TryRecvError::Disconnected => f.pad("receiving on an empty and disconnected channel"),
+        }
+    }
+}
+
 pub struct __SyncSndr<T> {
     c: Arc<__Chan<T>>,
 }
@@ -10466,6 +10640,13 @@ fn __exr_chan_send<T>(c: *mut __Chan<T>, v: T) -> Result<(), T> {
             while (*c).rx && (*c).recvd < ticket {
                 __exr_chan_wait(c);
             }
+            // (the receiver went before it took this one: it is still the queue's one value, and the send fails with it)
+            if (*c).recvd < ticket {
+                if let Some(v) = (*c).q.pop_back() {
+                    __exr_unlock(m);
+                    return Err(v);
+                }
+            }
         }
         __exr_unlock(m);
         Ok(())
@@ -10522,8 +10703,11 @@ pub fn __core_sync_channel<T>(n: usize) -> (__SyncSndr<T>, __Rcvr__<T>) {
 }
 
 impl<T> __Sndr<T> {
-    pub fn send(&self, v: T) -> Result<(), T> {
-        __exr_chan_send(__exr_chan_p(&self.c), v)
+    pub fn send(&self, v: T) -> Result<(), SendError<T>> {
+        match __exr_chan_send(__exr_chan_p(&self.c), v) {
+            Ok(()) => Ok(()),
+            Err(v) => Err(SendError(v)),
+        }
     }
     pub fn clone(&self) -> __Sndr<T> {
         __exr_chan_sender(&self.c, 1);
@@ -10542,8 +10726,11 @@ impl<T> Drop for __Sndr<T> {
 }
 
 impl<T> __SyncSndr<T> {
-    pub fn send(&self, v: T) -> Result<(), T> {
-        __exr_chan_send(__exr_chan_p(&self.c), v)
+    pub fn send(&self, v: T) -> Result<(), SendError<T>> {
+        match __exr_chan_send(__exr_chan_p(&self.c), v) {
+            Ok(()) => Ok(()),
+            Err(v) => Err(SendError(v)),
+        }
     }
     pub fn clone(&self) -> __SyncSndr<T> {
         __exr_chan_sender(&self.c, 1);
@@ -10561,16 +10748,24 @@ impl<T> Drop for __SyncSndr<T> {
 }
 
 impl<T> __Rcvr__<T> {
-    pub fn recv(&self) -> Result<T, ()> {
+    pub fn recv(&self) -> Result<T, RecvError> {
         match __exr_chan_recv(__exr_chan_p(&self.c), true) {
             Some(v) => Ok(v),
-            None => Err(()),
+            None => Err(RecvError),
         }
     }
-    pub fn try_recv(&self) -> Result<T, ()> {
-        match __exr_chan_recv(__exr_chan_p(&self.c), false) {
+    // (Empty while a sender is left, else Disconnected)
+    pub fn try_recv(&self) -> Result<T, TryRecvError> {
+        let p = __exr_chan_p(&self.c);
+        match __exr_chan_recv(p, false) {
             Some(v) => Ok(v),
-            None => Err(()),
+            None => {
+                let m = unsafe { &mut (*p).m as *mut u32 };
+                __exr_lock(m);
+                let left = unsafe { (*p).senders } != 0;
+                __exr_unlock(m);
+                Err(if left { TryRecvError::Empty } else { TryRecvError::Disconnected })
+            }
         }
     }
     pub fn iter(&self) -> __RecvIter<T> {
@@ -10592,8 +10787,12 @@ impl<T> Drop for __Rcvr__<T> {
             let m = &mut (*p).m as *mut u32;
             __exr_lock(m);
             (*p).rx = false;
+            // (the values no one can receive now go, after the lock is let go: their drops may use the channel. A
+            // rendezvous's value stays, for its sender to get back)
+            let rest = if (*p).cap == 0 { VecDeque::new() } else { core::mem::replace(&mut (*p).q, VecDeque::new()) };
             __exr_chan_notify(p);
             __exr_unlock(m);
+            drop(rest);
         }
     }
 }
@@ -11321,10 +11520,20 @@ impl<T> Drop for RwLockWriteGuard<T> {
     }
 }
 
+// (as std's: the data under a read lock taken without waiting, or `<locked>` while a writer holds it)
 impl<T: Debug> Debug for RwLock<T> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let l = self.__l();
+        let st = unsafe { &mut (*l).st as *mut u32 };
+        let s = __exr_atomic_load(st);
         f.buf.push_str("RwLock { data: ");
-        __exr_debug(&self.val, f);
+        if s < 4294967294 && __exr_atomic_cas(st, s, s + 1) == s {
+            __exr_debug(&self.val, f);
+            __exr_atomic_xadd(st, 4294967295);
+            __exr_rw_wake(l);
+        } else {
+            f.buf.push_str("<locked>");
+        }
         f.buf.push_str(", poisoned: false, .. }");
         Ok(())
     }
@@ -11336,9 +11545,10 @@ pub struct OnceLock<T> {
     __ol_once: Once,
 }
 
-// `std::sync::Once`: std's futex Once. The state is 0 not run, 1 running, 3 running with waiters, 2 done: the thread
-// that takes it 0 -> 1 runs the closure, the others wait on the futex until it is done. A panic does not unwind, so
-// no Once is ever seen poisoned (a panic in the closure of a spawned thread leaves it running: the others wait on)
+// `std::sync::Once`: std's futex Once. The state is 0 not run, 1 running, 3 running with waiters, 2 done, 4 poisoned:
+// the thread that takes it 0 -> 1 runs the closure, the others wait on the futex until it is done. A panic does not
+// unwind, but a spawned thread that panics in the closure poisons it (its waiters wake): `call_once` then panics, as
+// std's, and `call_once_force` and OnceLock run their closure again
 pub struct Once {
     __once_st: u32,
 }
@@ -11348,6 +11558,9 @@ pub struct OnceState {
 }
 
 pub const ONCE_INIT: Once = Once { __once_st: 0 };
+
+// (set by the first thread spawned: a Once begun (true) or done (false) on a spawned thread, which its panic poisons)
+static mut __EXR_ONCE_HOOK: Option<fn(*mut u32, bool)> = None;
 
 impl Once {
     pub const fn new() -> Once {
@@ -11360,29 +11573,38 @@ impl Once {
         __exr_atomic_load(self.__p()) == 2
     }
     pub fn call_once<F: FnOnce()>(&self, f: F) {
-        if !self.is_completed() && self.__once_begin() {
+        if !self.is_completed() && self.__once_begin(false) != 0 {
             f();
             self.__once_end();
         }
     }
     pub fn call_once_force<F: FnOnce(&OnceState)>(&self, f: F) {
-        if !self.is_completed() && self.__once_begin() {
-            f(&OnceState { __os_poisoned: false });
-            self.__once_end();
+        if !self.is_completed() {
+            let b = self.__once_begin(true);
+            if b != 0 {
+                f(&OnceState { __os_poisoned: b == 2 });
+                self.__once_end();
+            }
         }
     }
-    // (true: this thread is to run the closure; false: another one ran it meanwhile. A call_once inside its own
-    // closure waits forever, as std's)
-    fn __once_begin(&self) -> bool {
+    // (1: this thread is to run the closure; 2: so, after a poisoning (force only); 0: another one ran it meanwhile. A
+    // call_once inside its own closure waits forever, as std's)
+    fn __once_begin(&self, force: bool) -> u8 {
         let p = self.__p();
         loop {
             let s = __exr_atomic_load(p);
             if s == 2 {
-                return false;
+                return 0;
             }
-            if s == 0 {
-                if __exr_atomic_cas(p, 0, 1) == 0 {
-                    return true;
+            if s == 0 || s == 4 {
+                if s == 4 && !force {
+                    panic!("Once instance has previously been poisoned");
+                }
+                if __exr_atomic_cas(p, s, 1) == s {
+                    if let Some(h) = unsafe { __EXR_ONCE_HOOK } {
+                        h(p, true);
+                    }
+                    return if s == 4 { 2 } else { 1 };
                 }
                 continue;
             }
@@ -11393,6 +11615,9 @@ impl Once {
         }
     }
     fn __once_end(&self) {
+        if let Some(h) = unsafe { __EXR_ONCE_HOOK } {
+            h(self.__p(), false);
+        }
         if __exr_atomic_xchg(self.__p(), 2) == 3 {
             __exr_futex_wake_all(self.__p());
         }
@@ -11492,9 +11717,10 @@ impl<T> OnceLock<T> {
     pub fn get(&self) -> Option<&T> {
         if self.__ol_once.is_completed() { self.val.as_ref() } else { None }
     }
-    // (the closure runs on one thread; the others wait for its value)
+    // (the closure runs on one thread; the others wait for its value. One that panicked on a spawned thread leaves the
+    // cell empty, and the next caller runs its own, as std's)
     pub fn get_or_init<F: FnOnce() -> T>(&self, f: F) -> &T {
-        if !self.__ol_once.is_completed() && self.__ol_once.__once_begin() {
+        if !self.__ol_once.is_completed() && self.__ol_once.__once_begin(true) != 0 {
             let v = f();
             unsafe {
                 (&self.val as *const Option<T> as *mut Option<T>).write(Some(v));
@@ -11504,7 +11730,7 @@ impl<T> OnceLock<T> {
         self.val.as_ref().unwrap()
     }
     pub fn set(&self, v: T) -> Result<(), T> {
-        if !self.__ol_once.is_completed() && self.__ol_once.__once_begin() {
+        if !self.__ol_once.is_completed() && self.__ol_once.__once_begin(true) != 0 {
             unsafe {
                 (&self.val as *const Option<T> as *mut Option<T>).write(Some(v));
             }

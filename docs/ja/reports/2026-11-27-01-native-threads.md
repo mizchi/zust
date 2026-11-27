@@ -40,7 +40,14 @@ prelude はこれらを関数として名指す（`__exr_atomic_load`、`_store`
 - `mpsc` は futex の Mutex の下のキューと、両端が待つ Condvar である。`recv` は送り手がすべて drop されると `Err` を返す（前は、全スレッドが待ちになったとき）。`send` は受け手がいなくなると失敗する。`sync_channel(n)` の send はキューが一杯の間待ち、上限 0 なら自分の値が受け取られるまで待つ。
 - `thread_local!`（`lexer::expand_thread_local`）はスレッドごとに 1 つの値を持つ。最初に使われたときに番号の付く鍵と、各スレッドのコンテキストの中の値の列である（コンテキストは pthread のキーが持つ）。spawn したスレッドは、終わるときに自分の値を新しいものから drop する。これは `join` が戻る前に起きる。
 - spawn したスレッドの panic: メッセージはそれを `<unnamed>` と呼び、note は 1 回だけ付く。その後スレッドはパケットに panic したと印を付け、スレッドローカルを drop し、`pthread_exit` で終わる（オーバーフローのトラップの SIGILL ハンドラからも）。`join` は `Err(Any { .. })` を返す。
-- `print!` / `println!` は、スレッドが spawn された後は行の間ロックを取る。
+- `print!` / `println!` は、スレッドが spawn された後は行の間ロックを取る。このロックは再入可能で、`StdoutLock` は std と同じく生きている間それを持つ。
+- panic・切断・ロックが端で何をするかは std と同じにした（プルリクエストのレビューから）。
+  - thread_local! の値は、そのスレッドが作った順の逆に drop される。drop の始まった値には二度と届かない（`with` は panic し、`try_with` は `AccessError` を返す）。ほかの値の drop が初めて作った値も drop される。panic する drop はプログラムを abort する（"thread local panicked on drop"）。
+  - `Once` のクロージャを走らせている間に panic した spawn したスレッドは、その `Once` を poison するので、待っているスレッドは起きる。その後 `call_once` は panic し、`call_once_force` はもう一度走って `is_poisoned()` を見る。`OnceLock` は次の呼び出し手の初期化を走らせる。そのスレッドが持っていた `StdoutLock` は放される。
+  - 受け手が値を取る前にいなくなった `sync_channel(0)` の send は、その値と一緒に失敗する。drop された受け手は、キューに残った値を drop する。チャネルのエラーは std の `SendError`（その Debug は `T: Debug` を要らない）、`RecvError`、`TryRecvError` である。
+  - `RwLock` の Debug は待たずに読みロックを取り、writer が持っている間は `<locked>` と出す。
+  - `spawn(f)` の前にローカルに置かれたクロージャも、呼び出しの中に書かれたものと同じく `Send` を調べる（tests/security/send_rc_named_closure_thread.rs）。
+  - `pthread_create` が失敗したときは、渡すはずだったものを解放する。`pthread_key_create` の失敗は `spawn` の中の panic で、新しいスレッドでの `pthread_setspecific` の失敗は abort である。
 
 panic と print の経路のうちスレッドを意識する部分は、1 つのフック（`__EXR_THREAD_HOOK`）を通る。これは最初の spawn が設定する。スレッドのないプログラムにはフックがなく、前と同じことをする。そのプログラムが払うのは、static 1 つと、panic と print の関数の中でそれを調べることだけである。prelude は今も名前で絞られるので、何も spawn しないプログラムには pthread の関数は入らない。新しい型のうち 2 つ（`__TlsKey`、`__ThreadPanic`）は `crates/syntax/src/prelude.rs` で impl の持ち主として並べたので、その impl はその型と一緒にだけ入る。
 
@@ -50,6 +57,7 @@ panic と print の経路のうちスレッドを意識する部分は、1 つ�
   - `parallel`: 8 スレッド × 100 000 回の atomic の加算（それぞれ `Arc` の clone を通して）、`Mutex` の下での 8 × 20 000 回の read-modify-write、4 つの生産者 × 10 000 回の send、`sync_channel(0)`、`RwLock` の reader と writer、`Condvar` で待つ消費者、8 スレッドからの `Once` と `OnceLock`、park / unpark、detach したスレッド。どの合計も、すべての操作がアトミックなときにだけ正確になる。バックエンドごとに 5 回走らせる。
   - `panic`: spawn したスレッドでの範囲外の添字、オーバーフローのトラップ、`panic!`。どれもそのスレッドだけを終わらせ、その `join` は `Err` を返し、スレッドローカルは drop され、note は 1 回だけ付く。
   - `tls`: 各スレッド自身の `thread_local!` の値と、スレッドが終わるときのその drop。
+  - `edges`: 上の一覧の場合を、rustc のビルドが出すとおりに。
 - デッドロックのプログラム（再ロック、何も unpark しない park、自分のクロージャの中の `call_once`、何も notify しない Condvar）は、std と同じく永久に待つようになった。テストは、それぞれが 2 秒後にもまだ走っていて、rustc が出さなかったものを何も出していないことを確かめる。前は "deadlock" で panic していた。
 - `tests/probe/sync_once.rs` は、3 つのスレッドのどれが `call_once` を走らせたかを出していた。スレッドが並列に走ると、それはスケジューラ次第である（rustc でも同じ）。そこで、1 つが走らせたことを出すようにした。
 - `cargo test --release --workspace`。唯一の失敗である `ast_codegen` の `std_file` は main でも起きる。rustc 1.97 は `OpenOptions` を別の順で調べるので、メッセージが違う。
@@ -65,7 +73,7 @@ panic と print の経路のうちスレッドを意識する部分は、1 つ�
 
 TODO.md の「Threads」:
 
-- poisoning はなく、panic したスレッドの値の drop もない。どちらも巻き戻しが要る。
+- Mutex と RwLock の poisoning はなく、panic したスレッドの値の drop もない。どちらも巻き戻しが要る。
 - `thread::scope`、`Builder`、タイムアウト（`park_timeout`、`recv_timeout`、`wait_timeout`）、`Mutex::try_lock` はない。
 - main スレッドのスレッドローカルは、終了時に drop されない。
 - `unwrap` が出す場所は 1 つの static で、その間に他のスレッドが上書きしうる。
