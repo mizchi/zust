@@ -1162,6 +1162,44 @@ fn has_cstr_literal(src: &str) -> bool {
     false
 }
 
+/// A float literal such as `1.5` (a `.` between digits) outside string literals: the `.` and `"` of the source are
+/// gone through with memchr (`str::find` of a char), not byte by byte, as a large program has none of the one and few
+/// of the other (a quote after `\\` or `'` does not open or close a string)
+fn float_lit_in(src: &str) -> bool {
+    let b = src.as_bytes();
+    if b.len() < 3 {
+        return false;
+    }
+    // (the byte at 0 and the last are not looked at, as by the byte loop this replaces. `from` is 0 or just after an
+    // ASCII `"` / `.`: a char boundary)
+    let end = b.len() - 1;
+    let next = |from: usize, c: char| match src[from..].find(c) {
+        Some(k) if from + k < end => from + k,
+        _ => usize::MAX,
+    };
+    let first = |c: char| match next(0, c) {
+        0 => next(1, c),
+        k => k,
+    };
+    let mut in_str = false;
+    let (mut q, mut d) = (first('"'), first('.'));
+    loop {
+        if q < d {
+            if b[q - 1] != b'\\' && b[q - 1] != b'\'' {
+                in_str = !in_str;
+            }
+            q = next(q + 1, '"');
+        } else if d != usize::MAX {
+            if !in_str && b[d - 1].is_ascii_digit() && b[d + 1].is_ascii_digit() {
+                return true;
+            }
+            d = next(d + 1, '.');
+        } else {
+            return false;
+        }
+    }
+}
+
 pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCache) -> String {
     let all = items();
     // Collect only the user's identifiers that match a name the prelude defines (or a related name).
@@ -1747,23 +1785,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             })
         })
     });
-    let float_lit = !float_named && sc.any("float_lit", &|user_src: &str| {
-        let b = user_src.as_bytes();
-        // (not inside a string literal (`"{:8.3}"` and so on))
-        let mut in_str = false;
-        let mut found = false;
-        for i in 1..b.len().saturating_sub(1) {
-            match b[i] {
-                b'"' if b[i - 1] != b'\\' && b[i - 1] != b'\'' => in_str = !in_str,
-                b'.' if !in_str && b[i - 1].is_ascii_digit() && b[i + 1].is_ascii_digit() => {
-                    found = true;
-                    break;
-                }
-                _ => {}
-            }
-        }
-        found
-    });
+    let float_lit = !float_named && sc.any("float_lit", &|user_src: &str| float_lit_in(user_src));
     // (`d.as_secs_f64()`: the float comes from the prelude's Duration)
     let float_dur = need.contains("Duration") && (sc.has("_f64") || sc.has("_f32"));
     if float_named || float_lit || float_dur {
