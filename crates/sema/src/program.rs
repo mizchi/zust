@@ -3579,6 +3579,12 @@ impl Program {
             if text {
                 return inner == "<str>";
             }
+            // (and a Vec's to itself, `Vec<T>: AsMut<Vec<T>>`: its element told apart as a slice's is)
+            if std_name == "Vec" {
+                if let (Some(x), Some(e)) = (inner.strip_prefix("<Vec<").and_then(|r| r.strip_suffix(">>")), elem) {
+                    return !matches!((Ty::prim(x), Ty::prim(&self.tn(e))), (Some(a), Some(c)) if a != c);
+                }
+            }
             if let Some(e) = elem {
                 // (the slice's element is the sequence's: not `Vec<u16>: AsMut<[u8]>`. Only told apart for primitive
                 // types; another element (a parameter's placeholder, `[Item]`) is taken as the sequence's)
@@ -7594,7 +7600,8 @@ fn syn_unify(a: &TySyn, ga: &[String], b: &TySyn, gb: &[String], sub: &mut Vec<(
             let std_unsized = |t: &TySyn| {
                 matches!(t, TySyn::Named(m) if matches!(m.rsplit("::").next().unwrap_or(m), "Path" | "OsStr" | "CStr"))
             };
-            if sized && (matches!(b, TySyn::Slice(_) | TySyn::Str | TySyn::Dyn(_)) || std_unsized(b)) {
+            // (not the other impl's own parameter of the name, `impl<Path> Pick<Path> for S`)
+            if sized && (matches!(b, TySyn::Slice(_) | TySyn::Str | TySyn::Dyn(_)) || (var(b, sb).is_none() && std_unsized(b))) {
                 return false;
             }
             if let Some((_, (s2, t2))) = sub.iter().find(|x| x.0 == (sa, n.clone())).cloned() {
