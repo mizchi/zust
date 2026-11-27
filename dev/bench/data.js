@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795747150983,
+  "lastUpdate": 1795747153220,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -144821,6 +144821,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/ec48c43492d69bfdfa9f7683764d22658e6a8332"
         },
         "date": 1795746607663,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.82,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1918,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.88,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1557,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 73.68,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5442,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b18f94f3cb3ba0084621249140682fa172f3cce6",
+          "message": "syntax: crate items zustc lost — primitive-named items, {self} in use trees, use-tree aliases, macro self (#254) (#277)\n\nFixes the most common ways zustc lost a crate's own items, the top fix of the crate survey (#254, 11% of the surveyed crates' downloads):\n\n- Items named like primitives (`fn u32`, `mod char`, `const u8`): the renaming pass now tells type positions from value positions.\n  - Value positions: call arguments, let and assignment values, comparison operands, match arm values, and after return or break.\n  - A struct expression's head (`S { .. }`) is a type.\n  - Numeric suffixes are never renamed.\n- `{self}` in a use tree: it imports only the type namespace, so a value of the same name is not brought in.\n- Use-tree entries are not expanded through module aliases inside a prefixed group. A group right after `use` is still expanded.\n- Block imports are looked up by the reference's namespace: a call does not take a type-only `use E::{self}`.\n- Macro hygiene: `self` / `super` / `crate` are not taken as match-arm bindings in a macro body.\n\nTests: probes prim_named_fns, use_tree_self and macro_self_arrow, with expected output from rustc 1.97; lexer unit tests; tests/workspace.rs. rust-ui: 0 regressions.\n\nLeftover from the review: #283. Fixes #254 (the parts in the issue's top list; the rest is tracked there).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T11:33:32+09:00",
+          "tree_id": "375d80d7811d4325d298e403e7f4c94a83e184c8",
+          "url": "https://github.com/mizchi/zust/commit/b18f94f3cb3ba0084621249140682fa172f3cce6"
+        },
+        "date": 1795747152913,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
