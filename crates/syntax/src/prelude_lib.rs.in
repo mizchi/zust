@@ -10653,8 +10653,9 @@ fn __exr_chan_send<T>(c: *mut __Chan<T>, v: T) -> Result<(), T> {
     }
 }
 
-// (the next value; None when there is none (wait: and no sender is left))
-fn __exr_chan_recv<T>(c: *mut __Chan<T>, wait: bool) -> Option<T> {
+// (the next value; Err when there is none (wait: and no sender is left): Err(true) when no sender is left, decided
+// under the same lock as the queue was found empty)
+fn __exr_chan_recv<T>(c: *mut __Chan<T>, wait: bool) -> Result<T, bool> {
     unsafe {
         let m = &mut (*c).m as *mut u32;
         __exr_lock(m);
@@ -10663,11 +10664,12 @@ fn __exr_chan_recv<T>(c: *mut __Chan<T>, wait: bool) -> Option<T> {
                 (*c).recvd += 1;
                 __exr_chan_notify(c);
                 __exr_unlock(m);
-                return Some(v);
+                return Ok(v);
             }
-            if !wait || (*c).senders == 0 {
+            let gone = (*c).senders == 0;
+            if !wait || gone {
                 __exr_unlock(m);
-                return None;
+                return Err(gone);
             }
             __exr_chan_wait(c);
         }
@@ -10750,22 +10752,15 @@ impl<T> Drop for __SyncSndr<T> {
 impl<T> __Rcvr__<T> {
     pub fn recv(&self) -> Result<T, RecvError> {
         match __exr_chan_recv(__exr_chan_p(&self.c), true) {
-            Some(v) => Ok(v),
-            None => Err(RecvError),
+            Ok(v) => Ok(v),
+            Err(_) => Err(RecvError),
         }
     }
     // (Empty while a sender is left, else Disconnected)
     pub fn try_recv(&self) -> Result<T, TryRecvError> {
-        let p = __exr_chan_p(&self.c);
-        match __exr_chan_recv(p, false) {
-            Some(v) => Ok(v),
-            None => {
-                let m = unsafe { &mut (*p).m as *mut u32 };
-                __exr_lock(m);
-                let left = unsafe { (*p).senders } != 0;
-                __exr_unlock(m);
-                Err(if left { TryRecvError::Empty } else { TryRecvError::Disconnected })
-            }
+        match __exr_chan_recv(__exr_chan_p(&self.c), false) {
+            Ok(v) => Ok(v),
+            Err(gone) => Err(if gone { TryRecvError::Disconnected } else { TryRecvError::Empty }),
         }
     }
     pub fn iter(&self) -> __RecvIter<T> {
@@ -10806,7 +10801,10 @@ pub struct __RecvIter<T> {
 impl<T> Iterator for __RecvIter<T> {
     type Item = T;
     fn next(&mut self) -> Option<T> {
-        __exr_chan_recv(__exr_chan_p(&self.c), self.wait)
+        match __exr_chan_recv(__exr_chan_p(&self.c), self.wait) {
+            Ok(v) => Some(v),
+            Err(_) => None,
+        }
     }
 }
 

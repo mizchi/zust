@@ -46,7 +46,8 @@ prelude はこれらを関数として名指す（`__exr_atomic_load`、`_store`
   - `Once` のクロージャを走らせている間に panic した spawn したスレッドは、その `Once` を poison するので、待っているスレッドは起きる。その後 `call_once` は panic し、`call_once_force` はもう一度走って `is_poisoned()` を見る。`OnceLock` は次の呼び出し手の初期化を走らせる。そのスレッドが持っていた `StdoutLock` は放される。
   - 受け手が値を取る前にいなくなった `sync_channel(0)` の send は、その値と一緒に失敗する。drop された受け手は、キューに残った値を drop する。チャネルのエラーは std の `SendError`（その Debug は `T: Debug` を要らない）、`RecvError`、`TryRecvError` である。
   - `RwLock` の Debug は待たずに読みロックを取り、writer が持っている間は `<locked>` と出す。
-  - `spawn(f)` の前にローカルに置かれたクロージャも、呼び出しの中に書かれたものと同じく `Send` を調べる（tests/security/send_rc_named_closure_thread.rs）。
+  - `spawn(f)` の前にローカルに置かれたクロージャも、呼び出しの中に書かれたものと同じく調べる。参照で持つキャプチャは E0373、`Send` でないものは E0277 である（tests/security/spawn_named_closure_borrow.rs、send_rc_named_closure_thread.rs）。`StdoutLock` は `Send` ではない（send_stdout_lock_thread.rs）。
+  - `try_recv` は、キューが空だと分かったのと同じロックの下で Empty と Disconnected を見分ける。
   - `pthread_create` が失敗したときは、渡すはずだったものを解放する。`pthread_key_create` の失敗は `spawn` の中の panic で、新しいスレッドでの `pthread_setspecific` の失敗は abort である。
 
 panic と print の経路のうちスレッドを意識する部分は、1 つのフック（`__EXR_THREAD_HOOK`）を通る。これは最初の spawn が設定する。スレッドのないプログラムにはフックがなく、前と同じことをする。そのプログラムが払うのは、static 1 つと、panic と print の関数の中でそれを調べることだけである。prelude は今も名前で絞られるので、何も spawn しないプログラムには pthread の関数は入らない。新しい型のうち 2 つ（`__TlsKey`、`__ThreadPanic`）は `crates/syntax/src/prelude.rs` で impl の持ち主として並べたので、その impl はその型と一緒にだけ入る。

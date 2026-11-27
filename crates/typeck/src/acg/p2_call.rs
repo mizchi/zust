@@ -2228,6 +2228,16 @@ impl Cx<'_> {
             // (a closure held in a local, `let f = move || ..; spawn(f)`: its captures, the fields of its type, run on
             // the other thread just the same)
             if let Some(t) = self.peek(c) {
+                // (a capture held by reference: the closure may outlive it (E0373), as for one written in the call)
+                if let Ty::Struct(sid) = t {
+                    let cd = self.prog.closure_of_struct.get(&self.prog.base_of(sid)).and_then(|f| self.prog.closures.get(f));
+                    if let Some(cd) = cd {
+                        if let Some(k) = cd.moved.iter().position(|m| !m) {
+                            let n = &cd.captures[k];
+                            return Err(self.at(value_pos(c), format!("closure may outlive the current function, but it borrows `{n}`, which is owned by the current function")));
+                        }
+                    }
+                }
                 if not_send(self.prog, t) {
                     let bad = match t {
                         Ty::Struct(sid) => self.prog.structs[sid as usize].fields.iter().map(|f| f.1).find(|&f| not_send(self.prog, f)),
@@ -4908,7 +4918,7 @@ fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool
             if prelude {
                 let args = &sd.args;
                 return match (name, sync) {
-                    ("Rc", _) | ("MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard", false) => true,
+                    ("Rc", _) | ("MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard" | "StdoutLock", false) => true,
                     // (a RefCell's guards share the cell's non-atomic borrow flag: neither Send nor Sync, as in std)
                     ("Ref" | "RefMut", _) => true,
                     ("Cell" | "RefCell" | "UnsafeCell" | "LazyCell" | "OnceCell" | "__Rcvr__", true) => true,

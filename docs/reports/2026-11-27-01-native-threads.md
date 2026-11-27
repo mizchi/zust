@@ -80,8 +80,10 @@ knows about atomics.
     values left in the queue; the channels' errors are std's `SendError` (its Debug does not need `T: Debug`),
     `RecvError` and `TryRecvError`;
   - `RwLock`'s Debug takes a read lock without waiting, and prints `<locked>` while a writer holds it;
-  - a closure held in a local before `spawn(f)` is checked for `Send` as one written in the call
-    (tests/security/send_rc_named_closure_thread.rs);
+  - a closure held in a local before `spawn(f)` is checked as one written in the call: a capture held by reference
+    is E0373 and one that is not `Send` is E0277 (tests/security/spawn_named_closure_borrow.rs,
+    send_rc_named_closure_thread.rs); a `StdoutLock` is not `Send` (send_stdout_lock_thread.rs);
+  - `try_recv` tells Empty from Disconnected under the same lock as it finds the queue empty;
   - a failed `pthread_create` frees what it was given; a failed `pthread_key_create` is a panic in `spawn`, and a
     failed `pthread_setspecific` in a new thread aborts.
 
