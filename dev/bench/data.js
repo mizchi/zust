@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795767427818,
+  "lastUpdate": 1795769769401,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -63599,6 +63599,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 38.059,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a744cd515e2ce8437bbabbd277af619c3a359437",
+          "message": "Merge pull request #299 from mizchi/claude/lsp-edit-passes-5\n\nLSP edit: keep the program built while an edit changes nothing its build reads (#188)",
+          "timestamp": "2026-11-27T17:50:27+09:00",
+          "tree_id": "837aaf294e91caade222ad9cfcf0748809a50a1f",
+          "url": "https://github.com/mizchi/zust/commit/a744cd515e2ce8437bbabbd277af619c3a359437"
+        },
+        "date": 1795769768809,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 130.873,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.651,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 17.292,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 41.333,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.844,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.548,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 130.518,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 798.277,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 579.449,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.668,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 66.538,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 189.761,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.535,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.548,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 612.088,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3927.187,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.07,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 92.52,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 42.129,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 52.429,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 94.922,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 146.145,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 38.009,
             "unit": "ms"
           }
         ]
