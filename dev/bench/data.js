@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795769775190,
+  "lastUpdate": 1795769778190,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -148160,6 +148160,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/e2b10dc345f0553a7c32d296934c961cdf051b6d"
         },
         "date": 1795767427295,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.86,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1919,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.99,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1559,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 73.72,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5445,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a744cd515e2ce8437bbabbd277af619c3a359437",
+          "message": "Merge pull request #299 from mizchi/claude/lsp-edit-passes-5\n\nLSP edit: keep the program built while an edit changes nothing its build reads (#188)",
+          "timestamp": "2026-11-27T17:50:27+09:00",
+          "tree_id": "837aaf294e91caade222ad9cfcf0748809a50a1f",
+          "url": "https://github.com/mizchi/zust/commit/a744cd515e2ce8437bbabbd277af619c3a359437"
+        },
+        "date": 1795769777563,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
