@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795751109005,
+  "lastUpdate": 1795751111230,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -120882,6 +120882,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 90.188,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "62157772c4b6429303a222fd07f512a5d10b65d3",
+          "message": "prelude/acg: split_first / splitn, div_ceil, PoisonError, `x.fmt(f)`, `x.into()` targets and more std methods (#280)\n\nstd methods and lookups that the crate survey reported as missing (#256):\n\n- slice `split_first` / `splitn` and `to_owned`\n- `str::splitn` and ASCII checks\n- `div_ceil` / `wrapping_add_signed`\n- `Thread`-free std helpers: `MaybeUninit`, `PoisonError`, `Cow` From, `Waker`, `Mutex`\n- the `IoError` methods behind `io::Error::..` paths, applied only to std's io\n\nFormatting and conversion calls:\n\n- `x.fmt(f)` picks Display or Debug from the type parameter's bound first, then from the `fmt` imports, read per `use` tree, and then from the enclosing impl. When both traits are imported and nothing decides, it is an error, not a guess.\n- `x.into()` into its own type returns the value itself (std's `From<T> for T`). Otherwise the target comes from the fn's `T: Into<U>` bound, which covers foldhash's `x.into() << n`.\n- An inherent `into(&self)` reached through `&S` is called as in rustc.\n- The `fmt` import mask is part of the incremental cache key.\n\nDeferred:\n- #286: per-module fmt trait scope.\n- #289: two type parameters with the same instance, and the receiver mutability and generic instance of an inherent `into`.\n\nPart of #256.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T03:39:15Z",
+          "tree_id": "a432ab11366a08de00167bb791239bba58b2f1e3",
+          "url": "https://github.com/mizchi/zust/commit/62157772c4b6429303a222fd07f512a5d10b65d3"
+        },
+        "date": 1795751110938,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 75,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 75,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 80,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 91.332,
             "unit": "%"
           }
         ]
