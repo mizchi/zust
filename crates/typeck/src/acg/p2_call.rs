@@ -4648,8 +4648,13 @@ impl Cx<'_> {
                 }
             }
         }
-        // (`Self::is_nan(self)` in an impl for a number type: std's inherent method only, as below)
+        // (`Self::is_nan(self)` in an impl for a number type: std's inherent method only, as below. Not in a trait's
+        // default method, whose `Self` is any type of the trait's: `Self::count_ones(self)` there is the trait's)
         let self_prim = ty == "Self";
+        // (`root`: the fn being lowered, the one a closure is in, and an inlined callee's own while it is expanded)
+        if self_prim && self.prog.sigs.get(self.root as usize).is_some_and(|s| s.trait_of.is_some()) {
+            return None;
+        }
         let t = if self_prim { self.env.self_ty.filter(|t| t.is_int() || t.is_float())? } else { Ty::prim(ty)? };
         if t == Ty::Char || t == Ty::Bool {
             return None;

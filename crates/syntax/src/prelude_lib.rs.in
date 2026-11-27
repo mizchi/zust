@@ -6124,7 +6124,7 @@ fn __exr_cstr<G>(p: *const u8) -> &str {
 
 // (std の ErrorKind の名前: errno から)
 fn __exr_io_kind<G>(code: i32) -> &str {
-    if code <= -5 && code >= -7 {
+    if code <= -5 && code >= -8 {
         "InvalidInput"
     } else if code == -1 {
         "InvalidData"
@@ -6178,6 +6178,8 @@ impl IoError {
             "creating or truncating a file requires write or append access"
         } else if self.code == -7 {
             "append and truncate cannot both be enabled"
+        } else if self.code == -8 {
+            "file name contained an unexpected NUL byte"
         } else {
             __exr_cstr::<()>(unsafe { __exr_strerror(self.code) })
         }
@@ -16077,8 +16079,8 @@ unsafe extern "C" {
 }
 
 unsafe extern "C" {
-    #[link_name = "dup"]
-    fn __exr_dup(fd: i32) -> i32;
+    #[link_name = "fcntl"]
+    fn __exr_fcntl(fd: i32, cmd: i32, arg: i32) -> i32;
 }
 
 pub type RawFd = i32;
@@ -16099,6 +16101,10 @@ pub struct File {
 
 // (open(2) of a path with the flags and the mode a new file gets, retried when a signal interrupts it)
 fn __exr_file_open<G>(p: &[u8], flags: i32, mode: i32) -> Result<File, IoError> {
+    // (a NUL inside the path would end it there: std's InvalidInput)
+    if p.iter().any(|&b| b == 0) {
+        return Err(IoError { code: -8, os: false });
+    }
     let c = __exr_c_path::<()>(p);
     loop {
         // (O_CLOEXEC, as std's)
@@ -16155,7 +16161,8 @@ impl File {
         Ok(())
     }
     pub fn try_clone(&self) -> Result<File, IoError> {
-        let fd = unsafe { __exr_dup(self.__f_fd) };
+        // (F_DUPFD_CLOEXEC, as std's: the copy is not left to a child process either)
+        let fd = unsafe { __exr_fcntl(self.__f_fd, 1030, 3) };
         if fd < 0 {
             return Err(IoError::last_os_error());
         }
@@ -16363,7 +16370,7 @@ impl Metadata {
         self.__md[6]
     }
     pub fn file_type(&self) -> FileType {
-        FileType { __ft_mode: self.__mode() }
+        FileType { __ft_mode: self.__mode() & 0o170000 }
     }
     pub fn is_file(&self) -> bool {
         self.file_type().is_file()
@@ -16484,8 +16491,28 @@ impl PermissionsExt for Permissions {
     }
 }
 
+unsafe extern "C" {
+    #[link_name = "chmod"]
+    fn __exr_chmod(path: *const u8, mode: u32) -> i32;
+}
+
+// `fs::set_permissions(p, perm)`: chmod(2)
+pub fn __core_set_permissions<P>(path: P, perm: Permissions) -> Result<(), IoError> {
+    if path.__as_bytes().iter().any(|&b| b == 0) {
+        return Err(IoError { code: -8, os: false });
+    }
+    let c = __exr_c_path::<()>(path.__as_bytes());
+    if unsafe { __exr_chmod(c.as_ptr(), perm.__pm_mode) } != 0 {
+        return Err(IoError::last_os_error());
+    }
+    Ok(())
+}
+
 // `fs::metadata(p)`: stat(2), which follows a symlink
 pub fn __core_metadata<P>(path: P) -> Result<Metadata, IoError> {
+    if path.__as_bytes().iter().any(|&b| b == 0) {
+        return Err(IoError { code: -8, os: false });
+    }
     let c = __exr_c_path::<()>(path.__as_bytes());
     let mut m = Metadata { __md: [0u64; 18] };
     if unsafe { __exr_stat(c.as_ptr(), m.__md.as_mut_ptr() as *mut u8) } != 0 {
@@ -16499,7 +16526,16 @@ fn __exr_read_to_end<R: Read + ?Sized>(r: &mut R, buf: &mut Vec<u8>) -> Result<u
     let start = buf.len();
     let mut chunk = [0u8; 4096];
     loop {
-        let n = r.read(&mut chunk)?;
+        // (Interrupted: read again, as std's)
+        let n = match r.read(&mut chunk) {
+            Ok(n) => n,
+            Err(e) => {
+                if e.os && e.code == 4 {
+                    continue;
+                }
+                return Err(e);
+            }
+        };
         if n == 0 {
             return Ok(buf.len() - start);
         }
@@ -16507,16 +16543,20 @@ fn __exr_read_to_end<R: Read + ?Sized>(r: &mut R, buf: &mut Vec<u8>) -> Result<u
     }
 }
 
-// (std's leaves buf as it was when the bytes are no UTF-8)
+// (as std's: the bytes read, before an error too, are appended when they are UTF-8; buf is left as it was when they
+// are not, with read_to_end's error if it had one)
 fn __exr_read_to_string<R: Read + ?Sized>(r: &mut R, buf: &mut String) -> Result<usize, IoError> {
     let mut v: Vec<u8> = Vec::new();
-    let n = __exr_read_to_end(r, &mut v)?;
+    let ret = __exr_read_to_end(r, &mut v);
     match String::from_utf8(v) {
         Ok(t) => {
             buf.push_str(&t);
-            Ok(n)
+            ret
         }
-        Err(_) => Err(IoError { code: -1, os: false }),
+        Err(_) => match ret {
+            Err(e) => Err(e),
+            Ok(_) => Err(IoError { code: -1, os: false }),
+        },
     }
 }
 

@@ -1,0 +1,8 @@
+file name contained an unexpected NUL byte | Error { kind: InvalidInput, message: "file name contained an unexpected NUL byte" } | None
+true
+same file type: true
+clone close-on-exec: true
+4 "abcd"
+Err(Some(5)) ">abc"
+Err(Some(5)) ">"
+100 3
