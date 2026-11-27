@@ -1930,11 +1930,19 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     let mut dur_ops = false;
     let mut fmt_write = false;
+    let mut as_mut_gate = false;
     // (whether the program writes `thread` / `Layout`: asked once one of the functions below is wanted)
     let mut thread_text: Option<bool> = None;
     let mut layout_text: Option<bool> = None;
     loop {
         let mut changed = false;
+        // (`s.as_mut()` of a String: acg rewrites it to `s.as_mut_str()`. In the loop: String can enter `need` after
+        // the rules above, from `fs::` / `env::` / a dyn Error)
+        if !as_mut_gate && need.contains("String") && need.contains("as_mut") {
+            as_mut_gate = true;
+            changed = true;
+            need.extend(["as_mut_str", "as_mut_slice"]);
+        }
         if !wide_ops && (need.contains("i128") || need.contains("u128")) {
             wide_ops = true;
             changed = true;

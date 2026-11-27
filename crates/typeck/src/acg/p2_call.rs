@@ -805,6 +805,14 @@ impl Cx<'_> {
                 return self.expr(ne, expected);
             }
         }
+        // `s.as_mut()` (AsMut<str> of std's String / str): `s.as_mut_str()` / `&mut *s`, of a receiver that is one of
+        // them or `&mut` to one (a Vec's / array's / slice's below: as_mut_of_vec)
+        if method == "as_mut" && margs.is_empty() {
+            if let Some(ne) = self.as_mut_of_text(recv) {
+                let ne = self.keep_expr(ne);
+                return self.expr(ne, expected);
+            }
+        }
         let tf: Option<&[GArg]> = (!gargs.is_empty()).then_some(&gargs[..]);
         // `x.unwrap()` / `x.expect(..)`: panic の場所 (メソッド名の位置) を先に書いておく (#[track_caller] 相当)
         // (and `c.borrow()` / `c.replace(..)` .. of a RefCell, whose overlapping borrow panics at the call, as in std)
@@ -826,6 +834,15 @@ impl Cx<'_> {
         // 受け手が `a.as_slice()` (a: 配列) なら `(&a[..])` にして呼び直す (`a.as_slice().len()`)
         // (an array's `as_mut()` too: its one AsMut is `AsMut<[T]>`, `seed.as_mut().iter_mut()` in rand_core)
         if let Expr::MethodCall(ir, iname, _, iargs, _) = strip_paren(recv) {
+            // (and a String's / str's `as_mut()`, `s.as_mut().len()`: `(s.as_mut_str())`, as the call alone is lowered,
+            // so the method is the str's)
+            if iargs.is_empty() && iname == "as_mut" {
+                if let Some(nr) = self.as_mut_of_text(ir) {
+                    // (the call's span: an unsafe method's check needs it)
+                    let m2 = Expr::MethodCall(Box::new(paren(nr)), method.to_string(), gargs.clone(), margs.clone(), msp);
+                    return self.method_call(&m2, expected);
+                }
+            }
             if iargs.is_empty() && matches!(iname.as_str(), "as_slice" | "as_mut_slice" | "as_mut") {
                 if let Some(Ty::Array(..)) = self.peek(ir).map(|t| self.strip_refs(t)) {
                     let r = (**ir).clone();
@@ -2218,6 +2235,54 @@ impl Cx<'_> {
             }
         }
         Ok(())
+    }
+
+    /// std's `AsMut<str>` of `recv.as_mut()`: `recv.as_mut_str()` of a String, `&mut *recv` of a str (through `&mut`
+    /// references only; not a program's own type named String)
+    pub(crate) fn as_mut_of_text(&self, recv: &Expr) -> Option<Expr> {
+        let mut t = self.peek(recv)?;
+        let mut derefs = 0;
+        while let Ty::Ref(m, i) = t {
+            if !m {
+                return None;
+            }
+            derefs += 1;
+            t = *i;
+        }
+        // (a program's own `as_mut` of the type, `impl Len for str { fn as_mut(&self) -> usize }`: on the place itself,
+        // `(*s).as_mut()` / `t.as_mut()`, rustc's lookup takes it (its `&self` before AsMut's `&mut self`); through
+        // `&mut`, AsMut's `self: &mut str` comes first)
+        if derefs == 0 {
+            let own = match t {
+                Ty::Struct(sid) => self.prog.method(sid, "as_mut"),
+                Ty::Str => self.prog.prim_method(Ty::Str, "as_mut"),
+                _ => None,
+            };
+            if own.is_some() {
+                return None;
+            }
+        }
+        match t {
+            Ty::Struct(sid) if self.std_struct_name(sid) == "String" => Some(mcall(paren(recv.clone()), "as_mut_str", vec![])),
+            Ty::Str => {
+                let mut e = paren(recv.clone());
+                for _ in 0..derefs {
+                    e = paren(Expr::Unary("*".into(), Box::new(e), crate::parse::Span::default()));
+                }
+                Some(Expr::Ref(true, Box::new(e)))
+            }
+            _ => None,
+        }
+    }
+
+    /// The name of std's (the prelude's) struct sid's base, "" for a program's own type (`struct String` of its own)
+    pub(crate) fn std_struct_name(&self, sid: u32) -> &str {
+        let b = self.prog.base_of(sid);
+        if self.prog.struct_item.get(b as usize).is_some_and(|&i| i >= self.prog.prelude_from) {
+            self.prog.structs[b as usize].name.as_str()
+        } else {
+            ""
+        }
     }
 
     /// 組み込みの AsRef (`s.as_ref()` → `s.as_bytes()` / `&s[..]`)。受け手が as_ref を持つ構造体 (Option など) なら None

@@ -17,19 +17,19 @@ needs one filed first (then add it to [cratebench/survey/issues.tsv](cratebench/
 
 <!-- crate-priorities -->
 
-Survey of 2026-11-27 03:47 UTC on `6215777`: 45 of 273 crates build (16.4% of their downloads); 497 errors in 181 packages.
+Survey of 2026-11-27 06:09 UTC on `0277886`: 45 of 273 crates build (16.4% of their downloads); 514 errors in 180 packages.
 
 | # | fix | issue | holds back | crates it alone unblocks |
 |---:|---|---|---:|---:|
-| 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | [#254](https://github.com/mizchi/zust/issues/254) | 7.5% | 9 |
-| 2 | `impl<T: Tr> Tr for &T` | [#144](https://github.com/mizchi/zust/issues/144) | 7.2% | 12 |
-| 3 | parser: syntax zustc does not parse | [#257](https://github.com/mizchi/zust/issues/257) | 4.8% | 3 |
+| 1 | `impl<T: Tr> Tr for &T` | [#144](https://github.com/mizchi/zust/issues/144) | 7.2% | 12 |
+| 2 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | [#254](https://github.com/mizchi/zust/issues/254) | 6.8% | 8 |
+| 3 | parser: syntax zustc does not parse | [#257](https://github.com/mizchi/zust/issues/257) | 4.9% | 3 |
 | 4 | mismatched types (to sort by cause) | [#259](https://github.com/mizchi/zust/issues/259) | 4.5% | 1 |
 | 5 | duplicate definition of `…` | none yet | 4.2% | 6 |
 | 6 | `missing generics for` a type used without its parameters | [#260](https://github.com/mizchi/zust/issues/260) | 2.4% | 1 |
 | 7 | macro expansion too deep at a crate's first line | [#252](https://github.com/mizchi/zust/issues/252) | 2.3% | 5 |
-| 8 | false E0277: a bound zustc does not see | [#261](https://github.com/mizchi/zust/issues/261) | 2.2% | 2 |
-| 9 | value paths zustc cannot resolve | [#265](https://github.com/mizchi/zust/issues/265) | 2.2% | 0 |
+| 8 | value paths zustc cannot resolve | [#265](https://github.com/mizchi/zust/issues/265) | 2.3% | 0 |
+| 9 | false E0277: a bound zustc does not see | [#261](https://github.com/mizchi/zust/issues/261) | 2.2% | 2 |
 | 10 | not all trait items implemented, missing: `…` in `…` | none yet | 1.9% | 4 |
 | 11 | cannot infer an `impl Trait` return type | [#262](https://github.com/mizchi/zust/issues/262) | 1.9% | 5 |
 | 12 | prelude: `impl Error for fmt::Error` | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 2 |
@@ -38,15 +38,15 @@ By issue, with its tier (the issue's label: **T0** holds back 2% or more of the 
 
 | tier | issue | holds back | fixes | the largest |
 |---|---|---:|---:|---|
-| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 11.1% | 24 | prelude: type `File` |
-| T0 | [#254](https://github.com/mizchi/zust/issues/254) | 7.5% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
+| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 11.6% | 26 | prelude: type `File` |
 | T0 | [#144](https://github.com/mizchi/zust/issues/144) | 7.2% | 1 | `impl<T: Tr> Tr for &T` |
-| T0 | [#257](https://github.com/mizchi/zust/issues/257) | 4.8% | 1 | parser: syntax zustc does not parse |
+| T0 | [#254](https://github.com/mizchi/zust/issues/254) | 6.8% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
+| T0 | [#257](https://github.com/mizchi/zust/issues/257) | 4.9% | 1 | parser: syntax zustc does not parse |
 | T0 | [#259](https://github.com/mizchi/zust/issues/259) | 4.5% | 1 | mismatched types (to sort by cause) |
 | T0 | [#260](https://github.com/mizchi/zust/issues/260) | 2.4% | 1 | `missing generics for` a type used without its parameters |
 | T0 | [#252](https://github.com/mizchi/zust/issues/252) | 2.3% | 1 | macro expansion too deep at a crate's first line |
+| T0 | [#265](https://github.com/mizchi/zust/issues/265) | 2.3% | 1 | value paths zustc cannot resolve |
 | T0 | [#261](https://github.com/mizchi/zust/issues/261) | 2.2% | 1 | false E0277: a bound zustc does not see |
-| T0 | [#265](https://github.com/mizchi/zust/issues/265) | 2.2% | 1 | value paths zustc cannot resolve |
 | T1 | [#262](https://github.com/mizchi/zust/issues/262) | 1.9% | 1 | cannot infer an `impl Trait` return type |
 | T1 | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 1 | prelude: `impl Error for fmt::Error` |
 | T1 | [#264](https://github.com/mizchi/zust/issues/264) | 1.6% | 1 | false E0276 in bitflags' impls |
@@ -349,10 +349,16 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
 test by test (`cratebench/test_result.md`). fnv, rustc-hash, cfg-if and adler2 match, and CI keeps them so
 (`--check`). Tracking issue for the rest: #200.
 
-- either does not build under zurgo yet. The first error is `conflicting implementations of trait AsMut`: a blanket
-  `impl<Target> AsMut<Target>` beside impls for unsized types, which rustc accepts because `Target` is `Sized`. Then
-  serde_core, through the dev-dependency serde_json: #197, #198, and std types the prelude lacks (`CString` /
-  `CStr`, net addresses, `SystemTime`, `LinkedList`, `RwLock`, `Weak`, `Bound`).
+- either does not build under zurgo yet. The first error is `cannot find trait Binary` (lib.rs's
+  `impl_fmt_traits!(Binary, Display, LowerExp, ..)`: the prelude has no `fmt::Binary` / `LowerExp` / `Octal` /
+  `Pointer` / `UpperExp` traits). Then serde_core, through the dev-dependency serde_json: #197, #198, and std types
+  the prelude lacks (`CString` / `CStr`, net addresses, `SystemTime`, `LinkedList`, `RwLock`, `Weak`, `Bound`).
+- A method of a trait with several impls for one type that differ only in the trait's arguments is not chosen by a
+  bound: `fn f<T: AsMut<[u8]>>(t: &mut T) { t.as_mut() }` with `T = Either<..>` (either's `AsMut<str>` /
+  `AsMut<[Target]>` / `AsMut<Target>` ..) takes the first impl's `as_mut`, or cannot infer `Target`. The expected
+  type chooses (`let x: u16 = s.get()`), and a bound does when the impls' arguments are concrete; an impl's trait
+  arguments are not kept per method (FnSig has the trait's name only), so a generic one (`AsMut<[Target]>`) cannot
+  be matched against the bound.
 - hex and itoa: their dev-dependency criterion needs two versions of one crate (#28). The error message names
   `itoa v1.0.19` twice (#178).
 - Smaller gaps found on the way: inherent impls on instances of one type (associated fns, implicit `Sized`: #201),
