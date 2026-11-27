@@ -412,6 +412,12 @@ impl Cx<'_> {
                 let imp = self.prog.fmt_imports;
                 let vd = d && (imp & 1 != 0 || inside == Some("Display"));
                 let vg = g && (imp & 2 != 0 || inside == Some("Debug"));
+                // (both imported and no impl to decide: which one this module sees is not known here (one module may
+                // import Debug, another Display), so no pick, which could be the wrong one: the ordinary lookup, which
+                // finds no method. Both in this one module is rustc's E0034 anyway)
+                if vd && vg && !matches!(inside, Some("Display" | "Debug")) {
+                    return Ok(None);
+                }
                 let pick = |d: bool, g: bool| match (d, g) {
                     (true, false) => Some("Display"),
                     (false, true) => Some("Debug"),
