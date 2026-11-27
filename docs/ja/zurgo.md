@@ -38,7 +38,8 @@ zurgo run
 - `-v`: zurgo が zustc に渡すワークスペースを、`zustc build` の形で出す。`target/zust/<profile>/zurgo-ws.txt` にも
   書くので、`zustc build` で同じビルドを繰り返せる。クレート名と実行ファイルの名前が違う bin (パッケージの lib と
   bin はパッケージの名前を共有するので、bin のクレートは `<名前>-bin` になる) には `exe=<名前>` が付く。クレートごとの、
-  ビルドスクリプトが与える cfg と、`env!` の環境 (`CARGO_PKG_*`、`OUT_DIR`) もそこに付く (`cfg=`、`env=`)。
+  ビルドスクリプトが与える cfg と、`env!` の環境 (`CARGO_PKG_*`、`OUT_DIR`) もそこに付く (`cfg=`、`env=`)。名前を変えた
+  依存も (`extern=common=crypto_common`)。
 - `--filter-platform <triple>` (metadata)。
 - `--locked`、`--offline`、`--frozen` は受け付ける。zurgo はいつも Cargo.lock をそのまま使い、何もダウンロードしない。
 
@@ -267,8 +268,11 @@ zurgo test --lib parse -- --include-ignored
 
 ## まだのもの (mizchi/zust#28)
 
-- **1 つのライブラリの 2 つの版**と、**名前を変えた依存**はエラーになる: zustc のワークスペースでは、クレートごとに
-  名前が 1 つである。
+- **1 つのライブラリの 2 つの版**はエラーになる: zustc のワークスペースでは、クレートごとに名前が 1 つである。名前を
+  変えた依存 (`common = { package = "crypto-common" }`) は、それを使うクレートの中でだけその名前のライブラリになる
+  (ワークスペースのファイルの `extern=`。rustc の `--extern common=..` と同じ)。まだのもの: bin やテストのクレートの
+  トップレベルのモジュールが依存のライブラリと同じ名前のとき (spin の単体テストの `mod lock_api` とライブラリ lock_api):
+  クレートのモジュールとライブラリは 1 つの名前空間にある。
 - **ほかのソース:** git の依存、ほかのレジストリ、ソースの置き換え。
 - **`[patch]`、自前のリゾルバ、ダウンロード、`doc` はない。**
 - **edition:** zustc には edition の設定がない: どの edition が受け付けるものも受け付ける。なので、クレートの

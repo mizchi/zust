@@ -40,7 +40,7 @@ Options:
   `target/zust/<profile>/zurgo-ws.txt`, so `zustc build` can repeat the build. A bin whose crate name differs from its
   executable's (a package's lib and bin share the package's name, so the bin's crate is `<name>-bin`) carries
   `exe=<name>`. Each crate's cfgs from its build script and its environment for `env!` (`CARGO_PKG_*`, `OUT_DIR`)
-  are there too (`cfg=`, `env=`).
+  are there too (`cfg=`, `env=`), and its renamed dependencies (`extern=common=crypto_common`).
 - `--filter-platform <triple>` (metadata).
 - `--locked`, `--offline`, `--frozen` are accepted. zurgo always uses Cargo.lock as it is and never downloads.
 
@@ -272,8 +272,11 @@ zurgo test --lib parse -- --include-ignored
 
 ## Not yet (mizchi/zust#28)
 
-- **Two versions of one library**, and **renamed dependencies**, are errors: zustc's workspace has one name per
-  crate.
+- **Two versions of one library** are an error: zustc's workspace has one name per crate. A renamed dependency
+  (`common = { package = "crypto-common" }`) is the library under that name in its dependent only (`extern=` in the
+  workspace file, as rustc's `--extern common=..`). Still not: a bin's or test crate's own top-level module of a
+  dependency's library name (spin's `mod lock_api` beside the library lock_api, in its unit tests): the crate's
+  modules and the libraries share one namespace.
 - **Other sources:** git dependencies, other registries, source replacement.
 - **No `[patch]`, no resolver of its own, no downloads, no `doc`.**
 - **Editions:** zustc has no edition setting: it accepts what any edition accepts, so a crate's edition is not
