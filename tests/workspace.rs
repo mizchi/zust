@@ -120,6 +120,7 @@ fn exe_moved_between_crates_relinks() {
         display: format!("{name}.rs"),
         lib: false,
         deps: vec![],
+        aliases: vec![],
         features: vec![],
         exe: Some("one".to_string()),
         cfgs: vec![],
@@ -256,6 +257,7 @@ fn unused_parens_in_a_library_and_not_in_dependencies() {
         display: format!("{name}.rs"),
         lib,
         deps: deps.iter().map(|d| d.to_string()).collect(),
+        aliases: vec![],
         features: vec![],
         exe: (!lib).then(|| name.to_string()),
         cfgs: vec![],
@@ -269,5 +271,365 @@ fn unused_parens_in_a_library_and_not_in_dependencies() {
     assert!(e.contains("lib.rs:3:13: unnecessary parentheses around assigned value"), "{e}");
     s.build_workspace(&[spec("dep", true, &[]), spec("main", false, &["dep"])], &out).unwrap();
     assert_eq!(run(&out.join("main"), &dir, 0).0, "2\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Renamed dependencies (`extern=ALIAS=NAME`; a Cargo `common = { package = "crypto-common" }`, rustc's `--extern
+/// common=..`): the dependent names the library otherwise in each of its modules (a fn, a type, a trait, `use
+/// alias::..` of a module's item and of an item, `::alias::..`, in a module of another file), re-exports it (`pub use
+/// common;`) and names it in `extern crate` (`extern crate lock_api_crate as la;`); a module of the library's own name
+/// beside the renamed library (spin's `lock_api` with `lock_api_crate`); a bin's names, from a module of its own. The
+/// output is rustc's
+#[test]
+fn renamed_dependencies_match_rustc() {
+    let dir = std::env::temp_dir().join(format!("zustc_ws_renamed_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let put = |p: &str, t: &str| {
+        let f = dir.join(p);
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(f, t).unwrap();
+    };
+    put(
+        "cc/lib.rs",
+        "pub mod hazmat;\npub struct Block(pub u32);\npub fn make(x: u32) -> Block {\n    Block(x * 2)\n}\npub mod inner {\n    pub fn hello() -> &'static str {\n        \"hello\"\n    }\n}\npub trait Tr {\n    fn get(&self) -> u32;\n}\nimpl Tr for Block {\n    fn get(&self) -> u32 {\n        self.0 + 1\n    }\n}\n",
+    );
+    put("cc/hazmat.rs", "pub struct State<T>(pub T);\npub fn state<T>(t: T) -> State<T> {\n    State(t)\n}\n");
+    put(
+        "lock_api/lib.rs",
+        "pub unsafe trait RawMutex {\n    const INIT: Self;\n    fn lock(&self) -> u32;\n}\npub struct Mutex<R: RawMutex, T> {\n    pub raw: R,\n    pub data: T,\n}\nimpl<R: RawMutex, T: Copy> Mutex<R, T> {\n    pub fn get(&self) -> (u32, T) {\n        (self.raw.lock(), self.data)\n    }\n}\n",
+    );
+    put(
+        "dig/lib.rs",
+        "extern crate lock_api_crate as la;\npub use common;\npub use common::Block;\nmod sub;\n// (a module of the library's name: `lock_api` is this one, `lock_api_crate` the library)\npub mod lock_api {\n    pub type Mutex<T> = lock_api_crate::Mutex<crate::Raw, T>;\n    pub fn new<T>(data: T) -> Mutex<T> {\n        lock_api_crate::Mutex { raw: <crate::Raw as lock_api_crate::RawMutex>::INIT, data }\n    }\n}\npub struct Raw(pub u32);\nunsafe impl la::RawMutex for Raw {\n    const INIT: Self = Raw(100);\n    fn lock(&self) -> u32 {\n        self.0 + 1\n    }\n}\npub fn all() -> String {\n    let m = lock_api::new(7u8);\n    format!(\"{} {} {:?}\", sub::f(), common::make(1).0, m.get())\n}\n",
+    );
+    put(
+        "dig/sub.rs",
+        "use common::hazmat::State;\nuse common::inner::hello;\nuse common::Tr;\npub fn f() -> String {\n    let s: State<&str> = common::hazmat::state(\"st\");\n    let b: ::common::Block = common::make(3);\n    format!(\"{} {} {}\", hello(), b.get(), s.0)\n}\n",
+    );
+    put(
+        "app/main.rs",
+        "mod show {\n    use cc::Tr;\n    pub fn line() -> String {\n        let b: d::Block = cc::Block(9);\n        format!(\"{} {} {} {}\", d::all(), cc::make(5).0, d::common::inner::hello(), b.get())\n    }\n}\nfn main() {\n    println!(\"{}\", show::line());\n}\n",
+    );
+    put(
+        "ws.txt",
+        "lib crypto_common cc/lib.rs\nlib lock_api lock_api/lib.rs\nlib dig dig/lib.rs extern=common=crypto_common extern=lock_api_crate=lock_api\nbin app app/main.rs extern=d=dig extern=cc=crypto_common\n",
+    );
+    let crates = zustc::session::read_workspace(&dir.join("ws.txt")).unwrap();
+    assert_eq!(crates[2].deps, ["crypto_common", "lock_api"]);
+    let alias = |a: &str, n: &str| (a.to_string(), n.to_string());
+    assert_eq!(crates[2].aliases, [alias("common", "crypto_common"), alias("lock_api_crate", "lock_api")]);
+    let out = dir.join("target");
+    let mut s = zustc::session::Session::new(zustc::session::Options { jobs: 1, ..Default::default() });
+    s.build_workspace(&crates, &out).unwrap();
+    let rs = dir.join("target_rustc");
+    rustc_build(&crates, &rs);
+    let a = run(&out.join("app"), &dir, 0);
+    assert_eq!(a, run(&rs.join("app"), &dir, 0));
+    assert_eq!(a.0, "hello 7 st 2 (101, 7) 10 hello 10\n");
+    // (`extern=` with no crate)
+    put("bad.txt", "lib crypto_common cc/lib.rs\nlib dig dig/lib.rs extern=common\n");
+    let e = zustc::session::read_workspace(&dir.join("bad.txt")).err().unwrap_or_default();
+    assert!(e.contains("expected `extern=ALIAS=NAME`"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A workspace's crates built by rustc into rs, as zustc builds them: `--extern` for each dependency, a renamed one
+/// under its name (`--extern common=libcrypto_common.rlib`)
+fn rustc_build(crates: &[zustc::session::CrateSpec], rs: &Path) {
+    std::fs::create_dir_all(rs).unwrap();
+    let rlib = |n: &str| rs.join(format!("lib{n}.rlib"));
+    for c in crates {
+        let mut cmd = Command::new("rustc");
+        cmd.args(["--edition", "2021", "-Awarnings", "--crate-name", &c.name]).arg(&c.root).arg("-L").arg(rs);
+        if c.lib {
+            cmd.args(["--crate-type", "rlib"]).arg("-o").arg(rlib(&c.name));
+        } else {
+            cmd.arg("-o").arg(rs.join(&c.name));
+        }
+        for d in c.deps.iter().filter(|d| !c.aliases.iter().any(|x| x.1 == **d)) {
+            cmd.arg("--extern").arg(format!("{d}={}", rlib(d).display()));
+        }
+        for (a, n) in &c.aliases {
+            cmd.arg("--extern").arg(format!("{a}={}", rlib(n).display()));
+        }
+        let o = cmd.output().unwrap();
+        assert!(o.status.success(), "rustc {}: {}", c.name, String::from_utf8_lossy(&o.stderr));
+    }
+}
+
+/// The files (with `ws.txt`) built by zustc and by rustc: what the bin `app` prints in each
+fn zustc_and_rustc(name: &str, files: &[(&str, &str)]) -> (String, String) {
+    let dir = std::env::temp_dir().join(format!("zustc_ws_{name}_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (p, t) in files {
+        let f = dir.join(p);
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(f, t).unwrap();
+    }
+    let crates = zustc::session::read_workspace(&dir.join("ws.txt")).unwrap();
+    let out = dir.join("target");
+    let mut s = zustc::session::Session::new(zustc::session::Options { jobs: 1, ..Default::default() });
+    let built = s.build_workspace(&crates, &out);
+    rustc_build(&crates, &dir.join("target_rustc"));
+    let want = run(&dir.join("target_rustc/app"), &dir, 0).0;
+    let got = match built {
+        Ok(_) => run(&out.join("app"), &dir, 0).0,
+        Err(e) => format!("zustc: {e}"),
+    };
+    let _ = std::fs::remove_dir_all(&dir);
+    (got, want)
+}
+
+/// `::common::..` is the renamed dependency past a module `common` of the crate's own (edition 2018 on): in a `use` of an
+/// item, of the crate itself (`as c`) and of its module (`as i`), and in an expression; `common::..` is the module
+#[test]
+fn renamed_dependency_absolute_paths_past_a_module_of_its_name() {
+    let (got, want) = zustc_and_rustc(
+        "renamed_abs",
+        &[
+            ("cc.rs", "pub fn make() -> u32 {\n    1\n}\npub mod inner {\n    pub fn hi() -> u32 {\n        3\n    }\n}\n"),
+            (
+                "dig.rs",
+                "mod common {\n    pub fn make() -> u32 {\n        2\n    }\n}\nuse ::common::make;\nuse ::common as c;\nuse ::common::inner as i;\npub fn f() -> u32 {\n    i::hi() * 10000 + make() * 1000 + ::common::make() * 100 + c::make() * 10 + common::make()\n}\n",
+            ),
+            ("app.rs", "fn main() {\n    println!(\"{}\", dig::f());\n}\n"),
+            ("ws.txt", "lib cc cc.rs\nlib dig dig.rs extern=common=cc\nbin app app.rs dig\n"),
+        ],
+    );
+    assert_eq!(want, "31112\n");
+    assert_eq!(got, want);
+}
+
+/// A fn of the renamed dependency's name does not hide it: the fn is a value, `common::..` a path from a type or module
+#[test]
+fn renamed_dependency_beside_a_fn_of_its_name() {
+    let (got, want) = zustc_and_rustc(
+        "renamed_fn",
+        &[
+            ("cc.rs", "pub fn make() -> u32 {\n    1\n}\n"),
+            ("dig.rs", "fn common() -> u32 {\n    5\n}\npub fn f() -> u32 {\n    common::make() * 10 + common()\n}\n"),
+            ("app.rs", "fn main() {\n    println!(\"{}\", dig::f());\n}\n"),
+            ("ws.txt", "lib cc cc.rs\nlib dig dig.rs extern=common=cc\nbin app app.rs dig\n"),
+        ],
+    );
+    assert_eq!(want, "15\n");
+    assert_eq!(got, want);
+}
+
+/// A module of the renamed dependency's name shadows it where it is in scope, also for a path through the module's
+/// re-export (`common::inner` with `pub use crate::local::inner;` in it); a module beneath does not see it
+#[test]
+fn renamed_dependency_shadowed_by_a_module_that_reexports() {
+    let (got, want) = zustc_and_rustc(
+        "renamed_shadow",
+        &[
+            ("cc.rs", "pub mod inner {\n    pub fn make() -> u32 {\n        1\n    }\n}\n"),
+            (
+                "dig.rs",
+                "mod local {\n    pub mod inner {\n        pub fn make() -> u32 {\n            2\n        }\n    }\n}\nmod common {\n    pub use crate::local::inner;\n}\nmod sub {\n    pub fn g() -> u32 {\n        common::inner::make()\n    }\n}\npub fn f() -> u32 {\n    common::inner::make() * 10 + sub::g()\n}\n",
+            ),
+            ("app.rs", "fn main() {\n    println!(\"{}\", dig::f());\n}\n"),
+            ("ws.txt", "lib cc cc.rs\nlib dig dig.rs extern=common=cc\nbin app app.rs dig\n"),
+        ],
+    );
+    assert_eq!(want, "21\n");
+    assert_eq!(got, want);
+}
+
+/// A name another crate gives a dependency is that crate's alone: the bin names `other` `common`, and a generic fn of
+/// `dig`, which depends on the crate `common` and which the bin instantiates, still means `common` by `::common::..` and
+/// by `common::..`
+#[test]
+fn renamed_dependency_of_a_bin_does_not_reach_a_library() {
+    let (got, want) = zustc_and_rustc(
+        "renamed_leak",
+        &[
+            ("common.rs", "pub fn make() -> u32 {\n    1\n}\n"),
+            ("other.rs", "pub fn make() -> u32 {\n    2\n}\n"),
+            ("dig.rs", "pub fn f<T>() -> u32 {\n    ::common::make() * 10 + common::make()\n}\n"),
+            ("app.rs", "fn main() {\n    println!(\"{} {}\", dig::f::<u8>(), common::make());\n}\n"),
+            ("ws.txt", "lib common common.rs\nlib other other.rs\nlib dig dig.rs common\nbin app app.rs dig extern=common=other\n"),
+        ],
+    );
+    assert_eq!(want, "11 2\n");
+    assert_eq!(got, want);
+}
+
+/// Only a dependency's renamed dependency changes (`chosen=a` to `chosen=b`, the texts the same): its generic fn, which
+/// the bin instantiates, names the other crate now, so the bin is compiled again though the items it reaches are the same
+#[test]
+fn a_dependency_renaming_another_crate_recompiles_its_users() {
+    let dir = std::env::temp_dir().join(format!("zustc_ws_renamed_fp_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let put = |p: &str, t: &str| std::fs::write(dir.join(p), t).unwrap();
+    put("a.rs", "pub fn val() -> u32 {\n    1\n}\n");
+    put("b.rs", "pub fn val() -> u32 {\n    2\n}\n");
+    put("middle.rs", "pub fn get<T>() -> u32 {\n    chosen::val()\n}\n");
+    put("app.rs", "fn main() {\n    println!(\"{}\", middle::get::<u8>());\n}\n");
+    let out = dir.join("target");
+    for (alias, want) in [("a", "1\n"), ("b", "2\n"), ("a", "1\n")] {
+        put("ws.txt", &format!("lib a a.rs\nlib b b.rs\nlib middle middle.rs a b extern=chosen={alias}\nbin app app.rs middle\n"));
+        let crates = zustc::session::read_workspace(&dir.join("ws.txt")).unwrap();
+        let mut s = zustc::session::Session::new(zustc::session::Options { jobs: 1, ..Default::default() });
+        s.build_workspace(&crates, &out).unwrap();
+        assert_eq!(run(&out.join("app"), &dir, 0).0, want, "chosen={alias}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A crate's own items that zustc lost (#254). The flattening renames every item of a crate (`rng__u32`), and
+/// - a fn named like a primitive type (getrandom's `pub fn u32() -> Result<u32, Error>`, fastrand's macro-made `u8`
+///   that the root's `pub use global_rng::*;` brings) took the type `u32`, a number's suffix (`0u8`) and `u32::MAX`
+///   with it;
+/// - `self` first in a `use` tree (`use crate::unicode::Sign::{self, Minus}`, num-bigint) brings the enum, and a path in
+///   a tree's braces (`pub use crate::{hir::visitor::visit, unicode::Sign as S};` beside `use crate::unicode;`,
+///   regex-syntax) goes on from the tree's prefix;
+/// - a macro's body that passes `*self => $i` to another macro (num-traits) keeps its `self`.
+/// The expected output is rustc's
+#[test]
+fn crate_items_named_like_primitives_and_use_trees() {
+    let dir = std::env::temp_dir().join(format!("zustc_ws_254_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let put = |p: &str, t: &str| {
+        let f = dir.join(p);
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(f, t).unwrap();
+    };
+    put(
+        "rng/lib.rs",
+        r#"mod global_rng;
+pub mod hir;
+mod unicode;
+pub use global_rng::*;
+
+#[derive(Debug)]
+pub struct Error(u8);
+
+pub fn u32() -> Result<u32, Error> {
+    if u8(1..3) == 2 { Ok(u32::MAX) } else { Err(Error(0u8)) }
+}
+
+pub fn show() -> String {
+    let c = 0x41u8 as char;
+    format!("{c} {:?} {:?} {}", u32(), char('c'), u16(0..7))
+}
+"#,
+    );
+    put(
+        "rng/global_rng.rs",
+        r#"macro_rules! integer {
+    ($t:tt) => {
+        pub fn $t(range: core::ops::Range<$t>) -> $t {
+            range.end - 1 as $t
+        }
+    };
+}
+
+integer!(u8);
+integer!(u16);
+
+pub fn char(c: char) -> char {
+    if c > 'z' { 0u8 as char } else { c }
+}
+"#,
+    );
+    put(
+        "rng/unicode.rs",
+        r#"#[derive(Debug)]
+pub struct CaseFoldError(());
+
+#[derive(Clone, Copy, Debug)]
+pub enum Sign {
+    Minus,
+    Plus,
+}
+
+pub fn fold(n: u8) -> Result<u8, CaseFoldError> {
+    if n > 3 { Err(CaseFoldError(())) } else { Ok(n) }
+}
+"#,
+    );
+    put(
+        "rng/hir.rs",
+        r#"use crate::unicode;
+use crate::unicode::Sign::{self, Minus, Plus};
+
+pub use crate::unicode::CaseFoldError;
+pub use crate::{hir::visitor::visit, unicode::Sign as S};
+
+mod visitor {
+    pub fn visit(n: u8) -> u8 {
+        n * 2
+    }
+}
+
+pub trait ToInt {
+    fn to_i8(&self) -> Option<i8>;
+}
+
+macro_rules! unchecked {
+    ($float:expr => $int:ty) => {
+        $float as $int
+    };
+}
+
+macro_rules! impl_to_int {
+    ($f:ident : $(fn $method:ident -> $i:ident;)*) => {
+        impl ToInt for $f {
+            $(
+                fn $method(&self) -> Option<$i> {
+                    if *self < 128.0 { Some(unchecked!(*self => $i)) } else { None }
+                }
+            )*
+        }
+    };
+}
+
+impl_to_int!(f32: fn to_i8 -> i8;);
+
+pub fn fold(n: u8) -> core::result::Result<Sign, CaseFoldError> {
+    unicode::fold(visit(n)).map(|x| if x > 1 { Plus } else { Minus })
+}
+
+pub fn flip(s: S) -> Sign {
+    match s {
+        Sign::Minus => Plus,
+        Sign::Plus => Minus,
+    }
+}
+"#,
+    );
+    put(
+        "app/main.rs",
+        r#"use rng::hir::ToInt;
+
+fn main() {
+    println!("{}", rng::show());
+    println!("{:?} {:?} {:?}", rng::hir::fold(1), rng::hir::fold(2).is_err(), rng::hir::flip(rng::hir::S::Plus));
+    println!("{:?} {:?} {}", 3.5f32.to_i8(), 200.0f32.to_i8(), rng::u8(4..9));
+}
+"#,
+    );
+    let spec = |name: &str, root: &str, deps: &[&str]| zustc::session::CrateSpec {
+        name: name.to_string(),
+        root: dir.join(root),
+        display: root.to_string(),
+        lib: deps.is_empty(),
+        deps: deps.iter().map(|d| d.to_string()).collect(),
+        aliases: vec![],
+        features: vec![],
+        exe: (!deps.is_empty()).then(|| name.to_string()),
+        cfgs: vec![],
+        env: vec![],
+        proc_macro: None,
+        test: false,
+    };
+    let out = dir.join("t");
+    // (no forked workers: the other tests of this file run in threads beside this one)
+    let mut s = zustc::session::Session::new(zustc::session::Options { jobs: 1, ..Default::default() });
+    s.build_workspace(&[spec("rng", "rng/lib.rs", &[]), spec("app", "app/main.rs", &["rng"])], &out).unwrap();
+    let (got, err, code) = run(&out.join("app"), &dir, 0);
+    assert_eq!((got.as_str(), code), ("A Ok(4294967295) 'c' 6\nOk(Plus) true Minus\nSome(3) None 8\n", Some(0)), "{err}");
     let _ = std::fs::remove_dir_all(&dir);
 }

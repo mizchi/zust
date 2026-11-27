@@ -389,10 +389,10 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
 
 #[allow(clippy::too_many_arguments)]
 fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_base: u32, inl: &Inline, force_rg: bool, rerun_out: &mut bool) -> R<(Compiled, Vec<u32>)> {
-    let (sig, env, body_id, fnptr, inst_args, clo_rg, lenient, recheck, fnmut_ret, where_bound) = {
+    let (sig, env, body_id, fnptr, inst_args, clo_rg, lenient, (recheck, recheck_static), fnmut_ret, where_bound) = {
         let g = insts.lock().unwrap();
         let b = g.body_of(id);
-        (g.sig(prog, id).clone(), g.env(prog, id), b, g.get(id).is_some_and(|i| i.fnptr), g.get(id).map(|i| i.args.clone()), g.closure_rg.get(&b).cloned(), g.lenient, g.recheck.contains(&id), g.kind_free.contains(&b), g.where_bound.contains(&id))
+        (g.sig(prog, id).clone(), g.env(prog, id), b, g.get(id).is_some_and(|i| i.fnptr), g.get(id).map(|i| i.args.clone()), g.closure_rg.get(&b).cloned(), g.lenient, (g.recheck.contains(&id), g.recheck_static.contains(&id)), g.kind_free.contains(&b), g.where_bound.contains(&id))
     };
     // (zustc check's last round: instances with placeholders for type parameters, and those they request (only
     // there are placeholders): see below)
@@ -580,14 +580,26 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     // further, nothing reported. Its borrow and region checks' errors are)
     // (not an error of the borrow check's kind lowering itself returns: `m[k] = v` of a HashMap is E0594 whatever T is)
     // (a fn whose instances give `Copy` types for its parameters, again with placeholders: what moving a T does is
-    // reported, nothing else (the instances checked the rest))
-    if recheck {
-        let e = match r {
+    // reported, nothing else (the instances checked the rest). One whose body names a struct or an enum that
+    // bounds a type parameter by 'static: what T: 'static its types need (E0310))
+    if recheck || recheck_static {
+        let kept = |e: &String| (recheck && (e.contains("moved value") || e.contains("cannot move out"))) || (recheck_static && e.contains("must outlive `'static`") && e.ends_with("(E0310)"));
+        let ok = r.is_ok();
+        let mut e = match r {
             Err(e) => Some(e),
             Ok(_) => cx.bk_check().err(),
         };
-        if let Some(e) = e.filter(|e| e.contains("moved value") || e.contains("cannot move out")) {
-            return Err(e);
+        // (the region check, where the T: 'static of the types is required; run again forced as compile's other
+        // instances are)
+        if recheck_static && ok && e.as_ref().is_none_or(|e| !kept(e)) {
+            if cx.rg.rerun && !force_rg {
+                *rerun_out = true;
+            } else if let Err(re) = cx.rg_check() {
+                e = Some(re);
+            }
+        }
+        if let Some(e) = e.filter(kept) {
+            return Err(e.replace("#`", "`"));
         }
         let b = cx.b;
         return Ok((Compiled { rec: b.m, late: vec![], datas: vec![], vtables: vec![], infos: vec![], loc_used: false, line_base }, vec![]));
@@ -3069,10 +3081,16 @@ impl Cx<'_> {
                     return Some(t);
                 }
             }
-            // (an array's as_mut: `&mut [T]`, its one AsMut)
+            // (an array's or a slice's as_mut: `&mut [T]`, its one AsMut)
             if m == "as_mut" && a.is_empty() {
-                if let Some(Ty::Array(el, _)) = self.peek(r).map(|t| self.strip_refs(t)) {
+                if let Some(Ty::Array(el, _) | Ty::Slice(el)) = self.peek(r).map(|t| self.strip_refs(t)) {
                     return Some(Ty::Ref(true, intern(Ty::Slice(el))));
+                }
+                // (a Vec's, where it is its AsMut<[T]> or its AsMut<Vec<T>>)
+                match self.as_mut_of_vec(r, None) {
+                    Some((true, el)) => return Some(Ty::Ref(true, intern(Ty::Slice(intern(el))))),
+                    Some((false, v)) => return Some(Ty::Ref(true, intern(v))),
+                    None => {}
                 }
             }
         }
@@ -3230,7 +3248,7 @@ impl Cx<'_> {
                         "is_power_of_two" | "is_positive" | "is_negative" | "is_nan" | "is_finite" | "is_infinite" | "is_sign_negative"
                         | "is_sign_positive" => Some(Ty::Bool),
                         "pow" | "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "wrapping_neg" | "wrapping_abs" | "saturating_abs" | "saturating_neg" | "saturating_add" | "saturating_sub" | "abs" | "min"
-                        | "max" | "rem_euclid" | "div_euclid" | "next_multiple_of" | "next_power_of_two" | "rotate_left" | "rotate_right"
+                        | "max" | "rem_euclid" | "div_euclid" | "next_multiple_of" | "div_ceil" | "wrapping_add_signed" | "next_power_of_two" | "rotate_left" | "rotate_right"
                         | "swap_bytes" | "to_be" | "to_le" | "signum" | "wrapping_pow" | "saturating_pow" | "isqrt" | "sqrt" | "floor" | "ceil" | "round" | "trunc"
                         | "powi" | "powf" | "exp" | "ln" | "sin" | "cos" | "tan" | "clamp" => Some(t),
                         _ => None,

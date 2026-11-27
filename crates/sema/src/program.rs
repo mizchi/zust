@@ -521,6 +521,9 @@ pub struct Program {
     pub struct_index: FxMap<String, u32>,
     /// Variant name → (enum, index): finds variants from `use E::*;` by short name (not when several share it)
     pub variant_names: FxMap<String, Option<(u32, usize)>>,
+    /// The prelude enums' variants a variant of the program's own enum took the short name from, (name, (enum,
+    /// index)): the session gives the name back to the prelude's where the program imports that and not its own
+    pub variant_shadowed: Vec<(String, (u32, usize))>,
     /// The fns whose `impl Trait` return type their body determines
     pub opaque: Vec<u32>,
     /// The items from here on are the prelude's (no overflow checks)
@@ -569,6 +572,10 @@ pub struct Program {
     /// the names the program's `use` declarations write (fn bodies' too): a value of one is imported, not undeclared,
     /// though zustc may not have it (`use std::convert::identity;`)
     pub use_names: FxSet<String>,
+    /// the fmt traits the program's `use` declarations import (fn bodies' too; of the whole program, not each
+    /// scope's): 1 Display, 2 Debug (`use std::fmt::Debug;`, `use core::fmt::{self, Display as _}`; a glob `fmt::*`
+    /// both). Which one `x.fmt(f)` calls where x's type has both (#256)
+    pub fmt_imports: u8,
     /// a constant with a lowercase name exists (`const or: usize`): an identifier pattern of any case may name one;
     /// without, only an uppercase one is looked up
     pub lower_consts: bool,
@@ -920,6 +927,11 @@ pub struct Insts {
     /// Of those, the instances of fns that instances were made of with `Copy` types only (session's
     /// placeholder_wave): checked for what moving a T does, nothing else
     pub recheck: FxSet<u32>,
+    /// Of those, the instances of fns that instances were made of whose bodies name a struct or an enum of the
+    /// program's that bounds a type parameter by 'static (session's placeholder_wave): checked for the T: 'static
+    /// that its well-formedness needs (E0310), nothing else (an instance's T may be a type with a region the check
+    /// takes as fresh)
+    pub recheck_static: FxSet<u32>,
     /// Of those, the instances of fns that a where clause bounds (the fn's, its impl's): a parameter's bounds there
     /// may not be its own (`where &'a T: Trait`)
     pub where_bound: FxSet<u32>,
@@ -1031,6 +1043,7 @@ impl Insts {
             imp_cache: HashMap::default(),
             lenient: false,
             recheck: FxSet::default(),
+            recheck_static: FxSet::default(),
             where_bound: FxSet::default(),
             kind_free: FxSet::default(),
             fx_log: vec![],
@@ -1346,9 +1359,18 @@ impl Insts {
 }
 
 
-/// The summary with the items of `impl Alias { .. }` moved to the aliased type (`Alias::f` -> `Foo::f`)
-fn rebase_aliased(sm: &Summary, map: &FxMap<String, String>) -> Summary {
-    let mut sm = sm.clone();
+/// Whether rebase_aliased may change sm: it names an alias of the map where rebase_aliased looks (or more: the
+/// type parameters it leaves alone are not looked at)
+fn names_aliased(sm: &Summary, map: &FxMap<String, String>) -> bool {
+    let named = |n: &Option<String>| n.as_ref().is_some_and(|n| map.contains_key(n.as_str()));
+    named(&sm.impl_self)
+        || sm.fns.iter().any(|(_, s)| named(&s.impl_of))
+        || sm.closures.iter().any(|c| named(&c.sig.impl_of))
+        || sm.consts.iter().any(|c| c.0.split_once("::").is_some_and(|(a, _)| map.contains_key(a)))
+}
+
+/// sm with the items of `impl Alias { .. }` moved to the aliased type (`Alias::f` -> `Foo::f`)
+fn rebase_aliased(sm: &mut Summary, map: &FxMap<String, String>) {
     let re = |n: &mut String| {
         if let Some((a, rest)) = n.split_once("::") {
             if let Some(b) = map.get(a) {
@@ -1380,7 +1402,6 @@ fn rebase_aliased(sm: &Summary, map: &FxMap<String, String>) -> Summary {
     for c in &mut sm.consts {
         re(&mut c.0);
     }
-    sm
 }
 
 impl Program {
@@ -1458,20 +1479,34 @@ impl Program {
         None
     }
 
-    pub fn build(items: &[SrcItem], sums: &[Summary]) -> R<Program> {
+    pub fn build(items: &[SrcItem], sums: &mut [Summary]) -> R<Program> {
         Program::build_with(items, sums, true, items.len())
     }
 
     /// need_main: false means a library (no main needed)
     /// `user`: how many of the items are the program's (the rest are the prelude's)
-    pub fn build_with(items: &[SrcItem], sums: &[Summary], need_main: bool, user: usize) -> R<Program> {
+    pub fn build_with(items: &[SrcItem], sums: &mut [Summary], need_main: bool, user: usize) -> R<Program> {
         Program::build_with_edition(items, sums, need_main, user, 2021, false)
     }
 
     /// build_with in an edition: the types of the signatures and the fields are resolved in it (a trait's name behind
     /// a pointer is its trait object before 2021, bare_dyn)
     /// (deny_bare: the `bare_trait_objects` lint is denied, so such an object is an error)
-    pub fn build_with_edition(items: &[SrcItem], sums: &[Summary], need_main: bool, user: usize, edition: u16, deny_bare: bool) -> R<Program> {
+    /// (sums: the build rewrites a few of them for itself (`impl Alias`, closures of one name) and puts them back
+    /// before it returns, so the caller's are as they were; only those are copied)
+    pub fn build_with_edition(items: &[SrcItem], sums: &mut [Summary], need_main: bool, user: usize, edition: u16, deny_bare: bool) -> R<Program> {
+        let mut saved: Vec<(usize, Summary)> = vec![];
+        let r = Program::build_in(items, sums, &mut saved, need_main, user, edition, deny_bare);
+        // (the last saved first: a summary saved twice gets the first copy, the one from before the build)
+        for (i, sm) in saved.into_iter().rev() {
+            sums[i] = sm;
+        }
+        r
+    }
+
+    /// build_with_edition, saving each summary it rewrites in `saved` (its index, the summary before) first
+    fn build_in(items: &[SrcItem], sums_mut: &mut [Summary], saved: &mut Vec<(usize, Summary)>, need_main: bool, user: usize, edition: u16, deny_bare: bool) -> R<Program> {
+        let sums: &[Summary] = &*sums_mut;
         // (the crate's `main`, summed up as an ordinary function because it cannot be the entry (ast_summary): an error
         //  when it would be, so not under `--test`. First, as it was when the summary reported it)
         if need_main && !sums.iter().any(|s| s.fns.iter().any(|(n, _)| n == TEST_ENTRY)) {
@@ -1496,6 +1531,7 @@ impl Program {
             structs: AdtTable::new(),
             struct_index: FxMap::default(),
             variant_names: FxMap::default(),
+            variant_shadowed: vec![],
             opaque: vec![],
             prelude_from: u32::MAX,
             fn_preds: FxMap::default(),
@@ -1575,6 +1611,7 @@ impl Program {
             ambiguous_methods: FxMap::default(),
             unbounded_blankets: FxSet::default(),
             use_names: FxSet::default(),
+            fmt_imports: 0,
             impl_selfs: FxMap::default(),
             user_traits: FxSet::default(),
             tdb: Default::default(),
@@ -1648,65 +1685,68 @@ impl Program {
                 .filter_map(|n| p.alias_base(n).map(|b| (n.clone(), b)))
                 .collect()
         };
-        let owned_sums;
-        let sums: &[Summary] = if alias_owner.is_empty() {
-            sums
-        } else {
-            owned_sums = sums.iter().map(|sm| rebase_aliased(sm, &alias_owner)).collect::<Vec<_>>();
-            &owned_sums
-        };
+        if !alias_owner.is_empty() {
+            for (ii, sm) in sums_mut.iter_mut().enumerate() {
+                if names_aliased(sm, &alias_owner) {
+                    saved.push((ii, sm.clone()));
+                    rebase_aliased(sm, &alias_owner);
+                }
+            }
+        }
+        let sums: &[Summary] = &*sums_mut;
         // (a closure is named after the fn it is in, `Vec::m::{closure#0}`, which leaves out the trait: two traits of
         // one name (in two modules) implemented for Vec, each with a closure in `m`, would share the name. A later
         // one also gets its item's number. It was an error before, so no program that built is renamed)
-        let owned_unique;
-        let sums: &[Summary] = {
+        {
             let mut seen: FxMap<&str, usize> = FxMap::default();
             let dup = sums.iter().enumerate().any(|(ii, sm)| sm.closures.iter().any(|c| *seen.entry(c.name.as_str()).or_insert(ii) != ii));
             if dup {
+                // (the first summary with each name keeps it: the others are renamed, and only they are rewritten)
                 let mut first: FxMap<String, usize> = FxMap::default();
-                owned_unique = sums
-                    .iter()
-                    .enumerate()
-                    .map(|(ii, sm)| {
-                        let mut sm = sm.clone();
-                        let mut renames: Vec<(String, String)> = vec![];
+                for (ii, sm) in sums.iter().enumerate() {
+                    for c in &sm.closures {
+                        first.entry(c.name.clone()).or_insert(ii);
+                    }
+                }
+                for (ii, sm) in sums_mut.iter_mut().enumerate() {
+                    if sm.closures.iter().all(|c| first[&c.name] == ii) {
+                        continue;
+                    }
+                    saved.push((ii, sm.clone()));
+                    let mut renames: Vec<(String, String)> = vec![];
+                    for c in &mut sm.closures {
+                        if first[&c.name] != ii {
+                            let to = format!("{}_{ii}", c.name);
+                            // (its `call` takes the closure struct by name)
+                            let from = std::mem::replace(&mut c.name, to.clone());
+                            for t in c.sig.params.iter_mut().chain(std::iter::once(&mut c.sig.ret)).chain(c.sig.self_ty.iter_mut()) {
+                                rename_tysyn(t, &from, &to);
+                            }
+                            if c.sig.impl_of.as_deref() == Some(from.as_str()) {
+                                c.sig.impl_of = Some(to.clone());
+                            }
+                            // (and its symbol, `<the fn's symbol>.c<k>`, which is the same for the two too)
+                            c.sig.symbol = format!("{}_{ii}", c.sig.symbol);
+                            renames.push((from, to));
+                        }
+                    }
+                    // (the fn a closure is in names it in its return type when it returns it, `-> impl Fn`)
+                    for (from, to) in &renames {
+                        for (_, sig) in &mut sm.fns {
+                            for t in sig.params.iter_mut().chain(std::iter::once(&mut sig.ret)) {
+                                rename_tysyn(t, from, to);
+                            }
+                        }
                         for c in &mut sm.closures {
-                            if *first.entry(c.name.clone()).or_insert(ii) != ii {
-                                let to = format!("{}_{ii}", c.name);
-                                // (its `call` takes the closure struct by name)
-                                let from = std::mem::replace(&mut c.name, to.clone());
-                                for t in c.sig.params.iter_mut().chain(std::iter::once(&mut c.sig.ret)).chain(c.sig.self_ty.iter_mut()) {
-                                    rename_tysyn(t, &from, &to);
-                                }
-                                if c.sig.impl_of.as_deref() == Some(from.as_str()) {
-                                    c.sig.impl_of = Some(to.clone());
-                                }
-                                // (and its symbol, `<the fn's symbol>.c<k>`, which is the same for the two too)
-                                c.sig.symbol = format!("{}_{ii}", c.sig.symbol);
-                                renames.push((from, to));
+                            for t in c.sig.params.iter_mut().chain(std::iter::once(&mut c.sig.ret)) {
+                                rename_tysyn(t, from, to);
                             }
                         }
-                        // (the fn a closure is in names it in its return type when it returns it, `-> impl Fn`)
-                        for (from, to) in &renames {
-                            for (_, sig) in &mut sm.fns {
-                                for t in sig.params.iter_mut().chain(std::iter::once(&mut sig.ret)) {
-                                    rename_tysyn(t, from, to);
-                                }
-                            }
-                            for c in &mut sm.closures {
-                                for t in c.sig.params.iter_mut().chain(std::iter::once(&mut c.sig.ret)) {
-                                    rename_tysyn(t, from, to);
-                                }
-                            }
-                        }
-                        sm
-                    })
-                    .collect::<Vec<_>>();
-                &owned_unique
-            } else {
-                sums
+                    }
+                }
             }
-        };
+        }
+        let sums: &[Summary] = &*sums_mut;
         // 0. The names of consts / statics (before types, since array lengths use them)
         for (ii, sm) in sums.iter().enumerate() {
             let cs = sm
@@ -1959,12 +1999,28 @@ impl Program {
         // Instances made midway through layout (`RefCell<Node>` in `Node`) were computed with types whose size was
         // not settled yet, so they are redone once everything is settled
         p.relayout_instances();
+        // (a variant of the program's own enum wins over a prelude enum's of the same name: `use ControlFlow::*;` of its
+        // own `enum ControlFlow { Break, .. }`, beside the prelude's that the name brings in. The prelude's it took the
+        // name from are kept in variant_shadowed, for the imports to decide (session). When two of one side share the
+        // name, neither is found)
+        let mut own_names: FxSet<&str> = FxSet::default();
         for sid in 0..p.structs.len() {
             let sd = &p.structs[sid];
             if !sd.is_enum || sd.base.is_some() || sd.name.starts_with('#') {
                 continue;
             }
+            let own = p.struct_item.get(sid).is_some_and(|&i| (i as usize) < user);
             for (vi, v) in sd.variants.iter().enumerate() {
+                if own && own_names.insert(v.name.as_str()) {
+                    if let Some(Some(prev)) = p.variant_names.insert(v.name.clone(), Some((sid as u32, vi))) {
+                        p.variant_shadowed.push((v.name.clone(), prev));
+                    }
+                    continue;
+                }
+                if !own && own_names.contains(v.name.as_str()) {
+                    p.variant_shadowed.push((v.name.clone(), (sid as u32, vi)));
+                    continue;
+                }
                 p.variant_names
                     .entry(v.name.clone())
                     .and_modify(|e| *e = None)
@@ -3552,48 +3608,70 @@ impl Program {
             }
             return false;
         }
-        // The built-in AsMut<str> / AsMut<[T]> (std's: `String` and `str` to `str`, `Vec` / arrays / slices to `[T]`,
-        // and `&mut T` to what T's is; not `&T`)
+        // The built-in AsMut<[T]> of arrays, slices and Vec, AsMut<str> of str and String, and std's `impl AsMut<U>
+        // for &mut T` (through `&mut` only, not `&`). A program's own impls are asked below, by the trait's name
         if tr.starts_with("AsMut") && tr.contains('<') {
-            let inner: String = tr["AsMut".len()..].chars().filter(|c| !c.is_whitespace()).collect();
+            let squeeze = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+            let inner = squeeze(&tr["AsMut".len()..]);
             let mut b = t;
             while let Ty::Ref(true, i) = b {
                 b = *i;
             }
-            if matches!(b, Ty::Ref(..)) {
-                return false;
-            }
             // (std's String / Vec, not a program's type of the name)
-            let std_name = match b {
+            let name = match b {
                 Ty::Struct(sid) if self.struct_item.get(self.base_of(sid) as usize).is_some_and(|&i| i >= self.prelude_from) => {
                     self.structs[self.base_of(sid) as usize].name.as_str()
                 }
                 _ => "",
             };
-            let text = b == Ty::Str || std_name == "String";
             let elem = match b {
                 Ty::Array(e, _) | Ty::Slice(e) => Some(*e),
-                Ty::Struct(sid) if std_name == "Vec" => self.structs[sid as usize].args.first().copied(),
+                Ty::Struct(sid) if name == "Vec" => self.structs[sid as usize].args.first().copied(),
                 _ => None,
             };
-            if text {
-                return inner == "<str>";
+            // (and a Vec's AsMut<Vec<T>>)
+            if elem.is_some_and(|e| inner == squeeze(&format!("<[{}]>", self.tn(e))))
+                || ((b == Ty::Str || name == "String") && inner == "<str>")
+                || (name == "Vec" && inner == squeeze(&format!("<{}>", self.tn(b))))
+            {
+                return true;
             }
-            // (and a Vec's to itself, `Vec<T>: AsMut<Vec<T>>`: its element told apart as a slice's is)
-            if std_name == "Vec" {
-                if let (Some(x), Some(e)) = (inner.strip_prefix("<Vec<").and_then(|r| r.strip_suffix(">>")), elem) {
-                    return !matches!((Ty::prim(x), Ty::prim(&self.tn(e))), (Some(a), Some(c)) if a != c);
+        }
+        // std's Extend of Vec<T> (`Extend<T>`, and `Extend<&T>` of a Copy T) and of String (`char`, `&char`, `&str`,
+        // `String`), whose own `extend` takes any of them; a program's own impls by their argument (a type with none is
+        // asked below, by the trait's name)
+        if let Some(x) = tr.strip_prefix("Extend").map(str::trim).and_then(|r| r.strip_prefix('<')).and_then(|r| r.strip_suffix('>')) {
+            if let Ty::Struct(sid) = t {
+                // (the argument's text without lifetimes or white space: `&'a bool` is `&bool`)
+                let mut x2 = String::new();
+                let mut cs = x.chars().peekable();
+                while let Some(c) = cs.next() {
+                    if c == '\'' {
+                        while cs.next_if(|c| c.is_alphanumeric() || *c == '_').is_some() {}
+                    } else if !c.is_whitespace() {
+                        x2.push(c);
+                    }
                 }
-            }
-            if let Some(e) = elem {
-                // (the slice's element is the sequence's: not `Vec<u16>: AsMut<[u8]>`. Only told apart for primitive
-                // types; another element (a parameter's placeholder, `[Item]`) is taken as the sequence's)
-                let Some(x) = inner.strip_prefix("<[").and_then(|r| r.strip_suffix("]>")) else { return false };
-                return !matches!((Ty::prim(x), Ty::prim(&self.tn(e))), (Some(a), Some(c)) if a != c);
-            }
-            // (a program's type: its impls, by the general rule below, which looks at the instance)
-            if !matches!(b, Ty::Struct(_)) {
-                return false;
+                match self.structs[self.base_of(sid) as usize].name.as_str() {
+                    "Vec" => {
+                        if let Some(&e) = self.structs[sid as usize].args.first() {
+                            let en: String = self.tn(e).chars().filter(|c| !c.is_whitespace()).collect();
+                            if x2 == en || (x2 == format!("&{en}") && self.implements(e, "Copy")) {
+                                return true;
+                            }
+                        }
+                    }
+                    "String" if matches!(x2.as_str(), "char" | "&char" | "&str" | "String") => return true,
+                    _ => {}
+                }
+                // (a program's own impls for the type: one whose argument is the bound's (`impl Extend<u8> for Bits`
+                // is no `Extend<bool>`), or one with the impl's parameters in it, which is taken to fit)
+                let own: Vec<&(Ty, Vec<Ty>, usize)> =
+                    self.impl_targs.get("Extend").map_or(vec![], |v| v.iter().filter(|(s, _, n)| self.match_ty(*s, t, &mut vec![None; *n])).collect());
+                if !own.is_empty() {
+                    let squeeze = |s: String| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+                    return own.iter().any(|(_, a, _)| a.len() != 1 || self.has_param(a[0]) || squeeze(self.tn(a[0])) == x2);
+                }
             }
         }
         // The targets of collect (built-in): String / Vec / HashMap and so on
@@ -3851,9 +3929,11 @@ impl Program {
                 if self.impls.contains(&(b, if sync { "Sync" } else { "Send" }.to_string())) {
                     return true;
                 }
+                // (the prelude's, not a program's own type of the name)
+                let ours = self.struct_item.get(b as usize).is_some_and(|&i| i >= self.prelude_from);
                 match name {
-                    "Rc" => return false,
-                    "Cell" | "RefCell" | "LazyCell" if sync => return false,
+                    "Rc" if ours => return false,
+                    "Cell" | "RefCell" | "LazyCell" | "OnceCell" if sync && ours => return false,
                     // (the prelude's own types hold raw pointers: what they hold decides)
                     _ => {}
                 }
@@ -7868,6 +7948,10 @@ impl Program {
             return None;
         }
         let tr = &p.segs[n - 2];
+        // (`std::io::Error::from_raw_os_error(e)` / `std::fmt::Error`: std's error types, not the Error trait (#256))
+        if tr.name == "Error" && matches!(p.segs[n - 3].name.as_str(), "io" | "fmt") {
+            return None;
+        }
         // (not a name the program declares a trait of: `Trait::m` would be the program's trait, where the std path names
         // std's (`std::string::ToString::to_string` beside a program's `trait ToString`). That call stays unread)
         let known = self.traits.contains_key(&tr.name) || STD_PATH_TRAITS.contains(&tr.name.as_str());
@@ -8047,6 +8131,20 @@ impl Program {
             return None;
         }
         let name = |k: usize| p.segs[k].name.as_str();
+        // (`io::Error::from_raw_os_error(e)` / `std::io::Error::last_os_error()`: the prelude's IoError's, as the type
+        // `io::Error` is IoError)
+        // (std's io only: `std::io::` / `core::io::`, or `io::` where the program has no `io::Error` of its own (a
+        // `mod io { pub struct Error; .. }` flattens to `io__Error`), which the ordinary lookup finds)
+        let std_io = match n {
+            3 => !self.struct_index.contains_key("io__Error"),
+            4 => matches!(name(0), "std" | "core"),
+            _ => false,
+        };
+        if std_io && name(n - 3) == "io" && name(n - 2) == "Error" {
+            if let Some(&i) = self.index.get(&format!("IoError::{}", name(n - 1))) {
+                return Some(i);
+            }
+        }
         // `std::collections::HashMap::new` and the like are `HashMap::new`
         if n >= 3 && matches!(name(0), "core" | "std" | "alloc") {
             let ty = name(n - 2);
@@ -8088,6 +8186,17 @@ impl Program {
         }
         if n >= 2 && name(n - 2) == "process" && name(n - 1) == "exit" {
             return self.index.get("__core_process_exit").copied();
+        }
+        // (`alloc::alloc(layout)` after `use std::alloc;`, and the crate's `alloc::alloc::alloc(layout)`: std::alloc's
+        // functions, the prelude's `__core_*`. `alloc` is kept as a path's head above, as it names the crate too; not
+        // a program's own `alloc::f`)
+        if n >= 2
+            && name(0) == "alloc"
+            && (n == 2 || (n == 3 && name(1) == "alloc"))
+            && matches!(name(n - 1), "alloc" | "alloc_zeroed" | "dealloc" | "realloc" | "handle_alloc_error")
+            && !self.index.contains_key(&format!("alloc::{}", name(n - 1)))
+        {
+            return self.index.get(&format!("__core_{}", name(n - 1))).copied();
         }
         // `core::cmp::max` / `core::mem::swap` and the like go to the prelude's `__core_*`
         if n >= 2 && matches!(name(0), "core" | "std") {

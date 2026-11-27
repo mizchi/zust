@@ -133,3 +133,5 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-25 | [`Sized`: where only a sized type may be (E0277)](2026-11-25-09-sized.md) |
 | 2026-11-25 | [Region (lifetime) checking, part 37: impl where clauses through the header, closures passed by reference, `mut rest @ ..`](2026-11-25-10-region-check-37.md) |
 | 2026-11-26 | [Region (lifetime) checking, part 38: methods of impls for trait objects, and the `'static` they require](2026-11-26-01-region-check-38.md) |
+| 2026-11-26 | [Region (lifetime) checking, part 39: dyn Error's `is`, lets assigned through a deref, closures held as fn pointers, and trait methods' elided results](2026-11-26-02-region-check-39.md) |
+| 2026-11-26 | [Region (lifetime) checking, part 40: OnceCell, the well-formedness of values built by constructors, generic fns that are called, and elided lifetimes in a receiver's self type](2026-11-26-03-region-check-40.md) |

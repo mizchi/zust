@@ -1,0 +1,10 @@
+Ok(Some(42))
+Ok(None)
+Err("bad line \"x\"")
+Continue(()) Break(3) true true
+Some(3) None
+Break(30)
+Continue(6) true
+zzz
+[(1, 0), (2, 0), (3, 0)]
+0

@@ -1,1 +1,1 @@
-3:58: call to unsafe function `u` is unsafe and requires unsafe block (E0133)
+3:64: call to unsafe function `u` is unsafe and requires unsafe block (E0133)

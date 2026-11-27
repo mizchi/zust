@@ -3845,6 +3845,7 @@ compile-fail	inference/issue-86162-2.rs
 check-pass	inference/iter-ufcs-coercion-type-unification.rs
 run-pass	inference/iterator-sum-array-15673.rs
 run-pass	inference/lambda-infer-unresolved.rs
+run-pass	inference/lub-glb-with-unbound-infer-var.rs
 compile-fail	inference/multiple-impl-apply.rs
 compile-fail	inference/need_type_info/channel.rs
 compile-fail	inference/need_type_info/concrete-impl.rs
@@ -4044,6 +4045,7 @@ compile-fail	lifetimes/elided-lifetime-in-const-param-type.rs
 check-pass	lifetimes/elided-lifetime-in-param-pat.rs
 check-pass	lifetimes/elided-lifetime-in-path-in-pat.rs
 check-pass	lifetimes/elided-lifetime-in-path-in-type-relative-expression.rs
+compile-fail	lifetimes/elided-lifetime-mismatch-in-self-type.rs
 compile-fail	lifetimes/elided-self-lifetime-in-trait-fn.rs
 run-pass	lifetimes/enum-lifetime-container-10228.rs
 compile-fail	lifetimes/explicit-lifetime-required-14285.rs
@@ -5255,6 +5257,7 @@ check-pass	nll/issue-55651.rs
 check-pass	nll/issue-55825-const-fn.rs
 compile-fail	nll/issue-57100.rs
 compile-fail	nll/issue-57280-1-flipped.rs
+compile-fail	nll/issue-57362-1.rs
 compile-fail	nll/issue-57642-higher-ranked-subtype.rs
 compile-fail	nll/issue-57843.rs
 run-pass	nll/issue-57960.rs
@@ -5287,6 +5290,7 @@ check-pass	nll/maybe-initialized-drop-uninitialized.rs
 compile-fail	nll/maybe-initialized-drop-with-fragment.rs
 compile-fail	nll/maybe-initialized-drop-with-uninitialized-fragments.rs
 compile-fail	nll/maybe-initialized-drop.rs
+compile-fail	nll/mir_check_cast_closure.rs
 compile-fail	nll/mir_check_cast_reify.rs
 compile-fail	nll/mir_check_cast_unsafe_fn.rs
 compile-fail	nll/mir_check_cast_unsize.rs
@@ -5490,6 +5494,7 @@ run-pass	or-patterns/struct-like.rs
 compile-fail	or-patterns/while-parsing-this-or-pattern.rs
 run-pass	overloaded/fixup-deref-mut.rs
 run-pass	overloaded/overloaded-autoderef-vtable.rs
+run-pass	overloaded/overloaded-autoderef.rs
 run-pass	overloaded/overloaded-calls-object-one-arg.rs
 run-pass	overloaded/overloaded-calls-object-two-args.rs
 run-pass	overloaded/overloaded-calls-object-zero-args.rs
@@ -5968,6 +5973,7 @@ compile-fail	parser/macro/macro-bad-delimiter-ident.rs
 check-pass	parser/macro/macro-bare-trait-object-maybe-trait-bound.rs
 compile-fail	parser/macro/macro-doc-comments-1.rs
 compile-fail	parser/macro/macro-doc-comments-2.rs
+check-pass	parser/macro/macro-dotdotdot-may-not-begin-a-type.rs
 compile-fail	parser/macro/macro-in-attribute.rs
 compile-fail	parser/macro/macro-keyword.rs
 compile-fail	parser/macro/macro-missing-right-paren.rs
@@ -6780,6 +6786,7 @@ run-pass	regions/regions-scope-chain-example.rs
 run-pass	regions/regions-self-impls.rs
 run-pass	regions/regions-self-in-enums.rs
 run-pass	regions/regions-simple.rs
+compile-fail	regions/regions-static-bound-on-type-param.rs
 run-pass	regions/regions-static-bound-rpass.rs
 compile-fail	regions/regions-static-bound.rs
 run-pass	regions/regions-static-closure.rs
@@ -6801,6 +6808,7 @@ check-pass	regions/relate-bound-region-ref-type-param.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429-2.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429.rs
 compile-fail	regions/wf-bound-region-in-local-issue-115175.rs
+compile-fail	regions/wf-bound-region-in-local-soundness-issue-148854.rs
 run-pass	regions/wf-bound-region-in-object-type.rs
 check-pass	repeat-expr/can-have-side-effects-consider-element.rs
 compile-fail	repeat-expr/copy-check-const-element-uninferred-count.rs
@@ -7356,6 +7364,7 @@ compile-fail	span/move-closure.rs
 compile-fail	span/multiline-span-E0072.rs
 check-pass	span/multispan-import-lint.rs
 compile-fail	span/mut-arg-hint.rs
+compile-fail	span/mut-ptr-cant-outlive-ref.rs
 compile-fail	span/mutability-suggestion-fullwidth-ampersand.rs
 compile-fail	span/pub-struct-field.rs
 compile-fail	span/range-2.rs
@@ -8357,6 +8366,7 @@ compile-fail	trimmed-paths/core-unicode.rs
 run-pass	trivial-bounds/trivial-bounds-object.rs
 compile-fail	try-block/try-block-in-edition2015.rs
 run-pass	try-block/try-is-identifier-edition2015.rs
+compile-fail	try-trait/bad-interconversion.rs
 compile-fail	try-trait/bad-question-mark-on-trait-object.rs
 compile-fail	try-trait/deep-try-chain-issue-153583.rs
 compile-fail	try-trait/incompatible-types-with-question-mark-51632.rs
@@ -8893,6 +8903,7 @@ check-pass	variance/variance-use-covariant-struct-2.rs
 compile-fail	variance/variance-use-invariant-struct-1.rs
 compile-fail	variants/variant-result-noresult-used-as-type.rs
 compile-fail	variants/variant-used-as-type.rs
+run-pass	view-types/regression-156016.rs
 compile-fail	wf/conflicting-impls.rs
 compile-fail	wf/ice-hir-wf-check-anon-const-issue-122199.rs
 compile-fail	wf/ice-hir-wf-issue-135341.rs

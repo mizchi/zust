@@ -235,7 +235,7 @@ const OP_TRAITS: &[&str] = &[
     "Add", "Sub", "Mul", "Div", "Rem", "Neg", "Not", "BitAnd", "BitOr", "BitXor", "AddAssign", "SubAssign",
     "MulAssign", "DivAssign", "RemAssign", "BitAndAssign", "BitOrAssign", "BitXorAssign", "ShlAssign", "ShrAssign",
     "Shl", "Shr", "Index", "IndexMut", "From", "Deref", "IntoIterator", "Error", "AsRef", "AsMut", "Into", "Borrow", "BorrowMut",
-    "FromIterator",
+    "FromIterator", "Extend",
 ];
 
 /// The trait's name, when h declares an operator trait (computed once per item)
@@ -571,12 +571,14 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "Bytes" | "ToCase" | "CharEscape" | "ParseIntError" | "IntErrorKind" | "Rev" | "StepBy" | "Peekable"
                         | "SkipWhile" | "PreludeScan" | "Inspect" | "FlatMap" | "Flatten" | "Cloned" | "Windows" | "Chunks" | "ChunksExact" | "ChunksMut" | "Iter" | "IterMut" | "MaybeUninit"
                         | "HashSet" | "SetIntoIter" | "BTreeMap" | "BTreeSet" | "BtEntry" | "BtIter" | "BtIterMut"
-                        | "BtIntoIter" | "VecDeque" | "DqIter" | "DqIntoIter" | "f64" | "f32" | "ParseFloatError" | "i128" | "u128" | "FromUtf8Error" | "Utf8Error" | "Rc" | "Arc" | "ManuallyDrop" | "Pin" | "NonNull" | "UnsafeCell" | "RefCell" | "Ref" | "RefMut" | "BorrowError" | "BorrowMutError" | "Cell" | "JoinHandle" | "__Sndr" | "__SyncSndr" | "__Rcvr__" | "__RecvIter" | "AtomicUsize" | "AtomicIsize" | "AtomicU8" | "AtomicU16" | "AtomicU32" | "AtomicU64" | "AtomicI8" | "AtomicI16" | "AtomicI32" | "AtomicI64" | "AtomicBool" | "OnceLock" | "Mutex" | "MutexGuard" | "RwLock" | "RwLockReadGuard" | "RwLockWriteGuard" | "SystemTime" | "SystemTimeError" | "Bound" | "Arguments" | "RangeFrom" | "TryFromIntError" | "TryFromSliceError" | "Stdin" | "StdinLock" | "StdinLines" | "Stdout" | "StdoutLock"
+                        | "BtIntoIter" | "VecDeque" | "DqIter" | "DqIntoIter" | "f64" | "f32" | "ParseFloatError" | "i128" | "u128" | "FromUtf8Error" | "Utf8Error" | "Rc" | "Arc" | "ManuallyDrop" | "Pin" | "NonNull" | "UnsafeCell" | "RefCell" | "Ref" | "RefMut" | "BorrowError" | "BorrowMutError" | "Cell" | "JoinHandle" | "__Sndr" | "__SyncSndr" | "__Rcvr__" | "__RecvIter" | "AtomicUsize" | "AtomicIsize" | "AtomicU8" | "AtomicU16" | "AtomicU32" | "AtomicU64" | "AtomicI8" | "AtomicI16" | "AtomicI32" | "AtomicI64" | "AtomicBool" | "OnceLock" | "OnceCell" | "Mutex" | "MutexGuard" | "RwLock" | "RwLockReadGuard" | "RwLockWriteGuard" | "SystemTime" | "SystemTimeError" | "Bound" | "Arguments" | "RangeFrom" | "TryFromIntError" | "TryFromSliceError" | "Stdin" | "StdinLock" | "StdinLines" | "Stdout" | "StdoutLock"
                         | "BufWriter" | "BufReader" | "Cursor" | "ChunksMut" | "IoError" | "__DynError" | "Args" | "DefaultHasher" | "VarError"
                         | "PathBuf" | "__PathExt" | "__AsPathStr" | "Command" | "__ExitStatus" | "Cow" | "__CowStr"
                         | "Duration" | "AtomicPtr" | "RangeTo" | "RangeToInclusive" | "Fuse" | "Wrapping" | "Saturating"
-                        | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList"
-                        | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError" => Some(w),
+                        | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList" | "Thread" | "Once" | "OnceState"
+                        | "Layout" | "LayoutError" | "__LayoutAlign" | "Infallible" | "Condvar" | "ControlFlow"
+                        | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError"
+                        | "SplitNStr" | "SliceSplitN" | "PoisonError" => Some(w),
                         // (std::num's NonZero types: their impls only with them)
                         w if w.starts_with("NonZero") => Some(w),
                         // HashMap's iterators (HmIter and so on) only when HashMap is used
@@ -616,8 +618,23 @@ const SHADOWABLE: &[&str] = &[
     "Wrapping", "Saturating", "NonZeroU8", "NonZeroU16", "NonZeroU32", "NonZeroU64", "NonZeroU128", "NonZeroUsize",
     "NonZeroI8", "NonZeroI16", "NonZeroI32", "NonZeroI64", "NonZeroI128", "NonZeroIsize",
     "FromStr", "CString", "CStr", "NulError", "LinkedList", "Ipv4Addr", "Ipv6Addr", "IpAddr", "SocketAddrV4", "SocketAddrV6",
-    "SocketAddr", "AddrParseError", "RwLock", "SystemTime", "SystemTimeError", "Bound", "Arguments",
+    "SocketAddr", "AddrParseError", "RwLock", "SystemTime", "SystemTimeError", "Bound", "Arguments", "Thread", "ThreadId",
+    "Once", "OnceState", "Layout", "LayoutError", "Condvar", "ControlFlow", "Repeat",
 ];
+
+/// A name as it was before the compiler renamed it: `__u_Iter`, a program's type named as a prelude type
+/// (rename_user_collisions), is `Iter`; `__p_ThreadId`, the prelude's renamed against a program's (rename_shadowed),
+/// is `ThreadId`. Each renaming goes word by word, so a variant of such a name is renamed too. Any other name is
+/// itself: a variant the program names `__p_Ready`
+pub fn unrenamed(name: &str) -> &str {
+    if let Some(n) = name.strip_prefix("__u_").filter(|n| prelude_type_names().contains(*n)) {
+        return n;
+    }
+    if let Some(n) = name.strip_prefix("__p_").filter(|n| SHADOWABLE.contains(n)) {
+        return n;
+    }
+    name
+}
 
 /// The name a struct / enum / trait / union item defines (from its first identifiers: `pub struct Name`)
 fn type_def_name<'a>(src: &'a str, it: &SrcItem) -> Option<&'a str> {
@@ -1137,6 +1154,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             "split", "split_whitespace", "lines", "trim", "starts_with", "ends_with", "contains",
             "clamp", "from_u32", "char", "join", "concat", "drain", "default", "f64", "f32", "i128", "u128", "Iterator", "into", "split_at_mut",
             "copy_from_slice", "clone_from_slice", "BufRead", "Read", "Seek", "SeekFrom", "Write", "__FWr", "Cursor", "ExactSizeIterator", "BuildHasher", "split_first_chunk", "first_chunk", "chunks_exact", "chunks_mut", "chunks_exact_mut", "is_sorted", "is_sorted_by", "is_sorted_by_key",
+            "split_first", "split_last", "splitn",
         ]);
         // Candidates per (first byte, length): however many prelude names there are, 0 or 1 comparisons per identifier
         let mut t: Vec<Vec<&'static str>> = vec![vec![]; 256 * 32];
@@ -1222,6 +1240,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     // (`iter::Empty` likewise: `Empty` alone is usually a variant of the program's own enum)
     if need.contains("Empty") && !sc.has("iter::") {
         need.remove("Empty");
+    }
+    if need.contains("Repeat") && !sc.has("iter::") {
+        need.remove("Repeat");
     }
     // (`a.zip(&v)` / `a.chain([x])`: codegen makes Vec / array arguments `.iter()` / `.into_iter()`; `a.zip(dst)` with
     //  dst: &mut [T] is its `.iter_mut()`)
@@ -1421,9 +1442,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if ["default", "Default", "unwrap_or_default", "take"].iter().any(|n| need.contains(n)) {
         need.insert("__exr_default");
     }
-    // Codegen turns `x.clone()` into __exr_clone::<T> (also inside the prelude's Vec::clone / cloned / to_vec)
+    // Codegen turns `x.clone()` into __exr_clone::<T> (also inside the prelude's Vec::clone / cloned / to_vec, and a
+    // slice's to_owned, which is its to_vec)
     // (not needed for types without drop, or for types with their own clone (String / Vec))
-    if ["clone", "cloned", "to_vec", "resize"].iter().any(|n| need.contains(n)) {
+    if ["clone", "cloned", "to_vec", "to_owned", "resize"].iter().any(|n| need.contains(n)) {
         need.insert("__exr_clone");
     }
     if need.contains("join") || need.contains("concat") {
@@ -1455,9 +1477,16 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         ("clone_from_slice", "__exr_slice_clone_from"),
         ("split_at", "__exr_slice_split_at"),
         ("split_at_mut", "__exr_slice_split_at_mut"),
+        ("splitn", "__exr_slice_splitn"),
     ] {
         if need.contains(m) {
             need.extend([f, "Iterator", "next"]);
+        }
+    }
+    // (`s.split_first()` / `s.split_last()`, and a slice's `to_owned()`, its to_vec: no iterator (#256))
+    for (m, f) in [("split_first", "__exr_slice_split_first"), ("split_last", "__exr_slice_split_last"), ("to_owned", "__exr_slice_to_vec")] {
+        if need.contains(m) {
+            need.insert(f);
         }
     }
     // checked_* return Option
@@ -1470,6 +1499,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     // (`&*s` / `&**s` / `&s[..]` with s a String / &String: acg rewrites it to `s.as_str()`)
     if need.contains("String") && (sc.has("&*") || sc.has("[..]")) {
+        need.insert("as_str");
+    }
+    // (a str trait's method called on a String, `s.custom_len()` with `impl Ext for str`, or an OsString's
+    // to_string_lossy: acg calls it on `s.as_str()` (#256))
+    if need.contains("String") && (need.contains("to_string_lossy") || sc.has("for str")) {
         need.insert("as_str");
     }
     // A collect into String uses push_str when the elements are &str / String
@@ -1570,6 +1604,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     if sc.has("dyn") && (sc.has("Display") || sc.has("Debug")) {
         need.extend(["__exr_dyn_display", "__exr_dyn_debug"]);
+    }
+    // (`x.fmt(f)` / `fmt::Debug::fmt(s, f)` of a value with no fmt of its own (a number, a str, a derive): `{}` / `{:?}`
+    // as a fmt::Result (#256)) (`.fmt` / `::fmt`, not `.fmt(`: `x.fmt (f)` too)
+    if need.contains("fmt") && (sc.has(".fmt") || sc.has("::fmt")) {
+        need.extend(["__exr_display_fmt", "__exr_debug_fmt"]);
     }
     // (ManuallyDrop is used through Deref: `m.0`, `*m`)
     // (`io::Error` / `io::Result<T>` are the prelude's IoError, whose name does not appear)
@@ -1781,6 +1820,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("Cow") || need.contains("Mutex") || need.contains("RwLock") {
         op_impls.push("Deref");
     }
+    // (the prelude's Cow impls From: `"x".into()` as a `Cow<str>`)
+    if need.contains("Cow") {
+        op_impls.push("From");
+    }
     if need.contains("Mutex") {
         need.extend(["MutexGuard", "Deref", "deref", "Result"]);
     }
@@ -1888,6 +1931,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     let mut dur_ops = false;
     let mut fmt_write = false;
     let mut as_mut_gate = false;
+    // (whether the program writes `thread` / `Layout`: asked once one of the functions below is wanted)
+    let mut thread_text: Option<bool> = None;
+    let mut layout_text: Option<bool> = None;
     loop {
         let mut changed = false;
         // (`s.as_mut()` of a String: acg rewrites it to `s.as_mut_str()`. In the loop: String can enter `need` after
@@ -1925,6 +1971,19 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             // (most items are wanted only by their name: one lookup decides them before the gates below)
             if !by_more_than_name(i) && !name.as_deref().is_some_and(|n| need.contains(n)) {
                 continue;
+            }
+            // (std's functions of common names: `thread::current()` / `thread::park()` only with `thread` written,
+            // `alloc::alloc(layout)` and the rest, which take a Layout, only with `Layout` written. Here, as the name can
+            // come from another prelude item too: HashMap's own `alloc`)
+            if matches!(it.kind, ItemKind::Normal) {
+                let ok = match name.as_deref() {
+                    Some("current" | "park") => *thread_text.get_or_insert_with(|| sc.has("thread")),
+                    Some("alloc" | "alloc_zeroed" | "dealloc" | "realloc" | "handle_alloc_error") => *layout_text.get_or_insert_with(|| sc.has("Layout")),
+                    _ => true,
+                };
+                if !ok {
+                    continue;
+                }
             }
             // Iterator's (default) methods only when Iterator is used (the max of `a.max(b)` does not look them up)
             if let ItemKind::TraitMember(h) = it.kind {

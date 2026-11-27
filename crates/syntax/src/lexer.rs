@@ -309,7 +309,8 @@ fn split_items(src: &str) -> Result<Vec<SrcItem>, String> {
         }
         let start = i;
         // 文字列系リテラル (接頭辞 b / r / br / c / cr を含む)
-        if let Some(end) = string_lit(s, i) {
+        // (looked for only where one can start: most tokens start with another byte)
+        if let Some(end) = string_lit_at(s, i) {
             i = end;
             tok!(start, i, 1u8);
             continue;
@@ -735,6 +736,13 @@ pub fn unterminated_literal(s: &[u8]) -> Option<String> {
     None
 }
 
+/// string_lit, looked for only at the bytes a string, byte or C string literal starts with (`"`, `b`, `r`, `c`): the
+/// others are most tokens, and string_lit is not inlined
+#[inline(always)]
+fn string_lit_at(s: &[u8], i: usize) -> Option<usize> {
+    if matches!(s.get(i), Some(b'"' | b'b' | b'r' | b'c')) { string_lit(s, i) } else { None }
+}
+
 /// 位置 i から文字列リテラルが始まっていればその終端を返す。
 fn string_lit(s: &[u8], mut i: usize) -> Option<usize> {
     let n = s.len();
@@ -941,6 +949,150 @@ mod tests {
         assert!(out.contains("let b = &mylib__seedable__pcg32(state);"), "{out}");
     }
 
+    /// A fn named like a primitive type is a value (#254): getrandom's `pub fn u32() -> Result<u32, Error>` and
+    /// fastrand's `u8` (by the root's glob) leave the type, a number's suffix and a path through the type as they are;
+    /// a call and a call's argument by itself are the fn
+    #[test]
+    fn a_fn_named_like_a_primitive_leaves_the_type() {
+        let src = "mod mylib {\n    pub mod global_rng {\n        pub fn u8(n: u8) -> u8 { n }\n    }\n    pub use global_rng::*;\n    pub struct Error;\n    pub fn u32() -> Result<u32, Error> {\n        let b: [u8; 2] = [0u8, 0x1fu8];\n        Ok(u32::MAX - u8(b[1]) as u32)\n    }\n    pub fn bytes(v: &[u8]) -> Vec<u8> { v.iter().copied().map(u8).collect() }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["mylib".to_string()]).unwrap();
+        assert!(out.contains("pub fn mylib__global_rng__u8(n: u8) -> u8 { n }"), "{out}");
+        assert!(out.contains("pub fn mylib__u32() -> Result<u32, mylib__Error> {"), "{out}");
+        assert!(out.contains("let b: [u8; 2] = [0u8, 0x1fu8];"), "{out}");
+        assert!(out.contains("Ok(u32::MAX - mylib__global_rng__u8(b[1]) as u32)"), "{out}");
+        assert!(out.contains("pub fn mylib__bytes(v: &[u8]) -> Vec<u8> { v.iter().copied().map(mylib__global_rng__u8).collect() }"), "{out}");
+    }
+
+    /// `self` first in a `use` tree names the tree's prefix (#254): `use super::Sign::{self, Plus};` brings the enum
+    /// (num-bigint), `use crate::util::{alphabet::{self}};` the module
+    #[test]
+    fn self_in_a_use_tree_is_its_prefix() {
+        let mut items = vec![];
+        let src = b"use super::Sign::{self, Minus as M, Plus}; use crate::util::{alphabet::{self as a, Unit}};";
+        let toks = tokenize(src);
+        let end = toks.len();
+        use_walk(&toks, src, 1, end, vec![], &mut items);
+        let names: Vec<(String, String)> = items
+            .iter()
+            .map(|(p, l)| (p.iter().map(|x| String::from_utf8_lossy(x).into_owned()).collect::<Vec<_>>().join("::"), String::from_utf8_lossy(l).into_owned()))
+            .collect();
+        let has = |p: &str, l: &str| names.iter().any(|n| n.0 == p && n.1 == l);
+        assert!(has("super::Sign", "Sign") && has("super::Sign::Minus", "M") && has("super::Sign::Plus", "Plus"), "{names:?}");
+        let src = "mod mylib {\n    pub mod util {\n        pub mod alphabet {\n            pub struct Unit(pub u8);\n        }\n    }\n    pub mod dense {\n        use crate::util::{alphabet::{self, Unit}};\n        pub fn f(u: Unit) -> alphabet::Unit { u }\n    }\n}\nfn main() {}\n";
+        let out = flatten_modules_in(src, &["mylib".to_string()]).unwrap();
+        assert!(out.contains("fn mylib__dense__f(u: mylib__util__alphabet__Unit) -> mylib__util__alphabet__Unit"), "{out}");
+    }
+
+    /// A path in a `use` tree's braces goes on from the tree's prefix, though a `use` of the module imports its last
+    /// name (#254, regex-syntax's hir: `use crate::unicode;` and `pub use crate::{hir::x, unicode::CaseFoldError};`)
+    #[test]
+    fn a_module_alias_is_not_expanded_in_a_use_tree() {
+        let src = "mod unicode {\n    pub struct CaseFoldError;\n}\nmod hir {\n    use crate::unicode;\n    pub use crate::{hir::v::f, unicode::CaseFoldError};\n    mod v { pub fn f() {} }\n    fn g() -> unicode::CaseFoldError { unicode::CaseFoldError }\n}\nfn main() {}\n";
+        let out = expand_module_aliases(src).unwrap();
+        assert!(out.contains("pub use crate::{hir::v::f, unicode::CaseFoldError};"), "{out}");
+        assert!(out.contains("fn g() -> crate::unicode::CaseFoldError { crate::unicode::CaseFoldError }"), "{out}");
+        // (a group right after `use` names from the scope, as the `use` does: the alias is followed in it)
+        let src = "mod p {\n    pub mod q { pub fn f() {} }\n}\nmod m {\n    use crate::p as a;\n    use {a::q as b, a::{q as c}};\n    fn g() { b::f() }\n}\nfn main() {}\n";
+        let out = expand_module_aliases(src).unwrap();
+        assert!(out.contains("use {crate::p::q as b, crate::p::{q as c}};"), "{out}");
+    }
+
+    /// A `self` entry brings the type namespace only (#254 review): `use crate::a::m::{self};` is the module m, not a's
+    /// fn m beside it, so `m()` is the one a glob brings
+    #[test]
+    fn a_self_import_brings_no_value() {
+        let src = "mod d {\n    pub mod a {\n        pub mod m { pub fn inner() -> u8 { 3 } }\n        pub fn m() -> u8 { 1 }\n    }\n    pub mod b {\n        pub fn m() -> u8 { 2 }\n    }\n    pub mod user {\n        use crate::a::m::{self};\n        use crate::b::*;\n        pub fn run() -> u8 { m() * 10 + m::inner() }\n    }\n}\nfn main() {}\n";
+        let out = flatten_modules_in(src, &["d".to_string()]).unwrap();
+        assert!(out.contains("{ d__b__m() * 10 + d__a__m__inner() }"), "{out}");
+    }
+
+    /// A fn named like a primitive is a value in an expression's place (#254 review): `let f = u32;` takes the fn, the
+    /// annotation and a binding among generics the type
+    #[test]
+    fn a_fn_named_like_a_primitive_as_a_value() {
+        let src = "mod d {\n    pub fn u32() -> usize { 1 }\n    pub fn run() -> usize {\n        let f = u32;\n        let g: fn() -> usize = u32;\n        let x: u32 = 4;\n        let i: Option<Box<dyn Iterator<Item = u32>>> = None;\n        f() + g() + x as usize + i.map_or(0, |_| 1)\n    }\n    pub fn cmp(f: fn() -> usize, n: u32) -> bool {\n        f == u32 as fn() -> usize && (u32 != f) && n == u32::MAX && n as u32 == 4\n    }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["d".to_string()]).unwrap();
+        assert!(out.contains("let f = d__u32;"), "{out}");
+        assert!(out.contains("let g: fn() -> usize = d__u32;"), "{out}");
+        assert!(out.contains("let x: u32 = 4;"), "{out}");
+        assert!(out.contains("Iterator<Item = u32>"), "{out}");
+        // (a comparison's operands, `f == u32` / `u32 != f`; a path's head and a cast's type stay the type's)
+        assert!(out.contains("f == d__u32 as fn() -> usize && (d__u32 != f) && n == u32::MAX && n as u32 == 4"), "{out}");
+    }
+
+    /// A block's import named like a primitive shadows it in a type's place too (#254 review):
+    /// `use crate::Byte as u8;` makes the annotation `u8` the struct, as the call
+    #[test]
+    fn a_block_import_named_like_a_primitive_shadows_it() {
+        let src = "mod d {\n    pub struct Byte(pub u8);\n    pub fn run() {\n        use crate::Byte as u8;\n        let _: u8 = u8(1);\n    }\n    pub fn other() -> u8 { 2u8 }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["d".to_string()]).unwrap();
+        assert!(out.contains("let _: d__Byte = d__Byte(1);"), "{out}");
+        assert!(out.contains("pub fn d__other() -> u8 { 2u8 }"), "{out}");
+    }
+
+    /// A tuple variant's fields are types, not a call's arguments, though its name is lowercase (#254 review):
+    /// `enum E { lower(u8) }` beside `fn u8`, while `.map(u8)` passes the fn
+    #[test]
+    fn a_tuple_variant_of_a_primitive_is_no_call() {
+        let src = "mod d {\n    pub fn u8(x: u8) -> u8 { x }\n    pub enum E { lower(u8), Upper(u8, char) }\n    pub fn f(v: Vec<u8>) -> Vec<u8> { v.into_iter().map(u8).collect() }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["d".to_string()]).unwrap();
+        assert!(out.contains("pub enum d__E { lower(u8), Upper(u8, char) }"), "{out}");
+        assert!(out.contains(".map(d__u8)"), "{out}");
+    }
+
+    /// A block's import is looked up in the place's namespaces (#254 review): `use crate::a::E::{self};` in a body
+    /// brings the type E, so `E::V` is a's enum and the call `E()` the fn a glob brings
+    #[test]
+    fn a_block_self_import_is_no_value() {
+        let src = "mod d {\n    pub mod a {\n        pub enum E { V }\n        pub fn E() -> u8 { 1 }\n    }\n    pub mod b {\n        pub fn E() -> u8 { 2 }\n    }\n    pub mod user {\n        use crate::b::*;\n        pub fn run() -> u8 {\n            use crate::a::E::{self};\n            let _v = E::V;\n            let f = E;\n            E() + f()\n        }\n    }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["d".to_string()]).unwrap();
+        assert!(out.contains("let _v = d__a__E::V;\n            let f = d__b__E;\n            d__b__E() + f()\n"), "{out}");
+    }
+
+    /// A struct literal in a value's place names the type (rustc's tests/ui lint/use-redundant): a block's
+    /// `use m1::S;` beside the globs `use m1::*; use m2::*;` makes `let s = S {};` m1's S, as `=> S {}` and
+    /// `return S {}`; a comparison's operand before an `if`'s block is still a value
+    #[test]
+    fn a_struct_literal_takes_a_block_import_of_the_type() {
+        let src = "mod d {\n    mod m1 { pub struct S {} pub const B: u8 = 1; }\n    mod m2 { pub struct S {} pub const B: u8 = 2; }\n    use m1::*;\n    use m2::*;\n    pub fn run(x: u8) -> u8 {\n        use m1::S;\n        use m1::B;\n        let _s = S {};\n        let _t = match x { 0 => S {}, _ => return 0 };\n        if x == B { 1 } else { 2 }\n    }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["d".to_string()]).unwrap();
+        assert!(out.contains("let _s = d__m1__S {};"), "{out}");
+        assert!(out.contains("0 => d__m1__S {}"), "{out}");
+        assert!(out.contains("if x == d__m1__B { 1 }"), "{out}");
+        // (a struct with fields, which only the type namespace has: CodeRabbit's case on #277)
+        let src = "mod d {\n    pub mod a { pub struct E { pub x: u8 } }\n    pub fn run() { use crate::a::E; let e = E { x: 1 }; let _ = e.x; }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["d".to_string()]).unwrap();
+        assert!(out.contains("let e = d__a__E { x: 1 };"), "{out}");
+    }
+
+    /// A source that starts with `(` (`(u8)` beside a renamed `fn u8`): the walk back of a call's argument stops at the
+    /// first token (#254 review)
+    #[test]
+    fn a_paren_at_the_start_is_no_call_of_a_variant() {
+        let src = "(u8);\nmod d {\n    pub fn u8() -> u8 { 1 }\n}\nfn main() {}\n";
+        let _ = rename_module_collisions_in(src, &["d".to_string()]);
+    }
+
+    /// A dependency under another name (`dig:common=cc`, a renamed one, mizchi/zust#249): every module of dig sees
+    /// `common` as cc (a path, `::common::..`, a `use` of an item and of a module's item, a re-export a dependent's path
+    /// goes through), after its own names (a module of the library's name); the root of the source too (`:c=cc`)
+    #[test]
+    fn renamed_dependency_is_the_crate_in_each_module() {
+        let src = "pub mod cc {\n    pub fn make() -> u32 { 1 }\n    pub mod inner {\n        pub fn hi() {}\n    }\n}\npub mod dig {\n    pub use common;\n    pub mod cc {\n        pub fn make() -> u32 { 2 }\n    }\n    mod sub {\n        use common::inner::hi;\n        pub fn f() -> u32 {\n            hi();\n            common::make() + ::common::make() + crate::cc::make()\n        }\n    }\n}\nmod m {\n    pub fn g() -> u32 {\n        c::make() + dig::common::make()\n    }\n}\nfn main() {}\n";
+        let crates: Vec<String> = ["cc", "dig", "dig:common=cc", ":c=cc"].iter().map(|s| s.to_string()).collect();
+        let out = rename_module_collisions_in(src, &crates).unwrap();
+        assert!(out.contains("            cc__inner__hi();\n            cc__make() + cc__make() + dig__cc__make()"), "{out}");
+        assert!(out.contains("        cc__make() + cc__make()\n"), "{out}");
+        // (without the entry, `common` is no module)
+        let out = rename_module_collisions_in(src, &crates[..2]).unwrap();
+        assert!(out.contains("common::make()"), "{out}");
+        // (a bin's name for a crate over another crate of that name, which the bin does not depend on itself)
+        let src = "pub mod cc {\n    pub fn make() -> u32 { 1 }\n}\npub mod other {\n    pub fn make() -> u32 { 2 }\n}\nfn main() {\n    let _ = other::make();\n}\n";
+        let crates: Vec<String> = ["cc", "other", ":other=cc"].iter().map(|s| s.to_string()).collect();
+        let out = rename_module_collisions_in(src, &crates).unwrap();
+        assert!(out.contains("let _ = cc__make();"), "{out}");
+    }
+
     fn ren(src: &str) -> String {
         rename_module_collisions_in(src, &["d".to_string()]).unwrap_or_else(|| src.to_string())
     }
@@ -1100,6 +1252,46 @@ mod tests {
         let out = rename_module_collisions(src).unwrap_or_else(|| src.to_string());
         assert!(!out.contains("__unsafe"), "{out}");
         assert!(out.contains("unsafe impl Send for a__DIR") && out.contains("unsafe impl Send for b__DIR"), "{out}");
+    }
+
+    /// An attribute's names and a macro's are no items (#251): typenum's `#[derive(Eq, ..)]` beside the `pub type Eq<A,
+    /// B>` of `pub use crate::operator_aliases::*;` became `typenum__operator_aliases__Eq`. Nor do `#[repr(C)]` beside a
+    /// `struct C`, `#[default]` beside a `fn default` and `write!` beside a `fn write` change; a macro's arguments and the
+    /// alias in a type's place are still renamed
+    #[test]
+    fn attributes_and_macro_names_are_not_items() {
+        let src = "mod typenum {\n    pub mod operator_aliases {\n        pub type Eq<A, B> = (A, B);\n        pub struct C;\n        pub fn write() {}\n        pub fn default() {}\n    }\n    pub use crate::operator_aliases::*;\n    #[derive(Eq, PartialEq, Clone, core::cmp::Ord, Debug, Default)]\n    #[repr(C)]\n    pub struct Greater;\n    #[derive(Default)]\n    pub enum E { #[default] A }\n    pub fn f(out: &mut String, e: Eq<u8, u16>) {\n        write!(out, \"{}\", default()).unwrap();\n        write![out, \"{:?}\", e].unwrap();\n    }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["typenum".to_string()]).unwrap();
+        assert!(out.contains("#[derive(Eq, PartialEq, Clone, core::cmp::Ord, Debug, Default)]\n    #[repr(C)]\n    pub struct typenum__Greater;"), "{out}");
+        assert!(out.contains("pub enum typenum__E { #[default] A }"), "{out}");
+        assert!(out.contains("e: typenum__operator_aliases__Eq<u8, u16>)"), "{out}");
+        assert!(out.contains("{\n        write!(out, \"{}\", typenum__operator_aliases__default()).unwrap();\n        write![out, \"{:?}\", e].unwrap();"), "{out}");
+    }
+
+    /// Review of #272: only a macro's name is in the macro namespace; the modules of its path are a path's. Two fn
+    /// bodies' `mod m`, renamed for hoisting, take the `m` of their `m::say!(..)` with them
+    #[test]
+    fn a_macro_path_keeps_its_hoisted_module() {
+        let src = "fn a() {\n    mod m {\n        pub use std::println as say;\n    }\n    m::say!(\"hello a\");\n}\nfn b() {\n    mod m {\n        pub use std::println as say;\n    }\n    m::say!(\"hello b\");\n}\nfn main() {}\n";
+        let out = hoist_nested_items(src).unwrap();
+        for (call, name) in [("hello a", "m__h0"), ("hello b", "m__h1")] {
+            assert!(out.contains(&format!("    {name}::say!(\"{call}\");")), "{out}");
+            assert!(out.contains(&format!("mod {name} {{")), "{out}");
+        }
+    }
+
+    /// Review of #272: a macro's path names its module as any path does, and the macro's name is what the module
+    /// imports as a macro: std's `println` that m brings as `say`, not m's `fn say` beside it (a value, renamed for
+    /// n's `fn say`)
+    #[test]
+    fn a_macro_path_names_the_module_s_macro() {
+        let src = "mod m {\n    pub use std::println as say;\n    pub fn say() -> u8 { 1 }\n}\nmod n {\n    pub fn say() -> u8 { 2 }\n}\nfn main() {\n    m::say!(\"{} {}\", m::say(), n::say());\n    crate::m::say![\"x\"];\n}\n";
+        let out = rename_module_collisions_in(src, &[]).unwrap();
+        assert!(out.contains("    std::println!(\"{} {}\", m__say(), n__say());\n    std::println![\"x\"];"), "{out}");
+        // (in a crate module, through `crate::` and `self::` too)
+        let src = "mod d {\n    pub mod m {\n        pub use std::println as say;\n        pub fn say() {}\n    }\n    pub fn f() {\n        m::say!(\"x\");\n        crate::m::say!(\"y\");\n        self::m::say! { \"z\" }\n    }\n}\nfn main() {}\n";
+        let out = ren(src);
+        assert!(out.contains("        std::println!(\"x\");\n        std::println!(\"y\");\n        std::println! { \"z\" }"), "{out}");
     }
 
     #[test]
@@ -1377,7 +1569,7 @@ pub fn tokenize(s: &[u8]) -> Vec<(u8, usize, usize)> {
             }
             continue;
         }
-        if let Some(end) = string_lit(s, i) {
+        if let Some(end) = string_lit_at(s, i) {
             toks.push((2, i, end));
             i = end;
             continue;
@@ -2225,10 +2417,13 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
             }
         }
         let mut at: Vec<(usize, usize)> = vec![]; // (トークン, renames の番号)
+        // (not an attribute's tokens or a macro's name: `#[derive(Debug)]` / `write!(..)` beside a nested `struct Debug` /
+        // `fn write`)
+        let no_item = macro_ns_toks(&toks, s);
         for (ri, r) in renames.iter().enumerate() {
             let mut k = r.0 + 1;
             while k < r.1 {
-                if toks[k].0 == 0 && &s[toks[k].1..toks[k].2] == r.2.as_slice() {
+                if toks[k].0 == 0 && !no_item[k] && &s[toks[k].1..toks[k].2] == r.2.as_slice() && !number_suffix(s, toks[k].1) {
                     at.push((k, ri));
                 }
                 k += 1;
@@ -2569,6 +2764,11 @@ pub fn trait_scopes(src: &str) -> Vec<(u32, u32, Vec<String>)> {
 
 /// trait_scopes, with whether src contains `mod` already known (one search of the text for both uses)
 pub fn trait_scopes_with(src: &str, has_mod: bool) -> Vec<(u32, u32, Vec<String>)> {
+    trait_scopes_in(src, has_mod, None)
+}
+
+/// trait_scopes_with, with src's tokens (`tokenize(src)`) when the caller has them already
+pub fn trait_scopes_in(src: &str, has_mod: bool, src_toks: Option<&[(u8, usize, usize)]>) -> Vec<(u32, u32, Vec<String>)> {
     if !has_mod || !src.contains("trait") {
         return vec![];
     }
@@ -2600,7 +2800,14 @@ pub fn trait_scopes_with(src: &str, has_mod: bool) -> Vec<(u32, u32, Vec<String>
         }
     }
     let s = src.as_bytes();
-    let toks = tokenize(s);
+    let own;
+    let toks: &[(u8, usize, usize)] = match src_toks {
+        Some(t) => t,
+        None => {
+            own = tokenize(s);
+            &own
+        }
+    };
     let tok = |k: usize| -> &[u8] { &s[toks[k].1..toks[k].2] };
     let is_sym = |k: usize, c: u8| toks[k].0 == 1 && s[toks[k].1] == c && toks[k].2 == toks[k].1 + 1;
     let is_id = |k: usize, w: &[u8]| toks[k].0 == 0 && tok(k) == w;
@@ -2801,16 +3008,45 @@ pub fn trait_scopes_with(src: &str, has_mod: bool) -> Vec<(u32, u32, Vec<String>
 fn use_walk(
     toks: &[(u8, usize, usize)],
     s: &[u8],
+    j: usize,
+    end: usize,
+    prefix: Vec<Vec<u8>>,
+    out: &mut Vec<(Vec<Vec<u8>>, Vec<u8>)>,
+) -> usize {
+    use_walk_in(toks, s, j, end, prefix, out, &mut vec![])
+}
+
+/// use_walk, and the places in out of the `self` entries (`use a::m::{self};`), which bring the type namespace only:
+/// the module or the type m, not a fn m beside it
+fn use_walk_in(
+    toks: &[(u8, usize, usize)],
+    s: &[u8],
     mut j: usize,
     end: usize,
     prefix: Vec<Vec<u8>>,
     out: &mut Vec<(Vec<Vec<u8>>, Vec<u8>)>,
+    selfs: &mut Vec<usize>,
 ) -> usize {
     let tk = |k: usize| -> &[u8] { &s[toks[k].1..toks[k].2] };
     let mut path = prefix.clone();
     while j < end {
         let t = tk(j);
         if toks[j].0 == 0 {
+            // (`self` first in a tree is the prefix itself: `use super::Sign::{self, Minus};` brings `Sign` (num-bigint),
+            // `use crate::util::{alphabet::{self, ByteClasses}};` the module `alphabet`, as `self as x` brings it as x)
+            if t == b"self" && path.len() == prefix.len() && !prefix.is_empty() && !(j + 1 < end && tk(j + 1) == b":") {
+                let as_x = j + 2 < end && toks[j + 1].0 == 0 && tk(j + 1) == b"as";
+                // (`use super::{self};` names no item: left as it was)
+                let kw_prefix = prefix.last().is_some_and(|p| matches!(p.as_slice(), b"self" | b"super" | b"crate"));
+                if as_x || !kw_prefix {
+                    let local = if as_x { tk(j + 2).to_vec() } else { prefix.last().cloned().unwrap_or_default() };
+                    selfs.push(out.len());
+                    out.push((prefix.clone(), local));
+                    path = prefix.clone();
+                    j += if as_x { 3 } else { 1 };
+                    continue;
+                }
+            }
             if t == b"as" {
                 // 別名
                 if j + 1 < end {
@@ -2833,7 +3069,7 @@ fn use_walk(
         } else if t == b":" {
             j += 1;
         } else if t == b"{" {
-            j = use_walk(toks, s, j + 1, end, path.clone(), out);
+            j = use_walk_in(toks, s, j + 1, end, path.clone(), out, selfs);
             path = prefix.clone();
         } else if t == b"}" {
             return j + 1;
@@ -2865,6 +3101,8 @@ pub fn rename_module_collisions(src: &str) -> Option<String> {
 
 /// crates: クレートとして読み込んだモジュール (`pub mod geom { .. }`) の名前。その中のアイテムはぶつからなくても
 /// 必ず `geom__Name` にし (どのクレートと一緒にコンパイルしても同じシンボルになるように)、中の `crate::` はそのモジュールを指す
+/// (an entry `owner:alias=crate` is a dependency the crate `owner` names `alias`, a renamed one; `:alias=crate` for
+/// the root of the source: session::build's CrateSpec::aliases)
 pub fn rename_module_collisions_in(src: &str, crates: &[String]) -> Option<String> {
     rename_module_collisions_fix(src, crates, &mut vec![])
 }
@@ -3122,6 +3360,35 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     if renamed.is_empty() && !src.contains(" as ") {
         return None;
     }
+    // (the definitions in the type namespace, a struct / enum / union / trait / type alias: (scope, name). A fn, const or
+    // static is a value, which a path's first segment never names)
+    let ty_defs: LSet<(usize, Vec<u8>)> =
+        defs.iter().filter(|d| d.2 >= 1 && [&b"struct"[..], b"enum", b"union", b"trait", b"type"].iter().any(|w| is_id(d.2 - 1, w))).map(|d| (d.1, d.0.clone())).collect();
+    // (a dependency under another name, `common = { package = "crypto-common" }` (rustc's `--extern common=..`): the
+    //  entry `digest:common=crypto_common` of crates, `:common=crypto_common` for the root of the source (a bin's).
+    //  As in rustc's extern prelude, every module of that crate sees the name, after its own names; the crate keeps its
+    //  own name everywhere. (the crate's root: its module, or usize::MAX, the name) → the crate's module)
+    let crate_root = |m: usize| -> usize { if in_crate(m) { mod_of_path.get(&vec![mods[m].0[0].clone()]).copied().unwrap_or(usize::MAX) } else { usize::MAX } };
+    let mut ext_alias: LMap<(usize, Vec<u8>), usize> = LMap::default();
+    for e in crates {
+        let Some((owner, rest)) = e.split_once(':') else { continue };
+        let Some((alias, target)) = rest.split_once('=') else { continue };
+        let root = if owner.is_empty() { Some(usize::MAX) } else { mod_of_path.get(&vec![owner.as_bytes().to_vec()]).copied() };
+        if let (Some(root), Some(&t)) = (root, mod_of_path.get(&vec![target.as_bytes().to_vec()])) {
+            ext_alias.insert((root, alias.as_bytes().to_vec()), t);
+        }
+    }
+    // (the module path a path from the extern prelude of the crate of scope `from` names: `common::block` →
+    //  `crypto_common::block`)
+    let ext_path = |from: usize, segs: &[Vec<u8>]| -> Option<Vec<Vec<u8>>> {
+        if ext_alias.is_empty() {
+            return None;
+        }
+        let t = *ext_alias.get(&(crate_root(from), segs.first()?.clone()))?;
+        let mut p = mods[t].0.clone();
+        p.extend(segs[1..].iter().cloned());
+        Some(p)
+    };
     // モジュールのパス (`crate::a::b` / `a::b` / `self` / `super`) → mods の番号
     let resolve_mod = |from: usize, segs: &[Vec<u8>]| -> Option<usize> {
         let mut base: Vec<Vec<u8>> = if from == usize::MAX { vec![] } else { mods[from].0.clone() };
@@ -3141,7 +3408,23 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             // (相対パスで見つからなければ crate からとみなす)
             let mut rel = base.clone();
             rel.extend(rest.iter().cloned());
-            if let Some(i) = mod_of_path.get(&rel).copied() {
+            let hit = mod_of_path.get(&rel).copied();
+            // (a name of the crate's extern prelude, unless the scope binds the first name in the type namespace itself:
+            // a module of that name (whose re-exports the path may go on through, `common::inner` with `pub use
+            // crate::local::inner;` in it), or a type. Another crate's module of the name, which the root of the source
+            // holds, is none of the crate's; a fn of the name is a value)
+            if !ext_alias.is_empty() && rest.len() == segs.len() {
+                let own = |m: usize| !(crate_root(from) == usize::MAX && in_crate(m));
+                let mut first = base.clone();
+                first.push(segs[0].clone());
+                let local = mod_of_path.get(&first).copied().is_some_and(own) || ty_defs.contains(&(from, segs[0].clone()));
+                if !local {
+                    if let Some(p) = ext_path(from, segs) {
+                        return mod_of_path.get(&p).copied();
+                    }
+                }
+            }
+            if let Some(i) = hit {
                 return Some(i);
             }
             if !croot.is_empty() {
@@ -3159,6 +3442,22 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         }
         mod_of_path.get(&base).copied()
     };
+    // (a path from `::` (`::common::block`, edition 2018 on): the name of the crate's extern prelude, else a crate's
+    // module; never a module or alias of the scope's. Then the crate root's module, as edition 2015 reads it)
+    let resolve_lead = |from: usize, segs: &[Vec<u8>]| -> Option<usize> {
+        match ext_path(from, segs) {
+            Some(p) => mod_of_path.get(&p).copied(),
+            // (the crate's module by its own name: not through the names the root of the source (a bin) gives crates,
+            // which are the bin's alone)
+            None => mod_of_path.get(segs).copied().or_else(|| {
+                let mut p = vec![b"crate".to_vec()];
+                p.extend(segs.iter().cloned());
+                resolve_mod(from, &p).filter(|_| in_crate(from))
+            }),
+        }
+    };
+    // (whether the `use` at token k starts from `::`, `use ::common::make;`)
+    let use_lead = |k: usize| k + 2 < toks.len() && is_sym(k + 1, b':') && is_sym(k + 2, b':');
     // (a module imported by `use`, under its own name or another: `use util as u;` with the crate `util`, or
     // `use crate::geom::shape;`. (scope, the name used) → the module, so `u::calls()` is `util::calls()`)
     let mut mod_alias: LMap<(usize, Vec<u8>), usize> = LMap::default();
@@ -3196,9 +3495,10 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         // (in the module's own braces (or at the root), or in a block inside them)
         let own = if sc == usize::MAX { usize::MAX } else { mods[sc].1 };
         let block = block_of[k];
+        let lead = use_lead(k);
         for (path, local) in items {
             if local.as_slice() != b"*" && local.as_slice() != b"_" && !path.is_empty() {
-                if let Some(m) = resolve_mod(sc, &path).filter(|&m| m != usize::MAX) {
+                if let Some(m) = (if lead { resolve_lead(sc, &path) } else { resolve_mod(sc, &path) }).filter(|&m| m != usize::MAX) {
                     match close_at.get(&block) {
                         // (and its module: a `mod` declared in the block does not see it)
                         Some(&close) if block != own => block_alias.push((block, close, local, m, sc)),
@@ -3236,7 +3536,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     // or a module brings in)
     let resolve_mod_at = |from: usize, segs: &[Vec<u8>], at: usize, lead: bool| -> Option<usize> {
         if lead {
-            return resolve_mod(usize::MAX, segs);
+            return resolve_lead(from, segs);
         }
         let alias = segs.first().and_then(|f| {
             // (the innermost block's alias or module of that name, then the module's alias)
@@ -3255,7 +3555,6 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         }
         resolve_mod(from, segs)
     };
-    let resolve_mod = |from: usize, segs: &[Vec<u8>], at: usize| resolve_mod_at(from, segs, at, false);
     let renamed_in = |m: usize, n: &[u8]| -> Option<Vec<u8>> { renamed_map.get(&(m, n.to_vec())).cloned() };
     // use 文で取り込んだ名前: (スコープ, 使う名前) → 新しい名前。use 文のトークン範囲は書き換えない
     let mut imports: Vec<(usize, Vec<u8>, Vec<u8>)> = vec![];
@@ -3263,10 +3562,10 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     // `use crate::m::*;` で取り込んだモジュール: (スコープ, モジュール)
     let mut globs: Vec<(usize, usize)> = vec![];
     // (モジュール m の中で use した名前を取り込むもの: (スコープ, 使う名前, m, m の中の名前, ブロック))
-    let mut pending: Vec<(usize, Vec<u8>, usize, Vec<u8>, Option<(usize, usize)>)> = vec![];
+    let mut pending: Vec<(usize, Vec<u8>, usize, Vec<u8>, Option<(usize, usize)>, u8)> = vec![];
     // (a name a `use` in a block (a fn body) imports, seen in that block only: (its `{`, its `}`, the name used, the new
     // name). The innermost block's wins over the module's items and imports)
-    let mut block_imports: Vec<(usize, usize, Vec<u8>, Vec<u8>, usize)> = vec![];
+    let mut block_imports: Vec<(usize, usize, Vec<u8>, Vec<u8>, usize, u8)> = vec![];
     // (the namespaces of each definition: a fn / const / static is a value, an enum / trait / type alias a type, a
     //  struct / union both (a tuple struct's constructor); one defined twice under a name, both)
     let mut def_ns: LMap<(usize, Vec<u8>), u8> = LMap::default();
@@ -3344,13 +3643,13 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     // (the module of a `use` path, also through modules that globs bring in: in libc, `pub use new::*;` at the root,
     //  `pub(crate) use linux_uapi::*;` in new, and then `pub use crate::linux::can::*;` and, in new,
     //  `pub use linux::types::*;`. The longest prefix that names a module, then the rest segment by segment; from the
-    //  scope itself, the crate root too, when none does)
-    let resolve_path = |sc: usize, path: &[Vec<u8>], at: usize, names: &Names| -> Option<usize> {
-        if let Some(m) = resolve_mod(sc, path, at) {
+    //  scope itself, the crate root too, when none does. `lead`: the path starts from `::`, not from the scope)
+    let resolve_path = |sc: usize, path: &[Vec<u8>], at: usize, names: &Names, lead: bool| -> Option<usize> {
+        if let Some(m) = resolve_mod_at(sc, path, at, lead) {
             return Some(m);
         }
         for cut in (0..path.len()).rev() {
-            let start = if cut == 0 { Some(sc) } else { resolve_mod(sc, &path[..cut], at) };
+            let start = if cut == 0 { Some(sc).filter(|_| !lead) } else { resolve_mod_at(sc, &path[..cut], at, lead) };
             if let Some(m) = start.and_then(|st| names.walk(sc, st, &path[cut..])) {
                 return Some(m);
             }
@@ -3358,7 +3657,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         None
     };
     // (the globs first, until no more resolve: a `use` may name a module that a later glob brings in)
-    let mut glob_uses: Vec<(usize, usize, Vec<Vec<u8>>, bool)> = vec![];
+    let mut glob_uses: Vec<(usize, usize, Vec<Vec<u8>>, bool, bool)> = vec![];
     {
         let mut k = 0;
         while k < toks.len() {
@@ -3371,7 +3670,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 use_walk(&toks, s, k + 1, e, vec![], &mut items);
                 for (path, local) in items {
                     if local.as_slice() == b"*" {
-                        glob_uses.push((scope_of(k), k, path, pub_before(&toks, s, k)));
+                        glob_uses.push((scope_of(k), k, path, pub_before(&toks, s, k), use_lead(k)));
                     }
                 }
                 k = e;
@@ -3384,11 +3683,11 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         let mut added = vec![];
         {
             let names = names_with!(&globs, &no_imports);
-            for (i, (sc, at, path, _)) in glob_uses.iter().enumerate() {
+            for (i, (sc, at, path, _, lead)) in glob_uses.iter().enumerate() {
                 if done[i] {
                     continue;
                 }
-                if let Some(m) = resolve_path(*sc, path, *at, &names) {
+                if let Some(m) = resolve_path(*sc, path, *at, &names, *lead) {
                     done[i] = true;
                     added.push(((*sc, m), glob_uses[i].3));
                 }
@@ -3426,7 +3725,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         }
         use_ranges.push((k, e));
         let mut items = vec![];
-        use_walk(&toks, s, k + 1, e, vec![], &mut items);
+        let mut selfs = vec![];
+        use_walk_in(&toks, s, k + 1, e, vec![], &mut items, &mut selfs);
         // (a `pub use`: a glob of this module brings what it imports)
         if pub_before(&toks, s, k) {
             import_pub.extend(items.iter().filter(|it| it.1.as_slice() != b"*").map(|it| (sc, it.1.clone())));
@@ -3434,13 +3734,16 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         let own_brace = if sc == usize::MAX { usize::MAX } else { mods[sc].1 };
         let in_block = close_at.get(&block_of[k]).filter(|_| block_of[k] != own_brace).map(|&c| (block_of[k], c));
         let mut add = |local: Vec<u8>, nn: Vec<u8>, ns: u8| match in_block {
-            Some((o, c)) => block_imports.push((o, c, local, nn, sc)),
+            Some((o, c)) => block_imports.push((o, c, local, nn, sc, ns)),
             None => {
                 import_ns.insert((sc, local.clone()), ns);
                 imports.push((sc, local, nn));
             }
         };
-        for (path, local) in items {
+        for (ix, (path, local)) in items.into_iter().enumerate() {
+            // (a `self` entry, `use crate::a::m::{self};`, brings m's type namespace only: the module (followed as a
+            //  module alias) or a type, not a fn m of a beside it)
+            let want = if selfs.contains(&ix) { NS_TYPE } else { NS_ANY };
             if local.as_slice() == b"*" {
                 // (resolved before this loop, to a fixed point)
                 continue;
@@ -3449,8 +3752,11 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 continue;
             }
             let (mpath, name) = path.split_at(path.len() - 1);
-            // (an item of std under another name, `use std::cell::LazyCell as Lazy;`: the name is its path)
-            if matches!(mpath[0].as_slice(), b"std" | b"core" | b"alloc") && local != name[0] && local.as_slice() != b"_" && !def_set.contains(&(sc, local.clone())) {
+            // (an item of std under another name, `use std::cell::LazyCell as Lazy;`: the name is its path. A macro
+            // too, `pub use std::println as say;`: what `m::say!(..)` names, a macro only beside the module's own
+            // `fn say`. Not in a block that way: there its bare `say()` would take the import)
+            let own = def_set.contains(&(sc, local.clone()));
+            if matches!(mpath[0].as_slice(), b"std" | b"core" | b"alloc") && local != name[0] && local.as_slice() != b"_" && !(own && in_block.is_some()) {
                 let mut full = vec![];
                 for (i, seg) in path.iter().enumerate() {
                     if i > 0 {
@@ -3458,16 +3764,22 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                     }
                     full.extend_from_slice(seg);
                 }
-                add(local, full, NS_ANY);
+                // (a `self` entry, `use std::io::{self as sio};`, the module only: no macro)
+                let ns = if own { NS_MACRO } else { NS_ANY | NS_MACRO };
+                let ns = if want == NS_TYPE { ns & NS_TYPE } else { ns };
+                if ns != 0 {
+                    add(local, full, ns);
+                }
                 continue;
             }
-            if let Some(m) = resolve_path(sc, mpath, k, &use_names) {
-                let ns = def_ns.get(&(m, name[0].clone())).copied().unwrap_or(NS_ANY);
+            // (none when the name is only a value, beside the module a `self` entry names)
+            let found = resolve_path(sc, mpath, k, &use_names, use_lead(k)).map(|m| (m, def_ns.get(&(m, name[0].clone())).copied().unwrap_or(NS_ANY) & want));
+            if let Some((m, ns)) = found.filter(|f| f.1 != 0) {
                 if let Some(nn) = renamed_in(m, &name[0]) {
                     add(local, nn, ns);
                 } else if !def_set.contains(&(m, name[0].clone())) {
                     // (`pub use` で取り込み直した名前かもしれない: 後で解く)
-                    pending.push((sc, local, m, name[0].clone(), in_block));
+                    pending.push((sc, local, m, name[0].clone(), in_block, want));
                 } else if local.as_slice() != name[0].as_slice() && def_set.contains(&(m, name[0].clone())) {
                     // (`use crate::parse::{FnSig as PSig}`: 別名はそのモジュールの中で元の名前に)
                     add(local, name[0].clone(), ns);
@@ -3493,7 +3805,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             let names = names_with!(&final_globs, &map);
             for p in std::mem::take(&mut pending) {
                 // (as module p.2 sees it: what its globs bring is what it imports)
-                match names.item_at(p.2, p.2, &p.3, NS_ANY) {
+                match names.item_at(p.2, p.2, &p.3, p.5) {
                     GlobHit::Item(nn, ns) => found_any.push((p, nn, ns)),
                     _ => rest.push(p),
                 }
@@ -3504,8 +3816,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             break;
         }
         for (p, nn, ns) in found_any {
+            let ns = ns & p.5;
             match p.4 {
-                Some((o, c)) => block_imports.push((o, c, p.1, nn, p.0)),
+                Some((o, c)) => block_imports.push((o, c, p.1, nn, p.0, ns)),
                 None => {
                     import_ns.insert((p.0, p.1.clone()), ns);
                     imports.push((p.0, p.1, nn));
@@ -3560,8 +3873,16 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             k += 1;
         }
     }
+    let mut variant_tok: Vec<bool> = vec![false; toks.len()];
     for &v in &variant_toks {
         skip[v] = true;
+        variant_tok[v] = true;
+    }
+    // (nor an attribute's tokens or a macro's name: `#[derive(Eq)]` / `write!(..)` beside a module's `type Eq` /
+    // `fn write`. The modules of a macro's path are a path's, `m::say!(..)`'s m)
+    let macro_ns = macro_ns_toks(&toks, s);
+    for (sk, &m) in skip.iter_mut().zip(&macro_ns) {
+        *sk |= m;
     }
     let mut def_tok: Vec<bool> = vec![false; toks.len()];
     for d in &defs {
@@ -3881,8 +4202,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         while j + 3 < toks.len() && is_sym(j + 1, b':') && is_sym(j + 2, b':') && toks[j + 3].0 == 0 {
             j += 3;
         }
-        // (変える名前・取り込んだ名前でもなく、パスの先頭でもないなら何もしない)
-        if j == k && !interest.contains(&name_hash(tok(k))) {
+        // (変える名前・取り込んだ名前でもなく、パスの先頭でもないなら何もしない。A number's suffix is no name: `0u8`
+        //  beside fastrand's `fn u8` (#254))
+        if j == k && (!interest.contains(&name_hash(tok(k))) || number_suffix(s, toks[k].1)) {
             k += 1;
             continue;
         }
@@ -3911,7 +4233,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 // (a module by its path, or through modules that globs bring in: `facade::api::T` with facade's
                 //  `pub use crate::pkg::*;`)
                 let m = resolve_mod_at(sc, &segs[..cut], k, leading)
-                    .or_else(|| if leading { None } else { resolve_path(sc, &segs[..cut], k, &names).filter(|&m| m != usize::MAX || segs[0].as_slice() == b"crate") });
+                    .or_else(|| resolve_path(sc, &segs[..cut], k, &names, leading).filter(|&m| m != usize::MAX || segs[0].as_slice() == b"crate"));
                 if let Some(m) = m {
                     if m == usize::MAX && !(segs[0].as_slice() == b"crate") {
                         continue;
@@ -3919,7 +4241,15 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                     // (its item, what it imports, or what its globs pass on, globs of globs too: libc's root
                     //  `pub use unix::*;` then unix's `pub use self::linux::*;` give `crate::gid_t` / `libc::passwd`)
                     // (a segment a path goes on after names a type or module: `m::E::V(..)`'s E is no call)
-                    let w = if cut + 1 < segs.len() { NS_TYPE } else { want };
+                    // (and a macro's name, the last of `m::say!(..)`, a macro: std's that m imports, never m's
+                    // `fn say`)
+                    let w = if cut + 1 < segs.len() {
+                        NS_TYPE
+                    } else if macro_ns[j] {
+                        NS_MACRO
+                    } else {
+                        want
+                    };
                     if let Some(nn) = names.lookup_from(sc, m, &segs[cut], w) {
                         // segs[..=cut] を新しい名前にする (`::re::label`: the leading `::` too, as the name is the item's)
                         repl.push((if leading { k - 2 } else { k }, k + 3 * cut, nn));
@@ -3966,13 +4296,86 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         let is_def = def_tok[k];
         {
             let n = tok(k);
-            // (a block's own import first: `fn f() { use b::g; g() }` beside a module-level `g`)
-            let in_block = || if is_def { None } else { block_imports.iter().filter(|b| b.0 < k && k < b.1 && b.2 == n && b.4 == sc).max_by_key(|b| b.0).map(|b| b.3.clone()) };
-            // (the scope's own item, its import, or what its globs pass on, globs of globs too, all of them compared
-            //  (two distinct is ambiguous): libc's unix sees `time_t` of linux_like/linux/gnu/b64; a definition is its own)
+            // (a primitive type's name that is not called, `Result<u32, Error>` / `[u8]` / `u32::MAX`, is the primitive
+            //  unless a type of that name shadows it: getrandom's `pub fn u32() -> Result<u32, Error>` is a value, and
+            //  the `u32` beside it stays the type (#254). A call, `u32()`, is the fn, and so is a call's argument by
+            //  itself, `.map_or(x, char)`: a lowercase name before the `(` calls a fn or method, whose arguments are values
+            let call_arg = || {
+                if !(k >= 1 && (is_sym(k - 1, b'(') || is_sym(k - 1, b',')) && k + 1 < toks.len() && (is_sym(k + 1, b')') || is_sym(k + 1, b','))) {
+                    return false;
+                }
+                let (mut q, mut d, mut steps) = (k, 0i32, 0);
+                while q > 0 && steps < 400 {
+                    q -= 1;
+                    steps += 1;
+                    if is_sym(q, b')') || is_sym(q, b']') || is_sym(q, b'}') {
+                        d += 1;
+                    } else if is_sym(q, b'[') || is_sym(q, b'{') || (is_sym(q, b';') && d == 0) {
+                        if d == 0 {
+                            return false;
+                        }
+                        d -= 1;
+                    } else if is_sym(q, b'(') {
+                        if d == 0 {
+                            // (not a fn pointer's type, `fn(u8)`, nor a tuple struct's or variant's fields,
+                            //  `struct u8x2(u8, u8);` / `enum E { lower(u8) }`)
+                            let fields = (q >= 2 && (is_id(q - 2, b"struct") || is_id(q - 2, b"union"))) || (q >= 1 && variant_tok[q - 1]);
+                            return q >= 1 && toks[q - 1].0 == 0 && s[toks[q - 1].1].is_ascii_lowercase() && !is_id(q - 1, b"fn") && !fields;
+                        }
+                        d -= 1;
+                    }
+                }
+                false
+            };
+            // (and so is a value in an expression's place: a `let`'s or an assignment's, `let f = u32;` (not a binding or
+            //  a default among generics, `Iterator<Item = u8>` / `<T = u8>`), an operand of a comparison, `f == u32` /
+            //  `u32 != f` / `f <= u32` (fn pointers compare; arithmetic on them is no Rust), an arm's, `=> u32`, and after
+            //  `return` / `break`. A type's place is many more (`[u8]`, `(u8, char)`, `impl X for u8`, ..): what is
+            //  neither is a type. A path's head, `n == u32::MAX`, is the type's in any place)
+            // (a struct literal there, `let s = S {};` / `=> S { .. }` / `return S {}`, names the type: rustc resolves it
+            //  among types. After a comparison a `{` opens the `if`'s block, `if x == B { .. }`: the operand is a value)
+            let literal = k + 1 < toks.len() && is_sym(k + 1, b'{');
+            let value_place = || {
+                if is_sym(k - 1, b'=') {
+                    // (`==` / `!=` / `<=` / `>=`, or a compound assignment: an operand)
+                    let op = k >= 2 && toks[k - 2].0 == 1 && toks[k - 2].2 == toks[k - 1].1 && b"=!<>+-*/%&|^".contains(&s[toks[k - 2].1]);
+                    let binding = k >= 3 && toks[k - 2].0 == 0 && (is_sym(k - 3, b'<') || is_sym(k - 3, b','));
+                    return op || (!binding && !literal);
+                }
+                // (the left operand of `==` / `!=`; not of `<=` / `>=`, whose `>` may close generics, `Vec<u8>= ..`)
+                let cmp_next = k + 2 < toks.len() && (is_sym(k + 1, b'=') || is_sym(k + 1, b'!')) && is_sym(k + 2, b'=') && toks[k + 1].2 == toks[k + 2].1;
+                cmp_next || (!literal && ((k >= 2 && is_sym(k - 1, b'>') && is_sym(k - 2, b'=')) || is_id(k - 1, b"return") || is_id(k - 1, b"break")))
+            };
+            let prim = (j > k || !call) && is_primitive_name(n) && !(j == k && k >= 1 && want != NS_TYPE && (call_arg() || value_place()));
+            // (a block's own import first: `fn f() { use b::g; g() }` beside a module-level `g`; for a primitive's name,
+            //  one in the type namespace, `use crate::Byte as u8;`, as it shadows the primitive)
             // (the first segment of a path that goes on is a type or module: `E::V(..)`)
             let w = if j > k { NS_TYPE } else { want };
-            let nn = in_block().or_else(|| if is_def { renamed_in(sc, n) } else { names.lookup(sc, n, w) });
+            // (in the place's namespaces: a block's `use crate::a::E::{self};` is the type, not the call `E()` nor the
+            //  value of `let f = E;` (a value's place, as for a primitive's name above). A type's place that finds none
+            //  takes any, as `lookup` does, but not for a primitive's name)
+            let in_block = || {
+                if is_def {
+                    return None;
+                }
+                let of = |b: &&(usize, usize, Vec<u8>, Vec<u8>, usize, u8)| b.0 < k && k < b.1 && b.2 == n && b.4 == sc;
+                if !block_imports.iter().any(|b| of(&b)) {
+                    return None;
+                }
+                let find = |ns: u8| block_imports.iter().filter(|b| of(b) && b.5 & ns != 0).max_by_key(|b| b.0).map(|b| b.3.clone());
+                if prim {
+                    find(NS_TYPE)
+                } else if w == NS_TYPE {
+                    find(NS_TYPE).or_else(|| find(NS_ANY))
+                } else if w == NS_ANY && j == k && k >= 1 && (value_place() || call_arg()) {
+                    find(NS_VALUE)
+                } else {
+                    find(w)
+                }
+            };
+            // (the scope's own item, its import, or what its globs pass on, globs of globs too, all of them compared
+            //  (two distinct is ambiguous): libc's unix sees `time_t` of linux_like/linux/gnu/b64; a definition is its own)
+            let nn = in_block().or_else(|| if is_def { renamed_in(sc, n) } else if prim { names.lookup_type(sc, n) } else { names.lookup(sc, n, w) });
             // (not a macro's name: `use core::panic as p;` then `p!()` stays as it is written)
             let std_path = |nn: &[u8]| [&b"std::"[..], b"core::", b"alloc::"].iter().any(|p| nn.starts_with(p));
             // (a name before a `:` only when it is no field: the walk back to a `where` is for a name that is renamed)
@@ -4097,9 +4500,54 @@ pub fn expand_module_aliases(src: &str) -> Option<String> {
     if names.is_empty() {
         return None;
     }
-    // (the innermost block around token k: a module's body, or a function's for a `use` in it)
-    let scope = |k: usize| blocks.iter().filter(|&&(o, c)| o < k && k < c).min_by_key(|&&(o, c)| c - o).copied();
+    // (the innermost block around token k: a module's body, or a function's for a `use` in it. The `{`s still open
+    // before k, read forward as k grows (the `use`s are asked in order): the innermost of them that a `}` closes.
+    // Looking through every block for each `use` was quadratic in a program of many modules)
+    let close_of: LMap<usize, usize> = blocks.iter().copied().collect();
+    let mut open_at: Vec<usize> = vec![];
+    let mut read = 0usize;
+    let mut scope = |k: usize| -> Option<(usize, usize)> {
+        while read < k {
+            if is_sym(read, b'{') {
+                open_at.push(read);
+            } else if is_sym(read, b'}') {
+                open_at.pop();
+            }
+            read += 1;
+        }
+        open_at.iter().rev().find_map(|&o| close_of.get(&o).map(|&c| (o, c)))
+    };
     let mut reps: Vec<(usize, Vec<u8>, usize)> = vec![]; // (token, its new text, the size of the use's scope)
+    // (the tokens in the braces after a `use` tree's prefix, `use crate::{hir::x, m::Y};`: a path there goes on from
+    //  the prefix, so its `m` is the prefix's child, not the module imported as `m` (regex-syntax's hir has
+    //  `use crate::unicode;` and `pub use crate::{.., unicode::CaseFoldError};`, #254). Found once a name is imported)
+    let mut in_tree: Vec<bool> = vec![];
+    let use_trees = || {
+        let mut v = vec![false; toks.len()];
+        let mut k = 0;
+        while k < toks.len() {
+            if is_id(k) && tk(k) == b"use" && !(k >= 1 && (is_sym(k - 1, b'.') || is_sym(k - 1, b':'))) {
+                // (the open groups, each whether it goes on from a prefix: `a::{..}` does, and a group in it; a group
+                //  right after `use`, `use {a::q as b};`, names from the scope as the `use` itself does)
+                let mut groups: Vec<bool> = vec![];
+                let mut j = k + 1;
+                while j < toks.len() && !is_sym(j, b';') {
+                    if is_sym(j, b'{') {
+                        let prefixed = groups.last().copied().unwrap_or(false) || is_sym(j - 1, b':');
+                        groups.push(prefixed);
+                    } else if is_sym(j, b'}') {
+                        groups.pop();
+                    } else if groups.last().copied().unwrap_or(false) {
+                        v[j] = true;
+                    }
+                    j += 1;
+                }
+                k = j;
+            }
+            k += 1;
+        }
+        v
+    };
     let mut k = 0;
     while k < toks.len() {
         // (`use a::b::m as x;`, in a tree too: `use crate::{arch::m as x, y};`)
@@ -4119,9 +4567,16 @@ pub fn expand_module_aliases(src: &str) -> Option<String> {
             if path.len() < 2 || alias == b"*" || alias == b"_" || !names.contains(&last.as_slice()) {
                 continue;
             }
-            let text = path.join(&b"::"[..]);
+            // (from `::` as the `use` is: `use ::common::inner as i;`, `::common::inner::hi()`)
+            let mut text = path.join(&b"::"[..]);
+            if is_sym(k + 1, b':') && is_sym(k + 2, b':') {
+                text = [&b"::"[..], &text].concat();
+            }
+            if in_tree.is_empty() {
+                in_tree = use_trees();
+            }
             for t in lo..hi {
-                if (k..=e).contains(&t) || inner.iter().any(|&(o, c)| o <= t && t <= c) {
+                if (k..=e).contains(&t) || inner.iter().any(|&(o, c)| o <= t && t <= c) || in_tree[t] {
                     continue;
                 }
                 if is_id(t) && tk(t) == alias.as_slice() && is_sym(t + 1, b':') && is_sym(t + 2, b':') && !(t >= 2 && is_sym(t - 1, b':') && is_sym(t - 2, b':')) && !(t >= 1 && is_sym(t - 1, b'.')) {
@@ -4426,11 +4881,28 @@ fn dangling_docs(s: &[u8], docs: Vec<(usize, usize)>) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether n is a primitive type's name (`u8`, `char`, `str`, ..)
+fn is_primitive_name(n: &[u8]) -> bool {
+    matches!(
+        n,
+        b"bool" | b"char" | b"str" | b"u8" | b"u16" | b"u32" | b"u64" | b"u128" | b"usize" | b"i8" | b"i16" | b"i32" | b"i64" | b"i128" | b"isize" | b"f16" | b"f32" | b"f64" | b"f128"
+    )
+}
+
+/// Whether the name token that starts at byte `at` of s is a number's suffix, `0u8` / `1_000u32` / `0x800u32` / `1.5f32`:
+/// tokenize reads the digits apart and the rest as a name, and no name starts right after a digit
+fn number_suffix(s: &[u8], at: usize) -> bool {
+    at >= 1 && s[at - 1].is_ascii_digit()
+}
+
 /// Namespaces a name is in (rename_module_collisions): types (struct, enum, trait, type, union) and values (fn, const,
 /// static; a struct's constructor). A type's place looks only at types, so `*mut stat` beside `fn stat` is the struct
 const NS_TYPE: u8 = 1;
 const NS_VALUE: u8 = 2;
 const NS_ANY: u8 = 3;
+/// Macros, which no item of a module is: only what a `use` imports from std under another name (`pub use std::println
+/// as say;`) is one, and a macro's name (`m::say!(..)`) looks only at those
+const NS_MACRO: u8 = 4;
 
 /// What a name is through a module's globs: an item renamed (its new name, its namespaces), an item that keeps its name
 /// (the module that defines it), nothing, or more than one (ambiguous, E0659: left as written, rustc reports it)
@@ -4645,6 +5117,14 @@ impl<'a> Names<'a> {
         self.lookup_from(m, m, n, want)
     }
 
+    /// The new name of n as module m sees it, a type only (a primitive's name: a value of that name does not shadow it)
+    fn lookup_type(&self, m: usize, n: &[u8]) -> Option<Vec<u8>> {
+        match self.item_at(m, m, n, NS_TYPE) {
+            GlobHit::Item(nn, _) => Some(nn),
+            _ => None,
+        }
+    }
+
     /// lookup, of module m's n as viewer (where the path is written) sees it
     fn lookup_from(&self, viewer: usize, m: usize, n: &[u8], want: u8) -> Option<Vec<u8>> {
         // (m's item as m sees it: a path to a module's private item still names it (the test harness calls
@@ -4652,10 +5132,49 @@ impl<'a> Names<'a> {
         let _ = viewer;
         match self.item_at(m, m, n, want) {
             GlobHit::Item(nn, _) => Some(nn),
-            GlobHit::None if want != NS_ANY => self.lookup_from(m, m, n, NS_ANY),
+            // (a macro's name takes nothing else)
+            GlobHit::None if want != NS_ANY && want != NS_MACRO => self.lookup_from(m, m, n, NS_ANY),
             _ => None,
         }
     }
+}
+
+/// The tokens (lexer tokens, s their text) that name no item, which renaming an item leaves as they are: an
+/// attribute's, `#[derive(Eq, Debug)]` / `#[repr(C)]` / `#![allow(x)]` (its path and a derive's names are macros, the
+/// rest its own arguments), and a macro call's name, `write!(..)` / the `mac` of `m::mac![..]` (the macro namespace,
+/// where no item is). typenum's `#[derive(Eq, ..)]` took the `pub type Eq<A, B>` that `operator_aliases::*` brings,
+/// `typenum__operator_aliases__Eq`: no derive has that name. The modules before a macro's name are a path's, renamed
+/// with their module: two fn bodies' `mod m` hoisted as `m__h0` / `m__h1` have `m__h0::say!(..)` / `m__h1::say!(..)`
+fn macro_ns_toks(toks: &[(u8, usize, usize)], s: &[u8]) -> Vec<bool> {
+    let sym = |k: usize, c: u8| toks[k].0 == 1 && toks[k].2 == toks[k].1 + 1 && s[toks[k].1] == c;
+    let mut out = vec![false; toks.len()];
+    let mut k = 0;
+    while k + 2 < toks.len() {
+        if sym(k, b'#') && (sym(k + 1, b'[') || (sym(k + 1, b'!') && sym(k + 2, b'['))) {
+            let open = if sym(k + 1, b'[') { k + 1 } else { k + 2 };
+            let mut d = 0usize;
+            let mut e = open;
+            while e < toks.len() {
+                if sym(e, b'[') {
+                    d += 1;
+                } else if sym(e, b']') {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                e += 1;
+            }
+            out[open..e.min(toks.len())].fill(true);
+            k = e + 1;
+            continue;
+        }
+        if toks[k].0 == 0 && sym(k + 1, b'!') && (sym(k + 2, b'(') || sym(k + 2, b'[') || sym(k + 2, b'{')) {
+            out[k] = true;
+        }
+        k += 1;
+    }
+    out
 }
 
 /// Whether the item, `mod` or `use` whose keyword is at token kw is written `pub` (`pub`, `pub(crate)`, ..; past
