@@ -542,6 +542,59 @@ impl TraitDb {
 /// names one is not proved, `Overflow`), one per parameter (so two free parameters are not taken for one)
 const FREE: u8 = 200;
 
+/// The outermost constructor of an impl's self type, as far as `unify` tells two apart: two types of different heads
+/// never unify. None for what unifies with anything or is not unified at all (a parameter, an associated type, an
+/// array of a const parameter's length, a placeholder)
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Head {
+    Leaf(Ty),
+    Ref(bool),
+    Ptr(bool),
+    Slice,
+    Box,
+    Array(u32),
+    Fn(usize),
+    Struct(u32),
+    Dyn,
+}
+
+fn head(p: &Program, t: Ty) -> Option<Head> {
+    Some(match t {
+        Ty::Param(_) | Ty::Assoc(_) => return None,
+        Ty::Ref(m, _) => Head::Ref(m),
+        Ty::Ptr(m, _) => Head::Ptr(m),
+        Ty::Slice(_) => Head::Slice,
+        Ty::Box(_) => Head::Box,
+        Ty::Array(_, n) if n >= CONST_LEN_BASE => return None,
+        Ty::Array(_, n) => Head::Array(n),
+        Ty::Fn(f) => Head::Fn(f.params.len()),
+        Ty::Struct(x) => {
+            let s = &p.structs[x as usize];
+            if s.placeholder.is_some() {
+                return None;
+            }
+            Head::Struct(s.base.unwrap_or(x))
+        }
+        Ty::Dyn(_) => Head::Dyn,
+        t => Head::Leaf(t),
+    })
+}
+
+/// Two ascending lists of indices as one
+fn merge_sorted(a: &[usize], b: &[usize]) -> Vec<usize> {
+    let (mut v, mut i, mut j) = (Vec::with_capacity(a.len() + b.len()), 0, 0);
+    while i < a.len() || j < b.len() {
+        if j == b.len() || (i < a.len() && a[i] < b[j]) {
+            v.push(a[i]);
+            i += 1;
+        } else {
+            v.push(b[j]);
+            j += 1;
+        }
+    }
+    v
+}
+
 /// Two impls of one trait that surely conflict (E0119): (the later impl's item, the earlier's, the trait, the
 /// common instance of their self types when it is ground). `conflict_sound` of Coherence.lean: substitutions that
 /// make the heads equal (found by unification, and checked equal) under which the solver proves both impls' where
@@ -555,16 +608,29 @@ impl TraitDb {
         for tr in trs {
             let cs = &self.clauses[tr];
             // (which impls may be compared at all, once per impl rather than once per pair: a crate's macro writes
-            // hundreds of impls of one trait, `impl FromHex for [u8; N]` for each N, whose pairs this check tries)
-            let ok: Vec<bool> = cs.iter().map(|c| c.exact && !unknowable_head(p, c)).collect();
+            // hundreds of impls of one trait, `impl FromHex for [u8; N]` for each N, whose pairs this check tries.
+            // An impl without a self type is no witness: both_apply needs both)
+            let ok: Vec<bool> = cs.iter().map(|c| c.exact && c.self_ty.is_some() && !unknowable_head(p, c)).collect();
+            // (and which pairs: two self types of different heads do not unify (`[u8; 4]`, `[u8; 8]`), so an impl is
+            // compared only with the earlier ones of its head and those whose self type is a parameter (`impl<T> Tr
+            // for T`), in the order of all the pairs: the first conflict found is the one the whole search finds)
+            let heads: Vec<Option<Head>> = cs.iter().map(|c| c.self_ty.and_then(|t| head(p, t))).collect();
+            let mut by_head: FxMap<Head, Vec<usize>> = FxMap::default();
+            let mut open: Vec<usize> = vec![];
             for (j, b) in cs.iter().enumerate() {
                 if !ok[j] {
                     continue;
                 }
-                for (i, a) in cs[..j].iter().enumerate() {
-                    if !ok[i] {
-                        continue;
-                    }
+                let earlier: Vec<usize> = match heads[j] {
+                    None => (0..j).filter(|&i| ok[i]).collect(),
+                    Some(h) => merge_sorted(by_head.get(&h).map_or(&[][..], |v| v.as_slice()), &open),
+                };
+                match heads[j] {
+                    None => open.push(j),
+                    Some(h) => by_head.entry(h).or_default().push(j),
+                }
+                for i in earlier {
+                    let a = &cs[i];
                     if let Some(g) = self.both_apply(p, a, b).filter(|_| read_all(a.item) && read_all(b.item)) {
                         let (x, y) = if a.item > b.item { (a.item, b.item) } else { (b.item, a.item) };
                         return Some((x, y, tr.clone(), g));
