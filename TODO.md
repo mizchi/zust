@@ -17,7 +17,7 @@ needs one filed first (then add it to [cratebench/survey/issues.tsv](cratebench/
 
 <!-- crate-priorities -->
 
-Survey of 2026-11-27 14:11 UTC on `2a60144`: 45 of 273 crates build (16.4% of their downloads); 937 errors in 176 packages.
+Survey of 2026-11-27 15:01 UTC on `e0a3d9d`: 45 of 273 crates build (16.4% of their downloads); 938 errors in 177 packages.
 
 | # | fix | issue | holds back | crates it alone unblocks |
 |---:|---|---|---:|---:|
@@ -30,15 +30,15 @@ Survey of 2026-11-27 14:11 UTC on `2a60144`: 45 of 273 crates build (16.4% of th
 | 7 | `missing generics for` a type used without its parameters | [#260](https://github.com/mizchi/zust/issues/260) | 2.4% | 1 |
 | 8 | value paths zustc cannot resolve | [#265](https://github.com/mizchi/zust/issues/265) | 2.3% | 0 |
 | 9 | macro expansion too deep at a crate's first line | [#252](https://github.com/mizchi/zust/issues/252) | 2.2% | 5 |
-| 10 | cannot infer an `impl Trait` return type | [#262](https://github.com/mizchi/zust/issues/262) | 2.0% | 5 |
-| 11 | prelude: `impl Error for fmt::Error` | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 2 |
-| 12 | cannot evaluate `…` in a constant | none yet | 1.8% | 3 |
+| 10 | prelude: type `Instant` | [#250](https://github.com/mizchi/zust/issues/250) | 2.1% | 6 |
+| 11 | cannot infer an `impl Trait` return type | [#262](https://github.com/mizchi/zust/issues/262) | 2.0% | 5 |
+| 12 | prelude: `impl Error for fmt::Error` | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 2 |
 
 By issue, with its tier (the issue's label: **T0** holds back 2% or more of the surveyed downloads with all its fixes, **T1** 1% or more, **T2** less; relabel an issue when its tier here changes):
 
 | tier | issue | holds back | fixes | the largest |
 |---|---|---:|---:|---|
-| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 7.8% | 26 | prelude: type `Builder` |
+| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 7.6% | 25 | prelude: type `Instant` |
 | T0 | [#254](https://github.com/mizchi/zust/issues/254) | 7.5% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
 | T0 | [#144](https://github.com/mizchi/zust/issues/144) | 7.2% | 1 | `impl<T: Tr> Tr for &T` |
 | T0 | [#259](https://github.com/mizchi/zust/issues/259) | 6.9% | 1 | mismatched types (to sort by cause) |
@@ -51,7 +51,7 @@ By issue, with its tier (the issue's label: **T0** holds back 2% or more of the 
 | T1 | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 1 | prelude: `impl Error for fmt::Error` |
 | T1 | [#256](https://github.com/mizchi/zust/issues/256) | 1.7% | 1 | methods zustc does not find (std methods the prelude lacks; lookup) |
 | T1 | [#264](https://github.com/mizchi/zust/issues/264) | 1.5% | 1 | false E0276 in bitflags' impls |
-| T1 | [#266](https://github.com/mizchi/zust/issues/266) | 1.3% | 1 | std iterator adapters' arity (`Copied`, `Cloned`, `Map`) |
+| T1 | [#266](https://github.com/mizchi/zust/issues/266) | 1.4% | 1 | std iterator adapters' arity (`Copied`, `Cloned`, `Map`) |
 | T2 | [#28](https://github.com/mizchi/zust/issues/28) | 0.7% | 1 | zurgo: two versions of one crate in a graph |
 | T2 | [#253](https://github.com/mizchi/zust/issues/253) | 0.7% | 1 | a fn pointer cast to `*mut ()` in a static |
 | T2 | [#258](https://github.com/mizchi/zust/issues/258) | 0.4% | 1 | macro_rules: calls zustc's matcher rejects |
