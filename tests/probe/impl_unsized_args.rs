@@ -76,6 +76,17 @@ fn view<T: AsMut<str> + ?Sized>(v: &mut T) -> usize {
     (*v).as_mut().len()
 }
 
+// (a program's own `as_mut` of String: rustc's lookup takes its `&self` before AsMut's `&mut self` on the place;
+// through `&mut String`, AsMut's comes first)
+trait OwnAsMut {
+    fn as_mut(&self) -> usize;
+}
+impl OwnAsMut for String {
+    fn as_mut(&self) -> usize {
+        self.len() + 100
+    }
+}
+
 fn main() {
     check_mut::<Either<String, String>>();
     check_slice_mut::<Either<Vec<u8>, [u8; 2]>, u8>();
@@ -86,7 +97,7 @@ fn main() {
     first_to_nine(&mut a);
     let mut s = String::from("abc");
     let n = str_len(&mut s);
-    let m: &mut str = s.as_mut();
+    let m: &mut str = (&mut s).as_mut();
     let w: &mut [u8] = v.as_mut();
     w[1] = 7;
     let e: Either<u8, u8> = if n > 9 { Right(2) } else { Left(1) };
@@ -97,4 +108,10 @@ fn main() {
     println!("{:?} {:?} {} {} {}", v, a, n, m.len(), k);
     let mut t = String::from("abcd");
     println!("{}", view(t.as_mut_str()));
+    let o = String::from("xyz");
+    println!("{}", o.as_mut());
+    let mut o2 = String::from("uv");
+    let r = &mut o2;
+    let m2: &mut str = r.as_mut();
+    println!("{}", m2.len());
 }

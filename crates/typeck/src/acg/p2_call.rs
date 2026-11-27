@@ -2249,6 +2249,19 @@ impl Cx<'_> {
             derefs += 1;
             t = *i;
         }
+        // (a program's own `as_mut` of the type, `impl Len for str { fn as_mut(&self) -> usize }`: on the place itself,
+        // `(*s).as_mut()` / `t.as_mut()`, rustc's lookup takes it (its `&self` before AsMut's `&mut self`); through
+        // `&mut`, AsMut's `self: &mut str` comes first)
+        if derefs == 0 {
+            let own = match t {
+                Ty::Struct(sid) => self.prog.method(sid, "as_mut"),
+                Ty::Str => self.prog.prim_method(Ty::Str, "as_mut"),
+                _ => None,
+            };
+            if own.is_some() {
+                return None;
+            }
+        }
         match t {
             Ty::Struct(sid) if self.std_struct_name(sid) == "String" => Some(mcall(paren(recv.clone()), "as_mut_str", vec![])),
             Ty::Str => {
