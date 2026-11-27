@@ -1,5 +1,5 @@
 // A Condvar waiter notified by a thread that keeps the Mutex and parks: neither can go on (std's wait forever).
-// zustc's panics, and the waiter gets no second guard
+// zustc's wait forever too, and the waiter gets no second guard
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 

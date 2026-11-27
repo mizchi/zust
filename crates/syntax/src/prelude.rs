@@ -266,7 +266,11 @@ fn gated_trait(h: usize) -> Option<&'static str> {
                     return None;
                 }
                 it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).find(|w| {
-                    matches!(*w, "Hasher" | "Hash" | "__BoolThen" | "__AsBytes" | "__PathExt" | "__AsPathStr" | "BufRead" | "Read" | "Seek" | "Write" | "__FWr" | "ExactSizeIterator" | "BuildHasher" | "Binary" | "LowerHex" | "UpperHex" | "Octal" | "LowerExp" | "UpperExp" | "Pointer")
+                    matches!(*w, "Hasher" | "Hash" | "__BoolThen" | "__AsBytes" | "__PathExt" | "__AsPathStr" | "BufRead" | "Read" | "Seek" | "Write" | "__FWr" | "ExactSizeIterator" | "BuildHasher"
+                        // (std::os::unix's: `size()` / `mode()` / `as_raw_fd()` of a program's own are no reason for them)
+                        | "MetadataExt" | "OpenOptionsExt" | "PermissionsExt" | "AsRawFd" | "FromRawFd" | "IntoRawFd"
+                        // (the fmt traits other than Display / Debug: wanted where the source names one)
+                        | "Binary" | "LowerHex" | "UpperHex" | "Octal" | "LowerExp" | "UpperExp" | "Pointer")
                 })
             })
             .collect()
@@ -575,10 +579,11 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "BufWriter" | "BufReader" | "Cursor" | "ChunksMut" | "IoError" | "__DynError" | "Args" | "DefaultHasher" | "VarError"
                         | "PathBuf" | "__PathExt" | "__AsPathStr" | "Command" | "__ExitStatus" | "Cow" | "__CowStr"
                         | "Duration" | "AtomicPtr" | "RangeTo" | "RangeToInclusive" | "Fuse" | "Wrapping" | "Saturating"
-                        | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList" | "Thread" | "Once" | "OnceState"
+                        | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList" | "Thread" | "__ThreadPanic" | "__TlsKey" | "AccessError" | "SendError" | "RecvError" | "TryRecvError" | "Once" | "OnceState"
                         | "Layout" | "LayoutError" | "__LayoutAlign" | "Infallible" | "Condvar" | "ControlFlow"
                         | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError"
-                        | "SplitNStr" | "SliceSplitN" | "PoisonError" => Some(w),
+                        | "SplitNStr" | "SliceSplitN" | "PoisonError"
+                        | "File" | "OpenOptions" | "Metadata" | "FileType" | "Permissions" | "FpCategory" => Some(w),
                         // (std::num's NonZero types: their impls only with them)
                         w if w.starts_with("NonZero") => Some(w),
                         // HashMap's iterators (HmIter and so on) only when HashMap is used
@@ -614,13 +619,22 @@ const SHADOWABLE: &[&str] = &[
     "Chain", "Entry", "Enumerate", "Filter", "FilterMap", "Map", "OptIter", "Scan", "Skip", "Take", "TakeWhile", "Zip",
     "Command", "Mutex", "VarError", "Rev", "StepBy", "Peekable", "Cloned", "Flatten", "FlatMap", "Inspect", "SkipWhile",
     "PathBuf", "Args", "BufWriter", "BufReader", "Pin", "Windows", "Bytes", "MatchIndices", "MutexGuard", "Ref", "RefMut", "BorrowError", "BorrowMutError", "Chunks", "Duration", "Fuse", "Empty", "RangeTo", "RangeToInclusive", "RangeFull",
-    "AtomicPtr", "TryReserveError", "c_void", "Infallible", "Cycle", "JoinHandle", "Chars", "Poll", "Waker", "Context", "Future",
+    "AtomicPtr", "TryReserveError", "c_void", "Infallible", "Cycle", "JoinHandle", "AccessError", "SendError", "RecvError", "TryRecvError", "Chars", "Poll", "Waker", "Context", "Future",
     "Wrapping", "Saturating", "NonZeroU8", "NonZeroU16", "NonZeroU32", "NonZeroU64", "NonZeroU128", "NonZeroUsize",
     "NonZeroI8", "NonZeroI16", "NonZeroI32", "NonZeroI64", "NonZeroI128", "NonZeroIsize",
     "FromStr", "CString", "CStr", "NulError", "LinkedList", "Ipv4Addr", "Ipv6Addr", "IpAddr", "SocketAddrV4", "SocketAddrV6",
     "SocketAddr", "AddrParseError", "RwLock", "SystemTime", "SystemTimeError", "Bound", "Arguments", "Thread", "ThreadId",
     "Once", "OnceState", "Layout", "LayoutError", "Condvar", "ControlFlow", "Repeat",
+    "File", "OpenOptions", "Metadata", "FileType", "Permissions", "RawFd", "AsRawFd", "FromRawFd", "IntoRawFd",
+    "MetadataExt", "OpenOptionsExt", "PermissionsExt", "FpCategory",
 ];
+
+/// Whether the prelude's item of the name is renamed when the program defines one (SHADOWABLE, hashed: asked for each
+/// type a program defines, 1200 times in a large one)
+fn is_shadowable(w: &str) -> bool {
+    static S: OnceLock<crate::fxhash::FxSet<&'static str>> = OnceLock::new();
+    S.get_or_init(|| SHADOWABLE.iter().copied().collect()).contains(w)
+}
 
 /// A name as it was before the compiler renamed it: `__u_Iter`, a program's type named as a prelude type
 /// (rename_user_collisions), is `Iter`; `__p_ThreadId`, the prelude's renamed against a program's (rename_shadowed),
@@ -630,7 +644,7 @@ pub fn unrenamed(name: &str) -> &str {
     if let Some(n) = name.strip_prefix("__u_").filter(|n| prelude_type_names().contains(*n)) {
         return n;
     }
-    if let Some(n) = name.strip_prefix("__p_").filter(|n| SHADOWABLE.contains(n)) {
+    if let Some(n) = name.strip_prefix("__p_").filter(|n| is_shadowable(n)) {
         return n;
     }
     name
@@ -665,7 +679,7 @@ pub fn rename_user_collisions(src: &str, user_items: &[SrcItem]) -> Option<Strin
     let mut hit: Vec<&str> = vec![];
     for it in user_items {
         if let Some(w) = type_def_name(src, it) {
-            if prelude_type_names().contains(w) && !SHADOWABLE.contains(&w) && !hit.contains(&w) {
+            if prelude_type_names().contains(w) && !is_shadowable(w) && !hit.contains(&w) {
                 hit.push(w);
             }
         }
@@ -847,7 +861,7 @@ pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
                 let w = &user_src[a..e];
                 // (not in a comment or a string: a doc comment's `# struct IpAddr;`, `#[doc = " # struct IpAddr;"]`
                 // defines nothing. Looked at only for a name that would count)
-                if SHADOWABLE.contains(&w) && !defined.contains(&w) && lex_to(b, &mut lk, &mut ls, i) == LexAt::Code {
+                if is_shadowable(w) && !defined.contains(&w) && lex_to(b, &mut lk, &mut ls, i) == LexAt::Code {
                     defined.push(w);
                 }
                 i = e.max(i + 1);
@@ -1779,6 +1793,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     let float_dur = need.contains("Duration") && (sc.has("_f64") || sc.has("_f32"));
     if float_named || float_lit || float_dur {
         need.extend(["__exr_fmt_float", "__exr_powi", "__exr_powif", "__exr_ordering"]);
+        // (`x.classify()`: the prelude's classifier, which codegen calls, and its FpCategory)
+        if sc.has("classify") {
+            need.extend(["__exr_fp_classify", "FpCategory"]);
+        }
         // (paths such as `f64::max`: the wrapper whose name ends with the same name)
         for (a, bb) in [("f64", "__exr_f64_"), ("f32", "__exr_f32_")] {
             if sc.has(&format!("{a}::")) {

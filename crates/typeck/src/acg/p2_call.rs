@@ -2313,7 +2313,30 @@ impl Cx<'_> {
     }
 
     fn check_spawn_closure(&self, c: &Expr) -> R<()> {
-        let Expr::Closure(mv, _, _, _, cpos) = strip_paren(c) else { return Ok(()) };
+        let Expr::Closure(mv, _, _, _, cpos) = strip_paren(c) else {
+            // (a closure held in a local, `let f = move || ..; spawn(f)`: its captures, the fields of its type, run on
+            // the other thread just the same)
+            if let Some(t) = self.peek(c) {
+                // (a capture held by reference: the closure may outlive it (E0373), as for one written in the call)
+                if let Ty::Struct(sid) = t {
+                    let cd = self.prog.closure_of_struct.get(&self.prog.base_of(sid)).and_then(|f| self.prog.closures.get(f));
+                    if let Some(cd) = cd {
+                        if let Some(k) = cd.moved.iter().position(|m| !m) {
+                            let n = &cd.captures[k];
+                            return Err(self.at(value_pos(c), format!("closure may outlive the current function, but it borrows `{n}`, which is owned by the current function")));
+                        }
+                    }
+                }
+                if not_send(self.prog, t) {
+                    let bad = match t {
+                        Ty::Struct(sid) => self.prog.structs[sid as usize].fields.iter().map(|f| f.1).find(|&f| not_send(self.prog, f)),
+                        _ => None,
+                    };
+                    return Err(self.at(value_pos(c), format!("`{}` cannot be sent between threads safely", self.prog.tn(bad.unwrap_or(t)))));
+                }
+            }
+            return Ok(());
+        };
         for n in crate::ast_closure::free_vars(strip_paren(c)) {
             let Some((_, t)) = self.lookup(&n) else { continue };
             if not_send(self.prog, t) {
@@ -3629,6 +3652,35 @@ impl Cx<'_> {
         r
     }
 
+    /// `__exr_atomic_{load,store,xchg,xadd,cas,fence}(p, ..)` as one instruction (None: not a type it has one for)
+    fn atomic_intrinsic(&mut self, op: &str, vals: &[(Value, Ty, Sp)]) -> Option<V> {
+        if op == "fence" {
+            self.b.ins().fence();
+            return Some((None, Ty::Unit));
+        }
+        let t = match vals.first()?.1 {
+            Ty::Ptr(_, t) => *t,
+            _ => return None,
+        };
+        let ct = clif_ty(t)?;
+        if !matches!(ct, types::I8 | types::I16 | types::I32 | types::I64) {
+            return None;
+        }
+        let p = vals[0].0;
+        let v = match (op, vals.len()) {
+            ("load", 1) => self.b.ins().atomic_load(ct, p),
+            ("store", 2) => {
+                self.b.ins().atomic_store(vals[1].0, p);
+                return Some((None, Ty::Unit));
+            }
+            ("xchg", 2) => self.b.ins().atomic_rmw(crate::ir::AtomicOp::Xchg, p, vals[1].0),
+            ("xadd", 2) => self.b.ins().atomic_rmw(crate::ir::AtomicOp::Add, p, vals[1].0),
+            ("cas", 3) => self.b.ins().atomic_cas(p, vals[1].0, vals[2].0),
+            _ => return None,
+        };
+        Some((Some(v), t))
+    }
+
     fn call_fn_inner(&mut self, id: u32, recv: Option<(Value, Ty)>, args: &[&Expr], turbofish: Option<&[GArg]>, expected: Option<Ty>, span: Sp) -> R<V> {
         // (this call's: not the calls in its arguments')
         let store_args = std::mem::take(&mut self.bk.store_args);
@@ -4146,6 +4198,13 @@ impl Cx<'_> {
                 }
             }
         }
+        // (the prelude's atomic intrinsics, on an integer, bool, char or pointer of 1, 2, 4 or 8 bytes: one atomic
+        // instruction each, not a call. Their bodies are only what a value of another type would do)
+        if let Some(op) = self.prog.names[id as usize].strip_prefix("__exr_atomic_") {
+            if let Some(r) = self.atomic_intrinsic(op, &vals) {
+                return Ok(r);
+            }
+        }
         // (drop の要らない型の `__exr_drop_in_place::<T>` / `drop(x)` は何もしない: インスタンスも作らない)
         if matches!(self.prog.names[id as usize].as_str(), "__exr_drop_in_place" | "__core_drop") && arg_tys.len() == 1 {
             let t = match arg_tys[0] {
@@ -4223,6 +4282,16 @@ impl Cx<'_> {
         let r = self.resolve_call(id, &arg_tys, sol0, expected, span);
         crate::traits::EXPLICIT_ARGS.with(|e| e.set(prev));
         let (target, sig) = r?;
+        // (spawn's T goes to the thread that joins: it must be Send, as std's `T: Send`)
+        if self.prog.names[id as usize] == "__core_spawn" && self.user_code {
+            if let Ty::Struct(s) = sig.ret {
+                if let Some(&t) = self.prog.structs[s as usize].args.first() {
+                    if not_send(self.prog, t) {
+                        return Err(self.at(span, format!("`{}` cannot be sent between threads safely", self.prog.tn(t))));
+                    }
+                }
+            }
+        }
         if let Some(sol) = sol_rg {
             self.rg_call(id, &sol, turbofish, args, &sig.params, sig.ret, rg_recv, skip == 1, if span.line == 0 { rg_sp } else { span });
         }
@@ -4805,11 +4874,21 @@ impl Cx<'_> {
                 }
             }
         }
-        let t = Ty::prim(ty)?;
+        // (`Self::is_nan(self)` in an impl for a number type: std's inherent method only, as below. Not in a trait's
+        // default method, whose `Self` is any type of the trait's: `Self::count_ones(self)` there is the trait's)
+        let self_prim = ty == "Self";
+        // (`root`: the fn being lowered, the one a closure is in, and an inlined callee's own while it is expanded)
+        if self_prim && self.prog.sigs.get(self.root as usize).is_some_and(|s| s.trait_of.is_some()) {
+            return None;
+        }
+        let t = if self_prim { self.env.self_ty.filter(|t| t.is_int() || t.is_float())? } else { Ty::prim(ty)? };
         if t == Ty::Char || t == Ty::Bool {
             return None;
         }
         let ms = p.segs[1].name.as_str();
+        if self_prim && !crate::acg::p8_misc::prim_builtin(t, ms) {
+            return None;
+        }
         let pp = PPath::of(p);
         // `i64::from(7u32)` / `u32::from('a')`: 数値への変換はキャスト (広げる変換だけが書ける)
         // (also beside the program's `impl From<J> for f64`, for a number: a program cannot implement From of a
@@ -4826,14 +4905,19 @@ impl Cx<'_> {
         if ms.starts_with("from") || ms.starts_with("try_from") || ms == "default" || ms == "new" {
             return None;
         }
-        if self.prog.fn_by_p(&pp, self.self_sid).is_some() {
-            return None;
+        // (the program's own `T::m` stays as written, unless it is a trait impl's method and std has an inherent one of
+        // the name, which a path reaches first: `impl Float for f32 { fn classify(self) -> FpCategory {
+        // Self::classify(self) } }` (num-traits) calls f32's)
+        if let Some(id) = self.prog.fn_by_p(&pp, self.self_sid) {
+            if !(self.prog.sigs[id as usize].impl_trait.is_some() && crate::acg::p8_misc::prim_builtin(t, ms)) {
+                return None;
+            }
         }
         let mut args = cargs.iter();
         let a0 = args.next()?;
         let rest: Vec<Expr> = args.cloned().collect();
         // (リテラルは型を付ける: `i32::pow(2, 10)` の 2 は i32)
-        let recv = if matches!(a0, Expr::Lit(_, _)) { paren(Expr::Cast(Box::new(a0.clone()), ty_named(ty))) } else { paren(a0.clone()) };
+        let recv = if matches!(a0, Expr::Lit(_, _)) { paren(Expr::Cast(Box::new(a0.clone()), ty_named(&self.prog.tn(t)))) } else { paren(a0.clone()) };
         Some(Expr::MethodCall(Box::new(recv), ms.to_string(), vec![], rest, crate::parse::Span::default()))
     }
 }
@@ -4936,7 +5020,7 @@ fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool
             if prelude {
                 let args = &sd.args;
                 return match (name, sync) {
-                    ("Rc", _) | ("MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard", false) => true,
+                    ("Rc", _) | ("MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard" | "StdoutLock", false) => true,
                     // (a RefCell's guards share the cell's non-atomic borrow flag: neither Send nor Sync, as in std)
                     ("Ref" | "RefMut", _) => true,
                     ("Cell" | "RefCell" | "UnsafeCell" | "LazyCell" | "OnceCell" | "__Rcvr__", true) => true,

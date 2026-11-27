@@ -948,19 +948,34 @@ pub struct Session {
     sum_keep: Option<FxMap<Key, Vec<Summary>>>,
     /// What the last E0038 check found of the program's traits (dyncompat::check)
     dyn_memo: dyncompat::DynMemo,
+    /// (keep_for_edits) Each item's refs (Program::refs_in) by its hash, for the program's name tables of the
+    /// fingerprint (Program::ref_tables_fp): an edit that adds or renames nothing reads only the changed items again
+    refs_memo: Option<(Key, FxMap<Key, (Vec<u32>, Vec<u32>, Vec<u32>)>)>,
+    /// (keep_for_edits) A program as its build made it (before the analysis changed it), with the fingerprint of what
+    /// the build read (prog_fp), and the last analysis's fingerprint: a program is kept when two analyses in a row
+    /// build the same, so opening a file pays nothing for it
+    prog_keep: Option<ProgKeep>,
+}
+
+#[derive(Default)]
+struct ProgKeep {
+    last: Key,
+    prog: Option<(Key, Program)>,
 }
 
 impl Session {
     pub fn new(opts: Options) -> Session {
-        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new(), #[cfg(feature = "build")] ws_diags: None, sum_keep: None, dyn_memo: Default::default() }
+        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new(), #[cfg(feature = "build")] ws_diags: None, sum_keep: None, dyn_memo: Default::default(), refs_memo: None, prog_keep: None }
     }
 
     /// For a session whose document will be edited (zust-analyzer): the preprocessing keeps its chunks from the first
     /// analysis on, so that the first edit preprocesses only what it changed (PrepMemo::keep_from_first)
     pub fn keep_for_edits(&mut self) {
         self.sel.prep.keep_from_first();
-        // (and the item summaries, decoded, from one analysis to the next)
+        // (and the item summaries, decoded, from one analysis to the next, and the items' refs)
         self.sum_keep = Some(FxMap::default());
+        self.refs_memo = Some((0, FxMap::default()));
+        self.prog_keep = Some(ProgKeep::default());
     }
 
     pub fn load_cache(&mut self, path: &std::path::Path) {
@@ -2172,7 +2187,23 @@ impl Session {
             }
         }
         unsafe_impls(&src, &items[..user_src])?;
-        let mut prog = Program::build_with_edition(&items, &mut sums, self.ctx.lib.is_none() && !lib_attr, user, self.opts.edition, deny_bare).map_err(|e| name_line(&e, &src, &items))?;
+        let need_main = self.ctx.lib.is_none() && !lib_attr;
+        // (keep_for_edits: a build that reads the same as one kept builds the same program; the copy is the kept one's)
+        let prog_fp = self.prog_keep.as_ref().map(|_| prog_fp(iface_fp, &items, need_main, user, self.opts.edition, deny_bare));
+        let kept = match (&self.prog_keep, prog_fp) {
+            (Some(ProgKeep { prog: Some((fp, p)), .. }), Some(f)) if *fp == f => Some(p.clone()),
+            _ => None,
+        };
+        let mut prog = match kept {
+            Some(p) => p,
+            None => Program::build_with_edition(&items, &mut sums, need_main, user, self.opts.edition, deny_bare).map_err(|e| name_line(&e, &src, &items))?,
+        };
+        if let (Some(k), Some(f)) = (&mut self.prog_keep, prog_fp) {
+            if k.last == f && k.prog.as_ref().is_none_or(|(fp, _)| *fp != f) {
+                k.prog = Some((f, prog.clone()));
+            }
+            k.last = f;
+        }
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
         if !prog.variant_shadowed.is_empty() {
@@ -2694,11 +2725,36 @@ impl Session {
         let mut srefs = Vec::with_capacity(prog.item_of.len());
         let mut crefs = Vec::with_capacity(prog.item_of.len());
         let names = prog.ref_names();
+        // (keep_for_edits: the refs of an item of the same hash, read in a program of the same name tables, are the
+        // same: an item's hash is of its tokens, identifiers and all)
+        let mut memo = self.refs_memo.take().map(|(fp, m)| {
+            let now = prog.ref_tables_fp();
+            (now, if fp == now { m } else { FxMap::default() })
+        });
+        let mut used: FxMap<Key, (Vec<u32>, Vec<u32>, Vec<u32>)> = FxMap::default();
         for ii in &prog.item_of {
-            let (f, st, c) = ii.map(|ii| prog.refs_in(&src, &items[ii as usize], Some(&names))).unwrap_or_default();
+            let (f, st, c) = match (ii, &mut memo) {
+                (Some(ii), Some((_, m))) => {
+                    let it = &items[*ii as usize];
+                    let r = match used.get(&it.hash) {
+                        Some(r) => r.clone(),
+                        None => match m.remove(&it.hash) {
+                            Some(r) => r,
+                            None => prog.refs_in(&src, it, Some(&names)),
+                        },
+                    };
+                    used.entry(it.hash).or_insert_with(|| r.clone());
+                    r
+                }
+                (Some(ii), None) => prog.refs_in(&src, &items[*ii as usize], Some(&names)),
+                (None, _) => Default::default(),
+            };
             refs.push(f);
             srefs.push(st);
             crefs.push(c);
+        }
+        if let Some((fp, _)) = memo {
+            self.refs_memo = Some((fp, used));
         }
         tm.lap("refs", String::new());
         let mut a = Analysis { late_err, iface_fp, src, items, prog, refs, group_keys: Mutex::new((vec![], FxMap::default())), srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()), assoc_keys: (0, vec![]) };
@@ -5615,6 +5671,35 @@ fn imported_prelude_variants(prog: &mut Program, src: &str, items: &[SrcItem]) {
         }
     }
     prog.variant_shadowed = shadowed;
+}
+
+/// What Program::build_with_edition reads, as a fingerprint: the declarations (Analysis::iface_fp: each item's hash,
+/// or its summary's for an fn, whose body the build does not read), the items' kinds, and which items are on the same
+/// line (an item's line is read only for an error's place, and to tell impls of a trait on one line apart:
+/// `unbounded_blankets`); and the build's options
+fn prog_fp(iface_fp: u64, items: &[SrcItem], need_main: bool, user: usize, edition: u16, deny_bare: bool) -> Key {
+    let mut h = KeyHasher::new();
+    h.add(&iface_fp);
+    h.add(&items.len());
+    h.add(&need_main);
+    h.add(&user);
+    h.add(&edition);
+    h.add(&deny_bare);
+    let mut first: FxMap<usize, u32> = FxMap::default();
+    for (i, it) in items.iter().enumerate() {
+        let (k, of) = match it.kind {
+            ItemKind::Normal => (0u8, 0),
+            ItemKind::ImplHeader => (1, 0),
+            ItemKind::ImplMember(o) => (2, o),
+            ItemKind::TraitHeader => (3, 0),
+            ItemKind::TraitMember(o) => (4, o),
+            ItemKind::InnerAttr => (5, 0),
+        };
+        h.add(&k);
+        h.add(&of);
+        h.add(first.entry(it.line).or_insert(i as u32));
+    }
+    h.finish()
 }
 
 fn cross_kind_duplicate<'p>(prog: &'p Program, src: &str, items: &[SrcItem], sums: &'p [Summary], user: usize) -> Option<String> {

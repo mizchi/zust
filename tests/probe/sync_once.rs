@@ -40,7 +40,8 @@ fn main() {
         .map(|i| {
             std::thread::spawn(move || {
                 static T: Once = Once::new();
-                T.call_once(|| println!("thread {i} ran it"));
+                // (which thread runs it is the scheduler's choice: the threads run in parallel)
+                T.call_once(|| println!("thread {} ran it", if i < 3 { "one" } else { "no" }));
                 T.is_completed()
             })
         })

@@ -91,7 +91,7 @@ pub struct Clause {
 }
 
 /// The program's impls of its own traits, by trait name
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct TraitDb {
     pub clauses: FxMap<String, Vec<Clause>>,
     /// the program's traits (only these are solved here; the rest are asked of `implements`)
@@ -1267,6 +1267,8 @@ impl Cx<'_> {
                     return match name {
                         "Rc" => Ans::No,
                         "Cell" | "RefCell" | "OnceCell" if sync => Ans::No,
+                        // (std's stdout guard holds a reentrant lock owned by its thread: not Send)
+                        "StdoutLock" if !sync => Ans::No,
                         "Cell" | "RefCell" | "Option" | "Vec" | "VecDeque" | "String" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "BinaryHeap" | "Result" | "PhantomData" => {
                             all(self, &each(sync), stack)
                         }

@@ -17,46 +17,46 @@ needs one filed first (then add it to [cratebench/survey/issues.tsv](cratebench/
 
 <!-- crate-priorities -->
 
-Survey of 2026-11-27 06:09 UTC on `0277886`: 45 of 273 crates build (16.4% of their downloads); 514 errors in 180 packages.
+Survey of 2026-11-27 12:56 UTC on `15a3cbd`: 45 of 273 crates build (16.4% of their downloads); 917 errors in 179 packages.
 
 | # | fix | issue | holds back | crates it alone unblocks |
 |---:|---|---|---:|---:|
-| 1 | `impl<T: Tr> Tr for &T` | [#144](https://github.com/mizchi/zust/issues/144) | 7.2% | 12 |
-| 2 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | [#254](https://github.com/mizchi/zust/issues/254) | 6.8% | 8 |
-| 3 | parser: syntax zustc does not parse | [#257](https://github.com/mizchi/zust/issues/257) | 4.9% | 3 |
-| 4 | mismatched types (to sort by cause) | [#259](https://github.com/mizchi/zust/issues/259) | 4.5% | 1 |
+| 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | [#254](https://github.com/mizchi/zust/issues/254) | 7.5% | 8 |
+| 2 | `impl<T: Tr> Tr for &T` | [#144](https://github.com/mizchi/zust/issues/144) | 7.2% | 12 |
+| 3 | mismatched types (to sort by cause) | [#259](https://github.com/mizchi/zust/issues/259) | 5.3% | 1 |
+| 4 | parser: syntax zustc does not parse | [#257](https://github.com/mizchi/zust/issues/257) | 4.9% | 3 |
 | 5 | duplicate definition of `…` | none yet | 4.2% | 6 |
-| 6 | `missing generics for` a type used without its parameters | [#260](https://github.com/mizchi/zust/issues/260) | 2.4% | 1 |
-| 7 | macro expansion too deep at a crate's first line | [#252](https://github.com/mizchi/zust/issues/252) | 2.3% | 5 |
-| 8 | value paths zustc cannot resolve | [#265](https://github.com/mizchi/zust/issues/265) | 2.3% | 0 |
-| 9 | false E0277: a bound zustc does not see | [#261](https://github.com/mizchi/zust/issues/261) | 2.2% | 2 |
-| 10 | not all trait items implemented, missing: `…` in `…` | none yet | 1.9% | 4 |
-| 11 | cannot infer an `impl Trait` return type | [#262](https://github.com/mizchi/zust/issues/262) | 1.9% | 5 |
-| 12 | prelude: `impl Error for fmt::Error` | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 2 |
+| 6 | false E0277: a bound zustc does not see | [#261](https://github.com/mizchi/zust/issues/261) | 2.7% | 2 |
+| 7 | `missing generics for` a type used without its parameters | [#260](https://github.com/mizchi/zust/issues/260) | 2.4% | 1 |
+| 8 | macro expansion too deep at a crate's first line | [#252](https://github.com/mizchi/zust/issues/252) | 2.2% | 5 |
+| 9 | value paths zustc cannot resolve | [#265](https://github.com/mizchi/zust/issues/265) | 2.2% | 0 |
+| 10 | cannot infer an `impl Trait` return type | [#262](https://github.com/mizchi/zust/issues/262) | 2.0% | 5 |
+| 11 | prelude: `impl Error for fmt::Error` | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 2 |
+| 12 | cannot evaluate `…` in a constant | none yet | 1.8% | 3 |
 
 By issue, with its tier (the issue's label: **T0** holds back 2% or more of the surveyed downloads with all its fixes, **T1** 1% or more, **T2** less; relabel an issue when its tier here changes):
 
 | tier | issue | holds back | fixes | the largest |
 |---|---|---:|---:|---|
-| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 11.6% | 26 | prelude: type `File` |
+| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 9.4% | 27 | prelude: type `Builder` |
+| T0 | [#254](https://github.com/mizchi/zust/issues/254) | 7.5% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
 | T0 | [#144](https://github.com/mizchi/zust/issues/144) | 7.2% | 1 | `impl<T: Tr> Tr for &T` |
-| T0 | [#254](https://github.com/mizchi/zust/issues/254) | 6.8% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
+| T0 | [#259](https://github.com/mizchi/zust/issues/259) | 5.3% | 1 | mismatched types (to sort by cause) |
 | T0 | [#257](https://github.com/mizchi/zust/issues/257) | 4.9% | 1 | parser: syntax zustc does not parse |
-| T0 | [#259](https://github.com/mizchi/zust/issues/259) | 4.5% | 1 | mismatched types (to sort by cause) |
+| T0 | [#261](https://github.com/mizchi/zust/issues/261) | 2.7% | 1 | false E0277: a bound zustc does not see |
 | T0 | [#260](https://github.com/mizchi/zust/issues/260) | 2.4% | 1 | `missing generics for` a type used without its parameters |
-| T0 | [#252](https://github.com/mizchi/zust/issues/252) | 2.3% | 1 | macro expansion too deep at a crate's first line |
-| T0 | [#265](https://github.com/mizchi/zust/issues/265) | 2.3% | 1 | value paths zustc cannot resolve |
-| T0 | [#261](https://github.com/mizchi/zust/issues/261) | 2.2% | 1 | false E0277: a bound zustc does not see |
-| T1 | [#262](https://github.com/mizchi/zust/issues/262) | 1.9% | 1 | cannot infer an `impl Trait` return type |
+| T0 | [#252](https://github.com/mizchi/zust/issues/252) | 2.2% | 1 | macro expansion too deep at a crate's first line |
+| T0 | [#265](https://github.com/mizchi/zust/issues/265) | 2.2% | 1 | value paths zustc cannot resolve |
+| T0 | [#262](https://github.com/mizchi/zust/issues/262) | 2.0% | 1 | cannot infer an `impl Trait` return type |
 | T1 | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 1 | prelude: `impl Error for fmt::Error` |
-| T1 | [#264](https://github.com/mizchi/zust/issues/264) | 1.6% | 1 | false E0276 in bitflags' impls |
-| T1 | [#256](https://github.com/mizchi/zust/issues/256) | 1.4% | 1 | methods zustc does not find (std methods the prelude lacks; lookup) |
+| T1 | [#256](https://github.com/mizchi/zust/issues/256) | 1.6% | 1 | methods zustc does not find (std methods the prelude lacks; lookup) |
+| T1 | [#264](https://github.com/mizchi/zust/issues/264) | 1.5% | 1 | false E0276 in bitflags' impls |
 | T1 | [#266](https://github.com/mizchi/zust/issues/266) | 1.3% | 1 | std iterator adapters' arity (`Copied`, `Cloned`, `Map`) |
 | T2 | [#28](https://github.com/mizchi/zust/issues/28) | 0.7% | 1 | zurgo: two versions of one crate in a graph |
 | T2 | [#253](https://github.com/mizchi/zust/issues/253) | 0.7% | 1 | a fn pointer cast to `*mut ()` in a static |
 | T2 | [#258](https://github.com/mizchi/zust/issues/258) | 0.4% | 1 | macro_rules: calls zustc's matcher rejects |
 
-No issue yet, the next to file: duplicate definition of `…` (4.2%); not all trait items implemented, missing: `…` in `…` (1.9%); cannot evaluate `…` in a constant (1.7%); inherent impls cannot be unsafe (E0197) (1.7%); cannot infer the return type of this closure; annotate it (`… (1.2%).
+No issue yet, the next to file: duplicate definition of `…` (4.2%); cannot evaluate `…` in a constant (1.8%); inherent impls cannot be unsafe (E0197) (1.7%); cannot infer the return type of this closure; annotate it (`… (1.2%); `…` return types must be `…` (1.1%).
 
 <!-- /crate-priorities -->
 
@@ -92,6 +92,21 @@ invariants.
 | `rt_box_move_out` | `let x = *b;` moves the value but never frees the Box's block (a leak; valgrind) |
 | `rt_box_move_patterns` | the same leak through patterns (`let Pair { a, b } = *b`, `match *b`); no double free (valgrind) |
 | `rt_pattern_partial_move` | what a pattern leaves to `_` / `..` (`let (a, _) = pair();`, `let W { a, .. } = w;`) is never dropped (a leak) |
+
+## Threads (`crates/syntax/src/prelude_lib.rs.in`, `tests/threads/`)
+
+OS threads since [report 2026-11-27-01](docs/reports/2026-11-27-01-native-threads.md). Left:
+
+- No poisoning of a Mutex or RwLock: a panic does not unwind, so one a panicking thread holds stays locked, and the
+  threads that wait for it wait forever (std's is unlocked and poisoned; `lock` then gives `Err`). The other values of
+  that thread are not dropped either. Both need unwinding (SUPPORT.md, "Large features"). (A Once or OnceLock the
+  thread was running, and a StdoutLock it held, are let go: the thread's context keeps them.)
+- Not there: `thread::scope`, `thread::Builder` (names, stack sizes), `park_timeout`, `recv_timeout`,
+  `Condvar::wait_timeout`, `Mutex::try_lock`, `Receiver` as `IntoIterator`. `JoinHandle::join`'s Err is not a
+  `Box<dyn Any + Send>` (no downcast of the payload).
+- The main thread's thread_local! values are not dropped at exit (glibc's std runs their drops).
+- The location of an `unwrap` that panics is kept in one static (`__EXR_CALLER`), which another thread may write
+  meanwhile: the message can point at another thread's call. It needs a thread-local of its own (an ELF TLS slot).
 
 ## Trait solving (`crates/sema/src/traits.rs`, `formal/lean/`)
 
@@ -157,7 +172,7 @@ behavior: `cve_2020_36323_join_borrow` (join over a `Borrow<str>` of the program
   Node). A relooper or stackifier, and reuse of locals.
 - Not supported yet:
   - i128 division and i128 to / from float;
-  - threads (green threads need `swapcontext`);
+  - threads (`spawn` needs pthreads; on one thread the atomics, Mutex and the rest work as plain accesses);
   - zustc built as wasm by itself.
 - Traps carry no panic message (the native build prints the location from its trap table).
 
@@ -282,7 +297,7 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   `&Box<S>`, `From`'s bounds, const generic lengths (tests/probe/w1_items5.rs, tests/compile_errors/w1_*). It stops on:
   - `externref.rs:130`: "expected a function".
   - `LocalKey<T>` is a type with `with`, but a `thread_local!` is not one of them yet (each has a key type of its
-    own), so a `&'static LocalKey<T>` cannot point at one.
+    own, over a `__TlsKey`), so a `&'static LocalKey<T>` cannot point at one.
   - a method call on a `Box<[T]>` with the program's `impl Tr for Box<[T]>` derefs to `[T]` and misses it; a
     `Box<str>` cannot be made (`into_boxed_str`, `"x".into()`).
   - the items a macro's `const _: () = { .. };` moves out are visible outside it (rustc scopes its fns to the

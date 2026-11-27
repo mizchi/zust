@@ -1,4 +1,4 @@
-// A Mutex locked again by the thread that holds it: std's waits forever; zustc's panics (not a second guard)
+// A Mutex locked again by the thread that holds it: std's waits forever, and so does zustc's (not a second guard)
 use std::sync::Mutex;
 
 fn main() {

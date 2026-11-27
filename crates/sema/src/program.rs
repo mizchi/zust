@@ -62,6 +62,7 @@ pub struct TyEnv {
     pub self_ty: Option<Ty>,
 }
 
+#[derive(Clone)]
 pub struct VariantDef {
     pub name: String,
     pub kind: VariantKind,
@@ -72,7 +73,7 @@ pub struct VariantDef {
 
 /// The fields a module of the program may not read (E0616): the inline modules by their lines, and of each struct or
 /// union of a module whose name is the program's only item of that name, its fields that are not `pub`
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct FieldPriv {
     /// (the line of a module's `{`, of its `}`, its parent); the crate root is module 0, of every line
     pub mods: Vec<(u32, u32, u32)>,
@@ -112,6 +113,7 @@ impl FieldPriv {
 
 /// Definitions of structs and enums (named aggregate types). Keeping enums in the same table lets them share
 /// copying, argument passing, impls, deep hashing and so on with structs.
+#[derive(Clone)]
 pub struct StructDef {
     pub name: String,
     /// (name, type, offset)
@@ -188,6 +190,19 @@ pub struct AdtTable {
     any_placeholder: std::sync::atomic::AtomicBool,
 }
 
+impl Clone for AdtTable {
+    fn clone(&self) -> Self {
+        AdtTable {
+            v: Mutex::new(self.v.lock().unwrap().iter().map(|b| Box::new((**b).clone())).collect()),
+            inst: Mutex::new(self.inst.lock().unwrap().clone()),
+            tuples: Mutex::new(self.tuples.lock().unwrap().clone()),
+            placeholders: Mutex::new(self.placeholders.lock().unwrap().clone()),
+            assoc_placeholders: Mutex::new(self.assoc_placeholders.lock().unwrap().clone()),
+            any_placeholder: std::sync::atomic::AtomicBool::new(self.any_placeholder.load(std::sync::atomic::Ordering::Relaxed)),
+        }
+    }
+}
+
 impl AdtTable {
     fn new() -> Self {
         AdtTable {
@@ -254,6 +269,7 @@ impl ConstDef {
     }
 }
 
+#[derive(Clone)]
 pub struct ConstDef {
     pub name: String,
     pub ty: Ty,
@@ -503,6 +519,22 @@ pub fn prim_assoc_const(t: Ty, name: &str) -> Option<i128> {
     })
 }
 
+/// A Mutex that clones its content (Program's caches)
+#[derive(Default)]
+pub struct CloneMutex<T>(pub Mutex<T>);
+impl<T: Clone> Clone for CloneMutex<T> {
+    fn clone(&self) -> Self {
+        CloneMutex(Mutex::new(self.0.lock().unwrap().clone()))
+    }
+}
+impl<T> std::ops::Deref for CloneMutex<T> {
+    type Target = Mutex<T>;
+    fn deref(&self) -> &Mutex<T> {
+        &self.0
+    }
+}
+
+#[derive(Clone)]
 pub struct Program {
     /// All fns (user-defined + extern). The index is the u32 fn ID
     pub names: Vec<String>,
@@ -514,7 +546,7 @@ pub struct Program {
     /// looked for again by each instance's goals
     pub assoc_index: std::sync::OnceLock<FxMap<(String, u32), Vec<u32>>>,
     /// normalize's answers so far, by (type, trait, associated type)
-    pub normalized: std::sync::Mutex<FxMap<(Ty, String, String), Option<Ty>>>,
+    pub normalized: CloneMutex<FxMap<(Ty, String, String), Option<Ty>>>,
     /// A fn's where clauses on other than a parameter (SigSyn::preds), by fn id: goals of each instance (issue #2)
     pub fn_preds: FxMap<u32, Vec<(crate::types::TySyn, String, Vec<String>)>>,
     pub structs: AdtTable,
@@ -743,7 +775,7 @@ pub struct Program {
     /// A closure's (generic) struct id → fn id
     pub closure_of_struct: FxMap<u32, u32>,
     /// hash_ty's memo per instance (nested closure types share parts, so walking them again is exponential)
-    pub inst_keys: std::sync::Mutex<FxMap<u32, Key>>,
+    pub inst_keys: CloneMutex<FxMap<u32, Key>>,
     /// The structs / enums with an `impl Drop for S` (the base definition when generic)
     pub drop_impls: crate::fxhash::FxSet<u32>,
     /// The structs (base ids) whose `deref` returns a reference to an array, slice or str: `t.len()` on one of them is
@@ -778,6 +810,7 @@ pub struct Program {
 pub type AssocRegions = (Vec<u8>, Vec<u8>, Vec<(u8, u8)>, Vec<u8>);
 
 /// `impl<..> Trait for S<..> { type Name = Value; }`
+#[derive(Clone)]
 pub struct AssocDef {
     pub name: String,
     /// The impl's self type and value (with the impl's type parameters as Param)
@@ -882,6 +915,7 @@ pub const HOLE: u8 = 250;
 pub const FNPTR_MARK: u8 = 251;
 
 /// A lifted closure ([`crate::closure`])
+#[derive(Clone)]
 pub struct ClosureDef {
     /// The id of the parent (the fn the closure is written in), and the closure's preorder index in its body
     pub parent: u32,
@@ -1538,7 +1572,7 @@ impl Program {
             prelude_from: u32::MAX,
             fn_preds: FxMap::default(),
             assoc_index: std::sync::OnceLock::new(),
-            normalized: std::sync::Mutex::new(FxMap::default()),
+            normalized: Default::default(),
             overflow_checks: false,
             trait_supers: FxMap::default(),
             trait_marker_supers: FxMap::default(),
@@ -7433,6 +7467,35 @@ impl Program {
     }
 
     /// The set of names refs looks up (names in any table). Most identifiers (variables, keywords) need one lookup
+    /// A fingerprint of what refs_in reads of the program: the names of its fns (with their groups), structs / enums,
+    /// consts and aliases, and what each leads to. Two programs of one fingerprint give an item the same refs. Each
+    /// entry is hashed on its own and the hashes are added, so no map's order matters
+    pub fn ref_tables_fp(&self) -> Key {
+        fn sum<'a, K: std::hash::Hash + ?Sized + 'a, V: std::hash::Hash + 'a>(tag: u8, it: impl Iterator<Item = (&'a K, &'a V)>) -> Key {
+            let (mut s, mut n): (Key, u64) = (0, 0);
+            for (k, v) in it {
+                let mut h = KeyHasher::new();
+                h.add(&tag);
+                h.add(k);
+                h.add(v);
+                s = s.wrapping_add(h.finish());
+                n += 1;
+            }
+            let mut h = KeyHasher::new();
+            h.add(&tag);
+            h.add(&n);
+            h.add(&s);
+            h.finish()
+        }
+        let mut h = KeyHasher::new();
+        h.add(&sum(0, self.by_last.iter()));
+        h.add(&sum(1, self.struct_index.iter()));
+        h.add(&sum(2, self.const_index.iter()));
+        h.add(&sum(3, self.const_by_last.iter()));
+        h.add(&sum(4, self.aliases.iter()));
+        h.finish()
+    }
+
     pub fn ref_names(&self) -> FxSet<&str> {
         let mut s: FxSet<&str> = FxSet::default();
         s.extend(self.by_last.keys().map(|k| k.as_str()));

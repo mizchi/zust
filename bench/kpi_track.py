@@ -2,7 +2,7 @@
 """Measure the KPIs after one change and append them to bench/kpi_log.tsv, so that what each change did, and how far
 the KPIs have drifted in total, stays visible (small increases add up).
 
-usage: python3 bench/kpi_track.py "short label of the change" [--lsp] [--dry-run] [--jobs N]
+usage: python3 bench/kpi_track.py "short label of the change" [--lsp] [--dry-run] [--jobs N] [--only SECTIONS]
 (in a pull request, measure with --dry-run and commit no rows: .github/workflows/kpi.yml compares the pull request
  with its base and keeps the result in a comment on it; rows go in with commits made on main)
 (run from the repository root after cargo build --release --workspace; with tests/ui numbers, run
@@ -267,6 +267,9 @@ def band_check(rows, row, last=7, floor=0.001):
     return out
 
 
+SECTIONS = ("gen5000", "traits", "crates", "patterns", "lsp")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("change")
@@ -275,28 +278,39 @@ def main():
     # (the sections side by side, each in its own work directory: an instruction count does not depend on the load.
     # The LSP session runs alone after them, as its count moves with how often the client polls)
     ap.add_argument("--jobs", type=int, default=1, help="measure the gen5000, traits, crates and patterns sections side by side")
+    # (some of the sections only, as kpi.yml measures them on runners side by side; the KPIs of the others are left
+    # out of what is printed. With --dry-run only: a row with some of the KPIs is not logged)
+    ap.add_argument("--only", help=f"comma-separated sections: {','.join(SECTIONS)}")
     a = ap.parse_args()
+    only = SECTIONS if a.only is None else a.only.split(",")
+    unknown = [x for x in only if x not in SECTIONS]
+    if unknown or (a.only is not None and not a.dry_run):
+        ap.error(f"--only takes {','.join(SECTIONS)}, with --dry-run" if not unknown else f"no section {unknown[0]}")
     os.makedirs(WORK, exist_ok=True)
-    sections = [build_kpis, traits_kpis, crates_kpis, patterns_kpis]
+    nones = {"gen5000": (None,) * 4, "traits": (None,) * 2, "crates": (None,) * 2, "patterns": (None,) * 2}
+    sections = [(k, f) for k, f in (("gen5000", build_kpis), ("traits", traits_kpis), ("crates", crates_kpis),
+                                    ("patterns", patterns_kpis)) if k in only]
     if a.jobs > 1:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(a.jobs) as ex:
-            results = [f.result() for f in [ex.submit(s) for s in sections]]
+            got = dict(zip([k for k, _ in sections], [f.result() for f in [ex.submit(s) for _, s in sections]]))
     else:
-        results = [s() for s in sections]
-    (noop, edit, check, cache), (tr_check, tr_edit), (cr_noop, cr_edit), (pt_check, pt_edit) = results
-    lsp = lsp_kpi() if a.lsp else None
+        got = {k: s() for k, s in sections}
+    (noop, edit, check, cache), (tr_check, tr_edit), (cr_noop, cr_edit), (pt_check, pt_edit) = (
+        got.get(k, nones[k]) for k in ("gen5000", "traits", "crates", "patterns"))
+    lsp = lsp_kpi() if (a.lsp and a.only is None) or "lsp" in (a.only or "").split(",") else None
     ui = ui_counts()
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=ROOT).stdout.strip()
     # (the log itself does not count as a change)
     dirty = [l for l in subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True,
                                        cwd=ROOT).stdout.splitlines() if not l.endswith(("bench/kpi_log.tsv", "bench/kpi_log.md"))]
+    f3 = lambda v, d=3: "-" if v is None else f"{v:.{d}f}"
     row = {"date": datetime.date.today().isoformat(), "commit": commit + ("+" if dirty else ""), "change": a.change.replace("\t", " "),
-           "noop_M": f"{noop:.3f}", "edit_M": f"{edit:.3f}", "check_M": f"{check:.3f}", "cache_KiB": f"{cache:.1f}",
-           "lsp_G": "-" if lsp is None else f"{lsp:.4f}", "run": str(ui[0] or "-"), "check": str(ui[1] or "-"),
+           "noop_M": f3(noop), "edit_M": f3(edit), "check_M": f3(check), "cache_KiB": f3(cache, 1),
+           "lsp_G": f3(lsp, 4), "run": str(ui[0] or "-"), "check": str(ui[1] or "-"),
            "build": str(ui[2] or "-"), "cfail": str(ui[3] or "-"),
-           "tr_check_M": f"{tr_check:.3f}", "tr_edit_M": f"{tr_edit:.3f}", "cr_noop_M": f"{cr_noop:.3f}", "cr_edit_M": f"{cr_edit:.3f}",
-           "pt_check_M": f"{pt_check:.3f}", "pt_edit_M": f"{pt_edit:.3f}"}
+           "tr_check_M": f3(tr_check), "tr_edit_M": f3(tr_edit), "cr_noop_M": f3(cr_noop), "cr_edit_M": f3(cr_edit),
+           "pt_check_M": f3(pt_check), "pt_edit_M": f3(pt_edit)}
     rows = read_log()
     prev = rows[-1] if rows else None
     first = rows[0] if rows else row
