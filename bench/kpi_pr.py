@@ -5,8 +5,8 @@ usage (from .github/workflows/kpi.yml):
   python3 bench/kpi_pr.py --base base.txt --head head.txt --base-sha SHA --head-sha SHA [--pr N --repo OWNER/NAME]
                           [--threshold 1.0] [--out summary.md]
 
-base.txt / head.txt are what `python3 bench/kpi_track.py <label> --lsp --dry-run` printed for the base (the merge base of
-the PR) and for the PR head, measured on the same machine. The instruction counts are deterministic to about 0.1%,
+base.txt / head.txt are what `python3 bench/kpi_track.py <label> --lsp --dry-run` printed (or its parts, `--only`, put together) for the base (the merge base of
+the PR) and for the PR head, measured on runners of the same image. The instruction counts are deterministic to about 0.1%,
 so a difference past --threshold (in %, default 1.0) is reported as a regression (a ::warning:: line; the job does not
 fail).
 
@@ -70,8 +70,8 @@ def render(hist, threshold):
     last = hist[-1]
     lines = [MARKER, "## KPI: this PR against its base", ""]
     lines.append(
-        f"Measured by the `KPI` workflow on one runner: the merge base `{last['base_sha'][:7]}` and the head "
-        f"`{last['head_sha'][:7]}`, each with `bench/kpi_track.py --lsp --dry-run` (instruction counts of zustc, M = millions; "
+        f"Measured by the `KPI` workflow on runners of one image: the merge base `{last['base_sha'][:7]}` and the head "
+        f"`{last['head_sha'][:7]}`, each with `bench/kpi_track.py --dry-run --only <sections>` in parts side by side (instruction counts of zustc, M = millions; "
         f"of one zust-analyzer session, G = billions; deterministic to about 0.1%). A change past +{threshold:g}% is marked ⚠️. This comment is updated on every push.")
     lines += ["", "| KPI | base | head | change |", "|---|---:|---:|---:|"]
     for k in KPIS:
