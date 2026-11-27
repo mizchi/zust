@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795757297158,
+  "lastUpdate": 1795757300127,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -145934,6 +145934,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/62157772c4b6429303a222fd07f512a5d10b65d3"
         },
         "date": 1795751113321,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.86,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1919,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.93,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1558,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 73.68,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5442,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "20474e3c86372fad792de7ff96bdab2a1b62f4d7",
+          "message": "Merge pull request #285 from mizchi/claude/lsp-edit-passes-3\n\nLSP edit: keep what an edit leaves as it was, part 3 (#188)",
+          "timestamp": "2026-11-27T14:22:52+09:00",
+          "tree_id": "3b3d494d387ce85fca48572d237b0a31c89fb551",
+          "url": "https://github.com/mizchi/zust/commit/20474e3c86372fad792de7ff96bdab2a1b62f4d7"
+        },
+        "date": 1795757299602,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
