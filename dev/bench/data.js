@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795810809684,
+  "lastUpdate": 1795810812278,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -93640,6 +93640,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 142.047,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8854c02758adfe22cee61be317e10331b252b592",
+          "message": "prelude: std::time::Instant, std::any::Any (with dyn Any's Debug); E0277 for a str made into a dyn (#250, part 3a) (#312)\n\n* prelude: std::time::Instant, std::any::Any; E0277 for a str made into a dyn\n\nThe parts of #292 that do not depend on threads, on main after #308\n(which replaced the green threads #292 was built on).\n\n- `std::time::Instant` (CLOCK_MONOTONIC via clock_gettime): now,\n  elapsed, duration_since with its checked_ / saturating_ forms,\n  checked_add / checked_sub, `+` / `+=` / `-` with a Duration, `-`\n  between Instants, comparisons, Debug. An Instant stores the clock's time\n  plus 2^32 seconds, so `now - 10 years` can be represented, as with\n  std's signed seconds. Needed by crossbeam-channel and parking_lot_core.\n- `std::any::Any` (`trait Any: 'static`, as std's, so `T: Any` gives\n  `T: 'static` and `dyn Any + 'a` in a field is E0478): type_id, and\n  `dyn Any`'s `is`. `Any` is a prelude name candidate (a TraitHeader has\n  no name of its own), so `Box<dyn Any + Send>` alone selects the trait.\n- `{:?}` of std's `dyn Any` writes `Any { .. }`, alone or inside a value\n  (`Err(Box<dyn Any + Send>)`); a program's own `trait Any` has no Debug\n  (E0277).\n- E0277 for a `str` / `[T]` made into a dyn (`\"test\" as &dyn Any`, a\n  `&[u8]` as a `&dyn Debug`), which built and ran before.\n\ntests/ui: 4 new passes (coercion/any-trait-object-debug-12744,\ncoercion/fn-item-to-dyn-any, traits/object-one-type-two-traits by their\noutput; borrowck/unconstrained-closure-lifetime-trait-object against its\nannotation, E0310). New tests: tests/acg/std_instant.rs,\ntests/acg/std_any.rs (against rustc's output, also with -O),\ntests/compile_errors/dyn_own_any_debug.rs and str_as_dyn.rs.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* Any for unsized types; std's Debug of dyn Any meets T: Debug bounds\n\n- The prelude's blanket impl is `impl<T: 'static + ?Sized> Any for T`, as\n  std declares it: `<str as Any>::type_id` and `T: Any + ?Sized` with a\n  slice resolve.\n- `dyn_any_debug` moves to `Program`, and `implements_concrete` uses it: a\n  generic `T: Debug + ?Sized` bound now holds of std's `dyn Any` (`Any {\n  .. }`), and still not of a program's own `trait Any` (E0277).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* rust-ui ratchet: compile-fail 5386 after the merge\n\nEach side of the merge added one compile-fail pass (fmt/ifmt-unimpl.rs from\nmain, borrowck/unconstrained-closure-lifetime-trait-object.rs here); the\nmerge kept one side's count.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* Instant's f64 durations format; Instant -= Duration; dyn Any + Send's is\n\n- `float_dur` counts Instant as it does Duration: `t.elapsed().as_secs_f64()`\n  in a program with no float of its own brings `__exr_fmt_float` (it was\n  \"internal: `__exr_fmt_float` is missing from the prelude\").\n- `impl SubAssign<Duration> for Instant`, as std has.\n- Since trait objects keep their auto traits (#323), `dyn Any + Send` and\n  `dyn Any + Send + Sync` are types of their own, as in std, which gives\n  each its inherent `is`: so does the prelude (`Box<dyn Any + Send>`'s\n  `is` was \"expected `&dyn Any`, found `&dyn Any + Send`\").\n- `dyn_any_debug` takes the auto traits into account: std's Debug is for\n  `dyn Any`, `+ Send` and `+ Send + Sync`, so `dyn Any + Sync` is E0277.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* rust-ui ratchet: one block, the merged counts\n\nThe merge kept both sides' blocks; this is the one block of the counts\nafter it (run-pass 1936: main's 1933 and this branch's 3; compile-fail 5391).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* Instant's Debug: no overflow for an Instant moved far ahead\n\nThe seconds less the clock's base are written as a sign and a u64, not\nthrough `as i64`: an Instant moved by a near-maximal Duration (which\nchecked_add allows) had its stored seconds past i64::MAX, and the\nsubtraction overflowed. As rustc: `Instant { tv_sec: 92233720.. }`.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-28T05:06:14+09:00",
+          "tree_id": "cb519e1db13d8259c5930d92885f15ad2269167d",
+          "url": "https://github.com/mizchi/zust/commit/8854c02758adfe22cee61be317e10331b252b592"
+        },
+        "date": 1795810812008,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.065,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.883,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.917,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 13.811,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 6.072,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.278,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 8.783,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 317.431,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 139.43,
             "unit": "MiB"
           }
         ]
