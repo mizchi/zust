@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795791572333,
+  "lastUpdate": 1795799217520,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -64394,6 +64394,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 77.544,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1b74ff23ce626791ff7f3f42790988b3c447cdac",
+          "message": "Trait objects keep their auto traits (dyn Tr + Send / + Sync) (#323)\n\nzustc's types dropped `+ Send` / `+ Sync` from trait objects, and every `dyn Trait` counted as Send and Sync, so a `Box<dyn Fn()>` holding an `Rc` could move to another thread. Objects now keep them, as rustc's:\n\n- the three auto-trait judges take a `dyn` as Send/Sync only by its written auto traits or its trait's supertraits;\n- a value becomes a `dyn Tr + Send` / `+ Sync` only if its type is (E0277, naming the culprit);\n- Box / & / *const of an object coerce (and `&` casts to `*const`) to one with fewer auto traits, never more (E0308);\n- a pointer cast may not add an auto trait to an object with a principal trait (E0804); between objects of auto traits alone it may, as rustc's.\n\nReport: docs/reports/2026-11-27-03-dyn-auto-traits.md (en/ja).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01DA4GokUemhzj5xUVkRtGGb",
+          "timestamp": "2026-11-28T02:02:12+09:00",
+          "tree_id": "10523c6ce4f2b6519c18d3916b89a4adf6a2fa5f",
+          "url": "https://github.com/mizchi/zust/commit/1b74ff23ce626791ff7f3f42790988b3c447cdac"
+        },
+        "date": 1795799216862,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 93.093,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.914,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 18.474,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 35.079,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 23.027,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 324.086,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.557,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 131.091,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 800.912,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 395.464,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.845,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 58.699,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 159.855,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.793,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.445,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1903.182,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 613.416,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3938.612,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 33.113,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 73.913,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 31.555,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 48.438,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 51.287,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 144.034,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 40.706,
             "unit": "ms"
           }
         ]
