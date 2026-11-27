@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795751106673,
+  "lastUpdate": 1795751109005,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -89764,6 +89764,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 135.172,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "62157772c4b6429303a222fd07f512a5d10b65d3",
+          "message": "prelude/acg: split_first / splitn, div_ceil, PoisonError, `x.fmt(f)`, `x.into()` targets and more std methods (#280)\n\nstd methods and lookups that the crate survey reported as missing (#256):\n\n- slice `split_first` / `splitn` and `to_owned`\n- `str::splitn` and ASCII checks\n- `div_ceil` / `wrapping_add_signed`\n- `Thread`-free std helpers: `MaybeUninit`, `PoisonError`, `Cow` From, `Waker`, `Mutex`\n- the `IoError` methods behind `io::Error::..` paths, applied only to std's io\n\nFormatting and conversion calls:\n\n- `x.fmt(f)` picks Display or Debug from the type parameter's bound first, then from the `fmt` imports, read per `use` tree, and then from the enclosing impl. When both traits are imported and nothing decides, it is an error, not a guess.\n- `x.into()` into its own type returns the value itself (std's `From<T> for T`). Otherwise the target comes from the fn's `T: Into<U>` bound, which covers foldhash's `x.into() << n`.\n- An inherent `into(&self)` reached through `&S` is called as in rustc.\n- The `fmt` import mask is part of the incremental cache key.\n\nDeferred:\n- #286: per-module fmt trait scope.\n- #289: two type parameters with the same instance, and the receiver mutability and generic instance of an inherent `into`.\n\nPart of #256.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T03:39:15Z",
+          "tree_id": "a432ab11366a08de00167bb791239bba58b2f1e3",
+          "url": "https://github.com/mizchi/zust/commit/62157772c4b6429303a222fd07f512a5d10b65d3"
+        },
+        "date": 1795751108725,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.161,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.846,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.878,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 11.752,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.017,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.622,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 3.47,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 319.849,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 136.695,
             "unit": "MiB"
           }
         ]
