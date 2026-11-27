@@ -16956,7 +16956,7 @@ impl Debug for Instant {
 pub trait Any: 'static {
     fn type_id(&self) -> TypeId;
 }
-impl<T: 'static> Any for T {
+impl<T: 'static + ?Sized> Any for T {
     fn type_id(&self) -> TypeId {
         TypeId::of::<T>()
     }

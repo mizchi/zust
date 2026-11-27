@@ -2,5 +2,7 @@ true false true
 Any { .. } true
 Err(Any { .. })
 true false
+Any { .. } Any { .. }
+true false true
 true Some(true)
 true
