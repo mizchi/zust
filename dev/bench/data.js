@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795770407130,
+  "lastUpdate": 1795770410078,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -91588,6 +91588,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 138.246,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "531afefdf139f0e5492eaaee4a6a1ee896adfe3a",
+          "message": "prelude: ExactSizeIterator's default len, from size_hint as std's (#300)\n\nThe prelude's `ExactSizeIterator` now has std's default `len`: `size_hint()`'s lower bound, asserting that the upper bound matches, as std does in every build. So `impl ExactSizeIterator for X {}` compiles. It also gains `Iterator` as its supertrait. An impl's own `len`, or an inherent `len`, still wins. The trait's members are selected only when a program names both `ExactSizeIterator` and `len`.\n\nsmallvec, bit-vec, thread_local, bit-set, regex-automata and matchers get past the missing-`len` error. parking_lot's build moves on to parking_lot_core's `Instant` (#250). The other std traits' default methods (`nth_back`, `rfold`, `rfind`, `size_hint`, `Error::source`, `read_exact`, `write_all`, `Hasher::write_*`) were already accepted when an impl leaves them out; a probe now covers them. `cratebench/survey/issues.tsv` maps the error to #298.\n\nFixes #298.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T09:00:56Z",
+          "tree_id": "cfc9f9d3a8e1f2966eb2a74da9031746be6add0d",
+          "url": "https://github.com/mizchi/zust/commit/531afefdf139f0e5492eaaee4a6a1ee896adfe3a"
+        },
+        "date": 1795770409399,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.028,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.844,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.957,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 13.594,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.248,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.338,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 4.36,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 318.137,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 138.215,
             "unit": "MiB"
           }
         ]
