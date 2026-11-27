@@ -7,3 +7,5 @@ short first false: timed out true before the long deadline true
 long: value 7 timed out false within 2s true
 short first true: timed out true before the long deadline true
 long: value 7 timed out false within 2s true
+join: true
+recv: Ok(true)

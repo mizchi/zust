@@ -9901,6 +9901,8 @@ struct __GreenTh {
     run: Option<Box<dyn FnMut()>>,
     done: bool,
     waiting: bool,
+    // (in Condvar::wait_timeout: a thread that runs for __exr_green_all_wait, as time ends its wait)
+    timed: bool,
     // (`Thread::unpark`'s token, which the next `park` takes)
     token: bool,
     // (the name a thread::Builder gave it)
@@ -9933,7 +9935,7 @@ fn __exr_green() -> *mut __GreenSched {
     unsafe {
         if __EXR_GREEN.is_null() {
             let mut ths: Vec<__GreenTh> = Vec::new();
-            ths.push(__GreenTh { ctx: __exr_green_alloc(1024), stack: 0usize as *mut u8, run: None, done: false, waiting: false, token: false, name: None });
+            ths.push(__GreenTh { ctx: __exr_green_alloc(1024), stack: 0usize as *mut u8, run: None, done: false, waiting: false, timed: false, token: false, name: None });
             let s = __exr_green_alloc(core::mem::size_of::<__GreenSched>()) as *mut __GreenSched;
             s.write(__GreenSched { ths: ths, cur: 0, live: 1, epoch: 0 });
             __EXR_GREEN = s;
@@ -10069,7 +10071,7 @@ fn __exr_green_start(run: Box<dyn FnMut()>, name: Option<String>) -> usize {
         *(ctx.add(32) as *mut usize) = __EXR_GREEN_STACK;
         __exr_makecontext(ctx, __exr_green_entry, 0);
         let id = (*s).ths.len();
-        (*s).ths.push(__GreenTh { ctx: ctx, stack: stack, run: Some(run), done: false, waiting: false, token: false, name: name });
+        (*s).ths.push(__GreenTh { ctx: ctx, stack: stack, run: Some(run), done: false, waiting: false, timed: false, token: false, name: name });
         (*s).live += 1;
         // (the new thread runs at once, until it waits or ends: a thread that never waits runs as it did before
         // there were green threads)
@@ -11227,26 +11229,33 @@ impl Condvar {
             Some(d) => Instant::now() >= d,
             None => false,
         };
-        if !__exr_green_wait(|| unsafe { *n != seen } || up()) {
-            // (every other thread waits: the deadline is waited out here, in sleeps of at most 1 ms with a turn of the
-            // other threads after each, as a thread that runs: time ends this wait, so another thread's join or lock
-            // is no deadlock meanwhile, and a sibling's earlier deadline is not slept past)
-            if let Some(d) = deadline {
-                loop {
-                    if unsafe { *n != seen } {
-                        break;
-                    }
-                    let now = Instant::now();
-                    if now >= d {
-                        break;
-                    }
+        // (until a notify or the deadline: a turn of the other threads at a time, as a thread that runs (`timed`), not
+        // one that waits, since time ends this wait: another thread's join, recv or lock is no deadlock meanwhile.
+        // Once every other thread waits or is in a timed wait too (or there is none), at most 1 ms of sleep before
+        // each turn, so that no thread's earlier deadline is slept past)
+        __exr_green_timed(true);
+        loop {
+            if unsafe { *n != seen } || up() {
+                break;
+            }
+            if __exr_green_idle() {
+                let d = match deadline {
+                    Some(d) => d,
+                    // (a deadline past what an Instant holds, and nothing that could notify: `wait` would never return)
+                    None => break,
+                };
+                let now = Instant::now();
+                if now < d {
                     let left = d.duration_since(now);
                     let slice = Duration::from_millis(1);
+                    // (which gives the other threads their turn first)
                     __core_sleep(if left < slice { left } else { slice });
-                    __exr_green_yield();
+                    continue;
                 }
             }
+            __exr_green_yield();
         }
+        __exr_green_timed(false);
         let notified = unsafe { *n != seen };
         if !__exr_green_wait(|| unsafe { !*m }) {
             panic!("deadlock: every thread is waiting");
@@ -16326,3 +16335,35 @@ impl WaitTimeoutResult {
 // `std::sync::atomic::fence` / `compiler_fence`: the green threads share one OS thread, so nothing to order
 pub fn __core_fence(_o: __AtOrd_) {}
 pub fn __core_compiler_fence(_o: __AtOrd_) {}
+
+// (the running thread is in a timed wait, or no longer)
+fn __exr_green_timed(on: bool) {
+    unsafe {
+        if !__EXR_GREEN.is_null() {
+            let s = __EXR_GREEN;
+            let me = (*s).cur;
+            (*s).ths[me].timed = on;
+        }
+    }
+}
+
+// (whether every other thread is done, waits, or is in a timed wait: only time can change anything, so a timed
+// waiter sleeps)
+fn __exr_green_idle() -> bool {
+    unsafe {
+        let s = __EXR_GREEN;
+        if s.is_null() {
+            return true;
+        }
+        let me = (*s).cur;
+        let n = (*s).ths.len();
+        let mut j = 0;
+        while j < n {
+            if j != me && !(*s).ths[j].done && !(*s).ths[j].waiting && !(*s).ths[j].timed {
+                return false;
+            }
+            j += 1;
+        }
+        true
+    }
+}
