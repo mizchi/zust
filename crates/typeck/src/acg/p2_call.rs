@@ -383,6 +383,9 @@ impl Cx<'_> {
     #[inline(never)]
     fn fmt_method(&mut self, recv: &Expr, f: &Expr, expected: Option<Ty>) -> R<Option<V>> {
         let Some(t) = self.peek(recv) else { return Ok(None) };
+        if let Some(r) = self.radix_fmt_method(recv, t, f, expected)? {
+            return Ok(Some(r));
+        }
         let base = self.strip_refs(t);
         if matches!(base, Ty::Dyn(_) | Ty::Param(_) | Ty::Box(_)) || self.prog.has_param(base) {
             return Ok(None);
@@ -392,11 +395,55 @@ impl Cx<'_> {
                 return Ok(None);
             }
         }
+        // (`x.fmt(f)` of a number with LowerHex / Binary / LowerExp .. the one fmt trait in scope (imported, or the impl's
+        // own): that one's, `ff` of a u8 under `use std::fmt::LowerHex;`; with another in scope too, rustc's E0034, the
+        // ordinary lookup)
+        if self.explicit_trait.is_none() && (base.is_int() || base.is_float()) && !self.param_has_fmt_bound(recv) {
+            let inside = self.prog.sigs.get(self.root as usize).and_then(|s| s.impl_trait.as_deref()).map(|t| t.split('<').next().unwrap_or(t).trim().rsplit("::").next().unwrap_or(t));
+            const TRS: [&str; 8] = ["Display", "Debug", "LowerHex", "UpperHex", "Binary", "Octal", "LowerExp", "UpperExp"];
+            let imp = self.prog.fmt_imports;
+            let applies = |k: usize| k < 2 || k >= 6 || base.is_int();
+            let scope: Vec<usize> = (0..8).filter(|&k| applies(k) && (imp & (1 << k) != 0 || inside == Some(TRS[k]))).collect();
+            let pick = match inside.and_then(|t| scope.iter().copied().find(|&k| TRS[k] == t)) {
+                Some(k) => Some(k),
+                None if scope.len() == 1 => Some(scope[0]),
+                None if scope.iter().any(|&k| k >= 2) => return Ok(None),
+                None => None,
+            };
+            if let Some(k) = pick.filter(|&k| k >= 2) {
+                // (as the trait's path writes it, the prelude's impl for the number: `LowerHex::fmt(&x, f)`, through x's
+                // references; the prelude's trait under its own name where the program has one of that name)
+                let shadowed = format!("__p_{}", TRS[k]);
+                let tn = if self.prog.traits.contains_key(&shadowed) { shadowed } else { TRS[k].to_string() };
+                let mut refs = 0;
+                let mut u = t;
+                while let Ty::Ref(_, i) = u {
+                    refs += 1;
+                    u = *i;
+                }
+                let (rv, rt) = self.expr(recv, None)?;
+                let Some(rv) = rv else { return Ok(Some((None, Ty::Never))) };
+                let (fv, ft) = self.expr(f, None)?;
+                let Some(fv) = fv else { return Ok(Some((None, Ty::Never))) };
+                self.scopes.push(vec![]);
+                self.bind("__exr_xv".into(), rt, Some(rv));
+                self.bind("__exr_xf".into(), ft, Some(fv));
+                let e = crate::parse::parse_expr(&format!("{tn}::fmt(&{}__exr_xv, __exr_xf)", "*".repeat(refs)))?;
+                let e = self.keep_expr(e);
+                let r = self.expr(e, expected);
+                self.scopes.pop();
+                return r.map(Some);
+            }
+        }
         // (a `fmt` of a trait of the program's that the type implements, `impl Unsigned for u32 { fn fmt(self, buf) }`)
         let user_fmt = |tr: &String| {
             self.prog.traits.get(tr).is_some_and(|ds| ds.iter().any(|&d| self.prog.names[d as usize].rsplit("::").next() == Some("fmt"))) && self.prog.implements(base, tr)
         };
-        if self.prog.prim_method(base, "fmt").is_some() || self.prog.blanket.contains_key("fmt") || self.prog.user_traits.iter().any(user_fmt) {
+        // (not where Display / Debug is named, `fmt::Display::fmt(n, f)` of a number: the compiler's own, whatever `fmt` the
+        // prelude's `impl LowerHex for u32` gives the number)
+        let named_std = (base.is_int() || base.is_float() || matches!(base, Ty::Bool | Ty::Char | Ty::Str))
+            && self.explicit_trait.as_ref().is_some_and(|(m, tr)| m == "fmt" && matches!(tr.as_str(), "Display" | "Debug"));
+        if !named_std && (self.prog.prim_method(base, "fmt").is_some() || self.prog.blanket.contains_key("fmt") || self.prog.user_traits.iter().any(user_fmt)) {
             return Ok(None);
         }
         let tr = match self.explicit_trait.as_ref().filter(|(m, _)| m == "fmt") {
@@ -448,6 +495,107 @@ impl Cx<'_> {
         let call = Expr::Call(Box::new(path_expr(h)), vec![Expr::Ref(false, Box::new(paren(recv.clone()))), f.clone()]);
         let call: &Expr = self.keep_expr(call);
         self.expr(call, expected).map(Some)
+    }
+
+    /// `fmt::Pointer::fmt(p, f)` of a reference / raw pointer / Box: written as `{:p}` writes it, with the formatter's
+    /// width and flags. None for another receiver (a type's own impl: the ordinary lookup)
+    #[cold]
+    #[inline(never)]
+    fn radix_fmt_method(&mut self, recv: &Expr, t: Ty, f: &Expr, expected: Option<Ty>) -> R<Option<V>> {
+        let Some(tr) = self.explicit_trait.as_ref().filter(|(m, _)| m == "fmt").map(|(_, tr)| tr.rsplit("::").next().unwrap_or(tr).to_string()) else {
+            return Ok(None);
+        };
+        // (std's Pointer only: where the program has a Pointer of its own, std's is `__p_Pointer` and the program's
+        // goes through its impls)
+        if tr != if self.prog.traits.contains_key("__p_Pointer") { "__p_Pointer" } else { "Pointer" } {
+            return Ok(None);
+        }
+        // (Pointer's receiver is `&self`: the pointer is what it points to, `&&u8`'s `&u8`)
+        // (the pointer: `*recv` of a `&&u8` receiver, or the receiver itself, `r` of `fmt::Pointer::fmt(&r, f)` as the
+        // method call has it)
+        // (a fat one to a slice / str, `&str` / `&[T]` / `Box<[T]>`, too: `Pointer { addr, metadata }`; not a raw one, nor
+        // one to a `dyn`)
+        let ptr_like = |p: Ty| match p {
+            Ty::Ref(_, i) | Ty::Box(i) => !i.is_unsized() || matches!(*i, Ty::Slice(_) | Ty::Str),
+            Ty::Ptr(..) => !p.is_fat(),
+            _ => false,
+        };
+        // (not `&E` of a type with its own Pointer impl, `Pointer::fmt(e_ref, f)`: E's impl, the ordinary lookup)
+        let own = |p: Ty| matches!(p, Ty::Ref(_, Ty::Struct(_)));
+        // (`&p` of a fat pointer the above does not take, a raw one (`*const [u8]`) or one to a `dyn`: p itself, its two
+        // words read through the reference (never the address of the variable p, the outer reference's))
+        let fat_behind = |p: Ty| {
+            matches!(p, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_)) && !ptr_like(p) && matches!(p, Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) if matches!(*i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)))
+        };
+        let unsupported = |p: Ty| matches!(p, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_)) && !ptr_like(p) && !fat_behind(p);
+        let ptr_at: Option<(Ty, bool)> = match t {
+            Ty::Ref(_, p) if ptr_like(*p) || fat_behind(*p) => Some((*p, true)),
+            Ty::Ref(_, p) if unsupported(*p) => None,
+            p if ptr_like(p) && !own(p) => Some((p, false)),
+            _ => None,
+        };
+        if ptr_at.is_none() {
+            return Ok(None);
+        }
+        self.explicit_trait = None;
+        let (rv, rt) = self.expr(recv, None)?;
+        let Some(rv) = rv else { return Ok(Some((None, Ty::Never))) };
+        let (fv, ft) = self.expr(f, None)?;
+        let Some(fv) = fv else { return Ok(Some((None, Ty::Never))) };
+        self.scopes.push(vec![]);
+        self.bind("__exr_xv".into(), rt, Some(rv));
+        self.bind("__exr_xf".into(), ft, Some(fv));
+        let text = {
+            // (by the evaluated receiver's type, which match ergonomics may give one more reference than peek's)
+            let (pt, through) = match rt {
+                Ty::Ref(_, p) if ptr_like(*p) || fat_behind(*p) => (*p, true),
+                Ty::Ref(_, p) if unsupported(*p) => ptr_at.unwrap(),
+                p if ptr_like(p) && !own(p) => (p, false),
+                _ => ptr_at.unwrap(),
+            };
+            let tn = self.prog.tn(match pt {
+                Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) => *i,
+                _ => unreachable!(),
+            });
+            let p = if through { "*__exr_xv" } else { "__exr_xv" };
+            let star = if matches!(pt, Ty::Box(_)) { format!("&*{p}") } else { p.to_string() };
+            let dyn_pt = matches!(pt, Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) if matches!(*i, Ty::Dyn(_)));
+            if through && fat_behind(pt) || through && dyn_pt {
+                let w = if matches!(rt, Ty::Ref(..)) { "__exr_xv" } else { "&__exr_xv" };
+                let h = if dyn_pt { "__exr_dyn_pointer_fmt" } else { "__exr_fat_pointer_fmt" };
+                format!("{{ let (a, m) = __exr_fat_words({w}); {h}::<()>(a, m, __exr_xf) }}")
+            } else if pt.is_fat() {
+                format!("{{ let s = {star}; __exr_fat_pointer_fmt::<()>(s.as_ptr() as usize, s.len(), __exr_xf) }}")
+            } else {
+                format!("__exr_pointer_fmt::<()>({star} as *const {tn} as usize, __exr_xf)")
+            }
+        };
+        let e = crate::parse::parse_expr(&text)?;
+        let e = self.keep_expr(e);
+        let r = self.expr(e, expected);
+        self.scopes.pop();
+        r.map(Some)
+    }
+
+    /// Whether recv is a parameter of a type parameter with a fmt trait among its bounds (`x: T` with `T: UpperHex`), as
+    /// param_fmt_bound finds it: what its bounds say, not the traits the program imports
+    fn param_has_fmt_bound(&self, recv: &Expr) -> bool {
+        if self.env.params.is_empty() || self.generic_args.is_empty() {
+            return false;
+        }
+        let Expr::Path(None, rp) = strip_paren(recv) else { return false };
+        let Some(rn) = ident_of(rp) else { return false };
+        let Some(declared) = self.generic_args.iter().find(|a| a.0 == rn).map(|a| a.1.clone()) else { return false };
+        if self.scopes.iter().rposition(|s| s.iter().any(|b| b.0 == rn)) != Some(0) {
+            return false;
+        }
+        let Some(g) = self.prog.sigs.get(self.root as usize).and_then(|s| s.generics.iter().find(|g| g.0 == declared)) else { return false };
+        g.1.iter().any(|b| {
+            matches!(
+                b.split('<').next().unwrap_or(b).rsplit("::").next().map(str::trim),
+                Some("Display" | "Debug" | "LowerHex" | "UpperHex" | "Binary" | "Octal" | "LowerExp" | "UpperExp" | "Pointer")
+            )
+        })
     }
 
     /// The fmt trait a value of a type parameter takes from its bounds (`x: T` / `x: &T` with `T: Debug`), as
@@ -4767,13 +4915,17 @@ impl Cx<'_> {
                         let mut args = cargs.iter();
                         let a0 = args.next()?;
                         let rest: Vec<Expr> = args.cloned().collect();
+                        // (std's Pointer, which the compiler writes itself, `fmt::Pointer::fmt(&r, f)`: the method call with the
+                        // trait named (radix_fmt_method); its receiver keeps its `&`, as `Pointer::fmt(&rr, f)` of a `&&u8`
+                        // writes rr itself, not *rr)
+                        let std_fmt = ms == "fmt" && tr == if self.prog.traits.contains_key("__p_Pointer") { "__p_Pointer" } else { "Pointer" };
                         let recv = match a0 {
-                            Expr::Ref(_, e) => paren((**e).clone()),
+                            Expr::Ref(_, e) if !std_fmt => paren((**e).clone()),
                             _ => paren(a0.clone()),
                         };
                         // (a primitive receiver with an impl of this trait: `<u32 as Tr>::m(&x)`, which a builtin
                         // method of the same name (`to_string`) cannot take over as `x.m()` would let it)
-                        if let Some(t) = self.peek(&recv).map(|t| self.strip_refs(t)) {
+                        if let Some(t) = self.peek(&recv).map(|t| self.strip_refs(t)).filter(|_| !std_fmt) {
                             if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) {
                                 let key = format!("{}::{ms}", self.ty_key(t));
                                 if self.trait_candidate(&key, &tr).is_some() {
@@ -4782,8 +4934,11 @@ impl Cx<'_> {
                                     }
                                 }
                                 // (`A::m(&0.0f32)` taking A's default, beside another trait's `f32::m`: not `x.m()`, which
-                                // would reach that one; the path call keeps the trait)
-                                if self.prog.index.get(&key).is_some_and(|&i| self.prog.sigs[i as usize].impl_trait.as_deref().is_some_and(|it| it.split('<').next().unwrap_or(it).trim() != tr)) {
+                                // would reach that one; the path call keeps the trait. Not Display / Debug's `fmt` of a number,
+                                // which the compiler writes itself, beside the prelude's `impl LowerHex for u32`: the method
+                                // call with the trait named, as fmt_method takes it)
+                                if !(ms == "fmt" && matches!(tr.as_str(), "Display" | "Debug"))
+                                    && self.prog.index.get(&key).is_some_and(|&i| self.prog.sigs[i as usize].impl_trait.as_deref().is_some_and(|it| it.split('<').next().unwrap_or(it).trim() != tr)) {
                                     return None;
                                 }
                             }
