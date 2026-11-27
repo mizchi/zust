@@ -224,6 +224,149 @@ fn blank_comments(s: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| s.to_string())
 }
 
+/// The end of the `use` declaration whose keyword ends at sb[b]: its `;`, not one in a comment (`use a::{ /* ; */ b };`),
+/// else stop
+fn use_end(sb: &[u8], b: usize, stop: usize) -> usize {
+    let mut i = b;
+    while i < stop {
+        if sb[i] == b'/' && sb.get(i + 1) == Some(&b'/') {
+            i = sb[i..stop].iter().position(|&c| c == b'\n').map_or(stop, |k| i + k);
+        } else if sb[i] == b'/' && sb.get(i + 1) == Some(&b'*') {
+            // (block comments nest: `/* a /* b */ ; */`)
+            let mut depth = 1;
+            i += 2;
+            while i < stop && depth > 0 {
+                if sb[i] == b'/' && sb.get(i + 1) == Some(&b'*') {
+                    depth += 1;
+                    i += 2;
+                } else if sb[i] == b'*' && sb.get(i + 1) == Some(&b'/') {
+                    depth -= 1;
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+        } else if sb[i] == b';' {
+            return i;
+        } else {
+            i += 1;
+        }
+    }
+    stop
+}
+
+/// The fmt traits the items' `use` declarations import (fn bodies' too), by each declaration's use tree, its comments
+/// left out (use_tree_fmt): 1 Display, 2 Debug; a glob of a `fmt` path both. Only a name under a `fmt` path: a trait
+/// of the program's named Debug is not std's (Program::fmt_imports)
+fn fmt_imports(src: &str, items: &[SrcItem]) -> u8 {
+    let sb = src.as_bytes();
+    let mut mask = 0u8;
+    for it in items {
+        for &(a, b) in &it.idents {
+            if b - a != 3 || sb.get(a as usize..b as usize) != Some(b"use") {
+                continue;
+            }
+            // (the declaration, up to its `;` (not one in a comment), without its comments)
+            let end = use_end(sb, b as usize, it.end.min(sb.len()));
+            let text = blank_comments(src.get(b as usize..end).unwrap_or(""));
+            if !text.contains("fmt") {
+                continue;
+            }
+            let toks = use_tokens(&text);
+            let mut k = 0;
+            use_tree_fmt(&toks, &mut k, &mut vec![], &mut mask, 0);
+        }
+    }
+    mask
+}
+
+/// A use declaration's tokens: names, `::`, `{`, `}`, `,`, `*` (the rest is left out)
+fn use_tokens(t: &str) -> Vec<&str> {
+    let b = t.as_bytes();
+    let mut out = vec![];
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c.is_ascii_alphanumeric() || c == b'_' {
+            let s = i;
+            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+                i += 1;
+            }
+            out.push(&t[s..i]);
+            continue;
+        }
+        if c == b':' && b.get(i + 1) == Some(&b':') {
+            out.push("::");
+            i += 2;
+            continue;
+        }
+        if matches!(c, b'{' | b'}' | b',' | b'*') {
+            out.push(&t[i..i + 1]);
+        }
+        i += 1;
+    }
+    out
+}
+
+/// One use tree at toks[*k] under the path `prefix`: a leaf `fmt::Display` / `fmt::Debug` (also aliased, `Debug as D`
+/// or `as _`: the trait is in scope under any name; an alias that is spelled `Debug`, `io::Error as Debug`, is no trait
+/// of fmt) sets its bit, and a glob whose path ends in `fmt` (`fmt::*`, `fmt::{*, ..}`) both. A glob elsewhere
+/// (`ops::*`) none
+fn use_tree_fmt(toks: &[&str], k: &mut usize, prefix: &mut Vec<String>, mask: &mut u8, depth: u32) {
+    let base = prefix.len();
+    if toks.get(*k) == Some(&"::") {
+        *k += 1;
+    }
+    while let Some(&t) = toks.get(*k) {
+        match t {
+            "{" if depth < 16 => {
+                *k += 1;
+                while toks.get(*k).is_some_and(|&t| t != "}") {
+                    use_tree_fmt(toks, k, prefix, mask, depth + 1);
+                    if toks.get(*k) == Some(&",") {
+                        *k += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if toks.get(*k) == Some(&"}") {
+                    *k += 1;
+                }
+                break;
+            }
+            "*" => {
+                *k += 1;
+                if prefix.last().is_some_and(|p| p == "fmt") {
+                    *mask |= 3;
+                }
+                break;
+            }
+            "::" | "," | "}" | "{" => break,
+            name => {
+                *k += 1;
+                if toks.get(*k) == Some(&"::") {
+                    prefix.push(name.to_string());
+                    *k += 1;
+                    continue;
+                }
+                // (a leaf, by its own name: what follows `as` is its alias)
+                if toks.get(*k) == Some(&"as") {
+                    *k += 2;
+                }
+                if prefix.last().is_some_and(|p| p == "fmt") {
+                    match name {
+                        "Display" => *mask |= 1,
+                        "Debug" => *mask |= 2,
+                        _ => {}
+                    }
+                }
+                break;
+            }
+        }
+    }
+    prefix.truncate(base);
+}
+
 /// Where the string or char literal at b[i] ends (past it): `"..."`, `b'{'`, `'\n'`; None for anything else (a
 /// lifetime `'a`)
 fn literal_end(b: &[u8], i: usize) -> Option<usize> {
@@ -2167,38 +2310,16 @@ impl Session {
                 if b - a != 3 || sb.get(a..b) != Some(b"use") {
                     continue;
                 }
-                // (the declaration's `;`: not one in a comment, `use a::{ /* ; */ b };`)
-                let stop = it.end.min(sb.len());
-                let mut end = stop;
-                let mut i = b;
-                while i < stop {
-                    if sb[i] == b'/' && sb.get(i + 1) == Some(&b'/') {
-                        i = sb[i..stop].iter().position(|&c| c == b'\n').map_or(stop, |k| i + k);
-                    } else if sb[i] == b'/' && sb.get(i + 1) == Some(&b'*') {
-                        // (block comments nest: `/* a /* b */ ; */`)
-                        let mut depth = 1;
-                        i += 2;
-                        while i < stop && depth > 0 {
-                            if sb[i] == b'/' && sb.get(i + 1) == Some(&b'*') {
-                                depth += 1;
-                                i += 2;
-                            } else if sb[i] == b'*' && sb.get(i + 1) == Some(&b'/') {
-                                depth -= 1;
-                                i += 2;
-                            } else {
-                                i += 1;
-                            }
-                        }
-                    } else if sb[i] == b';' {
-                        end = i;
-                        break;
-                    } else {
-                        i += 1;
-                    }
-                }
+                let end = use_end(sb, b, it.end.min(sb.len()));
                 // (its identifier tokens: not the words of a comment in it)
                 prog.use_names.extend(it.idents.iter().map(|&(x, y)| (x as usize, y as usize)).filter(|&(x, y)| x > b && y <= end).filter_map(|(x, y)| src.get(x..y)).map(str::to_string));
             }
+        }
+        // (the fmt traits the program's `use` declarations import, for `x.fmt(f)` of a type with both (#256): only when
+        // the program calls a `fmt` method)
+        let user_end = items[..user].last().map_or(0, |it| it.end.min(src.len()));
+        if src[..user_end].contains(".fmt") {
+            prog.fmt_imports = fmt_imports(&src, &items[..user]);
         }
         // (a field or an impl's self type that names a struct of the program's whose parameter's bound does not hold:
         // `struct Hoge<K> { s: S<K> }` with `struct S<T: Tr>`)
@@ -9732,6 +9853,9 @@ impl Session {
         };
         let ii = a.prog.item_of[id].unwrap() as usize;
         let pf = a.prog.prelude_from as usize;
+        // (a closed fn's key holds the program's fmt imports only when its body calls a `fmt` method (#256): the mask
+        // is the whole program's, which a crate's keys would otherwise take from its consumer)
+        let fmt_mask = || a.src.get(a.items[ii].start..a.items[ii].end).is_some_and(|t| t.contains(".fmt")).then_some(a.prog.fmt_imports);
         // 閉じた依存するクレートの関数 (と、型引数に依存するクレートの型を持つ prelude の関数): 本体・自分のシグネチャと、
         // 見えるクレートの中の参照先だけ (prelude はコンパイラで決まる、ほかのクレートのものは呼べない)
         if let Some(u) = closed.filter(|u| ii < pf || u.iter().any(|&x| x)) {
@@ -9794,6 +9918,9 @@ impl Session {
                 }
             }
             h.add(&ak);
+            if let Some(m) = fmt_mask() {
+                h.add(&m);
+            }
             match a.prog.panic_handler {
                 Some(p) => h.add(&a.prog.names[p as usize]),
                 None => h.add(&0u8),
@@ -9813,6 +9940,9 @@ impl Session {
             h.add(&(self.opts.backend_id()));
             h.add(&a.items[ii].hash);
             h.add(&a.sig_key(id as u32));
+            if let Some(m) = fmt_mask() {
+                h.add(&m);
+            }
             match a.prog.panic_handler {
                 Some(p) => h.add(&a.prog.names[p as usize]),
                 None => h.add(&0u8),
@@ -9831,6 +9961,9 @@ impl Session {
         if let Some(vis) = a.prog.traits_at_item(ii as u32) {
             h.add(&vis.join(","));
         }
+        // (and the fmt traits the program imports, which `x.fmt(f)` takes its trait from (#256): a `use std::fmt::Debug;`
+        // changed elsewhere changes the call, the body the same; also an inlined body's)
+        h.add(&a.prog.fmt_imports);
         if a.prog.closures.contains_key(&(id as u32)) {
             h.add(&a.prog.names[id]);
         }
