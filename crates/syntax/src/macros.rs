@@ -1237,7 +1237,9 @@ fn body_lets(body: &[Pt], out: &mut Vec<String>) {
                     && !(i > 0 && matches!(&body[i - 1], Pt::Tok(TokenTree::Punct(c)) if c.as_char() == ':' || c.as_char() == '\'')) =>
             {
                 let n = n.to_string();
-                if !matches!(n.as_str(), "_" | "true" | "false") && n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && !out.contains(&n) {
+                // (nor a keyword: num-traits' `float_to_int_unchecked!(*self => $i)` in a body passes `self`, which no
+                // pattern binds (#254))
+                if !matches!(n.as_str(), "_" | "true" | "false" | "self" | "super" | "crate") && n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && !out.contains(&n) {
                     out.push(n);
                 }
             }
