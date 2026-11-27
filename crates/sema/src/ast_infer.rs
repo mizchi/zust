@@ -456,7 +456,9 @@ impl Inf<'_> {
     }
 
     fn fn_by(&self, p: &Path) -> Option<u32> {
-        self.prog.fn_by_p(&PPath::of(p), self.self_sid)
+        let id = self.prog.fn_by_p(&PPath::of(p), self.self_sid)?;
+        // (of inherent functions in impls for disjoint instances, the one of the self type the path names)
+        Some(self.prog.fn_of_path_self(id, p, self.env))
     }
 
     /// 自前の構文木のノードを keep に移して推論する (アドレスでは記録しない)
