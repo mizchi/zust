@@ -1056,10 +1056,12 @@ fn mutates_in(e: &Expr, caps: &[String]) -> bool {
 
 /// Whether the closure body assigns to the captured variable n or borrows it mutably, at its top level (`n = ..`,
 /// `n.f += 1`, `*n = ..`, `&mut n`; not in a nested closure): a closure that holds n by reference holds a `&mut` of
-/// it (or a unique borrow). A call of a `&mut self` method on it is not seen (it needs the type)
+/// it (or a unique borrow). A call of a `&mut self` method on it is not seen (it needs the type). Never where the body
+/// binds the name again anywhere (`let mut n = ..; n = ..` is another variable's): the answer is then false, which
+/// the auto traits take as "either kind", the rule that holds of both
 pub fn mutates_capture(c: &Expr, n: &str) -> bool {
     let Expr::Closure(_, _, _, body, _) = c else { return false };
-    mutates_in(body, &[n.to_string()])
+    !binds_name(body, n, 0) && mutates_in(body, &[n.to_string()])
 }
 
 /// Whether the closure body assigns to a captured variable (`r = ..` / `n += 1` / `v.x = ..`)
