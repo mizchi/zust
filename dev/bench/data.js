@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795799220143,
+  "lastUpdate": 1795799222744,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -124566,6 +124566,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 91.761,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1b74ff23ce626791ff7f3f42790988b3c447cdac",
+          "message": "Trait objects keep their auto traits (dyn Tr + Send / + Sync) (#323)\n\nzustc's types dropped `+ Send` / `+ Sync` from trait objects, and every `dyn Trait` counted as Send and Sync, so a `Box<dyn Fn()>` holding an `Rc` could move to another thread. Objects now keep them, as rustc's:\n\n- the three auto-trait judges take a `dyn` as Send/Sync only by its written auto traits or its trait's supertraits;\n- a value becomes a `dyn Tr + Send` / `+ Sync` only if its type is (E0277, naming the culprit);\n- Box / & / *const of an object coerce (and `&` casts to `*const`) to one with fewer auto traits, never more (E0308);\n- a pointer cast may not add an auto trait to an object with a principal trait (E0804); between objects of auto traits alone it may, as rustc's.\n\nReport: docs/reports/2026-11-27-03-dyn-auto-traits.md (en/ja).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01DA4GokUemhzj5xUVkRtGGb",
+          "timestamp": "2026-11-28T02:02:12+09:00",
+          "tree_id": "10523c6ce4f2b6519c18d3916b89a4adf6a2fa5f",
+          "url": "https://github.com/mizchi/zust/commit/1b74ff23ce626791ff7f3f42790988b3c447cdac"
+        },
+        "date": 1795799222358,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 90.625,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 77.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 69.697,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 90.323,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 85,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.697,
             "unit": "%"
           }
         ]
