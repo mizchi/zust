@@ -210,19 +210,28 @@ pub fn is_auto_trait(name: &str) -> bool {
     matches!(name, "Send" | "Sync" | "Unpin" | "UnwindSafe" | "RefUnwindSafe")
 }
 
+// (`dyn Send + Sync` / `dyn Sync + Send` is `Send + Sync`, the text the other objects' auto traits are written in
+// (types::dyn_autos): the first is the object's trait, the second a kept auto trait)
 fn auto_dyn(t: &PTy) -> Option<String> {
     let PTy::Dyn(bs) = t else { return None };
-    let mut auto = None;
+    let mut autos: Vec<String> = vec![];
     for b in bs {
         match b {
             Bound::Trait(_, p) if p.segs.last().is_some_and(|s| is_auto_trait(&s.name)) => {
-                auto.get_or_insert_with(|| p.segs.last().unwrap().name.clone());
+                let n = p.segs.last().unwrap().name.clone();
+                if !autos.contains(&n) {
+                    autos.push(n);
+                }
             }
             Bound::Lifetime(_) => {}
             _ => return None,
         }
     }
-    auto
+    let first = autos.first()?.clone();
+    if autos.iter().any(|a| a == "Send") && autos.iter().any(|a| a == "Sync") {
+        return Some("Send + Sync".to_string());
+    }
+    Some(first)
 }
 
 pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
@@ -268,7 +277,18 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
                 }
             }
             match tr {
-                Some(s) => TySyn::Dyn(s),
+                // (`+ Send` / `+ Sync` are kept, in that order: they decide the object's own auto traits)
+                Some(s) => {
+                    let has = |n: &str| bs.iter().any(|b| matches!(b, Bound::Trait(_, p) if p.segs.last().is_some_and(|s| s.name == n)));
+                    let mut s = s;
+                    for a in ["Send", "Sync"] {
+                        if has(a) {
+                            s.push_str(" + ");
+                            s.push_str(a);
+                        }
+                    }
+                    TySyn::Dyn(s)
+                }
                 // (an auto trait alone is read right behind a pointer only, see auto_dyn)
                 None => {
                     let _ = auto;

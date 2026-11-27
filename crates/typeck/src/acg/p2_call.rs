@@ -4932,8 +4932,33 @@ fn base_name(prog: &Program, sid: u32) -> (&str, bool) {
 /// A type whose values may not move to another thread (not Send): an `Rc`, a raw pointer, a `MutexGuard` or an
 /// RwLock guard, a `&T` of a T that is not Sync, an `Arc<T>` of a T that is not Send and Sync, or a type holding one.
 /// A type of the program's with `unsafe impl Send` is Send. The prelude's own types are judged by their arguments (a
-/// Vec holds a raw pointer, and is Send when its elements are). A type parameter is taken as Send. (A `dyn Trait` is
-/// taken as Send: zustc's types do not keep `+ Send`, tests/security/send_dyn_thread.rs.)
+/// Vec holds a raw pointer, and is Send when its elements are). A type parameter is taken as Send. A `dyn Trait` is
+/// Send only when it is written with `+ Send` or its trait has Send as a supertrait (tests/security/send_dyn_thread.rs).
+/// The part of t that makes it not Send (sync: not Sync), as rustc names it: through a closure's captures and the
+/// fields of the program's own structs, down to the type that is not (`Rc<i32>`, not the closure that captures it, nor
+/// the raw pointer inside the Rc), else t
+pub fn auto_culprit(prog: &Program, t: Ty, sync: bool) -> Ty {
+    let fails = |x: Ty| if sync { not_sync(prog, x) } else { not_send(prog, x) };
+    let mut t = t;
+    for _ in 0..16 {
+        let Ty::Struct(sid) = t else { break };
+        let base = prog.base_of(sid);
+        let own = prog.struct_item.get(base as usize).is_some_and(|&i| i < prog.prelude_from);
+        if !own || prog.impls.contains(&(base, if sync { "Sync" } else { "Send" }.to_string())) {
+            break;
+        }
+        let next = prog.structs[sid as usize].fields.iter().enumerate().map(|(i, f)| match f.1 {
+            Ty::Ptr(_, inner) if prog.ref_capture(sid, i).is_some() => *inner,
+            x => x,
+        }).find(|&f| fails(f));
+        match next {
+            Some(n) => t = n,
+            None => break,
+        }
+    }
+    t
+}
+
 pub fn not_send(prog: &Program, t: Ty) -> bool {
     auto_trait_fails(prog, t, false, &mut vec![], 0)
 }
@@ -4956,6 +4981,11 @@ fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool
     let sync_ = |t: Ty, seen: &mut Vec<(u32, bool)>| auto_trait_fails(prog, t, true, seen, d + 1);
     match t {
         Ty::Ptr(..) => true,
+        // (a trait object: only by an auto trait it is written with (`dyn Tr + Send`) or its trait's supertraits)
+        Ty::Dyn(d) => {
+            let (core, send, sync_) = crate::types::dyn_autos(d);
+            !(if sync { sync_ } else { send }) && prog.tdb.gives_auto(prog, core, if sync { "Sync" } else { "Send" }) != Some(true)
+        }
         // (&T is Send if T is Sync; &mut T if T is Send; both are Sync if T is Sync)
         Ty::Ref(false, i) => sync_(*i, seen),
         Ty::Ref(true, i) if !sync => send(*i, seen),
@@ -4992,8 +5022,11 @@ fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool
                 (Ty::Ptr(_, inner), Some(false)) => sync_(*inner, seen) || (!sync && send(*inner, seen)),
                 _ => auto_trait_fails(prog, t, sync, seen, d + 1),
             };
+            // (a struct of the program's with fields is judged by them (`Maker<Rc<u32>>` of a `fn() -> T` field is
+            // Send); one without (a placeholder instance) by its arguments)
             let closure = prog.closure_of_struct.contains_key(&base);
-            (!closure && sd.args.iter().any(|&a| auto_trait_fails(prog, a, sync, seen, d + 1)))
+            let laid_out = !sd.fields.is_empty() || !sd.variants.is_empty();
+            (!closure && !laid_out && sd.args.iter().any(|&a| auto_trait_fails(prog, a, sync, seen, d + 1)))
                 || sd.fields.iter().enumerate().any(|(i, f)| field(i, f.1, seen))
                 || sd.variants.iter().any(|v| v.fields.iter().any(|f| auto_trait_fails(prog, f.1, sync, seen, d + 1)))
         }

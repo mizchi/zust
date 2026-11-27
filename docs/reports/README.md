@@ -137,3 +137,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-26 | [Region (lifetime) checking, part 40: OnceCell, the well-formedness of values built by constructors, generic fns that are called, and elided lifetimes in a receiver's self type](2026-11-26-03-region-check-40.md) |
 | 2026-11-27 | [`std::thread` as OS threads](2026-11-27-01-native-threads.md) |
 | 2026-11-27 | [rustc's thread tests on OS threads: `thread::Builder`, `recv_timeout`, `park_timeout`, `Barrier`, closures that are Sync through what they borrow](2026-11-27-02-threads-ui.md) |
+| 2026-11-27 | [Trait objects keep their auto traits: `dyn Tr + Send` / `+ Sync`](2026-11-27-03-dyn-auto-traits.md) |

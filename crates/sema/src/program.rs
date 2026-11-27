@@ -3964,6 +3964,12 @@ impl Program {
         }
         match t {
             Ty::Ptr(..) => false,
+            // (a trait object has an auto trait it is written with (`dyn Tr + Send`), or one its trait has as a
+            // supertrait: it may hold any type of its trait, one without it too)
+            Ty::Dyn(d) => {
+                let (core, send, sync_) = crate::types::dyn_autos(d);
+                (if sync { sync_ } else { send }) || self.tdb.gives_auto(self, core, if sync { "Sync" } else { "Send" }) == Some(true)
+            }
             // (`&T` is Send and Sync when T is Sync; `&mut T` is Send when T is Send, Sync when T is Sync)
             Ty::Ref(m, i) => self.auto_trait(*i, sync || !m, d + 1),
             Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => self.auto_trait(*i, sync, d + 1),
@@ -4351,10 +4357,11 @@ impl Program {
                     },
                 }
             }
-            // `Box<dyn Error>`: the prelude's __DynError (holds the Display and Debug strings)
+            // `Box<dyn Error>`: the prelude's __DynError (holds the Display and Debug strings). Also `+ Send + Sync`: it
+            // holds two Strings, Send and Sync whatever the error was
             TySyn::App(n, args)
                 if n == "Box"
-                    && matches!(args.as_slice(), [TySyn::Dyn(d)] if d == "Error")
+                    && matches!(args.as_slice(), [TySyn::Dyn(d)] if crate::types::dyn_autos(d).0 == "Error")
                     && self.struct_index.contains_key("__DynError") =>
             {
                 Ty::Struct(self.struct_index["__DynError"])
@@ -7398,7 +7405,8 @@ impl Program {
             // The vtable order (the trait's method order) is embedded in the code too
             Ty::Dyn(s) => {
                 h.add(&(108u8, s));
-                for &f in self.traits.get(s).map(|v| &v[..]).unwrap_or(&[]) {
+                // (the trait's methods: of `Tr` for a `dyn Tr + Send`)
+                for &f in self.traits.get(crate::types::dyn_autos(s).0).map(|v| &v[..]).unwrap_or(&[]) {
                     h.add(&self.names[f as usize]);
                 }
             }
@@ -8209,6 +8217,7 @@ impl Program {
 
     /// The methods a `dyn tr` vtable holds, in order: the trait's own, then those of its supertraits (each name once)
     pub fn dyn_methods(&self, tr: &str) -> Vec<u32> {
+        let tr = crate::types::dyn_autos(tr).0;
         let mut out: Vec<u32> = self.traits.get(tr).cloned().unwrap_or_default();
         let mut todo: Vec<String> = self.trait_supers.get(tr).cloned().unwrap_or_default();
         let mut seen = vec![tr.to_string()];

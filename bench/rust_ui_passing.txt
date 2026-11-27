@@ -1291,6 +1291,7 @@ run-pass	cast/owned-struct-to-trait-cast-6318.rs
 check-pass	cast/ptr-ptr-to-ptr-ptr-different-regions.rs
 compile-fail	cast/ptr-to-ptr-different-regions.rs
 compile-fail	cast/ptr-to-ptr-indirect-different-regions.rs
+compile-fail	cast/ptr-to-trait-obj-add-auto.rs
 check-pass	cast/ptr-to-trait-obj-add-super-auto.rs
 build-pass	cast/raw-pointer-from-str-comparison.rs
 compile-fail	cast/raw-ptr-to-dyn-fn-raw-ptr.rs
@@ -1615,6 +1616,7 @@ compile-fail	coercion/no-implicit-box-to-ref-coercion.rs
 compile-fail	coercion/non-primitive-cast-135412.rs
 compile-fail	coercion/pin-dyn-dispatch-sound.rs
 compile-fail	coercion/ptr-mutability-errors.rs
+compile-fail	coercion/retslot-cast.rs
 check-pass	coercion/struct-literal-field-type-coercion-to-expected-type.rs
 run-pass	coercion/trait-object-arrays-11205.rs
 compile-fail	coercion/type-errors.rs
@@ -5014,6 +5016,7 @@ compile-fail	mismatched_types/suggest-option-asderef-inference-var.rs
 compile-fail	mismatched_types/suggest-option-asderef-unfixable.rs
 compile-fail	mismatched_types/suggest-option-asderef.rs
 compile-fail	mismatched_types/suggest-removing-tuple-struct-field.rs
+compile-fail	mismatched_types/trait-bounds-cant-coerce.rs
 compile-fail	mismatched_types/trait-impl-fn-incompatibility.rs
 compile-fail	mismatched_types/transforming-option-ref-issue-127545.rs
 compile-fail	missing/missing-block-hint.rs
@@ -8080,6 +8083,7 @@ compile-fail	traits/bound/on-structs-and-enums-static.rs
 compile-fail	traits/bound/on-structs-and-enums.rs
 check-pass	traits/bound/recursion.rs
 check-pass	traits/bound/recursive-trait-bound-on-type-param.rs
+compile-fail	traits/bound/sugar.rs
 compile-fail	traits/bound/unknown-assoc-with-const-arg.rs
 run-pass	traits/bug-7295.rs
 run-pass	traits/cache-issue-18209.rs
@@ -8226,6 +8230,7 @@ compile-fail	traits/issue-50480.rs
 build-pass	traits/issue-56202.rs
 run-pass	traits/issue-6128.rs
 run-pass	traits/issue-6334.rs
+compile-fail	traits/issue-7013.rs
 check-pass	traits/issue-70944.rs
 compile-fail	traits/issue-72410.rs
 check-pass	traits/issue-72455.rs
