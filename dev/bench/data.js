@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795747153220,
+  "lastUpdate": 1795750517221,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -62327,6 +62327,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 38.594,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "eaf33d090ab4b29ca021f27227c98068e91b7681",
+          "message": "syntax: macro_rules reads `ty` / `path` fragments by their grammar, and more matcher fixes (#281)\n\n`ty` and `path` fragments are now read by their grammar, matching rustc's parser. Each fragment ends where its type or path ends, not at whatever token comes next in the matcher. This fixes the pin-project-lite generics and where clauses, futures-util delegate_all!, and time-core impl_per!.\n\n- Fragment stops compare the whole operator, as rustc's lexer glues it (`=>`, `..=`, `::`, `||`). This fixes httparse.\n- A matcher drops only a doc comment's `#[doc = \"text\"]`. It no longer drops `#[doc = $x:literal]`. This fixes syn and zerocopy.\n- A repetition whose first token is the stop token is tried before matching stops there. Repetitions backtrack.\n- In statement position, an expansion that contains only items stays items, and a lone forwarded call is left as written. A braced call keeps its `({ })` wrapper when a single `.` or a `?` follows it, but not before `..`.\n- A `ty` fragment that can begin a type but fails to parse is an error at the macro call, as in rustc. `<=` does not begin a type.\n- `Fn::(A) -> R` is accepted as a path.\n\nDeferred to #287: nested repetition backtracking, committed `ty` errors inside a repetition with no separator, `Vec<,>` and `[u8; +]`, ambiguity between complete parses, exponential backtracking on chains of optional repetitions, edition-2015 keywords, and two parser gaps outside the matcher (`Fn::(..)` as a type, a bare `..` value).\n\nPart of #258.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T03:30:22Z",
+          "tree_id": "5452489465c14551aaac1e3641a61485c147f5d2",
+          "url": "https://github.com/mizchi/zust/commit/eaf33d090ab4b29ca021f27227c98068e91b7681"
+        },
+        "date": 1795750516347,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 140.739,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.851,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 21.054,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 51.186,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.391,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 129.839,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 797.521,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 573.095,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.875,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 73.216,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 234.192,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.441,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 611.536,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3925.588,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 63.333,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 94.159,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 37.907,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 67.261,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 77.599,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 178.618,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 62.847,
             "unit": "ms"
           }
         ]
