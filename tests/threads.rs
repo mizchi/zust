@@ -54,7 +54,7 @@ fn run_with_deadline(exe: &std::path::Path, secs: u64) -> Result<std::process::O
     let (stdout, stderr) = (ro.join().unwrap(), re.join().unwrap());
     match status {
         Some(status) => Ok(std::process::Output { status, stdout, stderr }),
-        None => Err(String::from_utf8_lossy(&stdout).into_owned()),
+        None => Err(format!("{}--- stderr\n{}", String::from_utf8_lossy(&stdout), String::from_utf8_lossy(&stderr))),
     }
 }
 

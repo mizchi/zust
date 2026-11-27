@@ -105,7 +105,8 @@ for building programs that already pass rustc quickly, not a replacement for rus
   nothing can end waits forever, as std's. A panic in a spawned thread prints `thread '<unnamed>' panicked at ..`, drops
   that thread's `thread_local!` values and ends it, and its `join` gives `Err` (`Any { .. }`). There is no unwinding,
   so its other values are not dropped and a Mutex or RwLock it holds stays locked (no poisoning; a `Once` it was
-  running is poisoned, as std's)
+  running is poisoned, as std's). A panic in a `thread_local!` value's drop, while the thread ends, aborts the program
+  instead (std's "thread local panicked on drop"): `join` cannot recover from that one
 - `impl Index` / `IndexMut`: `x[i]` becomes `*x.index_mut(i)` if x is a struct with `index` / `index_mut`
 - Associated constants (`examples/assoc_consts.rs`): `impl S { const N: usize = 4; }` / trait `const K: u32;` (also with default values). `S::N` / `Self::N` / `T::N` (type arguments), also in array lengths
 - Modules (`examples/modules.rs`): `mod m { .. }` within one file (nested, `pub(crate)`, `use self:: / super:: / crate::`, `m::f()` / `m::S` / `m::N`).

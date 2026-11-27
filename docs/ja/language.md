@@ -104,7 +104,7 @@ Rc など) は、zustc が持つ組み込みの prelude (`crates/syntax/src/prel
   カウントはアトミック命令で、ロックは std と同じ状態遷移で futex の上で待つ。何も終わらせられない待ちは、std と同じく
   永久に待つ。spawn したスレッドの panic は `thread '<unnamed>' panicked at ..` を出し、そのスレッドの `thread_local!` の値を
   drop して、そのスレッドだけを終わらせる。その `join` は `Err`（`Any { .. }`）を返す。巻き戻しはないので、そのスレッドの
-  ほかの値は drop されず、持っていた Mutex や RwLock はロックされたまま残る（poisoning はない。走らせていた `Once` は std と同じく poison される）
+  ほかの値は drop されず、持っていた Mutex や RwLock はロックされたまま残る（poisoning はない。走らせていた `Once` は std と同じく poison される）。スレッドが終わるときの `thread_local!` の値の drop での panic は、代わりにプログラムを abort する（std の "thread local panicked on drop"）。`join` はそれから回復できない
 - `impl Index` / `IndexMut`：`x[i]` は x が `index` / `index_mut` を持つ struct なら `*x.index_mut(i)` にする
 - 関連定数（`examples/assoc_consts.rs`）：`impl S { const N: usize = 4; }` / trait の `const K: u32;`（既定値も）。`S::N` / `Self::N` / `T::N`（型引数）、配列の長さにも
 - モジュール（`examples/modules.rs`）：1 ファイルの中の `mod m { .. }`（入れ子・`pub(crate)`・`use self:: / super:: / crate::`・`m::f()` / `m::S` / `m::N`）。

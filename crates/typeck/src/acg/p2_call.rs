@@ -4193,6 +4193,16 @@ impl Cx<'_> {
         let r = self.resolve_call(id, &arg_tys, sol0, expected, span);
         crate::traits::EXPLICIT_ARGS.with(|e| e.set(prev));
         let (target, sig) = r?;
+        // (spawn's T goes to the thread that joins: it must be Send, as std's `T: Send`)
+        if self.prog.names[id as usize] == "__core_spawn" && self.user_code {
+            if let Ty::Struct(s) = sig.ret {
+                if let Some(&t) = self.prog.structs[s as usize].args.first() {
+                    if not_send(self.prog, t) {
+                        return Err(self.at(span, format!("`{}` cannot be sent between threads safely", self.prog.tn(t))));
+                    }
+                }
+            }
+        }
         if let Some(sol) = sol_rg {
             self.rg_call(id, &sol, turbofish, args, &sig.params, sig.ret, rg_recv, skip == 1, if span.line == 0 { rg_sp } else { span });
         }

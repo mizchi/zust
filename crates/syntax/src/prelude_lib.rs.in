@@ -7868,6 +7868,52 @@ pub fn __core_stdout() -> Stdout {
 // stdout (so that another thread's output does not cut into a print, as std's stdout lock), 4 the end of a panic)
 static mut __EXR_THREAD_HOOK: Option<fn(u32) -> bool> = None;
 
+// The stdout lock, reentrant as std's: a StdoutLock's thread prints through it. The owner is the thread's context, 1 for
+// the main thread (also before any spawn: a StdoutLock taken then keeps stdout through a spawn in its life)
+static mut __EXR_OUT_LOCK: u32 = 0;
+static mut __EXR_OUT_OWNER: usize = 0;
+static mut __EXR_OUT_DEPTH: u32 = 0;
+
+fn __exr_out_me() -> usize {
+    unsafe {
+        if __exr_atomic_load(&mut __EXR_TLS_READY as *mut u32) == 0 {
+            return 1;
+        }
+        let c = __exr_pthread_getspecific(__EXR_TLS_KEY) as usize;
+        if c == 0 { 1 } else { c }
+    }
+}
+
+fn __exr_out_take() {
+    let me = __exr_out_me();
+    unsafe {
+        let owner = &mut __EXR_OUT_OWNER as *mut usize;
+        if __exr_atomic_load(owner) == me {
+            __EXR_OUT_DEPTH += 1;
+        } else {
+            __exr_lock(&mut __EXR_OUT_LOCK as *mut u32);
+            __exr_atomic_store(owner, me);
+            __EXR_OUT_DEPTH = 1;
+        }
+    }
+}
+
+// (only by the thread that holds it: another one's release changes nothing)
+fn __exr_out_give() {
+    let me = __exr_out_me();
+    unsafe {
+        let owner = &mut __EXR_OUT_OWNER as *mut usize;
+        if __exr_atomic_load(owner) != me || __EXR_OUT_DEPTH == 0 {
+            return;
+        }
+        __EXR_OUT_DEPTH -= 1;
+        if __EXR_OUT_DEPTH == 0 {
+            __exr_atomic_store(owner, 0);
+            __exr_unlock(&mut __EXR_OUT_LOCK as *mut u32);
+        }
+    }
+}
+
 fn __exr_out_str<G>(s: &str) {
     let h = unsafe { __EXR_THREAD_HOOK };
     if let Some(f) = h {
@@ -7884,13 +7930,10 @@ fn __exr_out_str<G>(s: &str) {
 }
 
 impl Stdout {
-    // (with threads, the stdout lock for the guard's life (reentrant: its thread prints through it); _x: 1 when taken)
+    // (the stdout lock for the guard's life (reentrant: its thread prints through it); _x: 1 when taken)
     pub fn lock(&self) -> StdoutLock {
-        if let Some(h) = unsafe { __EXR_THREAD_HOOK } {
-            h(2);
-            return StdoutLock { _x: 1 };
-        }
-        StdoutLock { _x: 0 }
+        __exr_out_take();
+        StdoutLock { _x: 1 }
     }
     pub fn write_str(&mut self, s: &str) -> Result<(), IoError> {
         __exr_out_str::<()>(s);
@@ -7907,9 +7950,7 @@ impl Stdout {
 impl Drop for StdoutLock {
     fn drop(&mut self) {
         if self._x == 1 {
-            if let Some(h) = unsafe { __EXR_THREAD_HOOK } {
-                h(3);
-            }
+            __exr_out_give();
         }
     }
 }
@@ -9785,6 +9826,9 @@ impl Display for AccessError {
     }
 }
 
+// (the name thread_local!'s expansion uses: a program's own `AccessError` renames the prelude's, not this)
+pub type __TlsAccessError = AccessError;
+
 pub fn __exr_access_error() -> AccessError {
     AccessError { __ae: 0 }
 }
@@ -9819,16 +9863,24 @@ pub fn __exr_tls_slot<T>(k: &__TlsKey) -> *mut Option<T> {
             p = __exr_alloc_ok(core::mem::size_of::<Option<T>>());
             (p as *mut Option<T>).write(None);
             (*c).tls[i - 1] = p;
-            (*c).tls_drop[i - 1] = Some(__exr_tls_drop::<T>);
-            (*c).tls_order.push(i - 1);
         }
         p as *mut Option<T>
     }
 }
 
-static mut __EXR_OUT_LOCK: u32 = 0;
-static mut __EXR_OUT_OWNER: usize = 0;
-static mut __EXR_OUT_DEPTH: u32 = 0;
+// (the value of the key has been made on this thread: its drop is registered now, after its initializer, as std's
+// lazy thread-locals do, so a value another one's initializer made first is dropped after it)
+pub fn __exr_tls_made<T>(k: &__TlsKey) {
+    let i = __exr_atomic_load(&k.__tk as *const usize as *mut usize);
+    let c = __exr_thread_ctx();
+    unsafe {
+        if (*c).tls_drop[i - 1].is_none() {
+            (*c).tls_drop[i - 1] = Some(__exr_tls_drop::<T>);
+            (*c).tls_order.push(i - 1);
+        }
+    }
+}
+
 // (whether a panic has been reported)
 static mut __EXR_PANICKED: u32 = 0;
 
@@ -9839,26 +9891,12 @@ static mut __EXR_PANICKED: u32 = 0;
 fn __exr_thread_hook(q: u32) -> bool {
     unsafe {
         let c = __exr_pthread_getspecific(__EXR_TLS_KEY) as *mut __ThreadCtx;
-        // (the stdout lock is reentrant, as std's: a StdoutLock's thread prints through it. The owner is the thread's
-        // context, 1 for the main thread)
-        if q == 2 || q == 3 {
-            let me = if c.is_null() { 1 } else { c as usize };
-            let owner = &mut __EXR_OUT_OWNER as *mut usize;
-            if q == 2 {
-                if __exr_atomic_load(owner) == me {
-                    __EXR_OUT_DEPTH += 1;
-                } else {
-                    __exr_lock(&mut __EXR_OUT_LOCK as *mut u32);
-                    __exr_atomic_store(owner, me);
-                    __EXR_OUT_DEPTH = 1;
-                }
-            } else {
-                __EXR_OUT_DEPTH -= 1;
-                if __EXR_OUT_DEPTH == 0 {
-                    __exr_atomic_store(owner, 0);
-                    __exr_unlock(&mut __EXR_OUT_LOCK as *mut u32);
-                }
-            }
+        if q == 2 {
+            __exr_out_take();
+            return true;
+        }
+        if q == 3 {
+            __exr_out_give();
             return true;
         }
         if q == 0 {

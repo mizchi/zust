@@ -2724,8 +2724,8 @@ pub fn expand_thread_local(src: &str) -> Option<String> {
             expanded.push_str(&format!(
                 "#[allow(non_camel_case_types)] {vis} struct {name}__Key; static {name}__tk: __TlsKey = __TlsKey::new(); \
                  {vis} static {name}: {name}__Key = {name}__Key; impl {name}__Key {{ {vis} fn with<R, F: FnOnce(&{ty}) -> R>(&'static self, f: F) -> R \
-                 {{ let s = __exr_tls_slot::<{ty}>(&{name}__tk); if s.is_null() {{ __exr_tls_destroyed() }} unsafe {{ if (*s).is_none() {{ *s = Some({init}); }} f((*s).as_ref().unwrap()) }} }} \
-                 {vis} fn try_with<R, F: FnOnce(&{ty}) -> R>(&'static self, f: F) -> Result<R, AccessError> {{ if __exr_tls_slot::<{ty}>(&{name}__tk).is_null() {{ return Err(__exr_access_error()); }} Ok(self.with(f)) }} {extra}}} "
+                 {{ let s = __exr_tls_slot::<{ty}>(&{name}__tk); if s.is_null() {{ __exr_tls_destroyed() }} unsafe {{ if (*s).is_none() {{ let v = {init}; *s = Some(v); __exr_tls_made::<{ty}>(&{name}__tk); }} f((*s).as_ref().unwrap()) }} }} \
+                 {vis} fn try_with<R, F: FnOnce(&{ty}) -> R>(&'static self, f: F) -> Result<R, __TlsAccessError> {{ if __exr_tls_slot::<{ty}>(&{name}__tk).is_null() {{ return Err(__exr_access_error()); }} Ok(self.with(f)) }} {extra}}} "
             ));
             j = i1 + 1;
         }
