@@ -24,7 +24,9 @@ enum Pt {
 
 #[derive(Clone, Debug)]
 enum Bind {
-    One(Vec<TokenTree>, bool),
+    /// a fragment's tokens, whether they go in parentheses (an expression's, to keep its precedence), and whether it is
+    /// a `ty` fragment (in parentheses before a `<`: rand's `1 as $u << p` shifts, as rustc's nonterminal type ends)
+    One(Vec<TokenTree>, bool, bool),
     Many(Vec<Bind>),
 }
 
@@ -1085,7 +1087,7 @@ fn match_prefix(pat: &[Pt], toks: &[TokenTree], binds: &mut HashMap<String, Bind
                     }
                     return None;
                 };
-                binds.insert(name.clone(), Bind::One(toks[i..i + n].to_vec(), wrap));
+                binds.insert(name.clone(), Bind::One(toks[i..i + n].to_vec(), wrap, kind == "ty"));
                 i += n;
             }
             Pt::Rep(inner, sep, op) => {
@@ -1382,7 +1384,10 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
                         && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Ident(_)) | Pt::Var(..))))
                     && !(k > 0
                         && matches!(&body[k - 1], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '.')
-                        && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '.'))) =>
+                        && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '.')))
+                    // (nor a path's segment, `ptr::read(ptr)` beside `let ptr` (yoke): a module's or a type's name)
+                    && !(matches!(body.get(k + 1), Some(Pt::Tok(TokenTree::Punct(q))) if q.as_char() == ':' && q.spacing() == Spacing::Joint)
+                        && punct(k + 2, ':')) =>
             {
                 out.push_str(&i.to_string());
                 out.push_str("__mh ");
@@ -1441,9 +1446,9 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
                 out.push(' ');
             }
             Pt::Var(name, _) => match binds.get(name) {
-                Some(Bind::One(ts, wrap)) => {
+                Some(Bind::One(ts, wrap, ty)) => {
                     // (`stringify!($e)`: the text of the expression, without the parentheses that keep its precedence)
-                    let wrap = &(*wrap && !{
+                    let wrap = &((*wrap || (*ty && punct(k + 1, '<'))) && !{
                         let tail: String = out[out.len().saturating_sub(40)..].chars().filter(|c| !c.is_whitespace()).collect();
                         tail.ends_with("stringify!(")
                     });
@@ -1823,6 +1828,23 @@ fn item_scope(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], depth: &[u
             }
             continue;
         }
+        // (a bracketed or parenthesized group of the head, `impl<T, const N: usize> Tr for [T; N] {` (yoke), `Fn(u8)`:
+        //  stepped over, back to where it opens; its `;` ends nothing)
+        if toks[k].0 == 1 && (t == b"]" || t == b")") {
+            let mut d = 0i32;
+            while k > 0 {
+                if toks[k].0 == 1 && matches!(tk(k), b"]" | b")") {
+                    d += 1;
+                } else if toks[k].0 == 1 && matches!(tk(k), b"[" | b"(") {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                k -= 1;
+            }
+            continue;
+        }
         if toks[k].0 == 1 && (t == b";" || t == b"{" || t == b"}") {
             return false;
         }
@@ -1958,6 +1980,17 @@ fn split_items(body: &str) -> Option<(String, String)> {
         let is_item = k < n && toks[k].0 == 0 && KW.contains(&tk(k));
         // (`static` / `type` / `use` end at the `;`; the others at it or at their first `{ .. }`)
         let semi_only = k < n && matches!(tk(k), b"static" | b"type" | b"use");
+        // (a braced macro call is a statement by itself, `crate::m! { .. }`, up to its `}`: not on to the items after it)
+        let braced_call = !is_item && {
+            let mut c = k;
+            if sym(c, b':') && sym(c + 1, b':') {
+                c += 2;
+            }
+            while c + 2 < n && toks[c].0 == 0 && sym(c + 1, b':') && sym(c + 2, b':') {
+                c += 3;
+            }
+            c + 2 < n && toks[c].0 == 0 && sym(c + 1, b'!') && sym(c + 2, b'{')
+        };
         // the statement's end
         let mut j = k.max(st);
         let mut d = 0i32;
@@ -1967,7 +2000,7 @@ fn split_items(body: &str) -> Option<(String, String)> {
                 d += 1;
             } else if sym(j, b')') || sym(j, b']') || sym(j, b'}') {
                 d -= 1;
-                if d == 0 && sym(j, b'}') && is_item && !semi_only {
+                if d == 0 && sym(j, b'}') && ((is_item && !semi_only) || braced_call) {
                     end = if sym(j + 1, b';') { j + 2 } else { j + 1 };
                     break;
                 }
@@ -1996,33 +2029,54 @@ fn split_items(body: &str) -> Option<(String, String)> {
 /// (`alone`: `;`, the block's end or nothing after it, or braces, `m! { .. }`, not followed by `.` / `?`), the items
 /// alone when they are all of it, and a lone macro call as it is (a statement there too, expanded next round):
 /// `const _: () = { a! { .. } b! { .. } impl S {} };` (pin-project-lite's) gets no `({ })` between them, which would
-/// need a `;` before the next item. A call an expression goes on after keeps its block: `outer!() * 3` with
-/// `outer!()` giving `inner! {}` is `({ inner! {} }) * 3`
+/// need a `;` before the next item. Macro calls after the items, and an expansion that is only calls or nothing, stay
+/// statements likewise: bitflags' `__impl_internal_bitflags!` gives items and three `$crate::m! { .. }`, and the
+/// `__impl_external_bitflags! { .. }` after it nothing, which as `({ .. }) ({ })` would be a call. A call an expression
+/// goes on after keeps its block: `outer!() * 3` with `outer!()` giving `inner! {}` is `({ inner! {} }) * 3`
 fn stmt_expansion(body: String, alone: bool) -> String {
     match split_items(&body) {
         Some((items, rest)) if alone && rest.trim().is_empty() => items,
+        Some((items, rest)) if alone && calls_only(&rest) => format!("{items} {rest}"),
         Some((items, rest)) => format!("{items} ({{ {rest} }})"),
-        None if alone && lone_call(&body) => body,
+        // (nothing, too: `({ })` before an item would need a `;`)
+        None if alone && calls_only(&body) => body,
         None => format!("({{ {body} }})"),
     }
 }
 
-/// Whether body is one macro call and nothing else: `crate::m! { .. }`, `m!(..);`
-fn lone_call(body: &str) -> bool {
+/// Whether body is macro calls and nothing else, each a statement by itself: `crate::m! { .. } n!(..);`, `m!(..)` (a
+/// call in parentheses or brackets takes a `;`, but the last)
+fn calls_only(body: &str) -> bool {
     let b = body.as_bytes();
     let toks = crate::lexer::tokenize(b);
     let n = toks.len();
     let sym = |k: usize, c: u8| k < n && toks[k].0 == 1 && b[toks[k].1] == c;
-    let mut k = if sym(0, b':') && sym(1, b':') { 2 } else { 0 };
-    while k + 3 < n && toks[k].0 == 0 && sym(k + 1, b':') && sym(k + 2, b':') {
-        k += 3;
+    let mut close = None;
+    let mut k = 0;
+    while k < n {
+        if sym(k, b':') && sym(k + 1, b':') {
+            k += 2;
+        }
+        while k + 3 < n && toks[k].0 == 0 && sym(k + 1, b':') && sym(k + 2, b':') {
+            k += 3;
+        }
+        if !(k + 2 < n && toks[k].0 == 0 && sym(k + 1, b'!') && (sym(k + 2, b'(') || sym(k + 2, b'[') || sym(k + 2, b'{'))) {
+            return false;
+        }
+        let close: &Vec<usize> = close.get_or_insert_with(|| brackets(b, &toks).0);
+        let e = close[k + 2];
+        if e == usize::MAX {
+            return false;
+        }
+        k = if sym(e + 1, b';') {
+            e + 2
+        } else if sym(k + 2, b'{') || e + 1 == n {
+            e + 1
+        } else {
+            return false;
+        };
     }
-    if !(k + 2 < n && toks[k].0 == 0 && sym(k + 1, b'!') && (sym(k + 2, b'(') || sym(k + 2, b'[') || sym(k + 2, b'{'))) {
-        return false;
-    }
-    let (close, _) = brackets(b, &toks);
-    let e = close[k + 2];
-    e != usize::MAX && (e + 1 == n || (e + 2 == n && sym(e + 1, b';')))
+    true
 }
 
 /// 1. `macro_rules!` の定義を集めて消す (関数の本体や `mod m { .. }` の中の定義も)
@@ -3658,6 +3712,33 @@ mod env_tests {
         assert!(norm.contains("core__mh..core__mh"), "{norm}");
         assert!(norm.contains("r.core()"), "{norm}");
         assert!(norm.contains("fnh(core__mh:u8)->u8{core__mh}"), "{norm}");
+    }
+
+    /// A body's own `let ptr` is renamed for hygiene, but not the path `ptr::read` (yoke's `unsafe_complex_yoke_impl!`);
+    /// a `ty` fragment before `<` goes in parentheses (rand's `1 as $u_scalar << precision`), elsewhere it does not
+    #[test]
+    fn hygiene_keeps_paths_and_ty_fragments_end() {
+        let src = "macro_rules! imp { ($u:ty) => { fn f(p: u32) -> $u { let ptr = &p as *const u32; let _: Vec<$u> = Vec::new(); unsafe { ptr::read(ptr) as $u << 1 } } } }\nimp!(u32);\nfn main() {}\n";
+        let out = expand_cfg(src, Some(&crate::cfg::CfgSet::default())).unwrap().unwrap();
+        let norm: String = out.split_whitespace().collect();
+        assert!(norm.contains("ptr::read(ptr__mh)"), "{norm}");
+        assert!(norm.contains("as(u32)<<1") && norm.contains("Vec<u32>") && norm.contains("->u32{"), "{norm}");
+        assert!(crate::parse::parse_file(&out).is_ok(), "{norm}");
+    }
+
+    /// A call among the items of `impl .. for [T; N]` is an item there (the `;` in the head's brackets ends nothing):
+    /// its `;` goes (yoke, defmt). A statement call's items and the braced calls after them stay statements, and one
+    /// that gives nothing leaves nothing (bitflags): no `({ .. }) ({ })`
+    #[test]
+    fn calls_in_impl_heads_with_brackets_and_in_blocks() {
+        let src = "macro_rules! m { () => { fn n(&self) -> usize { N } } }\ntrait T { fn n(&self) -> usize; }\nimpl<const N: usize> T for [u8; N] { m!(); }\nfn main() {}\n";
+        let out = expand_cfg(src, Some(&crate::cfg::CfgSet::default())).unwrap().unwrap();
+        assert!(crate::parse::parse_file(&out).is_ok(), "{out}");
+        let src = "macro_rules! a { () => { impl S { #[inline] fn a() {} } } }\nmacro_rules! z { () => {} }\nmacro_rules! o { () => { impl S { #[inline] fn c() {} } a! {} impl S { #[inline] fn d() {} } } }\nstruct S;\nconst _: () = { o! {} z! {} impl S { #[inline] fn e() {} } };\nfn main() {}\n";
+        let out = expand_cfg(src, Some(&crate::cfg::CfgSet::default())).unwrap().unwrap();
+        let norm: String = out.split_whitespace().collect();
+        assert!(!norm.contains("({"), "{norm}");
+        assert!(crate::parse::parse_file(&out).is_ok(), "{norm}");
     }
 
     /// A body's `let x: ::std::primitive::u8` binds x (the annotation's `:` stands alone before the type's `::`), so

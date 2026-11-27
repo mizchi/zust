@@ -2086,6 +2086,10 @@ impl Parser {
         self.expect_open("(")?;
         let mut v = Vec::new();
         while !self.is_close() {
+            // (an argument's outer attributes, `f(x, #[inline] |a| a)`: rustc takes them in a list of expressions)
+            if self.is_punct("#") {
+                self.attrs()?;
+            }
             v.push(self.expr(true)?);
             if !self.eat_punct(",") {
                 break;
@@ -2383,6 +2387,10 @@ impl Parser {
                         self.expect_close("]")?;
                         return Ok(Expr::Array(Vec::new()));
                     }
+                    // (an element's outer attributes, `[#[allow(x)] a, b]`, as in a call's arguments)
+                    if self.is_punct("#") {
+                        self.attrs()?;
+                    }
                     let first = self.expr(true)?;
                     if self.eat_punct(";") {
                         let n = self.const_expr()?;
@@ -2393,6 +2401,9 @@ impl Parser {
                     while self.eat_punct(",") {
                         if self.is_close() {
                             break;
+                        }
+                        if self.is_punct("#") {
+                            self.attrs()?;
                         }
                         v.push(self.expr(true)?);
                     }
@@ -3317,8 +3328,8 @@ impl Parser {
                 if !self.gdefaults.is_empty() {
                     self.misplaced_default(&g, false);
                 }
-                // (`impl<> T<> for S<>`: empty generics)
-                if self.punct_at(0, "<>") {
+                // (`impl<> T<> for S<>`: empty generics; also `impl< >`, as a macro's `impl< $($t,)* >` gives them for no `$t`)
+                if self.is_punct("<") && self.punct_at(1, ">") {
                     self.i += 2;
                 }
                 let neg = self.eat_punct("!");
