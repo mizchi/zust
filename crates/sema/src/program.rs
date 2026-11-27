@@ -764,6 +764,8 @@ pub struct Program {
     pub peq: Vec<u32>,
     /// Type aliases: name → (type parameters, body)
     pub aliases: FxMap<String, (Vec<String>, TySyn)>,
+    /// The defaults of an alias's type parameters, by place (`type Result<T, E = Error>`: [None, Some(Error)])
+    pub alias_defaults: FxMap<String, Vec<Option<TySyn>>>,
     /// Likewise `S::<PartialOrd<R>>::partial_cmp`, looked up when the types of `a < b` differ
     pub pord: Vec<u32>,
     /// The number of the item that writes each struct / enum definition (the low ids)
@@ -1599,6 +1601,7 @@ impl Program {
             derived: FxMap::default(),
             const_param_tys: FxMap::default(),
             struct_defaults: FxMap::default(),
+            alias_defaults: FxMap::default(),
             copy_params: FxMap::default(),
             unsized_params: FxMap::default(),
             fn_sized_gens: FxMap::default(),
@@ -1673,6 +1676,9 @@ impl Program {
             for (n, g, t) in &sm.aliases {
                 if !adt_names.contains(n.as_str()) {
                     p.aliases.insert(n.clone(), (g.clone(), t.clone()));
+                    if !sm.adt_defaults.is_empty() {
+                        p.add_alias_defaults(n, &sm.adt_defaults);
+                    }
                 }
             }
         }
@@ -3617,8 +3623,11 @@ impl Program {
             while let Ty::Ref(true, i) = b {
                 b = *i;
             }
+            // (std's String / Vec, not a program's type of the name)
             let name = match b {
-                Ty::Struct(sid) => self.structs[self.base_of(sid) as usize].name.as_str(),
+                Ty::Struct(sid) if self.struct_item.get(self.base_of(sid) as usize).is_some_and(|&i| i >= self.prelude_from) => {
+                    self.structs[self.base_of(sid) as usize].name.as_str()
+                }
                 _ => "",
             };
             let elem = match b {
@@ -3946,6 +3955,33 @@ impl Program {
         }
     }
 
+    #[cold]
+    #[inline(never)]
+    fn add_alias_defaults(&mut self, n: &str, ds: &[Option<TySyn>]) {
+        self.alias_defaults.insert(n.to_string(), ds.to_vec());
+    }
+
+    /// The types of alias n's parameters a use leaves out (after vals), from their defaults, which may name the
+    /// parameters before them. Any other name in a default is the type where the alias is declared, never a generic
+    /// parameter of the user's (`type Pair<T, E = Error>` used as `Pair<u8>` in `fn make<Error>()` is the struct)
+    #[cold]
+    #[inline(never)]
+    fn fill_alias_defaults(&self, n: &str, g: &[String], vals: &mut Vec<Ty>) -> R<()> {
+        let ds = self.alias_defaults[n].clone();
+        for d in &ds[vals.len()..] {
+            let d = d.as_ref().ok_or("an alias parameter without a default")?;
+            let k = vals.len();
+            let v = self.resolve_with(d, &|x| g.iter().position(|y| y == x).filter(|&i| i < k).map(|i| vals[i]))?;
+            vals.push(v);
+        }
+        Ok(())
+    }
+
+    /// Whether alias n's type parameters from the k-th on all have defaults (a use may give only the first k)
+    pub fn alias_fills(&self, n: &str, k: usize) -> bool {
+        self.alias_defaults.get(n).is_some_and(|ds| k < ds.len() && ds[k..].iter().all(Option::is_some))
+    }
+
     /// A method of primitive type t (from a trait impl, or else the trait's default method)
     /// prim_method for a method call: of the functions of that name, one that takes self (`impl Foo for isize`
     /// with `fn new() -> bool` and `impl Bar for isize` with `fn new(&self) -> bool`: `1.new()` is Bar's)
@@ -4241,6 +4277,10 @@ impl Program {
                     if g.is_empty() {
                         return self.resolve_with(t, names);
                     }
+                    // (every parameter with a default: `Bytes` for `type Bytes<T = u8>`, as `Bytes<>`)
+                    if self.alias_fills(n, 0) {
+                        return self.resolve_with(&TySyn::App(n.clone(), vec![]), names);
+                    }
                 }
                 match self.struct_index.get(n) {
                     Some(&id) if self.structs[id as usize].generics.is_empty() => Ty::Struct(id),
@@ -4285,10 +4325,14 @@ impl Program {
             TySyn::App(n, args) if n == "Box" && args.len() == 1 && !self.struct_index.contains_key(n) => {
                 Ty::Box(intern(self.bare_dyn(&args[0], names).unwrap_or_else(|| r(&args[0]))?))
             }
-            // An alias with type parameters (`type R<T> = Result<T, String>;`)
-            TySyn::App(n, args) if self.aliases.get(n).is_some_and(|a| a.0.len() == args.len()) => {
+            // An alias with type parameters (`type R<T> = Result<T, String>;`), those left out taking their defaults
+            // (`type Result<T, E = Error>` used as `Result<()>`)
+            TySyn::App(n, args) if self.aliases.get(n).is_some_and(|a| a.0.len() == args.len() || self.alias_fills(n, args.len())) => {
                 let (g, t) = self.aliases[n].clone();
-                let vals = args.iter().map(r).collect::<R<Vec<Ty>>>()?;
+                let mut vals = args.iter().map(r).collect::<R<Vec<Ty>>>()?;
+                if vals.len() < g.len() {
+                    self.fill_alias_defaults(n, &g, &mut vals)?;
+                }
                 return self.resolve_with(&t, &|x| match g.iter().position(|y| y == x) {
                     Some(i) => Some(vals[i]),
                     None => names(x),
@@ -7372,6 +7416,35 @@ impl Program {
     }
 
     /// The set of names refs looks up (names in any table). Most identifiers (variables, keywords) need one lookup
+    /// A fingerprint of what refs_in reads of the program: the names of its fns (with their groups), structs / enums,
+    /// consts and aliases, and what each leads to. Two programs of one fingerprint give an item the same refs. Each
+    /// entry is hashed on its own and the hashes are added, so no map's order matters
+    pub fn ref_tables_fp(&self) -> Key {
+        fn sum<'a, K: std::hash::Hash + ?Sized + 'a, V: std::hash::Hash + 'a>(tag: u8, it: impl Iterator<Item = (&'a K, &'a V)>) -> Key {
+            let (mut s, mut n): (Key, u64) = (0, 0);
+            for (k, v) in it {
+                let mut h = KeyHasher::new();
+                h.add(&tag);
+                h.add(k);
+                h.add(v);
+                s = s.wrapping_add(h.finish());
+                n += 1;
+            }
+            let mut h = KeyHasher::new();
+            h.add(&tag);
+            h.add(&n);
+            h.add(&s);
+            h.finish()
+        }
+        let mut h = KeyHasher::new();
+        h.add(&sum(0, self.by_last.iter()));
+        h.add(&sum(1, self.struct_index.iter()));
+        h.add(&sum(2, self.const_index.iter()));
+        h.add(&sum(3, self.const_by_last.iter()));
+        h.add(&sum(4, self.aliases.iter()));
+        h.finish()
+    }
+
     pub fn ref_names(&self) -> FxSet<&str> {
         let mut s: FxSet<&str> = FxSet::default();
         s.extend(self.by_last.keys().map(|k| k.as_str()));
@@ -7672,7 +7745,13 @@ fn syn_unify(a: &TySyn, ga: &[String], b: &TySyn, gb: &[String], sub: &mut Vec<(
         };
         if let Some(n) = var(a, sa) {
             let sized = !g[sa as usize].iter().any(|x| x.strip_prefix('?') == Some(n.as_str()));
-            if sized && matches!(b, TySyn::Slice(_) | TySyn::Str | TySyn::Dyn(_)) {
+            // (and std's unsized types, `impl<T> AsMut<T>` beside `impl AsMut<::std::path::Path>`: `Path`, `OsStr`,
+            // `CStr`, by their last segment)
+            let std_unsized = |t: &TySyn| {
+                matches!(t, TySyn::Named(m) if matches!(m.rsplit("::").next().unwrap_or(m), "Path" | "OsStr" | "CStr"))
+            };
+            // (not the other impl's own parameter of the name, `impl<Path> Pick<Path> for S`)
+            if sized && (matches!(b, TySyn::Slice(_) | TySyn::Str | TySyn::Dyn(_)) || (var(b, sb).is_none() && std_unsized(b))) {
                 return false;
             }
             if let Some((_, (s2, t2))) = sub.iter().find(|x| x.0 == (sa, n.clone())).cloned() {

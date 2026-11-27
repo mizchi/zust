@@ -942,17 +942,29 @@ pub struct Session {
     /// In a check_workspace: each crate's result (and no objects are written)
     #[cfg(feature = "build")]
     ws_diags: Option<Vec<CrateCheck>>,
+    /// (keep_for_edits) The last analysis's item summaries by their cache key (as the cache's bytes decode: a summary
+    /// encodes every field): the next analysis takes those of its items from here instead of decoding each (and
+    /// dropping them after)
+    sum_keep: Option<FxMap<Key, Vec<Summary>>>,
+    /// What the last E0038 check found of the program's traits (dyncompat::check)
+    dyn_memo: dyncompat::DynMemo,
+    /// (keep_for_edits) Each item's refs (Program::refs_in) by its hash, for the program's name tables of the
+    /// fingerprint (Program::ref_tables_fp): an edit that adds or renames nothing reads only the changed items again
+    refs_memo: Option<(Key, FxMap<Key, (Vec<u32>, Vec<u32>, Vec<u32>)>)>,
 }
 
 impl Session {
     pub fn new(opts: Options) -> Session {
-        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new(), #[cfg(feature = "build")] ws_diags: None }
+        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new(), #[cfg(feature = "build")] ws_diags: None, sum_keep: None, dyn_memo: Default::default(), refs_memo: None }
     }
 
     /// For a session whose document will be edited (zust-analyzer): the preprocessing keeps its chunks from the first
     /// analysis on, so that the first edit preprocesses only what it changed (PrepMemo::keep_from_first)
     pub fn keep_for_edits(&mut self) {
         self.sel.prep.keep_from_first();
+        // (and the item summaries, decoded, from one analysis to the next, and the items' refs)
+        self.sum_keep = Some(FxMap::default());
+        self.refs_memo = Some((0, FxMap::default()));
     }
 
     pub fn load_cache(&mut self, path: &std::path::Path) {
@@ -1148,7 +1160,7 @@ impl Session {
             }
             // (E0038: a `dyn` of a trait of the program's that is not dyn compatible. rustc's well-formedness check
             // reports it after the errors of resolution and the type check: as late_err below)
-            dyn_err = dyncompat::check(&src, &items[..user_src]);
+            dyn_err = dyncompat::check(&src, &items[..user_src], &mut self.dyn_memo);
             if let Some(e) = cfg_err.take().or_else(|| malformed_attr(src0, &src, &items[..user_src], self.ctx.deps.is_empty() && self.ctx.lib.is_none(), self.opts.edition)) {
                 return Err(e);
             }
@@ -1207,6 +1219,15 @@ impl Session {
         let cid = self.cid;
         let mut sums: Vec<Summary> = vec![Summary::default(); items.len()];
         let mut n_parsed = 0;
+        // (the last analysis's summaries (keep_for_edits; not without the cache, which would not give them), and each
+        // item's key, to keep this one's for the next. One parsed now is kept as it is: its bytes decode to the same
+        // summary (every field encodes))
+        let mut keep = if self.opts.no_cache { None } else { self.sum_keep.take() };
+        // (still on after an analysis that stops at an error: the next starts with none kept)
+        if keep.is_some() {
+            self.sum_keep = Some(FxMap::default());
+        }
+        let mut sum_keys: Vec<Key> = if keep.is_some() { vec![0; items.len()] } else { vec![] };
         // (the keys' common prefix, hashed once: a closure's captures depend on the edition (WILD_FAKE_READS))
         let seed = {
             let mut h = KeyHasher::new();
@@ -1226,6 +1247,15 @@ impl Session {
                 let mut h = seed.clone();
                 h.add(&it.hash);
                 let k = h.finish();
+                if let Some(keep) = &mut keep {
+                    sum_keys[i] = k;
+                    // (what the cache's bytes for k decode to, from the last analysis; still a use of k for the cache)
+                    if let Some(sm) = keep.get_mut(&k).and_then(|v| v.pop()) {
+                        self.used.insert(k);
+                        sums[i] = sm;
+                        continue;
+                    }
+                }
                 if let Some(sm) = self.get(k).and_then(|d| Summary::decode(&d)) {
                     sums[i] = sm;
                     continue;
@@ -2608,18 +2638,21 @@ impl Session {
                 let Ok(st) = prog.resolve_g(st, &gn) else { continue };
                 let rigid: Vec<Ty> = sm.impl_generics.iter().enumerate().map(|(k, (g, bs))| Ty::Struct(prog.placeholder(u32::MAX - ii as u32, k as u32, g, bs))).collect();
                 let (st, v) = (prog.subst(st, &rigid), prog.subst(v, &rigid));
-                // (the definition's line: the member item that defines it)
-                let line = (0..items.len().min(sums.len()))
-                    .find(|&jj| matches!(items[jj].kind, ItemKind::ImplMember(h) if h as usize == ii) && sums[jj].assocs.iter().any(|a| a.name == n))
-                    .map_or(items[ii].line, |jj| items[jj].line);
+                // (the definition's line: the member item that defines it. Looked for only for an error: a search of
+                // every item for each definition was quadratic in a program of many impls)
+                let line = || {
+                    (0..items.len().min(sums.len()))
+                        .find(|&jj| matches!(items[jj].kind, ItemKind::ImplMember(h) if h as usize == ii) && sums[jj].assocs.iter().any(|a| a.name == n))
+                        .map_or(items[ii].line, |jj| items[jj].line)
+                };
                 for b in &bounds {
                     match prog.tdb.assoc_bound(&prog, v, b, st) {
                         (_, Some((proj, got, want))) => {
-                            return Err(format!("{line}:1: type mismatch resolving `{proj} == {}`: it is `{}` (E0271)", prog.tn(want).replace('#', ""), prog.tn(got).replace('#', "")));
+                            return Err(format!("{}:1: type mismatch resolving `{proj} == {}`: it is `{}` (E0271)", line(), prog.tn(want).replace('#', ""), prog.tn(got).replace('#', "")));
                         }
                         (crate::traits::Ans::No, None) => {
                             let tn = crate::traits::display_ty(&prog, v);
-                            return Err(format!("{line}:1: {} (E0277)", crate::traits::not_held(&tn, b)));
+                            return Err(format!("{}:1: {} (E0277)", line(), crate::traits::not_held(&tn, b)));
                         }
                         _ => {}
                     }
@@ -2665,17 +2698,50 @@ impl Session {
         let mut srefs = Vec::with_capacity(prog.item_of.len());
         let mut crefs = Vec::with_capacity(prog.item_of.len());
         let names = prog.ref_names();
+        // (keep_for_edits: the refs of an item of the same hash, read in a program of the same name tables, are the
+        // same: an item's hash is of its tokens, identifiers and all)
+        let mut memo = self.refs_memo.take().map(|(fp, m)| {
+            let now = prog.ref_tables_fp();
+            (now, if fp == now { m } else { FxMap::default() })
+        });
+        let mut used: FxMap<Key, (Vec<u32>, Vec<u32>, Vec<u32>)> = FxMap::default();
         for ii in &prog.item_of {
-            let (f, st, c) = ii.map(|ii| prog.refs_in(&src, &items[ii as usize], Some(&names))).unwrap_or_default();
+            let (f, st, c) = match (ii, &mut memo) {
+                (Some(ii), Some((_, m))) => {
+                    let it = &items[*ii as usize];
+                    let r = match used.get(&it.hash) {
+                        Some(r) => r.clone(),
+                        None => match m.remove(&it.hash) {
+                            Some(r) => r,
+                            None => prog.refs_in(&src, it, Some(&names)),
+                        },
+                    };
+                    used.entry(it.hash).or_insert_with(|| r.clone());
+                    r
+                }
+                (Some(ii), None) => prog.refs_in(&src, &items[*ii as usize], Some(&names)),
+                (None, _) => Default::default(),
+            };
             refs.push(f);
             srefs.push(st);
             crefs.push(c);
+        }
+        if let Some((fp, _)) = memo {
+            self.refs_memo = Some((fp, used));
         }
         tm.lap("refs", String::new());
         let mut a = Analysis { late_err, iface_fp, src, items, prog, refs, group_keys: Mutex::new((vec![], FxMap::default())), srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()), assoc_keys: (0, vec![]) };
         a.assoc_keys = a.assoc_keys();
         if self.opts.opt && std::env::var_os("ZUSTC_NO_INLINE").is_none() {
             a.inl = inline_bodies(&a);
+        }
+        // (this analysis's summaries for the next, by key. The last ones it did not take are dropped)
+        if let Some(mut k) = keep {
+            k.clear();
+            for (i, sm) in sums.into_iter().enumerate() {
+                k.entry(sum_keys[i]).or_default().push(sm);
+            }
+            self.sum_keep = Some(k);
         }
         Ok(a)
     }
@@ -12610,7 +12676,7 @@ impl Session {
         let mut done: FxSet<u32> = FxSet::default();
         // 前回の check の記録: 宣言の指紋が同じなら、本体のアイテムが変わっていない関数は検査済み (キーも読み戻しも要らない)。
         // 要求していたインスタンスは名前で辿り、本体が変わったものだけを要求し直す
-        let old = match self.chk.take() {
+        let mut old = match self.chk.take() {
             Some(m) if m.fp == a.iface_fp && m.lint == lint_bits(&a.prog) && check_only && std::env::var_os("ZUSTC_NO_CHECK_MEMO").is_none() => Some(m),
             _ => None,
         };
@@ -12657,12 +12723,14 @@ impl Session {
                         continue;
                     }
                     // (記録から: 本体が同じなら、要求していたインスタンスを名前で辿る)
-                    if let Some(o) = &old {
-                        if let Some(e) = o.ents.get(&name) {
-                            if e.ok && Some(e.body_hash) == body_hash(&e.body) {
+                    // (an entry taken is moved to the new record, not copied: each is taken once, as `seen` keeps a
+                    // name from being looked up again)
+                    if let Some(o) = &mut old {
+                        if o.ents.get(&name).is_some_and(|e| e.ok && Some(e.body_hash) == body_hash(&e.body)) {
+                            if let Some(e) = o.ents.remove(&name) {
                                 n_memo += 1;
                                 let mut st: Vec<String> = e.children.clone();
-                                memo.ents.insert(name.clone(), e.clone());
+                                memo.ents.insert(name.clone(), e);
                                 while let Some(c) = st.pop() {
                                     if seen.contains(&c) {
                                         continue;
@@ -12671,8 +12739,9 @@ impl Session {
                                     if ce.ok && Some(ce.body_hash) == body_hash(&ce.body) {
                                         seen.insert(c.clone());
                                         n_memo += 1;
+                                        let Some(ce) = o.ents.remove(&c) else { continue };
                                         st.extend(ce.children.iter().cloned());
-                                        memo.ents.insert(c, ce.clone());
+                                        memo.ents.insert(c, ce);
                                     } else {
                                         // (本体が変わったインスタンス: 要求し直して検査する)
                                         let _ = crate::build_cache::decode_blob(&ce.me, &a.prog, &insts);
@@ -13714,6 +13783,9 @@ fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem]
             }
         }
     }
+    // (the first declaration of each trait of the program's, by name: built at the first impl of a trait. A search of
+    // every summary for each impl was quadratic in a program of many impls)
+    let mut decl_of: Option<FxMap<&str, usize>> = None;
     for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
         // (an impl's self type and trait arguments: `impl Foo for Option<[u8]>`)
         if let Some(st) = &sm.impl_self_ty {
@@ -13736,7 +13808,16 @@ fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem]
                 // `impl<T: ?Sized> Tr<T> for ()` with `trait Tr<T> {}`)
                 let tr = sm.impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
                 let tr = tr.map(|t| t.rsplit("::").next().unwrap_or(t));
-                if let Some((di, d)) = tr.and_then(|tr| sums[..user.min(sums.len())].iter().enumerate().find(|(_, s)| s.trait_decl.as_deref() == Some(tr))) {
+                let decls = decl_of.get_or_insert_with(|| {
+                    let mut m: FxMap<&str, usize> = FxMap::default();
+                    for (di, d) in sums[..user.min(sums.len())].iter().enumerate() {
+                        if let Some(t) = d.trait_decl.as_deref() {
+                            m.entry(t).or_insert(di);
+                        }
+                    }
+                    m
+                });
+                if let Some((di, d)) = tr.and_then(|tr| decls.get(tr)).map(|&di| (di, &sums[di])) {
                     let tparams: Vec<&String> = d.trait_generics.iter().map(|g| &g.0).filter(|g| !g.starts_with('#') && *g != "Self").collect();
                     // (the arguments written fill the leading parameters: the rest have defaults, `trait Tr<T, U = ()>`)
                     if sm.impl_trait_args.len() <= tparams.len() {
