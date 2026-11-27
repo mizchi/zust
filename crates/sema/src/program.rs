@@ -7416,6 +7416,35 @@ impl Program {
     }
 
     /// The set of names refs looks up (names in any table). Most identifiers (variables, keywords) need one lookup
+    /// A fingerprint of what refs_in reads of the program: the names of its fns (with their groups), structs / enums,
+    /// consts and aliases, and what each leads to. Two programs of one fingerprint give an item the same refs. Each
+    /// entry is hashed on its own and the hashes are added, so no map's order matters
+    pub fn ref_tables_fp(&self) -> Key {
+        fn sum<'a, K: std::hash::Hash + ?Sized + 'a, V: std::hash::Hash + 'a>(tag: u8, it: impl Iterator<Item = (&'a K, &'a V)>) -> Key {
+            let (mut s, mut n): (Key, u64) = (0, 0);
+            for (k, v) in it {
+                let mut h = KeyHasher::new();
+                h.add(&tag);
+                h.add(k);
+                h.add(v);
+                s = s.wrapping_add(h.finish());
+                n += 1;
+            }
+            let mut h = KeyHasher::new();
+            h.add(&tag);
+            h.add(&n);
+            h.add(&s);
+            h.finish()
+        }
+        let mut h = KeyHasher::new();
+        h.add(&sum(0, self.by_last.iter()));
+        h.add(&sum(1, self.struct_index.iter()));
+        h.add(&sum(2, self.const_index.iter()));
+        h.add(&sum(3, self.const_by_last.iter()));
+        h.add(&sum(4, self.aliases.iter()));
+        h.finish()
+    }
+
     pub fn ref_names(&self) -> FxSet<&str> {
         let mut s: FxSet<&str> = FxSet::default();
         s.extend(self.by_last.keys().map(|k| k.as_str()));
