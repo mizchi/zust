@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795788599300,
+  "lastUpdate": 1795788601850,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -123952,6 +123952,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 91.513,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2a60144cd2f487535522509fccfc5f5272a7f9b9",
+          "message": "prelude: fmt radix and exponent traits; {:x} of negative numbers; write! with a Formatter of its own (#250 part 4) (#296)\n\nAdds fmt::Binary / Octal / LowerHex / UpperHex / LowerExp / UpperExp with std's impls for the numbers, dispatches radix and exponent specs of other types through those traits (E0277 without an impl), writes signed numbers in radix specs as their bits, zero-pads exponent output (NaN and infinity included) as rustc does, and gives a program's write! into a Formatter a Formatter of its own.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-27T23:04:14+09:00",
+          "tree_id": "68930b0a9dcdabb8d97d08188ba6aa0c6f7b0cff",
+          "url": "https://github.com/mizchi/zust/commit/2a60144cd2f487535522509fccfc5f5272a7f9b9"
+        },
+        "date": 1795788601433,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 93.103,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 65,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 76.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.103,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 90.909,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 91.761,
             "unit": "%"
           }
         ]
