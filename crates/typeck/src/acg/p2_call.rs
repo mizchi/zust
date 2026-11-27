@@ -2233,29 +2233,34 @@ impl Cx<'_> {
         }
     }
 
-    fn check_spawn_closure(&self, c: &Expr) -> R<()> {
-        let Expr::Closure(mv, _, _, _, cpos) = strip_paren(c) else {
-            // (a closure held in a local, `let f = move || ..; spawn(f)`: its captures, the fields of its type, run on
-            // the other thread just the same)
-            if let Some(t) = self.peek(c) {
-                // (a capture held by reference: the closure may outlive it (E0373), as for one written in the call)
-                if let Ty::Struct(sid) = t {
-                    let cd = self.prog.closure_of_struct.get(&self.prog.base_of(sid)).and_then(|f| self.prog.closures.get(f));
-                    if let Some(cd) = cd {
-                        if let Some(k) = cd.moved.iter().position(|m| !m) {
-                            let n = &cd.captures[k];
-                            return Err(self.at(value_pos(c), format!("closure may outlive the current function, but it borrows `{n}`, which is owned by the current function")));
-                        }
-                    }
-                }
-                if not_send(self.prog, t) {
-                    let bad = match t {
-                        Ty::Struct(sid) => self.prog.structs[sid as usize].fields.iter().map(|f| f.1).find(|&f| not_send(self.prog, f)),
-                        _ => None,
-                    };
-                    return Err(self.at(value_pos(c), format!("`{}` cannot be sent between threads safely", self.prog.tn(bad.unwrap_or(t)))));
+    /// A spawned closure given as a value, not written in the call (`spawn(f)`, `spawn({ move || .. })`,
+    /// `spawn(if c { f } else { g })`): checked by its type t once the call's arguments are evaluated. Its captures (the
+    /// fields of its type) run on the other thread just the same: one held by reference may be outlived (E0373), and
+    /// each must be Send (E0277)
+    fn check_spawn_value(&self, c: &Expr, t: Ty) -> R<()> {
+        if let Ty::Struct(sid) = t {
+            let cd = self.prog.closure_of_struct.get(&self.prog.base_of(sid)).and_then(|f| self.prog.closures.get(f));
+            if let Some(cd) = cd {
+                if let Some(k) = cd.moved.iter().position(|m| !m) {
+                    let n = &cd.captures[k];
+                    return Err(self.at(value_pos(c), format!("closure may outlive the current function, but it borrows `{n}`, which is owned by the current function")));
                 }
             }
+        }
+        if not_send(self.prog, t) {
+            let bad = match t {
+                Ty::Struct(sid) => self.prog.structs[sid as usize].fields.iter().map(|f| f.1).find(|&f| not_send(self.prog, f)),
+                _ => None,
+            };
+            return Err(self.at(value_pos(c), format!("`{}` cannot be sent between threads safely", self.prog.tn(bad.unwrap_or(t)))));
+        }
+        Ok(())
+    }
+
+    /// A closure written in a spawn call: its free variables, before the call is evaluated (one given as a value is
+    /// check_spawn_value's, after)
+    fn check_spawn_closure(&self, c: &Expr) -> R<()> {
+        let Expr::Closure(mv, _, _, _, cpos) = strip_paren(c) else {
             return Ok(());
         };
         for n in crate::ast_closure::free_vars(strip_paren(c)) {
@@ -4206,6 +4211,19 @@ impl Cx<'_> {
         let r = self.resolve_call(id, &arg_tys, sol0, expected, span);
         crate::traits::EXPLICIT_ARGS.with(|e| e.set(prev));
         let (target, sig) = r?;
+        // (a closure given as a value: by its type, now evaluated (vals holds the receiver or the builder first))
+        if self.spawns(id) && self.user_code {
+            let (ai, vi) = match (self.prog.names[id as usize] == "__core_spawn", recv.is_some()) {
+                (true, _) => (0, 0),
+                (false, true) => (0, 1),
+                (false, false) => (1, 1),
+            };
+            if let (Some(c), Some(v)) = (args.get(ai), vals.get(vi)) {
+                if !matches!(strip_paren(c), Expr::Closure(..)) {
+                    self.check_spawn_value(c, v.1)?;
+                }
+            }
+        }
         // (spawn's T goes to the thread that joins: it must be Send, as std's `T: Send`. Builder::spawn's comes in a
         // Result)
         if self.spawns(id) && self.user_code {

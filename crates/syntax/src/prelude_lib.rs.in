@@ -10751,11 +10751,11 @@ unsafe extern "C" {
     fn __exr_clock_gettime(clk: i32, ts: *mut [i64; 2]) -> i32;
 }
 
-// (CLOCK_MONOTONIC, in nanoseconds)
+// (CLOCK_MONOTONIC, in nanoseconds. A read that fails panics, as std's `Instant::now`: a deadline could never pass)
 fn __exr_mono_ns() -> u128 {
     let mut ts = [0i64, 0i64];
-    unsafe {
-        __exr_clock_gettime(1, &mut ts);
+    if unsafe { __exr_clock_gettime(1, &mut ts) } != 0 {
+        panic!("clock_gettime(CLOCK_MONOTONIC) failed");
     }
     ts[0] as u128 * 1000000000 + ts[1] as u128
 }
