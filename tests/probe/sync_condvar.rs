@@ -1,5 +1,5 @@
-// `std::sync::Condvar` with a Mutex: a waiter woken by a notify from another thread (zustc's threads are green threads:
-// `wait` lets the others run until a notify comes after it)
+// `std::sync::Condvar` with a Mutex: a waiter woken by a notify from another thread (`wait` lets the Mutex go and
+// waits on the Condvar's futex until a notify comes after it)
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 

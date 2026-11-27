@@ -514,6 +514,22 @@ pub enum Op {
     Vconst(u128),
     /// a SIMD instruction, reading its vectors as the shape
     Simd(Shape, VOp, Vec<Value>),
+    /// Atomic memory operations, all sequentially consistent (std's orderings are all as strong or weaker): a load of
+    /// the type from the address, a store of the value (value, address), a read-modify-write giving the old value
+    /// (op, address, operand), a compare-and-swap giving the old value (address, expected, new), and a full fence.
+    /// Integers of 1, 2, 4 or 8 bytes only
+    AtomicLoad(Type, Value),
+    AtomicStore(Value, Value),
+    AtomicRmw(AtomicOp, Value, Value),
+    AtomicCas(Value, Value, Value),
+    Fence,
+}
+
+/// The operation of [`Op::AtomicRmw`] (the others std has are compare-and-swap loops in the prelude)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AtomicOp {
+    Xchg,
+    Add,
 }
 
 impl Op {
@@ -804,6 +820,32 @@ impl Recorder {
     }
     pub fn trap(&mut self) {
         self.ops.push(Op::Trap);
+        self.res.push(vec![]);
+    }
+    pub fn atomic_load(&mut self, t: Type, addr: Value) -> Value {
+        self.ops.push(Op::AtomicLoad(t, addr));
+        let r = self.val(t);
+        self.res.push(vec![r.0]);
+        r
+    }
+    pub fn atomic_store(&mut self, v: Value, addr: Value) {
+        self.ops.push(Op::AtomicStore(v, addr));
+        self.res.push(vec![]);
+    }
+    pub fn atomic_rmw(&mut self, op: AtomicOp, addr: Value, x: Value) -> Value {
+        self.ops.push(Op::AtomicRmw(op, addr, x));
+        let r = self.val(self.vt[x.0 as usize]);
+        self.res.push(vec![r.0]);
+        r
+    }
+    pub fn atomic_cas(&mut self, addr: Value, expected: Value, new: Value) -> Value {
+        self.ops.push(Op::AtomicCas(addr, expected, new));
+        let r = self.val(self.vt[new.0 as usize]);
+        self.res.push(vec![r.0]);
+        r
+    }
+    pub fn fence(&mut self) {
+        self.ops.push(Op::Fence);
         self.res.push(vec![]);
     }
     pub fn call(&mut self, f: FuncRef, args: &[Value], rets: &[Type]) -> Vec<Value> {

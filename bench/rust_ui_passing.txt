@@ -2357,6 +2357,7 @@ run-pass	drop/drop-on-ret.rs
 run-pass	drop/drop-on-untaken-arm-raw-ptr.rs
 run-pass	drop/drop-on-untaken-arm.rs
 run-pass	drop/drop-once-on-move.rs
+run-pass	drop/drop-once-on-panic.rs
 run-pass	drop/drop-scope-exit.rs
 run-pass	drop/drop-struct-as-object.rs
 run-pass	drop/drop-trait-generic.rs
@@ -2392,6 +2393,7 @@ compile-fail	drop/missing-drop-method.rs
 run-pass	drop/nested-return-drop-order.rs
 run-pass	drop/no-drop-flag-size.rs
 run-pass	drop/nondrop-cycle.rs
+run-pass	drop/panic-during-slice-init.rs
 run-pass	drop/rc-trait-object-double-drop.rs
 compile-fail	drop/repeat-drop-2.rs
 run-pass	drop/same-alloca-reassigned-match-binding-16151.rs
@@ -2399,6 +2401,7 @@ run-pass	drop/static-issue-17302.rs
 build-pass	drop/static-variable-with-drop-trait-9243.rs
 run-pass	drop/struct-field-drop-order.rs
 check-pass	drop/tail_expr_drop_order-on-recursive-boxed-fut.rs
+run-pass	drop/terminate-in-initializer.rs
 run-pass	drop/trait-object-drop-10802.rs
 run-pass	dropck/cleanup-arm-conditional.rs
 run-pass	dropck/compound-type-of-raw-pointers.rs
@@ -4630,6 +4633,7 @@ check-pass	macros/issue-70446.rs
 build-pass	macros/issue-78333.rs
 check-pass	macros/issue-78892-substitution-in-statement-attr.rs
 check-pass	macros/issue-84429-matches-edition.rs
+check-pass	macros/issue-86082-option-env-invalid-char.rs
 compile-fail	macros/issue-86865.rs
 run-pass	macros/issue-8709.rs
 check-pass	macros/issue-87877.rs
@@ -5521,6 +5525,7 @@ run-pass	packed/packed-tuple-struct-layout.rs
 run-pass	packed/packed-with-inference-vars-issue-61402.rs
 compile-fail	panic-runtime/needs-gate.rs
 check-pass	panics/panic-handler-closures.rs
+run-pass	panics/rvalue-cleanup-during-box-panic.rs
 build-pass	parallel-rustc/assert-found_cycle-issue-115223.rs
 compile-fail	parallel-rustc/cycle_crash-issue-135870.rs
 build-pass	parallel-rustc/export-symbols-deadlock-issue-118205.rs
@@ -7966,6 +7971,8 @@ run-pass	threads-sendsync/comm.rs
 run-pass	threads-sendsync/issue-29488.rs
 run-pass	threads-sendsync/issue-4446.rs
 run-pass	threads-sendsync/issue-4448.rs
+run-pass	threads-sendsync/issue-8827.rs
+run-pass	threads-sendsync/issue-9396.rs
 compile-fail	threads-sendsync/rc-is-not-send.rs
 run-pass	threads-sendsync/send-resource.rs
 run-pass	threads-sendsync/send-type-inference.rs
@@ -7979,11 +7986,13 @@ run-pass	threads-sendsync/spawn2.rs
 check-pass	threads-sendsync/sync-send-atomics.rs
 run-pass	threads-sendsync/task-comm-0.rs
 run-pass	threads-sendsync/task-comm-1.rs
+run-pass	threads-sendsync/task-comm-10.rs
 run-pass	threads-sendsync/task-comm-11.rs
 run-pass	threads-sendsync/task-comm-12.rs
 run-pass	threads-sendsync/task-comm-13.rs
 run-pass	threads-sendsync/task-comm-14.rs
 run-pass	threads-sendsync/task-comm-15.rs
+run-pass	threads-sendsync/task-comm-16.rs
 run-pass	threads-sendsync/task-comm-17.rs
 run-pass	threads-sendsync/task-comm-3.rs
 run-pass	threads-sendsync/task-comm-4.rs
@@ -7998,6 +8007,7 @@ run-pass	threads-sendsync/thread-join-unwrap.rs
 run-pass	threads-sendsync/thread-local-syntax.rs
 run-pass	threads-sendsync/threads.rs
 run-pass	threads-sendsync/tls-dont-move-after-init.rs
+run-pass	threads-sendsync/tls-dtors-are-run-in-a-static-binary.rs
 run-pass	threads-sendsync/trivial-message.rs
 run-pass	threads-sendsync/yield.rs
 run-pass	threads-sendsync/yield1.rs

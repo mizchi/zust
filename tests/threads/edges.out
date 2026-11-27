@@ -1,0 +1,23 @@
+locked a
+locked b
+worker, after the lock
+drop outer; inner still there: true
+AccessError(1)
+drop a, made second
+drop b, made first
+first init: true
+second init: 7
+once: true false
+call_once after: true
+force: poisoned true
+completed true
+rendezvous send after the receiver went: value back Some(5)
+drop queued 1
+drop queued 2
+receiver dropped; send now: err true
+drop late
+RwLock { data: <locked>, poisoned: false, .. }
+RwLock { data: [1, 2], poisoned: false, .. }
+through the lock
+println while holding it
+end
