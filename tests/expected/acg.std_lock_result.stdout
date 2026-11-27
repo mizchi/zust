@@ -1,0 +1,8 @@
+5 true
+would block
+6 false
+Some(3)
+true
+poisoned lock: another task failed inside PoisonError { .. } 9
+try_lock failed because the operation would block
+Ok([1, 2, 3])

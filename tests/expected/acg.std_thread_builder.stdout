@@ -1,0 +1,4 @@
+Some("worker-1") true
+None None
+Some("scoped") 7
+Some("main")

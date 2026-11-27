@@ -578,7 +578,7 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList" | "Thread" | "Once" | "OnceState"
                         | "Layout" | "LayoutError" | "__LayoutAlign" | "Infallible" | "Condvar" | "ControlFlow"
                         | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError"
-                        | "SplitNStr" | "SliceSplitN" | "PoisonError" => Some(w),
+                        | "SplitNStr" | "SliceSplitN" | "PoisonError" | "Builder" | "Instant" | "TryLockError" | "JoinHandleExt" | "WaitTimeoutResult" => Some(w),
                         // (std::num's NonZero types: their impls only with them)
                         w if w.starts_with("NonZero") => Some(w),
                         // HashMap's iterators (HmIter and so on) only when HashMap is used
@@ -620,6 +620,8 @@ const SHADOWABLE: &[&str] = &[
     "FromStr", "CString", "CStr", "NulError", "LinkedList", "Ipv4Addr", "Ipv6Addr", "IpAddr", "SocketAddrV4", "SocketAddrV6",
     "SocketAddr", "AddrParseError", "RwLock", "SystemTime", "SystemTimeError", "Bound", "Arguments", "Thread", "ThreadId",
     "Once", "OnceState", "Layout", "LayoutError", "Condvar", "ControlFlow", "Repeat",
+    "Builder", "Instant", "LockResult", "TryLockResult", "TryLockError", "Any", "RawPthread", "JoinHandleExt",
+    "WaitTimeoutResult",
 ];
 
 /// A name as it was before the compiler renamed it: `__u_Iter`, a program's type named as a prelude type
@@ -1929,6 +1931,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         need.insert("__exr_panic_fmt");
     }
     let mut dur_ops = false;
+    let mut any_trait = false;
     let mut fmt_write = false;
     // (whether the program writes `thread` / `Layout`: asked once one of the functions below is wanted)
     let mut thread_text: Option<bool> = None;
@@ -1951,6 +1954,12 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         }
         // (the prelude's Duration impls + - * / and += -=; Duration is also chosen as the argument of `thread::sleep`,
         // so this is checked inside the loop)
+        // (`dyn Any` (a thread::Result's error, a panic's payload): the trait, whose one member is type_id, which the
+        // name alone would not bring)
+        if !any_trait && need.contains("Any") {
+            any_trait = true;
+            need.extend(["type_id", "TypeId"]);
+        }
         if !dur_ops && need.contains("Duration") {
             dur_ops = true;
             op_impls.extend(["Add", "Sub", "Mul", "Div", "AddAssign", "SubAssign"]);

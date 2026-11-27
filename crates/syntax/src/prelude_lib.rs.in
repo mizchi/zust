@@ -9903,6 +9903,8 @@ struct __GreenTh {
     waiting: bool,
     // (`Thread::unpark`'s token, which the next `park` takes)
     token: bool,
+    // (the name a thread::Builder gave it)
+    name: Option<String>,
 }
 
 struct __GreenSched {
@@ -9931,7 +9933,7 @@ fn __exr_green() -> *mut __GreenSched {
     unsafe {
         if __EXR_GREEN.is_null() {
             let mut ths: Vec<__GreenTh> = Vec::new();
-            ths.push(__GreenTh { ctx: __exr_green_alloc(1024), stack: 0usize as *mut u8, run: None, done: false, waiting: false, token: false });
+            ths.push(__GreenTh { ctx: __exr_green_alloc(1024), stack: 0usize as *mut u8, run: None, done: false, waiting: false, token: false, name: None });
             let s = __exr_green_alloc(core::mem::size_of::<__GreenSched>()) as *mut __GreenSched;
             s.write(__GreenSched { ths: ths, cur: 0, live: 1, epoch: 0 });
             __EXR_GREEN = s;
@@ -10054,7 +10056,7 @@ extern "C" fn __exr_green_entry() {
     }
 }
 
-fn __exr_green_start(run: Box<dyn FnMut()>) -> usize {
+fn __exr_green_start(run: Box<dyn FnMut()>, name: Option<String>) -> usize {
     unsafe {
         let s = __exr_green();
         let ctx = __exr_green_alloc(1024);
@@ -10067,7 +10069,7 @@ fn __exr_green_start(run: Box<dyn FnMut()>) -> usize {
         *(ctx.add(32) as *mut usize) = __EXR_GREEN_STACK;
         __exr_makecontext(ctx, __exr_green_entry, 0);
         let id = (*s).ths.len();
-        (*s).ths.push(__GreenTh { ctx: ctx, stack: stack, run: Some(run), done: false, waiting: false, token: false });
+        (*s).ths.push(__GreenTh { ctx: ctx, stack: stack, run: Some(run), done: false, waiting: false, token: false, name: name });
         (*s).live += 1;
         // (the new thread runs at once, until it waits or ends: a thread that never waits runs as it did before
         // there were green threads)
@@ -10117,6 +10119,11 @@ impl<T> JoinHandle<T> {
 }
 
 pub fn __core_spawn<T, F: FnOnce() -> T>(f: F) -> JoinHandle<T> {
+    __exr_spawn_named(f, None)
+}
+
+// (a thread, named or not: it runs at once, so its name is in place before)
+fn __exr_spawn_named<T, F: FnOnce() -> T>(f: F, name: Option<String>) -> JoinHandle<T> {
     let slot = __exr_green_alloc(core::mem::size_of::<Option<T>>()) as *mut Option<T>;
     unsafe {
         slot.write(None);
@@ -10130,7 +10137,7 @@ pub fn __core_spawn<T, F: FnOnce() -> T>(f: F) -> JoinHandle<T> {
             }
         }
     });
-    let id = __exr_green_start(run);
+    let id = __exr_green_start(run, name);
     JoinHandle { slot: slot, id: id }
 }
 
@@ -10156,9 +10163,15 @@ impl Thread {
     pub fn id(&self) -> ThreadId {
         ThreadId(self.__th_id as u64 + 1)
     }
-    // (no `Builder` here: only the main thread has a name)
+    // (the main thread's, or the one a thread::Builder gave)
     pub fn name(&self) -> Option<&str> {
-        if self.__th_id == 0 { Some("main") } else { None }
+        if self.__th_id == 0 {
+            return Some("main");
+        }
+        match unsafe { &(*__exr_green()).ths[self.__th_id].name } {
+            Some(n) => Some(n.as_str()),
+            None => None,
+        }
     }
     pub fn unpark(&self) {
         unsafe {
@@ -11078,6 +11091,21 @@ impl<T> Mutex<T> {
     pub fn get_mut(&mut self) -> Result<&mut T, PoisonError<&mut T>> {
         Ok(&mut self.val)
     }
+    // (held: WouldBlock, never a wait; never poisoned, as lock's PoisonError says)
+    pub fn try_lock(&self) -> Result<MutexGuard<T>, TryLockError<MutexGuard<T>>> {
+        if self.locked {
+            return Err(TryLockError::WouldBlock);
+        }
+        let m = &self.locked as *const bool as *mut bool;
+        unsafe {
+            *m = true;
+        }
+        Ok(MutexGuard { p: &self.val as *const T as *mut T, m: m })
+    }
+    pub fn is_poisoned(&self) -> bool {
+        false
+    }
+    pub fn clear_poison(&self) {}
 }
 
 // `std::sync::PoisonError`, the Err of a Mutex's lock: none comes here (a panic ends the program, so no lock is left
@@ -11182,6 +11210,24 @@ impl Condvar {
         }
         Ok(g)
     }
+    // (no clock: the time is up when no thread is left that could notify, where `wait` would be std's wait forever)
+    pub fn wait_timeout<T>(&self, guard: MutexGuard<T>, _dur: Duration) -> Result<(MutexGuard<T>, WaitTimeoutResult), ()> {
+        let n = &self.__cv_n as *const u64;
+        let seen = unsafe { *n };
+        let m = guard.m;
+        unsafe {
+            *m = false;
+        }
+        __exr_green_progress();
+        let notified = __exr_green_wait(|| unsafe { *n != seen });
+        if !__exr_green_wait(|| unsafe { !*m }) {
+            panic!("deadlock: every thread is waiting");
+        }
+        unsafe {
+            *m = true;
+        }
+        Ok((guard, WaitTimeoutResult(!notified)))
+    }
     pub fn notify_one(&self) {
         self.notify_all();
     }
@@ -11221,7 +11267,7 @@ impl<T> RwLock<T> {
     pub const fn new(v: T) -> RwLock<T> {
         RwLock { val: v, readers: 0, writer: false }
     }
-    pub fn read(&self) -> Result<RwLockReadGuard<T>, ()> {
+    pub fn read(&self) -> Result<RwLockReadGuard<T>, PoisonError<RwLockReadGuard<T>>> {
         let w = &self.writer as *const bool;
         // (no other thread to wait for, and a writer holds it: std's would deadlock)
         if !__exr_green_wait(|| unsafe { !*w }) {
@@ -11233,7 +11279,7 @@ impl<T> RwLock<T> {
         }
         Ok(RwLockReadGuard { p: &self.val as *const T, l: r })
     }
-    pub fn write(&self) -> Result<RwLockWriteGuard<T>, ()> {
+    pub fn write(&self) -> Result<RwLockWriteGuard<T>, PoisonError<RwLockWriteGuard<T>>> {
         let w = &self.writer as *const bool as *mut bool;
         let r = &self.readers as *const usize;
         if !__exr_green_wait(|| unsafe { !*w && *r == 0 }) {
@@ -11244,12 +11290,38 @@ impl<T> RwLock<T> {
         }
         Ok(RwLockWriteGuard { p: &self.val as *const T as *mut T, w: w })
     }
-    pub fn into_inner(self) -> Result<T, ()> {
+    pub fn into_inner(self) -> Result<T, PoisonError<T>> {
         Ok(self.val)
     }
-    pub fn get_mut(&mut self) -> Result<&mut T, ()> {
+    pub fn get_mut(&mut self) -> Result<&mut T, PoisonError<&mut T>> {
         Ok(&mut self.val)
     }
+    // (a writer holds it: WouldBlock, never a wait)
+    pub fn try_read(&self) -> Result<RwLockReadGuard<T>, TryLockError<RwLockReadGuard<T>>> {
+        if self.writer {
+            return Err(TryLockError::WouldBlock);
+        }
+        let r = &self.readers as *const usize as *mut usize;
+        unsafe {
+            *r += 1;
+        }
+        Ok(RwLockReadGuard { p: &self.val as *const T, l: r })
+    }
+    // (a writer or a reader holds it: WouldBlock)
+    pub fn try_write(&self) -> Result<RwLockWriteGuard<T>, TryLockError<RwLockWriteGuard<T>>> {
+        if self.writer || self.readers > 0 {
+            return Err(TryLockError::WouldBlock);
+        }
+        let w = &self.writer as *const bool as *mut bool;
+        unsafe {
+            *w = true;
+        }
+        Ok(RwLockWriteGuard { p: &self.val as *const T as *mut T, w: w })
+    }
+    pub fn is_poisoned(&self) -> bool {
+        false
+    }
+    pub fn clear_poison(&self) {}
 }
 
 impl<T> Deref for RwLockReadGuard<T> {
@@ -16040,3 +16112,183 @@ impl __BoolThen for bool {
         if self { Some(f()) } else { None }
     }
 }
+
+// `std::thread::Builder`: a thread's name, which Thread::name gives, and its stack size (not used: the green threads'
+// stacks are all of one size). Spawning cannot fail
+pub struct Builder {
+    __b_name: Option<String>,
+    __b_stack: Option<usize>,
+}
+
+impl Builder {
+    pub fn new() -> Builder {
+        Builder { __b_name: None, __b_stack: None }
+    }
+    pub fn name(self, name: String) -> Builder {
+        Builder { __b_name: Some(name), __b_stack: self.__b_stack }
+    }
+    pub fn stack_size(self, size: usize) -> Builder {
+        Builder { __b_name: self.__b_name, __b_stack: Some(size) }
+    }
+    pub fn spawn<F: FnOnce() -> T, T>(self, f: F) -> Result<JoinHandle<T>, IoError> {
+        Ok(__exr_spawn_named(f, self.__b_name))
+    }
+}
+
+unsafe extern "C" {
+    #[link_name = "clock_gettime"]
+    fn __exr_clock_gettime(clock: i32, ts: *mut i64) -> i32;
+}
+
+// `std::time::Instant`: CLOCK_MONOTONIC's time
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Instant {
+    __in_d: Duration,
+}
+
+impl Instant {
+    pub fn now() -> Instant {
+        let mut ts = [0i64; 2];
+        unsafe {
+            __exr_clock_gettime(1, ts.as_mut_ptr());
+        }
+        Instant { __in_d: Duration::new(ts[0] as u64, ts[1] as u32) }
+    }
+    pub fn duration_since(&self, earlier: Instant) -> Duration {
+        self.__in_d.checked_sub(earlier.__in_d).unwrap_or(Duration::ZERO)
+    }
+    pub fn checked_duration_since(&self, earlier: Instant) -> Option<Duration> {
+        self.__in_d.checked_sub(earlier.__in_d)
+    }
+    pub fn saturating_duration_since(&self, earlier: Instant) -> Duration {
+        self.duration_since(earlier)
+    }
+    pub fn elapsed(&self) -> Duration {
+        Instant::now().duration_since(*self)
+    }
+    pub fn checked_add(&self, d: Duration) -> Option<Instant> {
+        match self.__in_d.checked_add(d) {
+            Some(t) => Some(Instant { __in_d: t }),
+            None => None,
+        }
+    }
+    pub fn checked_sub(&self, d: Duration) -> Option<Instant> {
+        match self.__in_d.checked_sub(d) {
+            Some(t) => Some(Instant { __in_d: t }),
+            None => None,
+        }
+    }
+}
+
+impl Add<Duration> for Instant {
+    type Output = Instant;
+    fn add(self, d: Duration) -> Instant {
+        Instant { __in_d: self.__in_d + d }
+    }
+}
+impl AddAssign<Duration> for Instant {
+    fn add_assign(&mut self, d: Duration) {
+        self.__in_d = self.__in_d + d;
+    }
+}
+impl Sub<Duration> for Instant {
+    type Output = Instant;
+    fn sub(self, d: Duration) -> Instant {
+        Instant { __in_d: self.__in_d - d }
+    }
+}
+impl Sub<Instant> for Instant {
+    type Output = Duration;
+    fn sub(self, earlier: Instant) -> Duration {
+        self.duration_since(earlier)
+    }
+}
+
+impl Debug for Instant {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let s = format!("Instant {{ tv_sec: {}, tv_nsec: {} }}", self.__in_d.as_secs(), self.__in_d.subsec_nanos());
+        f.pad(&s)
+    }
+}
+
+// `std::sync::LockResult` / `TryLockResult` / `TryLockError`: what lock / read / write and their try_ forms give
+pub type LockResult<Guard> = Result<Guard, PoisonError<Guard>>;
+pub type TryLockResult<Guard> = Result<Guard, TryLockError<Guard>>;
+
+pub enum TryLockError<T> {
+    Poisoned(PoisonError<T>),
+    WouldBlock,
+}
+
+impl<T> Debug for TryLockError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        match self {
+            TryLockError::Poisoned(_) => __exr_fmt_str::<()>(f, "Poisoned(..)"),
+            TryLockError::WouldBlock => __exr_fmt_str::<()>(f, "WouldBlock"),
+        }
+        Ok(())
+    }
+}
+
+impl<T> Display for TryLockError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        match self {
+            TryLockError::Poisoned(_) => __exr_fmt_str::<()>(f, "poisoned lock: another task failed inside"),
+            TryLockError::WouldBlock => __exr_fmt_str::<()>(f, "try_lock failed because the operation would block"),
+        }
+        Ok(())
+    }
+}
+
+/// `std::os::unix::thread::RawPthread` and JoinHandleExt: a green thread's index stands for its pthread_t
+pub type RawPthread = u64;
+pub trait JoinHandleExt {
+    fn as_pthread_t(&self) -> RawPthread;
+    fn into_pthread_t(self) -> RawPthread;
+}
+impl<T> JoinHandleExt for JoinHandle<T> {
+    fn as_pthread_t(&self) -> RawPthread {
+        self.id as u64
+    }
+    fn into_pthread_t(self) -> RawPthread {
+        self.id as u64
+    }
+}
+
+/// `std::any::Any`: every type's TypeId (`dyn Any`'s `is`; a panic's payload, `Box<dyn Any + Send>`)
+pub trait Any {
+    fn type_id(&self) -> TypeId;
+}
+impl<T: 'static> Any for T {
+    fn type_id(&self) -> TypeId {
+        TypeId::of::<T>()
+    }
+}
+impl dyn Any {
+    pub fn is<T: 'static>(&self) -> bool {
+        self.type_id() == TypeId::of::<T>()
+    }
+}
+
+// `std::panic::catch_unwind` / `resume_unwind`: a panic stops the process (no unwinding), so the closure's value is all
+// catch_unwind gives, and resume_unwind is a panic
+pub fn __core_catch_unwind<F: FnOnce() -> R, R>(f: F) -> Result<R, Box<dyn Any + Send>> {
+    Ok(f())
+}
+pub fn __core_resume_unwind(_payload: Box<dyn Any + Send>) -> ! {
+    panic!("Box<dyn Any>")
+}
+
+// `std::sync::WaitTimeoutResult`: whether Condvar::wait_timeout's time was up
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WaitTimeoutResult(bool);
+
+impl WaitTimeoutResult {
+    pub fn timed_out(&self) -> bool {
+        self.0
+    }
+}
+
+// `std::sync::atomic::fence` / `compiler_fence`: the green threads share one OS thread, so nothing to order
+pub fn __core_fence(_o: __AtOrd_) {}
+pub fn __core_compiler_fence(_o: __AtOrd_) {}
