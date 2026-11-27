@@ -259,7 +259,72 @@ macro_rules! boxed_size {
     };
 }
 
+// `<=` begins no type, `<` does: `(<=)` takes the second rule, `<u8 as Store<Vec<u8>>>::Item ,` the first
+macro_rules! le_or_ty {
+    ($t:ty ,) => {
+        size_of::<$t>()
+    };
+    (<=) => {
+        0
+    };
+}
+
+// a parenthesized bound goes on with more (`(Debug) + Send`), a tuple ends at its group
+macro_rules! object_size {
+    ($t:ty) => {
+        size_of::<&$t>()
+    };
+}
+
+// a repetition of groups before a group of the same delimiter: one item for `[a] [a]`, none for `[a]`
+macro_rules! opt_group {
+    ($([a])? [a]) => {
+        1
+    };
+    ([a]) => {
+        2
+    };
+}
+
+// a braced call that a method call or `?` goes on after is an operand: `outer! {}.abs()` is `(1 - 2).abs()`
+macro_rules! diff {
+    () => {
+        1_i32 - 2_i32
+    };
+}
+macro_rules! outer_diff {
+    () => {
+        diff! {}
+    };
+}
+struct Neg(Option<i32>);
+impl std::ops::Neg for Neg {
+    type Output = Option<i32>;
+    fn neg(self) -> Option<i32> {
+        self.0.map(|v| -v)
+    }
+}
+macro_rules! negated {
+    () => {
+        -Neg(Some(5))
+    };
+}
+macro_rules! outer_negated {
+    () => {
+        negated! {}
+    };
+}
+fn absolute() -> i32 {
+    outer_diff! {}.abs()
+}
+fn tried() -> Option<i32> {
+    let v = outer_negated! {}?;
+    Some(v * 2)
+}
+
 fn main() {
+    println!("{} {} {}", le_or_ty!(<=), le_or_ty!(<u8 as Store<Vec<u8>>>::Item ,), object_size!((u8, char)));
+    println!("{} {} {:?}", opt_group!([a] [a]), opt_group!([a]), (absolute(), tried()));
     println!("{:?} {:?} {}", arrow!(1 == 1 => 2), arrow!(2 >= 3 => 4), times_three());
     println!("{} {} {}", opt_prefix!(, a), opt_prefix!(, a, a), boxed_size!(dyn core::fmt::Debug +));
     println!("{:?} {:?}", micro(), milli());

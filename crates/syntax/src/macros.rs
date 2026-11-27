@@ -628,14 +628,19 @@ fn bound_end(t: &[TokenTree], i: usize) -> Option<usize> {
 /// Bounds from t[i]: `Tr + Send + 'a`, and a `+` after the last (`dyn Debug +`, as rustc's parse_generic_bounds eats
 /// it); only the first bound when not `plus`
 fn bounds_end(t: &[TokenTree], i: usize, plus: bool) -> Option<usize> {
-    let mut j = bound_end(t, i)?;
-    while plus && punct_at(t, j, '+') {
+    let j = bound_end(t, i)?;
+    Some(if plus { more_bounds(t, j) } else { j })
+}
+
+/// Where the `+ Bound`s from t[j] end (j itself when there is no `+`)
+fn more_bounds(t: &[TokenTree], mut j: usize) -> usize {
+    while punct_at(t, j, '+') {
         match bound_end(t, j + 1) {
             Some(e) => j = e,
-            None => return Some(j + 1),
+            None => return j + 1,
         }
     }
-    Some(j)
+    j
 }
 
 /// `fn(u8) -> u8`, `unsafe extern "C" fn()` from t[i]
@@ -678,6 +683,11 @@ fn ty_end(t: &[TokenTree], i: usize, plus: bool) -> Option<usize> {
     };
     match t.get(i)? {
         TokenTree::Group(g) => match g.delimiter() {
+            // (a parenthesized bound goes on with more: `(Debug) + Send`; a tuple, `(u8, char)`, ends at its group)
+            Delimiter::Parenthesis if plus && punct_at(t, i + 1, '+') => {
+                let inner: Vec<TokenTree> = g.stream().into_iter().collect();
+                Some(if !inner.is_empty() && bound_end(&inner, 0) == Some(inner.len()) { more_bounds(t, i + 1) } else { i + 1 })
+            }
             Delimiter::Parenthesis => Some(i + 1),
             // (`[T]` or `[T; len]`, not `[u8;]`; the length, an expression, is not read. One of more than 64 tokens
             //  is taken as it is)
@@ -742,7 +752,13 @@ fn ty_may_begin(t: &[TokenTree]) -> bool {
             !reserved_word(&w) || matches!(w.as_str(), "dyn" | "impl" | "fn" | "unsafe" | "extern" | "for" | "typeof")
         }
         Some(TokenTree::Group(g)) => matches!(g.delimiter(), Delimiter::Parenthesis | Delimiter::Bracket),
-        Some(TokenTree::Punct(p)) => matches!(p.as_char(), '!' | '*' | '&' | '?' | '\'' | '<') || pair_at(t, 0, ':', ':'),
+        // (by the whole operator rustc's lexer glues there: `<` and `<<` begin a type (`<T as Tr>::X`), `<=` and
+        //  `<-` do not, `&&` does and `&=` does not)
+        Some(TokenTree::Punct(p)) => match op_len(t, 0) {
+            1 => matches!(p.as_char(), '!' | '*' | '&' | '?' | '\'' | '<') && !pair_at(t, 0, '<', '-'),
+            2 => pair_at(t, 0, '&', '&') || pair_at(t, 0, '<', '<') || pair_at(t, 0, ':', ':'),
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -1053,10 +1069,16 @@ fn match_prefix(pat: &[Pt], toks: &[TokenTree], binds: &mut HashMap<String, Bind
                         break;
                     }
                     // (not when the repetition starts with that token itself: `$(,)? $($g:ident),*` of `, T`, where the
-                    //  `,` that the second repetition's separator stands for is the first's)
+                    //  `,` that the second repetition's separator stands for is the first's; or with a group of that
+                    //  delimiter, `$([a])? [a]`)
                     if let Some(s) = &stop {
                         if sep.as_ref().is_none_or(|x| !same_tok(x, &s.t)) && at_stop(toks, i, s) {
-                            if !matches!(inner.first(), Some(Pt::Tok(t)) if same_tok(t, &s.t)) {
+                            let starts = match (inner.first(), &s.t) {
+                                (Some(Pt::Tok(t)), _) => same_tok(t, &s.t),
+                                (Some(Pt::Group(d, _)), TokenTree::Group(g)) => g.delimiter() == *d,
+                                _ => false,
+                            };
+                            if !starts {
                                 break;
                             }
                             both = true;
@@ -2602,7 +2624,9 @@ fn expand_joined(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::
             // let x = ..;`)
             //  Attributes that are only `#[cfg(..)]` / `#[cfg_attr(..)]` (cfg-if's expansions) are evaluated with what they
             //  are on, so they leave nothing behind)
-            let spliced = !top && stmt_pos && (sym(ge + 1, b';') || sym(ge + 1, b'}') || sym(ge, b'}')) && only_cfg_attrs(&body);
+            //  A braced call followed by `.` / `?` is an expression's operand, `outer! {}.abs()`: kept in its block)
+            let alone = ge + 1 >= toks.len() || sym(ge + 1, b';') || sym(ge + 1, b'}') || (sym(ge, b'}') && !sym(ge + 1, b'.') && !sym(ge + 1, b'?'));
+            let spliced = !top && stmt_pos && alone && only_cfg_attrs(&body);
             // (the call's own `;` goes when the expansion ends a statement itself: no stray `;` after attributes)
             let drop_semi = spliced && sym(ge + 1, b';') && body.trim_end().ends_with(';');
             let rep = if operand {
@@ -2614,7 +2638,6 @@ fn expand_joined(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::
                 // expansion's own `let`s are already renamed for hygiene, so they do not capture names)
                 body
             } else if stmt_pos {
-                let alone = ge + 1 >= toks.len() || sym(ge + 1, b';') || sym(ge + 1, b'}') || (sym(ge, b'}') && !sym(ge + 1, b'.') && !sym(ge + 1, b'?'));
                 stmt_expansion(body, alone)
             } else {
                 format!("({{ {body} }})")
@@ -2871,7 +2894,11 @@ fn find_calls(
                                 let next_semi = matches!(toks.get(i + 3), Some(TokenTree::Punct(q)) if q.as_char() == ';');
                                 // (`m! { .. }` is a statement by itself, whatever follows, as in expand_cfg)
                                 let braced = matches!(toks.get(i + 2), Some(TokenTree::Group(cg)) if cg.delimiter() == proc_macro2::Delimiter::Brace);
-                                let spliced = depth > 0 && stmt_pos && (next_semi || braced || toks.get(i + 3).is_none()) && only_cfg_attrs(&body);
+                                // (a braced call followed by `.` / `?` is an expression's operand: kept in its block)
+                                let alone = next_semi
+                                    || toks.get(i + 3).is_none()
+                                    || (braced && !matches!(toks.get(i + 3), Some(TokenTree::Punct(q)) if matches!(q.as_char(), '.' | '?')));
+                                let spliced = depth > 0 && stmt_pos && alone && only_cfg_attrs(&body);
                                 let drop_semi = spliced && next_semi && body.trim_end().ends_with(';');
                                 // (as expand_cfg: at the top, an item only where an item starts (after an attribute
                                 // too); after a binary operator, one operand that keeps the `;` after it)
@@ -2886,9 +2913,6 @@ fn find_calls(
                                 } else if top || spliced {
                                     body
                                 } else if stmt_pos {
-                                    let alone = next_semi
-                                        || toks.get(i + 3).is_none()
-                                        || (braced && !matches!(toks.get(i + 3), Some(TokenTree::Punct(q)) if matches!(q.as_char(), '.' | '?')));
                                     stmt_expansion(body, alone)
                                 } else {
                                     format!("({{ {body} }})")
