@@ -1158,6 +1158,12 @@ impl Cx<'_> {
         if method == "into" && margs.is_empty() {
             let recv_own = match self.peek(recv) {
                 Some(Ty::Struct(sid)) => self.prog.method(sid, "into").is_some(),
+                // (a `&S` whose S has an inherent `into(&self)`: rustc's probe takes it at the reference itself, before
+                // the blanket `Into` of `&S`, so the ordinary lookup calls it (its side effects too). Not one taking
+                // `self`, which is no candidate there, nor through two references)
+                Some(Ty::Ref(_, Ty::Struct(sid))) => {
+                    self.prog.method(*sid, "into").is_some_and(|id| self.prog.sigs[id as usize].has_self && matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(..))))
+                }
                 _ => false,
             };
             let target = expected.or_else(|| self.lets.get(&(e as *const Expr as usize)).copied());

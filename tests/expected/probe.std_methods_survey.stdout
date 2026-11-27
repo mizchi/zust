@@ -22,3 +22,5 @@ Os { code: 0, kind: Uncategorized, message: "Success" }
 1 64
 67305985
 true true
+Own::into 3
+3

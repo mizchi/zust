@@ -44,6 +44,17 @@ unsafe fn load(p: *const u32) -> u32 {
     unsafe { p.read_unaligned() }
 }
 
+// (an inherent `into(&self) -> &Self` called on a `&S` where a `&S` is expected: that method, which prints, not the
+// value itself as std's `From<T> for T` (#280's review))
+struct Own(u8);
+
+impl Own {
+    fn into(&self) -> &Own {
+        println!("Own::into {}", self.0);
+        self
+    }
+}
+
 // (`true.into()` into its own type in a fn with a `T: Into<u64>` bound: a bool, not the bound's u64 (#280's review))
 fn always<T: Into<u64>>(_: T) -> bool {
     true.into()
@@ -170,4 +181,8 @@ fn main() {
     println!("{} {}", h.sponge, h.len);
     println!("{}", first_word::<A>());
     println!("{} {}", always(true), always(3u8));
+    let own = Own(3);
+    let r: &Own = &own;
+    let back: &Own = r.into();
+    println!("{}", back.0);
 }
