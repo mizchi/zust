@@ -1,4 +1,4 @@
-// A park that nothing can unpark: std's blocks forever; zustc's panics
+// A park that nothing can unpark: std's blocks forever, and so does zustc's
 use std::thread;
 
 fn main() {

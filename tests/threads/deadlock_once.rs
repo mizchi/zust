@@ -1,4 +1,4 @@
-// A call_once inside its own Once's closure: std's deadlocks; zustc's panics
+// A call_once inside its own Once's closure: std's deadlocks, and so does zustc's
 use std::sync::Once;
 
 static O: Once = Once::new();

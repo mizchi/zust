@@ -3540,6 +3540,35 @@ impl Cx<'_> {
         r
     }
 
+    /// `__exr_atomic_{load,store,xchg,xadd,cas,fence}(p, ..)` as one instruction (None: not a type it has one for)
+    fn atomic_intrinsic(&mut self, op: &str, vals: &[(Value, Ty, Sp)]) -> Option<V> {
+        if op == "fence" {
+            self.b.ins().fence();
+            return Some((None, Ty::Unit));
+        }
+        let t = match vals.first()?.1 {
+            Ty::Ptr(_, t) => *t,
+            _ => return None,
+        };
+        let ct = clif_ty(t)?;
+        if !matches!(ct, types::I8 | types::I16 | types::I32 | types::I64) {
+            return None;
+        }
+        let p = vals[0].0;
+        let v = match (op, vals.len()) {
+            ("load", 1) => self.b.ins().atomic_load(ct, p),
+            ("store", 2) => {
+                self.b.ins().atomic_store(vals[1].0, p);
+                return Some((None, Ty::Unit));
+            }
+            ("xchg", 2) => self.b.ins().atomic_rmw(crate::ir::AtomicOp::Xchg, p, vals[1].0),
+            ("xadd", 2) => self.b.ins().atomic_rmw(crate::ir::AtomicOp::Add, p, vals[1].0),
+            ("cas", 3) => self.b.ins().atomic_cas(p, vals[1].0, vals[2].0),
+            _ => return None,
+        };
+        Some((Some(v), t))
+    }
+
     fn call_fn_inner(&mut self, id: u32, recv: Option<(Value, Ty)>, args: &[&Expr], turbofish: Option<&[GArg]>, expected: Option<Ty>, span: Sp) -> R<V> {
         // (this call's: not the calls in its arguments')
         let store_args = std::mem::take(&mut self.bk.store_args);
@@ -4055,6 +4084,13 @@ impl Cx<'_> {
                         return Err(self.at(span, format!("the size for values of type `{n}` cannot be known at compilation time {}", crate::traits::SOLVED_NO)));
                     }
                 }
+            }
+        }
+        // (the prelude's atomic intrinsics, on an integer, bool, char or pointer of 1, 2, 4 or 8 bytes: one atomic
+        // instruction each, not a call. Their bodies are only what a value of another type would do)
+        if let Some(op) = self.prog.names[id as usize].strip_prefix("__exr_atomic_") {
+            if let Some(r) = self.atomic_intrinsic(op, &vals) {
+                return Ok(r);
             }
         }
         // (drop の要らない型の `__exr_drop_in_place::<T>` / `drop(x)` は何もしない: インスタンスも作らない)

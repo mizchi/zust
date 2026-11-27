@@ -98,12 +98,13 @@ Rc など) は、zustc が持つ組み込みの prelude (`crates/syntax/src/prel
 - コレクション（`examples/collections.rs`）：`HashSet`（HashMap<T, ()> の上に。和・積・差・collect）、`BTreeMap` / `BTreeSet`（キーの順に並べた Vec と二分探索。
   回る順・`entry().or_insert` / `or_default`・`first_key_value`・`pop_first`・`m[&k]` は std と同じ）、`VecDeque`（リングバッファ。`d[i]`・両端の push / pop）。
   キーが `&str` / String の map の `get("k")` は std の Borrow と同じく `&str` で引ける
-- スレッド（`tests/green_threads/`）：`thread::spawn` / `join` / `is_finished` / `yield_now` / `sleep`、`mpsc` のチャネル、`Mutex`、atomic。
-  グリーンスレッドで、OS スレッドは 1 本、spawn したスレッドはそれぞれ自分のスタックを持つ（libc の `makecontext` /
-  `swapcontext`）。新しいスレッドはすぐ走り、待つところまで進む。待つのは `join`、空のチャネルの `recv`、他のスレッドが持つ
-  `Mutex`、`sleep`、`yield_now`、他のスレッドが生きている間の atomic の `load`。そこで、終わっていない次のスレッドに移る。
-  全員が待ちになると、`join` は "deadlock" で panic し、`recv` は `Err` を返す。並列には走らず、待たないスレッドは他のスレッドを
-  走らせない
+- スレッド（`tests/threads/`）：`thread::spawn` / `join` / `is_finished` / `yield_now` / `sleep` / `current` / `park` /
+  `Thread::unpark`、`mpsc` のチャネル（`channel`、`sync_channel`）、`Mutex`、`Condvar`、`RwLock`、`Once`、`OnceLock`、
+  atomic、`Arc`、`thread_local!`。std と同じく OS スレッド（pthread、スタック 2 MiB）で、並列に走る。atomic と `Arc` の
+  カウントはアトミック命令で、ロックは std と同じ状態遷移で futex の上で待つ。何も終わらせられない待ちは、std と同じく
+  永久に待つ。spawn したスレッドの panic は `thread '<unnamed>' panicked at ..` を出し、そのスレッドの `thread_local!` の値を
+  drop して、そのスレッドだけを終わらせる。その `join` は `Err`（`Any { .. }`）を返す。巻き戻しはないので、そのスレッドの
+  ほかの値は drop されず、持っていたロックはロックされたまま残る（poisoning はない）
 - `impl Index` / `IndexMut`：`x[i]` は x が `index` / `index_mut` を持つ struct なら `*x.index_mut(i)` にする
 - 関連定数（`examples/assoc_consts.rs`）：`impl S { const N: usize = 4; }` / trait の `const K: u32;`（既定値も）。`S::N` / `Self::N` / `T::N`（型引数）、配列の長さにも
 - モジュール（`examples/modules.rs`）：1 ファイルの中の `mod m { .. }`（入れ子・`pub(crate)`・`use self:: / super:: / crate::`・`m::f()` / `m::S` / `m::N`）。

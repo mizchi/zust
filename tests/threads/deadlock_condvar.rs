@@ -1,4 +1,4 @@
-// A Condvar wait that no thread can notify: std's waits forever; zustc's panics
+// A Condvar wait that no thread can notify: std's waits forever, and so does zustc's
 use std::sync::{Condvar, Mutex};
 
 fn main() {

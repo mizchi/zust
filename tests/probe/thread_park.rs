@@ -1,5 +1,5 @@
-// std::thread::Thread: thread::current(), park / unpark, id and name, JoinHandle::thread (zustc's threads are
-// green threads: a parked thread lets the others run until its token is set)
+// std::thread::Thread: thread::current(), park / unpark, id and name, JoinHandle::thread (a parked thread waits on
+// its futex until unpark leaves its token)
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, Thread};
 
