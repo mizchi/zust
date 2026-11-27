@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795784157674,
+  "lastUpdate": 1795788596343,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -64076,6 +64076,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 42.35,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2a60144cd2f487535522509fccfc5f5272a7f9b9",
+          "message": "prelude: fmt radix and exponent traits; {:x} of negative numbers; write! with a Formatter of its own (#250 part 4) (#296)\n\nAdds fmt::Binary / Octal / LowerHex / UpperHex / LowerExp / UpperExp with std's impls for the numbers, dispatches radix and exponent specs of other types through those traits (E0277 without an impl), writes signed numbers in radix specs as their bits, zero-pads exponent output (NaN and infinity included) as rustc does, and gives a program's write! into a Formatter a Formatter of its own.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-27T23:04:14+09:00",
+          "tree_id": "68930b0a9dcdabb8d97d08188ba6aa0c6f7b0cff",
+          "url": "https://github.com/mizchi/zust/commit/2a60144cd2f487535522509fccfc5f5272a7f9b9"
+        },
+        "date": 1795788595626,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 134.07,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 1.147,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 23.289,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 53.654,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 23.008,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 324.086,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.557,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.549,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 131.476,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 799.915,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 585.806,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.97,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 79.308,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 242.827,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.445,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.445,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1903.182,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.549,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 607.441,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3930.57,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 63.593,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 136.51,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 38.352,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 67.95,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 81.831,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 181.675,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 62.246,
             "unit": "ms"
           }
         ]
