@@ -554,8 +554,17 @@ impl TraitDb {
         trs.sort();
         for tr in trs {
             let cs = &self.clauses[tr];
+            // (which impls may be compared at all, once per impl rather than once per pair: a crate's macro writes
+            // hundreds of impls of one trait, `impl FromHex for [u8; N]` for each N, whose pairs this check tries)
+            let ok: Vec<bool> = cs.iter().map(|c| c.exact && !unknowable_head(p, c)).collect();
             for (j, b) in cs.iter().enumerate() {
-                for a in &cs[..j] {
+                if !ok[j] {
+                    continue;
+                }
+                for (i, a) in cs[..j].iter().enumerate() {
+                    if !ok[i] {
+                        continue;
+                    }
                     if let Some(g) = self.both_apply(p, a, b).filter(|_| read_all(a.item) && read_all(b.item)) {
                         let (x, y) = if a.item > b.item { (a.item, b.item) } else { (b.item, a.item) };
                         return Some((x, y, tr.clone(), g));
@@ -566,19 +575,9 @@ impl TraitDb {
         None
     }
 
-    /// Some(common self type, when ground) when both impls surely apply to one goal
+    /// Some(common self type, when ground) when both impls surely apply to one goal (both `exact`, neither of an
+    /// `unknowable_head`: the caller's checks)
     fn both_apply(&self, p: &Program, a: &Clause, b: &Clause) -> Option<Option<Ty>> {
-        if !a.exact || !b.exact {
-            return None;
-        }
-        // (a fn pointer with a reference is higher-ranked or not by lifetimes `Ty` does not keep: `for<'a> fn(&'a
-        // u8)` is not `fn(&'static u8)`, though both are one Ty)
-        // (nor a trait object: `dyn Tr` keeps neither its auto traits nor its lifetime, so `dyn Error + 'a` and
-        // `dyn Error + Send + 'a` are one Ty)
-        let heads = |c: &Clause| c.self_ty.into_iter().chain(c.args.iter().flatten().copied()).any(|t| fn_ref(p, t, 0) || has_dyn(p, t, 0));
-        if heads(a) || heads(b) {
-            return None;
-        }
         let (sa, sb) = (a.self_ty?, b.self_ty?);
         let (aa, ba) = (a.args.as_ref()?, b.args.as_ref()?);
         let n = a.n + b.n;
@@ -587,15 +586,19 @@ impl TraitDb {
         if aa.len() != ba.len() || n >= FREE as usize || FREE as usize + n > crate::program::HOLE as usize {
             return None;
         }
-        // (b's parameters after a's: one namespace)
-        let ren: Vec<Ty> = (0..b.n).map(|i| Ty::Param((a.n + i) as u8)).collect();
-        let sb = p.subst(sb, &ren);
-        let ba: Vec<Ty> = ba.iter().map(|&t| p.subst(t, &ren)).collect();
+        // (b's parameters after a's: one namespace. An impl with none has nothing to rename)
+        let ba: std::borrow::Cow<[Ty]> = if b.n == 0 {
+            std::borrow::Cow::Borrowed(ba.as_slice())
+        } else {
+            let ren: Vec<Ty> = (0..b.n).map(|i| Ty::Param((a.n + i) as u8)).collect();
+            std::borrow::Cow::Owned(ba.iter().map(|&t| p.subst(t, &ren)).collect())
+        };
+        let sb = if b.n == 0 { sb } else { p.subst(sb, &(0..b.n).map(|i| Ty::Param((a.n + i) as u8)).collect::<Vec<Ty>>()) };
         let mut sol: Vec<Option<Ty>> = vec![None; n];
         if unify(p, sa, sb, &mut sol, 0) != Some(true) {
             return None;
         }
-        for (&x, &y) in aa.iter().zip(&ba) {
+        for (&x, &y) in aa.iter().zip(ba.iter()) {
             if unify(p, x, y, &mut sol, 0) != Some(true) {
                 return None;
             }
@@ -614,7 +617,7 @@ impl TraitDb {
         }
         // (the heads are equal under it: the hypothesis of conflict_sound, checked rather than trusted)
         let g = p.subst(sa, &fin);
-        if g != p.subst(sb, &fin) || aa.iter().zip(&ba).any(|(&x, &y)| p.subst(x, &fin) != p.subst(y, &fin)) {
+        if g != p.subst(sb, &fin) || aa.iter().zip(ba.iter()).any(|(&x, &y)| p.subst(x, &fin) != p.subst(y, &fin)) {
             return None;
         }
         let sub_b: Vec<Ty> = (0..b.n).map(|i| fin[a.n + i]).collect();
@@ -732,6 +735,13 @@ fn mentions(p: &Program, t: Ty, i: u8, depth: u32) -> bool {
         Ty::Struct(s) => p.structs[s as usize].args.iter().any(|&x| mentions(p, x, i, depth + 1)),
         _ => false,
     }
+}
+
+/// An impl whose head has a fn pointer with a reference or a trait object: `Ty` keeps neither the one's
+/// higher-rankedness (`for<'a> fn(&'a u8)` is not `fn(&'static u8)`, though both are one Ty) nor the other's lifetime
+/// (`dyn Error + 'a`), so no conflict of it is reported
+fn unknowable_head(p: &Program, c: &Clause) -> bool {
+    c.self_ty.into_iter().chain(c.args.iter().flatten().copied()).any(|t| fn_ref(p, t, 0) || has_dyn(p, t, 0))
 }
 
 /// First-order unification over one namespace of parameters (sol: what each is bound to), with the occurs check.
