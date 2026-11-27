@@ -104,6 +104,9 @@ OS threads since [report 2026-11-27-01](docs/reports/2026-11-27-01-native-thread
 - Not there: `thread::scope`, `Condvar::wait_timeout`, `Mutex::try_lock`, `sync::Weak`,
   `std::time::Instant`. `JoinHandle::join`'s Err is not a `Box<dyn Any + Send>` (no downcast of the payload).
   `Builder::spawn_scoped` needs `thread::scope`.
+- A closure's capture held by reference does not record whether it is shared or mutable, so the auto traits ask both
+  rules of it (Send needs the value to be Sync and Send): a closure that assigns a borrowed `Cell` is not Send, where
+  rustc's is (a `&mut Cell` is Send).
 - The main thread's thread_local! values are not dropped at exit (glibc's std runs their drops).
 - The location of an `unwrap` that panics is kept in one static (`__EXR_CALLER`), which another thread may write
   meanwhile: the message can point at another thread's call. It needs a thread-local of its own (an ELF TLS slot).

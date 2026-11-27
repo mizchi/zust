@@ -10135,11 +10135,19 @@ fn __exr_spawn<T, F: FnOnce() -> T>(f: F, name: Option<String>, stack: usize) ->
     let mut pt: u64 = 0;
     // (a pthread_attr_t: 56 bytes in glibc on x86-64. 2 MiB of stack by default, as std's)
     let mut attr = [0u64; 8];
-    let size = if stack < 65536 { 65536 } else { (stack + 4095) / 4096 * 4096 };
+    // (a size whose rounding would overflow is the largest whole number of pages: pthread_create fails on it then)
+    let size = if stack < 65536 {
+        65536
+    } else if stack > 18446744073709551615 - 4095 {
+        18446744073709551615 / 4096 * 4096
+    } else {
+        (stack + 4095) / 4096 * 4096
+    };
+    // (a size the attribute refuses fails the spawn, as pthread_create's error would)
     let r = unsafe {
         __exr_pthread_attr_init(attr.as_mut_ptr() as *mut u8);
-        __exr_pthread_attr_setstacksize(attr.as_mut_ptr() as *mut u8, size);
-        __exr_pthread_create(&mut pt, attr.as_ptr() as *const u8, __exr_thread_start, c as *mut u8)
+        let e = __exr_pthread_attr_setstacksize(attr.as_mut_ptr() as *mut u8, size);
+        if e != 0 { e } else { __exr_pthread_create(&mut pt, attr.as_ptr() as *const u8, __exr_thread_start, c as *mut u8) }
     };
     if r != 0 {
         // (no thread holds them: the closure (and its captures), the context, the packet and the Thread go now)
@@ -10267,7 +10275,8 @@ pub fn __core_park_timeout(d: Duration) {
     if __exr_atomic_xadd(p, 4294967295) == 1 {
         return;
     }
-    let ts = [d.secs as i64, d.nanos as i64];
+    // (seconds past i64's range are its largest, as in recv_timeout)
+    let ts = [if d.secs > 9223372036854775807 { 9223372036854775807 } else { d.secs as i64 }, d.nanos as i64];
     __exr_futex_wait_for(p, 4294967295, &ts);
     __exr_atomic_xchg(p, 0);
 }
@@ -10752,7 +10761,9 @@ fn __exr_chan_wait_until<T>(c: *mut __Chan<T>, end: u128) {
         return;
     }
     let left = end - now;
-    let ts = [(left / 1000000000) as i64, (left % 1000000000) as i64];
+    // (seconds past i64's range (`Duration::MAX`) are its largest: a negative timespec would make the wait fail at once)
+    let secs = left / 1000000000;
+    let ts = [if secs > 9223372036854775807 { 9223372036854775807 } else { secs as i64 }, (left % 1000000000) as i64];
     unsafe {
         let cv = &mut (*c).cv as *mut u32;
         let m = &mut (*c).m as *mut u32;

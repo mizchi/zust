@@ -2223,6 +2223,16 @@ impl Cx<'_> {
         }).collect())
     }
 
+    /// `thread::spawn`, or the prelude's `Builder::spawn` (not a program's own `Builder`'s): the closure it is given
+    /// runs on another thread, so its captures must be Send and held by value, and its value Send
+    fn spawns(&self, id: u32) -> bool {
+        match self.prog.names.get(id as usize).map(|n| n.as_str()) {
+            Some("__core_spawn") => true,
+            Some("Builder::spawn" | "__p_Builder::spawn") => self.prog.item_of.get(id as usize).copied().flatten().is_some_and(|i| i >= self.prog.prelude_from),
+            _ => false,
+        }
+    }
+
     fn check_spawn_closure(&self, c: &Expr) -> R<()> {
         let Expr::Closure(mv, _, _, _, cpos) = strip_paren(c) else {
             // (a closure held in a local, `let f = move || ..; spawn(f)`: its captures, the fields of its type, run on
@@ -3598,7 +3608,7 @@ impl Cx<'_> {
         // (the receiver's region tree is this call's: the calls in the arguments must not take it)
         let rg_recv = if recv.is_some() { self.rg.recv.take() } else { None };
         let rg_sp = std::mem::take(&mut self.rg.call_sp);
-        if self.prog.names.get(id as usize).is_some_and(|n| n == "__core_spawn") {
+        if self.spawns(id) {
             if let Some(c) = args.first() {
                 self.check_spawn_closure(c)?;
             }
@@ -4193,9 +4203,16 @@ impl Cx<'_> {
         let r = self.resolve_call(id, &arg_tys, sol0, expected, span);
         crate::traits::EXPLICIT_ARGS.with(|e| e.set(prev));
         let (target, sig) = r?;
-        // (spawn's T goes to the thread that joins: it must be Send, as std's `T: Send`)
-        if self.prog.names[id as usize] == "__core_spawn" && self.user_code {
-            if let Ty::Struct(s) = sig.ret {
+        // (spawn's T goes to the thread that joins: it must be Send, as std's `T: Send`. Builder::spawn's comes in a
+        // Result)
+        if self.spawns(id) && self.user_code {
+            let mut ret = sig.ret;
+            if let Ty::Struct(s) = ret {
+                if self.prog.structs[self.prog.base_of(s) as usize].name == "Result" {
+                    ret = self.prog.structs[s as usize].args.first().copied().unwrap_or(ret);
+                }
+            }
+            if let Ty::Struct(s) = ret {
                 if let Some(&t) = self.prog.structs[s as usize].args.first() {
                     if not_send(self.prog, t) {
                         return Err(self.at(span, format!("`{}` cannot be sent between threads safely", self.prog.tn(t))));
@@ -4945,12 +4962,16 @@ fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool
                 return false;
             }
             seen.push((sid, sync));
-            // (a closure's capture held by reference is a raw pointer: it is the `&T` it stands for)
+            // (a closure's capture held by reference is a raw pointer: the reference it stands for, `&T` or `&mut T`
+            // (which is not kept): Sync needs `T: Sync`, Send `T: Sync` and `T: Send`. A closure is judged by its
+            // captures alone: its type arguments are the parent's parameters and the captures' types, raw pointers
+            // among them)
             let field = |i: usize, t: Ty, seen: &mut Vec<(u32, bool)>| match t {
-                Ty::Ptr(_, inner) if prog.ref_capture(sid, i) => sync_(*inner, seen),
+                Ty::Ptr(_, inner) if prog.ref_capture(sid, i) => sync_(*inner, seen) || (!sync && send(*inner, seen)),
                 _ => auto_trait_fails(prog, t, sync, seen, d + 1),
             };
-            sd.args.iter().any(|&a| auto_trait_fails(prog, a, sync, seen, d + 1))
+            let closure = prog.closure_of_struct.contains_key(&base);
+            (!closure && sd.args.iter().any(|&a| auto_trait_fails(prog, a, sync, seen, d + 1)))
                 || sd.fields.iter().enumerate().any(|(i, f)| field(i, f.1, seen))
                 || sd.variants.iter().any(|v| v.fields.iter().any(|f| auto_trait_fails(prog, f.1, sync, seen, d + 1)))
         }

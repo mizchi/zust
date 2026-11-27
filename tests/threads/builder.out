@@ -2,8 +2,8 @@ Some("worker")
 None
 true
 parked
-Ok(1)
 Err(Timeout)
+Ok(1)
 Ok(2)
 Err(Disconnected)
 timed out waiting on channel / channel is empty and sending half is closed

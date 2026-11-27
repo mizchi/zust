@@ -3971,9 +3971,17 @@ impl Program {
                 }
                 // (the prelude's, not a program's own type of the name)
                 let ours = self.struct_item.get(b as usize).is_some_and(|&i| i >= self.prelude_from);
+                // (as acg's auto_trait_fails: a lock's guard is not Send, a RefCell's guards neither Send nor Sync, a
+                // Mutex is Sync when T is Send, an Arc or RwLock when T is Send and Sync)
+                let args = &self.structs[sid as usize].args;
                 match name {
-                    "Rc" if ours => return false,
-                    "Cell" | "RefCell" | "LazyCell" | "OnceCell" if sync && ours => return false,
+                    "Rc" | "Ref" | "RefMut" if ours => return false,
+                    "MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard" | "StdoutLock" if !sync && ours => return false,
+                    "Cell" | "RefCell" | "LazyCell" | "OnceCell" | "UnsafeCell" | "__Rcvr__" if sync && ours => return false,
+                    "Mutex" if sync && ours => return args.iter().all(|&a| self.auto_trait(a, false, d + 1)),
+                    "Arc" | "RwLock" | "OnceLock" if ours && (sync || name == "Arc") => {
+                        return args.iter().all(|&a| self.auto_trait(a, false, d + 1) && self.auto_trait(a, true, d + 1));
+                    }
                     // (the prelude's own types hold raw pointers: what they hold decides)
                     _ => {}
                 }
@@ -3982,9 +3990,11 @@ impl Program {
                 if prelude {
                     return sd.args.iter().all(|&a| self.auto_trait(a, sync, d + 1));
                 }
-                // (a closure's capture held by reference is a raw pointer: the `&T` it stands for, which needs `T: Sync`)
+                // (a closure's capture held by reference is a raw pointer: the reference it stands for. Which kind is not
+                // kept, so both rules hold: Sync needs `T: Sync` (as `&T` and `&mut T`), Send needs `T: Sync` (`&T`) and
+                // `T: Send` (`&mut T`))
                 sd.fields.iter().enumerate().all(|(i, f)| match f.1 {
-                    Ty::Ptr(_, inner) if self.ref_capture(sid, i) => self.auto_trait(*inner, true, d + 1),
+                    Ty::Ptr(_, inner) if self.ref_capture(sid, i) => self.auto_trait(*inner, true, d + 1) && (sync || self.auto_trait(*inner, false, d + 1)),
                     _ => self.auto_trait(f.1, sync, d + 1),
                 }) && sd.variants.iter().all(|v| v.fields.iter().all(|f| self.auto_trait(f.1, sync, d + 1)))
             }
@@ -5494,7 +5504,8 @@ impl Program {
     }
 
     /// Field i of the struct sid is a closure's capture held by reference: its type is a raw pointer, which the auto
-    /// traits take as the `&T` it stands for (Send and Sync when T is Sync)
+    /// traits take as the reference it stands for (Sync when T is Sync; Send when T is Sync and Send, as whether it
+    /// is a `&T` or a `&mut T` is not kept)
     pub fn ref_capture(&self, sid: u32, i: usize) -> bool {
         let b = self.base_of(sid);
         self.closure_of_struct.get(&b).and_then(|f| self.closures.get(f)).is_some_and(|cd| !cd.by_move && cd.moved.get(i) == Some(&false))

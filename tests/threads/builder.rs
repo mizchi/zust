@@ -44,16 +44,20 @@ fn main() {
     w.join().unwrap();
     println!("parked");
 
-    // (recv_timeout: a value in time, a timeout, then a disconnect)
+    // (recv_timeout: a timeout while this thread keeps the sender (nothing can come); values that come in time, one
+    // sent while it waits; a disconnect)
+    let (idle_tx, idle_rx) = channel::<u32>();
+    println!("{:?}", idle_rx.recv_timeout(Duration::from_millis(10)));
+    drop(idle_tx);
     let (tx, rx) = channel::<u32>();
     let t = thread::spawn(move || {
         tx.send(1).unwrap();
-        thread::sleep(Duration::from_millis(200));
+        thread::sleep(Duration::from_millis(100));
         tx.send(2).unwrap();
     });
     println!("{:?}", rx.recv_timeout(Duration::from_secs(5)));
-    println!("{:?}", rx.recv_timeout(Duration::from_millis(10)));
-    println!("{:?}", rx.recv_timeout(Duration::from_secs(5)));
+    // (a deadline past what a timespec holds: the wait is as long as it can be, not one that fails at once)
+    println!("{:?}", rx.recv_timeout(Duration::MAX));
     t.join().unwrap();
     println!("{:?}", rx.recv_timeout(Duration::from_millis(10)));
     println!("{} / {}", RecvTimeoutError::Timeout, RecvTimeoutError::Disconnected);
