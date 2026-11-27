@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795788596343,
+  "lastUpdate": 1795788599300,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -92044,6 +92044,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 137.398,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2a60144cd2f487535522509fccfc5f5272a7f9b9",
+          "message": "prelude: fmt radix and exponent traits; {:x} of negative numbers; write! with a Formatter of its own (#250 part 4) (#296)\n\nAdds fmt::Binary / Octal / LowerHex / UpperHex / LowerExp / UpperExp with std's impls for the numbers, dispatches radix and exponent specs of other types through those traits (E0277 without an impl), writes signed numbers in radix specs as their bits, zero-pads exponent output (NaN and infinity included) as rustc does, and gives a program's write! into a Formatter a Formatter of its own.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-27T23:04:14+09:00",
+          "tree_id": "68930b0a9dcdabb8d97d08188ba6aa0c6f7b0cff",
+          "url": "https://github.com/mizchi/zust/commit/2a60144cd2f487535522509fccfc5f5272a7f9b9"
+        },
+        "date": 1795788598916,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.2,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.903,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.948,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 13.54,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.317,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.113,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 4.382,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 310.461,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 138.934,
             "unit": "MiB"
           }
         ]
