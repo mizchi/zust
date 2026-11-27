@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795799217520,
+  "lastUpdate": 1795799220143,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -92500,6 +92500,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 139.344,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1b74ff23ce626791ff7f3f42790988b3c447cdac",
+          "message": "Trait objects keep their auto traits (dyn Tr + Send / + Sync) (#323)\n\nzustc's types dropped `+ Send` / `+ Sync` from trait objects, and every `dyn Trait` counted as Send and Sync, so a `Box<dyn Fn()>` holding an `Rc` could move to another thread. Objects now keep them, as rustc's:\n\n- the three auto-trait judges take a `dyn` as Send/Sync only by its written auto traits or its trait's supertraits;\n- a value becomes a `dyn Tr + Send` / `+ Sync` only if its type is (E0277, naming the culprit);\n- Box / & / *const of an object coerce (and `&` casts to `*const`) to one with fewer auto traits, never more (E0308);\n- a pointer cast may not add an auto trait to an object with a principal trait (E0804); between objects of auto traits alone it may, as rustc's.\n\nReport: docs/reports/2026-11-27-03-dyn-auto-traits.md (en/ja).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01DA4GokUemhzj5xUVkRtGGb",
+          "timestamp": "2026-11-28T02:02:12+09:00",
+          "tree_id": "10523c6ce4f2b6519c18d3916b89a4adf6a2fa5f",
+          "url": "https://github.com/mizchi/zust/commit/1b74ff23ce626791ff7f3f42790988b3c447cdac"
+        },
+        "date": 1795799219756,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.024,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.756,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.358,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 10.661,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.082,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.884,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 4.136,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 311.645,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 138.703,
             "unit": "MiB"
           }
         ]
