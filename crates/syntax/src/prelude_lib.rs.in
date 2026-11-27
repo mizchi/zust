@@ -10089,7 +10089,8 @@ pub struct JoinHandle<T> {
 }
 
 impl<T> JoinHandle<T> {
-    pub fn join(self) -> Result<T, ()> {
+    // (std's thread::Result: a panic's payload for the error, which none is here, as a panic ends the program)
+    pub fn join(self) -> Result<T, Box<dyn Any + Send>> {
         let id = self.id;
         if !__exr_green_wait(|| __exr_green_done(id)) {
             panic!("deadlock: every thread is waiting");
@@ -10106,7 +10107,7 @@ impl<T> JoinHandle<T> {
         unsafe { __exr_free(self.slot as *mut u8) };
         match v {
             Some(x) => Ok(x),
-            None => Err(()),
+            None => Err(Box::new(())),
         }
     }
     pub fn is_finished(&self) -> bool {
@@ -11226,16 +11227,27 @@ impl Condvar {
             Some(d) => Instant::now() >= d,
             None => false,
         };
-        __exr_green_wait(|| unsafe { *n != seen } || up());
-        let notified = unsafe { *n != seen };
-        if !notified {
+        if !__exr_green_wait(|| unsafe { *n != seen } || up()) {
+            // (every other thread waits: the deadline is waited out here, in sleeps of at most 1 ms with a turn of the
+            // other threads after each, as a thread that runs: time ends this wait, so another thread's join or lock
+            // is no deadlock meanwhile, and a sibling's earlier deadline is not slept past)
             if let Some(d) = deadline {
-                let now = Instant::now();
-                if now < d {
-                    __core_sleep(d.duration_since(now));
+                loop {
+                    if unsafe { *n != seen } {
+                        break;
+                    }
+                    let now = Instant::now();
+                    if now >= d {
+                        break;
+                    }
+                    let left = d.duration_since(now);
+                    let slice = Duration::from_millis(1);
+                    __core_sleep(if left < slice { left } else { slice });
+                    __exr_green_yield();
                 }
             }
         }
+        let notified = unsafe { *n != seen };
         if !__exr_green_wait(|| unsafe { !*m }) {
             panic!("deadlock: every thread is waiting");
         }
@@ -16275,8 +16287,9 @@ impl<T> JoinHandleExt for JoinHandle<T> {
     }
 }
 
-/// `std::any::Any`: every type's TypeId (`dyn Any`'s `is`; a panic's payload, `Box<dyn Any + Send>`)
-pub trait Any {
+/// `std::any::Any`: every type's TypeId (`dyn Any`'s `is`; a panic's payload, `Box<dyn Any + Send>`). `'static`, as
+/// std's: `T: Any` gives `T: 'static`, and `dyn Any + 'a` is E0478
+pub trait Any: 'static {
     fn type_id(&self) -> TypeId;
 }
 impl<T: 'static> Any for T {
