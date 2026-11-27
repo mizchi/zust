@@ -28,15 +28,15 @@ fn green_threads_like_rustc() {
 }
 
 /// What std's threads would wait for forever (rustc's build of each hangs): a Mutex locked again by its holder, a park
-/// nothing can unpark, a call_once inside its own closure, a Condvar wait nothing can notify, and a notified waiter
-/// whose Mutex the notifier keeps while it parks. Each panics with "deadlock: every thread is waiting" instead (exit
+/// nothing can unpark, a call_once inside its own closure, a Condvar wait nothing can notify (also a wait_timeout whose
+/// deadline is past what an Instant holds), and a notified waiter whose Mutex the notifier keeps while it parks. Each panics with "deadlock: every thread is waiting" instead (exit
 /// 101), after printing what rustc's printed before it hung (the `.out` file); never a second guard or a wrong answer
 #[test]
 fn deadlocks_panic_where_std_waits_forever() {
     let dir = std::env::temp_dir().join(format!("green_deadlocks_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let mut bad = vec![];
-    for name in ["deadlock_relock", "deadlock_park", "deadlock_once", "deadlock_condvar", "deadlock_condvar_relock"] {
+    for name in ["deadlock_relock", "deadlock_park", "deadlock_once", "deadlock_condvar", "deadlock_condvar_max", "deadlock_condvar_relock"] {
         let src = std::fs::read_to_string(format!("tests/green_threads/{name}.rs")).unwrap();
         let want = std::fs::read_to_string(format!("tests/green_threads/{name}.out")).unwrap();
         let exe = dir.join(name);

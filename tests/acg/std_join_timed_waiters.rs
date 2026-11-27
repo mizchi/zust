@@ -1,7 +1,7 @@
 // thread::Result as `join`'s type, with std's `Any { .. }` for `{:?}` of a `dyn Any` (alone, and inside an Err); two
 // timed waiters on one Condvar whose short deadline comes first: it is not slept past while the long one waits, nor is
-// main's join of it taken for a deadlock; and a join or recv of a thread in a timed wait, which is no deadlock either
-// (#292's review)
+// main's join of it taken for a deadlock; a join or recv of a thread in a timed wait, which is no deadlock either; and
+// a wait_timeout of Duration::MAX, which only a notify ends (#292's review)
 use std::any::Any;
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
@@ -26,6 +26,21 @@ fn main() {
     two_waiters(false);
     two_waiters(true);
     waited_for();
+    max_wait();
+}
+
+// (a timed wait that only its deadline ends: std's wakeups may be spurious, so it waits again on one, for what is left
+// of the time; whether it ended no sooner than its deadline)
+fn wait_out<T>(m: &Mutex<T>, cv: &Condvar, dur: Duration) -> bool {
+    let end = Instant::now() + dur;
+    let mut g = m.lock().unwrap();
+    loop {
+        let (g2, r) = cv.wait_timeout(g, end.saturating_duration_since(Instant::now())).unwrap();
+        g = g2;
+        if r.timed_out() {
+            return Instant::now() >= end;
+        }
+    }
 }
 
 // (each order of the spawns: before #292's fix, the 10 ms waiter came 5 s late when it was spawned first. The long
@@ -55,9 +70,7 @@ fn two_waiters(short_first: bool) {
         let p = Arc::clone(state);
         thread::spawn(move || {
             let (m, cv, _) = &*p;
-            let g = m.lock().unwrap();
-            let (_g, r) = cv.wait_timeout(g, Duration::from_millis(10)).unwrap();
-            (r.timed_out(), t0.elapsed() < Duration::from_secs(2))
+            (wait_out(m, cv, Duration::from_millis(10)), t0.elapsed() < Duration::from_secs(2))
         })
     };
     let (short, long) = if short_first {
@@ -89,9 +102,7 @@ fn waited_for() {
     let p = Arc::clone(&pair);
     let h = thread::spawn(move || {
         let (m, cv) = &*p;
-        let g = m.lock().unwrap();
-        let (_g, r) = cv.wait_timeout(g, Duration::from_millis(30)).unwrap();
-        r.timed_out()
+        wait_out(m, cv, Duration::from_millis(30))
     });
     let other = Mutex::new(0);
     *other.lock().unwrap() += 1;
@@ -100,11 +111,32 @@ fn waited_for() {
     let p = Arc::clone(&pair);
     let h = thread::spawn(move || {
         let (m, cv) = &*p;
-        let g = m.lock().unwrap();
-        let (_g, r) = cv.wait_timeout(g, Duration::from_millis(30)).unwrap();
-        tx.send(r.timed_out()).unwrap();
+        tx.send(wait_out(m, cv, Duration::from_millis(30))).unwrap();
     });
     *other.lock().unwrap() += 1;
     println!("recv: {:?}", rx.recv());
     h.join().unwrap();
+}
+
+// (a deadline past what an Instant holds: the wait never times out, and ends by the notify of a thread that needs the
+// lock the waiter gives up)
+fn max_wait() {
+    let pair = Arc::new((Mutex::new(false), Condvar::new()));
+    let p = Arc::clone(&pair);
+    let (m, cv) = &*pair;
+    let mut g = m.lock().unwrap();
+    let h = thread::spawn(move || {
+        let (m, cv) = &*p;
+        *m.lock().unwrap() = true;
+        cv.notify_all();
+    });
+    let mut timed_out = false;
+    while !*g {
+        let (g2, r) = cv.wait_timeout(g, Duration::MAX).unwrap();
+        g = g2;
+        timed_out = timed_out || r.timed_out();
+    }
+    drop(g);
+    h.join().unwrap();
+    println!("max: notified, timed out {}", timed_out);
 }

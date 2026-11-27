@@ -11224,38 +11224,40 @@ impl Condvar {
             *m = false;
         }
         __exr_green_progress();
-        let deadline = Instant::now().checked_add(dur);
-        let up = || match deadline {
-            Some(d) => Instant::now() >= d,
-            None => false,
-        };
-        // (until a notify or the deadline: a turn of the other threads at a time, as a thread that runs (`timed`), not
-        // one that waits, since time ends this wait: another thread's join, recv or lock is no deadlock meanwhile.
-        // Once every other thread waits or is in a timed wait too (or there is none), at most 1 ms of sleep before
-        // each turn, so that no thread's earlier deadline is slept past)
-        __exr_green_timed(true);
-        loop {
-            if unsafe { *n != seen } || up() {
-                break;
+        match Instant::now().checked_add(dur) {
+            // (until a notify or the deadline: a turn of the other threads at a time, as a thread that runs (`timed`),
+            // not one that waits, since time ends this wait: another thread's join, recv or lock is no deadlock
+            // meanwhile. Once every other thread waits or is in a timed wait too (or there is none), at most 1 ms of
+            // sleep before each turn, so that no thread's earlier deadline is slept past)
+            Some(d) => {
+                __exr_green_timed(true);
+                loop {
+                    if unsafe { *n != seen } {
+                        break;
+                    }
+                    let now = Instant::now();
+                    if now >= d {
+                        break;
+                    }
+                    if __exr_green_idle() {
+                        let left = d.duration_since(now);
+                        let slice = Duration::from_millis(1);
+                        // (which gives the other threads their turn first)
+                        __core_sleep(if left < slice { left } else { slice });
+                    } else {
+                        __exr_green_yield();
+                    }
+                }
+                __exr_green_timed(false);
             }
-            if __exr_green_idle() {
-                let d = match deadline {
-                    Some(d) => d,
-                    // (a deadline past what an Instant holds, and nothing that could notify: `wait` would never return)
-                    None => break,
-                };
-                let now = Instant::now();
-                if now < d {
-                    let left = d.duration_since(now);
-                    let slice = Duration::from_millis(1);
-                    // (which gives the other threads their turn first)
-                    __core_sleep(if left < slice { left } else { slice });
-                    continue;
+            // (a deadline past what an Instant holds (`Duration::MAX`): the wait never times out, so it is `wait`'s,
+            // where a notify that no thread can give is std's wait for ever)
+            None => {
+                if !__exr_green_wait(|| unsafe { *n != seen }) {
+                    panic!("deadlock: every thread is waiting");
                 }
             }
-            __exr_green_yield();
         }
-        __exr_green_timed(false);
         let notified = unsafe { *n != seen };
         if !__exr_green_wait(|| unsafe { !*m }) {
             panic!("deadlock: every thread is waiting");
