@@ -3221,7 +3221,10 @@ impl Cx<'_> {
     pub(crate) fn to_dyn(&mut self, v: Value, t: Ty, tr: &str, span: Sp) -> R<Value> {
         // (`dyn Tr + Send` / `+ Sync`: the value's type must have them (E0277), as the object says it does; the vtable
         // is the trait's)
-        let (tr, send, sync) = crate::types::dyn_autos(tr);
+        let (tr, mut send, mut sync) = crate::types::dyn_autos(tr);
+        // (`dyn Send` / `dyn Sync` alone: the auto trait is the object's trait)
+        send |= tr == "Send";
+        sync |= tr == "Sync";
         if self.user_code && send && super::p2_call::not_send(self.prog, t) {
             return err(span, format!("`{}` cannot be sent between threads safely (E0277)", self.prog.tn(super::p2_call::auto_culprit(self.prog, t, false))));
         }

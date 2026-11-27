@@ -19,7 +19,8 @@ keeps them, as rustc does.
 
 - `ast_types::tysyn` writes the object's text with its auto traits after the trait, `Send` then `Sync`:
   `Fn() -> i32 + Send + Sync`. A repeated one is written once, so `dyn Tr + Send + Send` is the same type.
-  `types::dyn_autos` splits such a text into the trait and its two flags.
+  `types::dyn_autos` splits such a text into the trait and its two flags. An object of auto traits alone
+  (`Box<dyn Send>`, `&dyn Sync`) has the first as its trait: `dyn Sync + Send` is `Send + Sync`, both kept.
 - What reads the trait from the text takes it without the auto traits: the vtable (`to_dyn`), method calls
   (`dyn_trait_args`, `dyn_methods`, inference's method lookup), `Fn` calls (`dyn_fn_sig`), the region check of a
   `dyn Fn` call (`rg_dyn_fn_args`, which parses `0 as &dyn ..`, where `+ Send` would be an addition), and
@@ -28,7 +29,12 @@ keeps them, as rustc does.
 - The three judges of the auto traits (`Program::auto_trait`, the trait solver's `auto_rec`, acg's
   `auto_trait_fails`) take a `dyn` type as Send / Sync only by its written auto traits or its trait's supertraits.
 - `to_dyn`, which makes the vtable where a value becomes an object, checks the value's type against the object's auto
-  traits: E0277, naming the part that is not (`Rc<i32>`, not the closure that captures it).
+  traits, also an auto trait that is the object's trait (`dyn Send`): E0277, naming the part that is not, through
+  closures' captures and the program's own structs (`Rc<i32>`, not the closure that captures it, nor the pointer
+  inside the `Rc`). In a constant's initializer the error is at the constant's line (`zustc check` too).
+- `TraitDb::gives_auto` looks through all of a trait's supertraits before it calls the answer open: with
+  `trait Tr: A + Error` and `trait A: Send`, `dyn Tr` is Send though zustc does not know `Error`'s supertraits.
+- The type hash of a `dyn Tr + Send` takes in `Tr`'s methods, as a `dyn Tr`'s does.
 - A coercion of `Box`, `&` or `*const` of an object to one with fewer auto traits is the same value
   (`types::dyn_drops_autos`); one to more is still a mismatched type (E0308).
 - A `static`'s type must be Sync (E0277). That check now comes after the auto traits of the program's traits'
@@ -37,8 +43,9 @@ keeps them, as rustc does.
 ## What was checked
 
 - tests/security: send_dyn_thread.rs passes (no longer a TODO); new cases send_rc_dyn_send_coerce.rs (an `Rc` closure
-  as a `Box<dyn Fn() + Send>`), sync_cell_dyn_sync_coerce.rs (a `Cell` closure as a `&(dyn Fn() + Sync)`) and
-  send_dyn_add_auto.rs (`Box<dyn Fn()>` to `Box<dyn Fn() + Send>`, E0308). Each is rejected where rustc rejects it.
+  as a `Box<dyn Fn() + Send>`), sync_cell_dyn_sync_coerce.rs (a `Cell` closure as a `&(dyn Fn() + Sync)`),
+  send_rc_bare_dyn_send.rs (an `Rc` as a `Box<dyn Send>`) and send_dyn_add_auto.rs (`Box<dyn Fn()>` to
+  `Box<dyn Fn() + Send>`, E0308). Each is rejected where rustc rejects it.
 - Against rustc: a `Box<dyn Tr + Send>` (and a `Vec` of them) moves to a thread; a `Box<dyn Tr>` does not, nor meets a
   `T: Send` bound; `Mutex<Box<dyn Tr + Send>>` works; `Box<dyn Error + Send + Sync>` with `?`, `Box::new(e)` and
   `"msg".into()` behaves as before.

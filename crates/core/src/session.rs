@@ -13006,9 +13006,10 @@ impl Session {
 fn const_err_line(e: String, src: &str, prog: &Program) -> String {
     let Some(rest) = e.strip_prefix("0:1: in constant `") else { return e };
     let Some((full, tail)) = rest.split_once("`: ") else { return e };
-    // (what rustc reports at the constant: an overflow, a transmute of sizes, mismatched types; not what zustc does
-    // not evaluate)
-    if !["overflow in constant", "cannot transmute between types of different sizes", "mismatched types"].iter().any(|m| tail.contains(m)) && !tail.ends_with("(E0080)") {
+    // (what rustc reports at the constant: an overflow, a transmute of sizes, mismatched types, a value made a `dyn
+    // Tr + Send` / `+ Sync` whose type is not (E0277); not what zustc does not evaluate)
+    let placed = ["overflow in constant", "cannot transmute between types of different sizes", "mismatched types", "cannot be sent between threads safely", "cannot be shared between threads safely"];
+    if !placed.iter().any(|m| tail.contains(m)) && !tail.ends_with("(E0080)") {
         return e;
     }
     let name = full.rsplit("::").next().unwrap_or(full);

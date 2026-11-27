@@ -4934,17 +4934,29 @@ fn base_name(prog: &Program, sid: u32) -> (&str, bool) {
 /// A type of the program's with `unsafe impl Send` is Send. The prelude's own types are judged by their arguments (a
 /// Vec holds a raw pointer, and is Send when its elements are). A type parameter is taken as Send. A `dyn Trait` is
 /// Send only when it is written with `+ Send` or its trait has Send as a supertrait (tests/security/send_dyn_thread.rs).
-/// The part of t that makes it not Send (sync: not Sync): a field of a struct or a closure's capture that is not, as
-/// rustc names it (`Rc<i32>`, not the closure's type), else t
+/// The part of t that makes it not Send (sync: not Sync), as rustc names it: through a closure's captures and the
+/// fields of the program's own structs, down to the type that is not (`Rc<i32>`, not the closure that captures it, nor
+/// the raw pointer inside the Rc), else t
 pub fn auto_culprit(prog: &Program, t: Ty, sync: bool) -> Ty {
     let fails = |x: Ty| if sync { not_sync(prog, x) } else { not_send(prog, x) };
-    match t {
-        Ty::Struct(sid) => prog.structs[sid as usize].fields.iter().map(|f| match f.1 {
-            Ty::Ptr(_, i) if prog.ref_capture(sid, prog.structs[sid as usize].fields.iter().position(|g| g.0 == f.0).unwrap_or(0)).is_some() => *i,
+    let mut t = t;
+    for _ in 0..16 {
+        let Ty::Struct(sid) = t else { break };
+        let base = prog.base_of(sid);
+        let own = prog.struct_item.get(base as usize).is_some_and(|&i| i < prog.prelude_from);
+        if !own || prog.impls.contains(&(base, if sync { "Sync" } else { "Send" }.to_string())) {
+            break;
+        }
+        let next = prog.structs[sid as usize].fields.iter().enumerate().map(|(i, f)| match f.1 {
+            Ty::Ptr(_, inner) if prog.ref_capture(sid, i).is_some() => *inner,
             x => x,
-        }).find(|&f| fails(f)).unwrap_or(t),
-        _ => t,
+        }).find(|&f| fails(f));
+        match next {
+            Some(n) => t = n,
+            None => break,
+        }
     }
+    t
 }
 
 pub fn not_send(prog: &Program, t: Ty) -> bool {

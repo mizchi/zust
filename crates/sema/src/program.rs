@@ -7405,7 +7405,8 @@ impl Program {
             // The vtable order (the trait's method order) is embedded in the code too
             Ty::Dyn(s) => {
                 h.add(&(108u8, s));
-                for &f in self.traits.get(s).map(|v| &v[..]).unwrap_or(&[]) {
+                // (the trait's methods: of `Tr` for a `dyn Tr + Send`)
+                for &f in self.traits.get(crate::types::dyn_autos(s).0).map(|v| &v[..]).unwrap_or(&[]) {
                     h.add(&self.names[f as usize]);
                 }
             }

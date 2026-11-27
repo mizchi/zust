@@ -475,6 +475,9 @@ impl TraitDb {
         if self.user.contains(name) {
             let mut seen: Vec<String> = vec![];
             let mut todo = vec![name.to_string()];
+            // (a std trait zustc does not know the supertraits of, met on the way: the answer is open only if no other
+            // path gives the auto trait)
+            let mut unknown = false;
             while let Some(t) = todo.pop() {
                 if seen.contains(&t) {
                     continue;
@@ -487,14 +490,15 @@ impl TraitDb {
                     let n = n.rsplit("::").next().unwrap_or(n).to_string();
                     if self.user.contains(&n) {
                         todo.push(n);
+                    } else if n == tr {
+                        return Some(true);
                     } else if !STD_EXACT.contains(&n.as_str()) && !n.starts_with('#') && !matches!(n.as_str(), "Sized" | "Send" | "Sync" | "Unpin") {
-                        // (a std trait zustc does not know the supertraits of)
-                        return None;
+                        unknown = true;
                     }
                 }
                 seen.push(t);
             }
-            return Some(false);
+            return if unknown { None } else { Some(false) };
         }
         // (std's traits zustc knows: none of them has an auto trait as a supertrait; nor do the Fn traits)
         if STD_EXACT.contains(&name) || matches!(name, "Sized" | "Send" | "Sync" | "Unpin" | "Fn" | "FnMut" | "FnOnce" | "Iterator" | "IntoIterator") || b.starts_with('\'') {

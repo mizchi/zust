@@ -18,6 +18,7 @@ Send かつ Sync とみなしていた。そのため、`Rc` を持つ `Box<dyn 
 
 - `ast_types::tysyn` は、オブジェクトの文字列に、トレイトの後ろに auto trait を `Send`、`Sync` の順に書く（`Fn() -> i32 + Send + Sync`）。
   重複したものは 1 回だけ書くので、`dyn Tr + Send + Send` は同じ型になる。`types::dyn_autos` はその文字列をトレイトと 2 つのフラグに分ける。
+  auto trait だけのオブジェクト（`Box<dyn Send>`、`&dyn Sync`）は最初のものをトレイトとする。`dyn Sync + Send` は `Send + Sync` で、両方を持つ。
 - 文字列からトレイトを読むところは、auto trait を除いたものを使う。vtable（`to_dyn`）、メソッド呼び出し（`dyn_trait_args`、`dyn_methods`、
   推論のメソッド探索）、`Fn` の呼び出し（`dyn_fn_sig`）、`dyn Fn` の呼び出しのリージョン検査（`rg_dyn_fn_args`。`0 as &dyn ..` を
   パースするので、`+ Send` が足し算として読まれてしまう）、そして `Box<dyn Error>` と同じく prelude の `__DynError` になる
@@ -25,8 +26,12 @@ Send かつ Sync とみなしていた。そのため、`Rc` を持つ `Box<dyn 
   文字列を `+` で分けていた。
 - auto trait を判定する 3 か所（`Program::auto_trait`、トレイトソルバの `auto_rec`、acg の `auto_trait_fails`）は、`dyn` 型を、
   書かれた auto trait かトレイトのスーパートレイトによってだけ Send / Sync とする。
-- 値がオブジェクトになるところで vtable を作る `to_dyn` は、値の型をオブジェクトの auto trait と照らし合わせる。E0277 で、
-  それを満たさない部分を名指す（それをキャプチャするクロージャではなく `Rc<i32>`）。
+- 値がオブジェクトになるところで vtable を作る `to_dyn` は、値の型をオブジェクトの auto trait と照らし合わせる。オブジェクトのトレイトそのものである
+  auto trait（`dyn Send`）とも照らし合わせる。E0277 で、それを満たさない部分を、クロージャのキャプチャとプログラム自身の構造体をたどって名指す
+  （それをキャプチャするクロージャでも、`Rc` の中のポインタでもなく `Rc<i32>`）。定数の初期化式の中では、そのエラーは定数の行に出る（`zustc check` でも）。
+- `TraitDb::gives_auto` は、答えを未定とする前に、トレイトのスーパートレイトをすべて見る。`trait Tr: A + Error` と `trait A: Send` なら、zustc が
+  `Error` のスーパートレイトを知らなくても `dyn Tr` は Send である。
+- `dyn Tr + Send` の型のハッシュは、`dyn Tr` のものと同じく `Tr` のメソッドを含む。
 - オブジェクトの `Box`、`&`、`*const` から、auto trait のより少ないものへの型強制は同じ値である（`types::dyn_drops_autos`）。
   より多いものへは、これまでどおり型の不一致（E0308）である。
 - `static` の型は Sync でなければならない（E0277）。この検査を、プログラムのトレイトのスーパートレイトの auto trait を読んだ後に移した。
@@ -35,7 +40,7 @@ Send かつ Sync とみなしていた。そのため、`Rc` を持つ `Box<dyn 
 ## 確かめたこと
 
 - tests/security: send_dyn_thread.rs が通る（もう TODO ではない）。新しいケースは send_rc_dyn_send_coerce.rs（`Box<dyn Fn() + Send>` にする
-  `Rc` のクロージャ）、sync_cell_dyn_sync_coerce.rs（`&(dyn Fn() + Sync)` にする `Cell` のクロージャ）、send_dyn_add_auto.rs
+  `Rc` のクロージャ）、sync_cell_dyn_sync_coerce.rs（`&(dyn Fn() + Sync)` にする `Cell` のクロージャ）、send_rc_bare_dyn_send.rs（`Box<dyn Send>` にする `Rc`）、send_dyn_add_auto.rs
   （`Box<dyn Fn()>` から `Box<dyn Fn() + Send>`、E0308）。どれも rustc が拒否する場所で拒否される。
 - rustc と比べた。`Box<dyn Tr + Send>`（とその `Vec`）はスレッドへ移れる。`Box<dyn Tr>` は移れず、`T: Send` の境界も満たさない。
   `Mutex<Box<dyn Tr + Send>>` は動く。`?`、`Box::new(e)`、`"msg".into()` での `Box<dyn Error + Send + Sync>` は前と同じく動く。
