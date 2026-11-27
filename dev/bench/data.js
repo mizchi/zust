@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795806940457,
+  "lastUpdate": 1795806944504,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -125432,6 +125432,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/48ec084144de5b948f1250f3f23b03872a115299"
         },
         "date": 1795806175158,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 82.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 80.645,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.173,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a3959bf12a3b1b4e4cf36445673ea54a4cdede5d",
+          "message": "perf: the E0119 check's per-pair work and the float-literal scan (edit builds -2.5%) (#325)\n\nTraitDb::conflict computes once per impl whether it can be compared, and does not rename an impl with no parameters (cratebench hex's edit build 139.6M -> 130.3M instructions). Prelude selection's float-literal scan goes by memchr instead of byte by byte (14.3M -> 3.4M on gen5000). KPI: edit one fn -2.77%, crates edit -2.54%, traits edit -1.06%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-28T04:09:42+09:00",
+          "tree_id": "7c8bdd61c83eec7dfe9b9b5b2e8a8cb9fdc9c9fe",
+          "url": "https://github.com/mizchi/zust/commit/a3959bf12a3b1b4e4cf36445673ea54a4cdede5d"
+        },
+        "date": 1795806943940,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
