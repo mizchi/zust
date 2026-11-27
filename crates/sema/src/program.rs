@@ -3420,16 +3420,16 @@ impl Program {
     /// thread's join error, a panic's payload). Only std's Any, the prelude's trait (`__p_Any` where a program defines
     /// an `Any` of its own): a program's `trait Any` has no Debug (E0277)
     pub fn dyn_any_debug(&self, s: &str) -> bool {
-        let has_debug = s.split('+').any(|p| p.trim().rsplit("::").next() == Some("Debug"));
-        !has_debug
-            && s.split('+').any(|p| {
-                let n = p.trim();
-                let last = n.rsplit("::").next().unwrap_or(n);
-                matches!(last, "Any" | "__p_Any")
-                    && self.traits.get(n).or_else(|| self.traits.get(last)).is_some_and(|fs| {
-                        !fs.is_empty()
-                            && fs.iter().all(|&f| self.item_of.get(f as usize).copied().flatten().is_some_and(|i| i >= self.prelude_from))
-                    })
+        // (std's impls are for `dyn Any`, `dyn Any + Send` and `dyn Any + Send + Sync`: `dyn Any + Sync` has none)
+        let (n, send, sync) = dyn_autos(s);
+        if sync && !send {
+            return false;
+        }
+        let n = n.trim();
+        let last = n.rsplit("::").next().unwrap_or(n);
+        matches!(last, "Any" | "__p_Any")
+            && self.traits.get(n).or_else(|| self.traits.get(last)).is_some_and(|fs| {
+                !fs.is_empty() && fs.iter().all(|&f| self.item_of.get(f as usize).copied().flatten().is_some_and(|i| i >= self.prelude_from))
             })
     }
 

@@ -1,7 +1,7 @@
 // std::any::Any without threads: `is` and type_id of `&dyn Any` (also named by its path only), `{:?}` of a
-// `Box<dyn Any + Send>` (std's `Any { .. }`, alone, inside an Err, and through a `T: Debug + ?Sized` bound), a `T:
+// `Box<dyn Any + Send>` (std's `Any { .. }`, alone, inside an Err, through a `T: Debug + ?Sized` bound, and `+ Send + Sync`), a `T:
 // Any` bound (also `?Sized`: str and slices are Any, `<str as Any>::type_id`), and an Instant before the
-// clock's origin (`now - 10 years`), which std's signed seconds can hold (#250)
+// clock's origin (`now - 10 years`), which std's signed seconds can hold, `-=` and an elapsed f64 (#250)
 use std::any::Any;
 use std::time::{Duration, Instant};
 
@@ -31,6 +31,12 @@ fn main() {
     println!("{} {}", same(&4u8), same(&"s"));
     let x: &dyn Any = &1u8;
     println!("{} {}", dbg(x), dbg(&e));
+    let ss: &(dyn Any + Send + Sync) = &2u8;
+    let bs: Box<dyn Any + Sync + Send> = Box::new(3u8);
+    println!("{:?} {:?} {}", ss, bs, ss.is::<u8>());
+    let mut t = Instant::now() + Duration::from_secs(5);
+    t -= Duration::from_secs(5);
+    println!("{}", format!("{}", t.elapsed().as_secs_f64()).len() > 0);
     let id = <str as Any>::type_id("abc");
     println!("{} {} {}", id == std::any::TypeId::of::<str>(), id == std::any::TypeId::of::<&str>(), tid(&[1u8, 2][..]) == std::any::TypeId::of::<[u8]>());
 

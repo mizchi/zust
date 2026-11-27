@@ -1769,7 +1769,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         found
     });
     // (`d.as_secs_f64()`: the float comes from the prelude's Duration)
-    let float_dur = need.contains("Duration") && (sc.has("_f64") || sc.has("_f32"));
+    let float_dur = (need.contains("Duration") || need.contains("Instant")) && (sc.has("_f64") || sc.has("_f32"));
     if float_named || float_lit || float_dur {
         need.extend(["__exr_fmt_float", "__exr_powi", "__exr_powif", "__exr_ordering"]);
         // (`x.classify()`: the prelude's classifier, which codegen calls, and its FpCategory)

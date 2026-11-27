@@ -17672,6 +17672,11 @@ impl AddAssign<Duration> for Instant {
         self.__in_d = self.__in_d + d;
     }
 }
+impl SubAssign<Duration> for Instant {
+    fn sub_assign(&mut self, rhs: Duration) {
+        *self = *self - rhs;
+    }
+}
 impl Sub<Duration> for Instant {
     type Output = Instant;
     fn sub(self, d: Duration) -> Instant {
@@ -17705,6 +17710,17 @@ impl<T: 'static + ?Sized> Any for T {
 }
 // (for any object lifetime: std's `dyn Any` is always `'static`, as Any is, which `&dyn Any` takes here as `'_`)
 impl<'a> dyn Any + 'a {
+    pub fn is<T: 'static>(&self) -> bool {
+        self.type_id() == TypeId::of::<T>()
+    }
+}
+// (std's three inherent impls: an object's auto traits make it another type, so `dyn Any + Send`'s `is` is its own)
+impl<'a> dyn Any + Send + 'a {
+    pub fn is<T: 'static>(&self) -> bool {
+        self.type_id() == TypeId::of::<T>()
+    }
+}
+impl<'a> dyn Any + Send + Sync + 'a {
     pub fn is<T: 'static>(&self) -> bool {
         self.type_id() == TypeId::of::<T>()
     }

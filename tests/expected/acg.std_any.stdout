@@ -3,6 +3,8 @@ Any { .. } true
 Err(Any { .. })
 true false
 Any { .. } Any { .. }
+Any { .. } Any { .. } true
+true
 true false true
 true Some(true)
 true
