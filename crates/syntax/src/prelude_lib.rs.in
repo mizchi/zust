@@ -10778,18 +10778,28 @@ unsafe extern "C" {
     fn __exr_clock_gettime(clk: i32, ts: *mut [i64; 2]) -> i32;
 }
 
-// (CLOCK_MONOTONIC, in nanoseconds. A read that fails panics, as std's `Instant::now`: a deadline could never pass)
-fn __exr_mono_ns() -> u128 {
+// (CLOCK_MONOTONIC, in nanoseconds; u128::MAX when the read fails: under a lock, taken as the deadline reached, so the
+// wait ends and the lock is let go)
+fn __exr_mono_ns_or_max() -> u128 {
     let mut ts = [0i64, 0i64];
     if unsafe { __exr_clock_gettime(1, &mut ts) } != 0 {
-        panic!("clock_gettime(CLOCK_MONOTONIC) failed");
+        return 340282366920938463463374607431768211455;
     }
     ts[0] as u128 * 1000000000 + ts[1] as u128
 }
 
+// (the first read, before any lock: one that fails panics, as std's `Instant::now`, as no deadline could be set)
+fn __exr_mono_ns() -> u128 {
+    let t = __exr_mono_ns_or_max();
+    if t == 340282366920938463463374607431768211455 {
+        panic!("clock_gettime(CLOCK_MONOTONIC) failed");
+    }
+    t
+}
+
 // (as __exr_chan_wait, until the monotonic clock reads `end` at the latest)
 fn __exr_chan_wait_until<T>(c: *mut __Chan<T>, end: u128) {
-    let now = __exr_mono_ns();
+    let now = __exr_mono_ns_or_max();
     if now >= end {
         return;
     }
@@ -10983,7 +10993,7 @@ impl<T> __Rcvr__<T> {
                     __exr_unlock(m);
                     return Err(RecvTimeoutError::Disconnected);
                 }
-                if __exr_mono_ns() >= end {
+                if __exr_mono_ns_or_max() >= end {
                     __exr_unlock(m);
                     return Err(RecvTimeoutError::Timeout);
                 }

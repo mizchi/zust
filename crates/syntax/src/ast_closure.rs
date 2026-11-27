@@ -981,15 +981,18 @@ pub fn binds_name(e: &Expr, n: &str, d: u32) -> bool {
     if d > 64 {
         return true;
     }
-    let block = |b: &crate::parse::Block| {
+    // (a `let .. else`'s block is a block too: its lets bind names, as any block's)
+    fn block_binds(b: &crate::parse::Block, n: &str, d: u32) -> bool {
+        if d > 64 {
+            return true;
+        }
         b.stmts.iter().any(|s| match s {
-            Stmt::Let(p, _, init, els, ..) => {
-                pat_binds_name(p, n) || init.as_ref().is_some_and(|x| binds_name(x, n, d + 1)) || els.as_ref().is_some_and(|b| b.stmts.iter().any(|s| matches!(s, Stmt::Expr(x, _) if binds_name(x, n, d + 1))))
-            }
+            Stmt::Let(p, _, init, els, ..) => pat_binds_name(p, n) || init.as_ref().is_some_and(|x| binds_name(x, n, d + 1)) || els.as_ref().is_some_and(|b| block_binds(b, n, d + 1)),
             Stmt::Expr(x, _) => binds_name(x, n, d + 1),
             _ => false,
         })
-    };
+    }
+    let block = |b: &crate::parse::Block| block_binds(b, n, d);
     match e {
         Expr::Closure(_, ps, _, b, _) => ps.iter().any(|(p, _)| pat_binds_name(p, n)) || binds_name(b, n, d + 1),
         Expr::Let(p, x) => pat_binds_name(p, n) || binds_name(x, n, d + 1),
