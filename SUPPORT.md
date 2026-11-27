@@ -4,7 +4,7 @@ The percentages are rustc's own UI tests that pass in that area: run-pass + chec
 directories named in the comment next to the number (`ui:`), or compile-fail (`cf:`). They count only the tests
 `bench/rust_ui.py` can ask zustc to handle (no nightly features, auxiliary crates, special flags or targets other than
 Linux x86-64), so 100% does not mean every test of a directory passes. They were measured
-<!-- measured -->2026-11-27, 531afef<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
+<!-- measured -->2026-11-27, 15a3cbd<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
 `scripts/update_readme.py` writes them here). The totals for each kind of test are in the
 [README](README.md#coverage-of-rustcs-test-suite), the subset of the language in prose is in
 [docs/language.md](docs/language.md), and the [reports](docs/reports/) explain each step.
@@ -46,9 +46,9 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
 - [x] generics: <!-- ui:generics -->95.2% (an integer literal for `T: Foo` takes the one integer type that implements Foo; a type
   parameter known only from the expected type is not inferred)
 - [ ] consts: <!-- ui:consts -->79.1% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
-- [ ] drop: <!-- ui:drop -->71.0% (the drop order of some temporaries differs)
+- [ ] drop: <!-- ui:drop -->75.4% (the drop order of some temporaries differs)
 - [ ] traits: <!-- ui:traits -->74.3% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
-- [ ] `macro_rules!`: <!-- ui:macros -->80.0% (hygiene for `let`, labels, arm bindings; not every fragment kind)
+- [ ] `macro_rules!`: <!-- ui:macros -->80.7% (hygiene for `let`, labels, arm bindings; not every fragment kind)
 - [ ] unions: <!-- ui:union -->84.6% (no `repr(packed)`)
 - [ ] const generics: <!-- ui:const-generics -->66.3% (no `generic_const_exprs`)
 - [ ] generic associated types: <!-- ui:generic-associated-types -->86.7%
@@ -92,10 +92,10 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
 - [ ] async / await: <!-- ui:async-await -->82.5%. An `async fn` runs at once and returns its value: it is not lowered
   to a state machine that `poll`s, and there is no executor or real `Waker`. Futures implemented and polled by hand
   work (above)
-- [ ] threads: <!-- ui:threads-sendsync -->70.7%. OS threads (pthreads), in parallel: `spawn` / `join` / `is_finished`, atomic `Arc` and atomics (one instruction each), `Mutex` / `Condvar` / `RwLock` / `Once` / `OnceLock` / `thread::park` on futexes as std's, `mpsc` (also `sync_channel`), `thread_local!` per thread; a panic in a spawned thread ends that thread and its `join` gives `Err`. No `thread::scope` or `Builder`, and no poisoning (a panic does not unwind)
+- [ ] threads: <!-- ui:threads-sendsync -->79.3%. OS threads (pthreads), in parallel: `spawn` / `join` / `is_finished`, atomic `Arc` and atomics (one instruction each), `Mutex` / `Condvar` / `RwLock` / `Once` / `OnceLock` / `thread::park` on futexes as std's, `mpsc` (also `sync_channel`), `thread_local!` per thread; a panic in a spawned thread ends that thread and its `join` gives `Err`. No `thread::scope` or `Builder`, and no poisoning (a panic does not unwind)
 - [ ] iterators: <!-- ui:iterators -->47.1% (`iter::empty()` cannot infer its item from the target)
 - [ ] FFI: <!-- ui:abi -->81.0%. Scalars only, no structs by value
-- [ ] panics: <!-- ui:panics -->11.1%. A panic aborts: no unwinding, `catch_unwind`, `set_hook`
+- [ ] panics: <!-- ui:panics -->22.2%. A panic aborts: no unwinding, `catch_unwind`, `set_hook`
 
 ## In sight (known approach, small cost)
 
