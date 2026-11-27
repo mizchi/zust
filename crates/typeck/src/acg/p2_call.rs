@@ -383,6 +383,9 @@ impl Cx<'_> {
     #[inline(never)]
     fn fmt_method(&mut self, recv: &Expr, f: &Expr, expected: Option<Ty>) -> R<Option<V>> {
         let Some(t) = self.peek(recv) else { return Ok(None) };
+        if let Some(r) = self.radix_fmt_method(recv, t, f, expected)? {
+            return Ok(Some(r));
+        }
         let base = self.strip_refs(t);
         if matches!(base, Ty::Dyn(_) | Ty::Param(_) | Ty::Box(_)) || self.prog.has_param(base) {
             return Ok(None);
@@ -448,6 +451,92 @@ impl Cx<'_> {
         let call = Expr::Call(Box::new(path_expr(h)), vec![Expr::Ref(false, Box::new(paren(recv.clone()))), f.clone()]);
         let call: &Expr = self.keep_expr(call);
         self.expr(call, expected).map(Some)
+    }
+
+    /// `fmt::LowerHex::fmt(x, f)` (Binary / Octal / UpperHex / LowerExp / UpperExp) of a number, and
+    /// `fmt::Pointer::fmt(p, f)` of a reference / raw pointer / Box: written as `{:x}` / `{:e}` / `{:p}` write them,
+    /// with the formatter's width and flags. None for another receiver (a type's own impl: the ordinary lookup)
+    #[cold]
+    #[inline(never)]
+    fn radix_fmt_method(&mut self, recv: &Expr, t: Ty, f: &Expr, expected: Option<Ty>) -> R<Option<V>> {
+        let Some(tr) = self.explicit_trait.as_ref().filter(|(m, _)| m == "fmt").map(|(_, tr)| tr.rsplit("::").next().unwrap_or(tr).to_string()) else {
+            return Ok(None);
+        };
+        let code: u8 = match tr.as_str() {
+            "LowerHex" => 1,
+            "UpperHex" => 2,
+            "Binary" => 3,
+            "Octal" => 4,
+            "LowerExp" => 5,
+            "UpperExp" => 6,
+            "Pointer" => 7,
+            _ => return Ok(None),
+        };
+        let base = self.strip_refs(t);
+        let mut refs = 0;
+        let mut u = t;
+        while let Ty::Ref(_, i) = u {
+            refs += 1;
+            u = *i;
+        }
+        let number = base.is_int() || base.is_float();
+        // (Pointer's receiver is `&self`: the pointer is what it points to, `&&u8`'s `&u8`)
+        // (the pointer: `*recv` of a `&&u8` receiver, or the receiver itself, `r` of `fmt::Pointer::fmt(&r, f)` as the
+        // method call has it)
+        let ptr_like = |p: Ty| matches!(p, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_)) && !p.is_fat();
+        // (not `&E` of a type with its own Pointer impl, `Pointer::fmt(e_ref, f)`: E's impl, the ordinary lookup)
+        let own = |p: Ty| matches!(p, Ty::Ref(_, Ty::Struct(_)));
+        let ptr_at: Option<(Ty, bool)> = match t {
+            Ty::Ref(_, p) if ptr_like(*p) => Some((*p, true)),
+            p if ptr_like(p) && !own(p) => Some((p, false)),
+            _ => None,
+        };
+        let pointer = code == 7 && ptr_at.is_some();
+        if !(number && code < 7) && !pointer {
+            return Ok(None);
+        }
+        self.explicit_trait = None;
+        let (rv, rt) = self.expr(recv, None)?;
+        let Some(rv) = rv else { return Ok(Some((None, Ty::Never))) };
+        let (fv, ft) = self.expr(f, None)?;
+        let Some(fv) = fv else { return Ok(Some((None, Ty::Never))) };
+        self.scopes.push(vec![]);
+        self.bind("__exr_xv".into(), rt, Some(rv));
+        self.bind("__exr_xf".into(), ft, Some(fv));
+        let d = |n: usize| format!("{}__exr_xv", "*".repeat(n));
+        // (the receiver as the method call has it: `self.0` of `fmt::LowerHex::fmt(&self.0, f)`, or a reference)
+        let by_ref = if matches!(rt, Ty::Ref(..)) { "__exr_xv" } else { "&__exr_xv" };
+        let text = if code < 5 {
+            format!("__exr_radix_fmt({by_ref}, __exr_xf, {code}u8)")
+        } else if code == 7 {
+            // (by the evaluated receiver's type, which match ergonomics may give one more reference than peek's)
+            let (pt, through) = match rt {
+                Ty::Ref(_, p) if ptr_like(*p) => (*p, true),
+                p if ptr_like(p) && !own(p) => (p, false),
+                _ => ptr_at.unwrap(),
+            };
+            let tn = self.prog.tn(match pt {
+                Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) => *i,
+                _ => unreachable!(),
+            });
+            let p = if through { "*__exr_xv" } else { "__exr_xv" };
+            let star = if matches!(pt, Ty::Box(_)) { format!("&*{p}") } else { p.to_string() };
+            format!("__exr_pointer_fmt::<()>({star} as *const {tn} as usize, __exr_xf)")
+        } else {
+            let up = code == 6;
+            if base.is_float() {
+                format!("__exr_exp_fmt_float::<()>({} as f64, {}, {up}, __exr_xf)", d(refs), base == Ty::F32)
+            } else if base.signed() {
+                format!("{{ let v = {} as i128; __exr_exp_fmt_int::<()>(if v < 0 {{ (0 - (v + 1)) as u128 + 1 }} else {{ v as u128 }}, v < 0, {up}, __exr_xf) }}", d(refs))
+            } else {
+                format!("__exr_exp_fmt_int::<()>({} as u128, false, {up}, __exr_xf)", d(refs))
+            }
+        };
+        let e = crate::parse::parse_expr(&text)?;
+        let e = self.keep_expr(e);
+        let r = self.expr(e, expected);
+        self.scopes.pop();
+        r.map(Some)
     }
 
     /// The fmt trait a value of a type parameter takes from its bounds (`x: T` / `x: &T` with `T: Debug`), as
@@ -1676,7 +1765,7 @@ impl Cx<'_> {
             if let Some((_, tr)) = self.explicit_trait.as_ref().filter(|(m, _)| *m == name) {
                 // (`Display::fmt(self, f)` in the type's Debug: its Display / Debug methods are `S::<Display>::fmt`)
                 // (of a generic type's instance, the generic impl's: `VecDeque<i32>`'s is `VecDeque::<Debug>::fmt`)
-                if matches!(tr.as_str(), "Display" | "Debug") {
+                if crate::ast_summary::is_fmt_trait(tr) {
                     let own = format!("{}::<{tr}>::{name}", self.prog.structs[sid as usize].name);
                     let generic = format!("{}::<{tr}>::{name}", self.prog.structs[self.prog.base_of(sid) as usize].name);
                     if let Some(&id) = self.prog.index.get(&own).or_else(|| self.prog.index.get(&generic)) {
@@ -4666,7 +4755,10 @@ impl Cx<'_> {
                         };
                         // (a primitive receiver with an impl of this trait: `<u32 as Tr>::m(&x)`, which a builtin
                         // method of the same name (`to_string`) cannot take over as `x.m()` would let it)
-                        if let Some(t) = self.peek(&recv).map(|t| self.strip_refs(t)) {
+                        // (std's fmt traits the compiler writes itself, `fmt::LowerHex::fmt(x, f)` / `fmt::Pointer::fmt(&r, f)`:
+                        // the method call with the trait named (radix_fmt_method), whatever a number's other `fmt` is)
+                        let std_fmt = matches!(tr.as_str(), "Binary" | "LowerHex" | "UpperHex" | "Octal" | "LowerExp" | "UpperExp" | "Pointer") && ms == "fmt";
+                        if let Some(t) = self.peek(&recv).map(|t| self.strip_refs(t)).filter(|_| !std_fmt) {
                             if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) {
                                 let key = format!("{}::{ms}", self.ty_key(t));
                                 if self.trait_candidate(&key, &tr).is_some() {

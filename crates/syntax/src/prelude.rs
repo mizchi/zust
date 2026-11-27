@@ -266,7 +266,7 @@ fn gated_trait(h: usize) -> Option<&'static str> {
                     return None;
                 }
                 it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).find(|w| {
-                    matches!(*w, "Hasher" | "Hash" | "__BoolThen" | "__AsBytes" | "__PathExt" | "__AsPathStr" | "BufRead" | "Read" | "Seek" | "Write" | "__FWr" | "ExactSizeIterator" | "BuildHasher")
+                    matches!(*w, "Hasher" | "Hash" | "__BoolThen" | "__AsBytes" | "__PathExt" | "__AsPathStr" | "BufRead" | "Read" | "Seek" | "Write" | "__FWr" | "ExactSizeIterator" | "BuildHasher" | "Binary" | "LowerHex" | "UpperHex" | "Octal" | "LowerExp" | "UpperExp" | "Pointer")
                 })
             })
             .collect()
@@ -1120,6 +1120,31 @@ impl<'a> PreludeScan<'a> {
 
 /// Whether src writes a C string literal, `c"..."` / `cr"..."`: a `c` that starts a token (not the end of `"abc"` or of a
 /// name)
+/// Whether the source has a radix format spec: `:` with flags / width (`#`, `08`, `>5`) and then `x` / `X` / `b` / `o`
+/// and `}` (`{:x}`, `{v:#010b}`), as a format string writes one
+fn has_radix_spec(src: &str) -> bool {
+    let b = src.as_bytes();
+    let mut i = 0;
+    while let Some(k) = memchr_byte(b'}', &b[i..]) {
+        let e = i + k;
+        if e >= 2 && matches!(b[e - 1], b'x' | b'X' | b'b' | b'o') {
+            let mut j = e - 2;
+            while j > 0 && matches!(b[j], b'0'..=b'9' | b'#' | b'+' | b'-' | b'.' | b'<' | b'>' | b'^' | b'$' | b'*') {
+                j -= 1;
+            }
+            if b[j] == b':' {
+                return true;
+            }
+        }
+        i = e + 1;
+    }
+    false
+}
+
+fn memchr_byte(c: u8, b: &[u8]) -> Option<usize> {
+    b.iter().position(|&x| x == c)
+}
+
 fn has_cstr_literal(src: &str) -> bool {
     let b = src.as_bytes();
     let mut i = 0;
@@ -1607,8 +1632,19 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     // (`x.fmt(f)` / `fmt::Debug::fmt(s, f)` of a value with no fmt of its own (a number, a str, a derive): `{}` / `{:?}`
     // as a fmt::Result (#256)) (`.fmt` / `::fmt`, not `.fmt(`: `x.fmt (f)` too)
+    // (the fmt traits other than Display / Debug, gated (gated_trait): wanted where the source names one, `impl
+    // fmt::LowerHex for S`, `L: fmt::Binary`; trait names are not among the name candidates)
+    for t in ["Binary", "LowerHex", "UpperHex", "Octal", "LowerExp", "UpperExp", "Pointer"] {
+        if sc.has(t) {
+            need.insert(t);
+        }
+    }
     if need.contains("fmt") && (sc.has(".fmt") || sc.has("::fmt")) {
         need.extend(["__exr_display_fmt", "__exr_debug_fmt"]);
+        // (and the radix / exponent / pointer traits' `fmt::LowerHex::fmt(x, f)` of a number or a pointer)
+        if ["Binary", "LowerHex", "UpperHex", "Octal", "LowerExp", "UpperExp", "Pointer"].iter().any(|t| sc.has(t)) {
+            need.extend(["__exr_radix_fmt", "__exr_exp_fmt_float", "__exr_exp_fmt_int", "__exr_pointer_fmt", "__exr_fmt_exp", "__exr_fmt_exp_int", "__exr_fmt_ptr"]);
+        }
     }
     // (ManuallyDrop is used through Deref: `m.0`, `*m`)
     // (`io::Error` / `io::Result<T>` are the prelude's IoError, whose name does not appear)
@@ -1663,10 +1699,19 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     // 128-bit integers: division and formatting (and `x.isqrt()` on one). Also in the loop below, for a 128-bit type
     // that another prelude item brings in (`NonZeroU128::get`, `impl FromStr for u128`) rather than the program's text
     let isqrt = sc.has("isqrt");
+    // (a radix spec, `{:x}` / `{:#b}` / `{v:08o}` / `{:X}`, or a radix trait: a signed integer's two's-complement bits
+    // (__exr_fmt_int_s); left out where nothing looks like one)
+    let radix_fmt = has_radix_spec(sc.src) || ["Binary", "LowerHex", "UpperHex", "Octal"].iter().any(|t| sc.has(t));
+    if radix_fmt {
+        need.insert("__exr_fmt_int_s");
+    }
     let wide = |need: &mut crate::fxhash::FxSet<&'static str>| {
         need.extend(["__exr_udiv128", "__exr_sdiv128", "__exr_fmt_int128", "__exr_u128_to_f", "__exr_f_to_u128"]);
         if isqrt {
             need.insert("__exr_isqrt128");
+        }
+        if radix_fmt {
+            need.insert("__exr_fmt_int128_s");
         }
     };
     let mut wide_ops = need.contains("i128") || need.contains("u128");

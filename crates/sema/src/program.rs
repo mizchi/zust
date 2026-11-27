@@ -2909,14 +2909,14 @@ impl Program {
             for &d in decls {
                 let m = p.names[d as usize].rsplit("::").next().unwrap();
                 // (Display / Debug methods are `S::<Display>::fmt`)
-                let found = if matches!(tr.as_str(), "Display" | "Debug") {
+                let found = if crate::ast_summary::is_fmt_trait(tr) {
                     p.index
                         .contains_key(&format!("{}::<{tr}>::{m}", p.structs[*sid as usize].name))
                 } else {
                     p.method(*sid, m).is_some()
                 };
                 // (the impl's method against the trait's: the number of parameters (E0050) and the kind of receiver (E0053))
-                if !matches!(tr.as_str(), "Display" | "Debug") {
+                if !crate::ast_summary::is_fmt_trait(tr) {
                     if let Some(mi) = p.method(*sid, m).filter(|&mi| p.sigs[mi as usize].impl_trait.as_deref() == Some(tr.as_str()) && mi != d) {
                         let (ds, ms) = (&p.sigs[d as usize], &p.sigs[mi as usize]);
                         let line = p.item_of[mi as usize].map_or(String::new(), |ii| format!("{}:1: ", items[ii as usize].line));
@@ -3548,6 +3548,23 @@ impl Program {
                 let name = |b: &str| b.split('<').next().unwrap_or(b).trim().to_string();
                 return matches!(tr, "Sized" | "Send" | "Sync" | "Unpin") || bs.iter().any(|b| b == tr || name(b) == name(tr));
             }
+        }
+        // (std's fmt traits of numbers and pointers: Binary / LowerHex / UpperHex / Octal of the integers, LowerExp /
+        // UpperExp of the integers and floats, each of `&T` / `&mut T` when T's; Pointer of references, raw pointers
+        // and Box. A program's own impls are asked below)
+        match tr {
+            "Binary" | "LowerHex" | "UpperHex" | "Octal" | "LowerExp" | "UpperExp" => {
+                if t.is_int() || (t.is_float() && matches!(tr, "LowerExp" | "UpperExp")) {
+                    return true;
+                }
+                if let Ty::Ref(_, i) = t {
+                    if self.implements(*i, tr) {
+                        return true;
+                    }
+                }
+            }
+            "Pointer" if matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_)) => return true,
+            _ => {}
         }
         if matches!(t, Ty::Ref(..)) && !self.ref_impls.is_empty() && self.ref_impls.contains(&(t, tr.to_string())) {
             return true;

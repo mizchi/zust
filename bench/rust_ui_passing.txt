@@ -2125,6 +2125,7 @@ compile-fail	consts/non-const-value-in-const-pat-binding.rs
 compile-fail	consts/non-const-value-in-const.rs
 compile-fail	consts/non-constant-value-in-nested-const.rs
 run-pass	consts/non-scalar-cast.rs
+check-pass	consts/non-sync-references-in-const.rs
 run-pass	consts/oncecell-const-init-57781.rs
 run-pass	consts/packed_pattern.rs
 run-pass	consts/packed_pattern2.rs

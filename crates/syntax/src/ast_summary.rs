@@ -871,7 +871,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
     // (the trait's part of the symbol where two traits of one type have a method of one name: Display / Debug's
     // `fmt`, PartialEq<X> / PartialOrd<X>; for an impl for a reference too, `_xS.Debug.__ref_fmt`)
     let disc = match owner.and_then(|o| o.impl_trait.as_deref()) {
-        Some(t) if t == "Display" || t == "Debug" => format!("{t}."),
+        Some(t) if is_fmt_trait(t) => format!("{t}."),
         Some(t) if t.starts_with("PartialEq<") || t.starts_with("PartialOrd<") => {
             let t: String = t.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
             format!("{t}.")
@@ -2795,7 +2795,7 @@ fn summarize_assoc_fn(owner: Option<&Owner>, sm: &mut Summary, fs: &PSig, body: 
         }
     }
     let name = match ow.impl_trait.as_deref() {
-        Some(t) if t == "Display" || t == "Debug" => format!("{}::<{t}>::{}", ow.base, fs.name),
+        Some(t) if is_fmt_trait(t) => format!("{}::<{t}>::{}", ow.base, fs.name),
         Some(t) if t.starts_with("PartialEq<") || t.starts_with("PartialOrd<") => format!("{}::<{t}>::{}", ow.base, fs.name),
         _ if matches!(ow.self_ty, TySyn::Ref(..)) => {
             let (mut pre, mut t) = (String::new(), &ow.self_ty);
@@ -3677,4 +3677,10 @@ fn forwards_to_referent(fs: &PSig, body: &Block, param: &str, tr: &str, mut_ref:
         }
         _ => false,
     }
+}
+
+/// The std fmt traits, each with one method `fmt`: a type's impls of them are kept apart as `S::<Display>::fmt`,
+/// `S::<LowerHex>::fmt` .. (either's `impl_fmt_traits!(Binary, Display, LowerExp, ..)` gives one type eight)
+pub fn is_fmt_trait(t: &str) -> bool {
+    matches!(t, "Display" | "Debug" | "Binary" | "LowerHex" | "UpperHex" | "Octal" | "LowerExp" | "UpperExp" | "Pointer")
 }

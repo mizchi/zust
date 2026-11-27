@@ -4096,6 +4096,24 @@ pub trait Debug {
 pub trait Pointer {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
 }
+pub trait Binary {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
+pub trait LowerHex {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
+pub trait UpperHex {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
+pub trait Octal {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
+pub trait LowerExp {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
+pub trait UpperExp {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
 
 // `f.debug_struct("P").field("x", &self.x).finish()` などのビルダー (derive(Debug) と同じ部品で書く)
 pub struct DebugStruct {
@@ -4387,6 +4405,27 @@ fn __exr_fmt_base<G>(f: &Formatter) -> u64 {
     }
 }
 
+// (a signed integer of `bits` bits, sign-extended to v: in `{:x}` / `{:X}` / `{:b}` / `{:o}` its two's-complement bits,
+// as std writes them (`-3i32` is `fffffffd`); otherwise its sign and magnitude)
+fn __exr_fmt_int_s<G>(f: &mut Formatter, v: i64, bits: u32) {
+    if f.radix >= 1 && f.radix <= 4 {
+        let mask: u64 = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
+        __exr_fmt_int::<()>(f, (v as u64) & mask, false);
+    } else if v < 0 {
+        __exr_fmt_int::<()>(f, (v as u64).wrapping_neg(), true);
+    } else {
+        __exr_fmt_int::<()>(f, v as u64, false);
+    }
+}
+fn __exr_fmt_int128_s<G>(f: &mut Formatter, v: i128) {
+    if f.radix >= 1 && f.radix <= 4 {
+        __exr_fmt_int128::<()>(f, v as u128, false);
+    } else if v < 0 {
+        __exr_fmt_int128::<()>(f, (v as u128).wrapping_neg(), true);
+    } else {
+        __exr_fmt_int128::<()>(f, v as u128, false);
+    }
+}
 fn __exr_fmt_int<G>(f: &mut Formatter, mag: u64, neg: bool) {
     // 10 進で幅も符号の指定もない (`{}` の大半): 桁を後ろから詰め、まとめて足す (10 の割り算は掛け算になる)
     if f.radix == 0 && !f.plus && f.width == 0 {
@@ -8226,6 +8265,29 @@ fn __exr_display_fmt<T>(x: &T, f: &mut Formatter) -> Result<(), __FmtError> {
 }
 fn __exr_debug_fmt<T>(x: &T, f: &mut Formatter) -> Result<(), __FmtError> {
     __exr_debug(x, f);
+    Ok(())
+}
+// (`fmt::LowerHex::fmt(&x, f)` / Binary / Octal / UpperHex of a number: as `{:x}` / `{:b}` .. formats it, with the
+// formatter's width and flags; the radix: 1 = x, 2 = X, 3 = b, 4 = o)
+fn __exr_radix_fmt<T>(x: &T, f: &mut Formatter, radix: u8) -> Result<(), __FmtError> {
+    let old = f.radix;
+    f.radix = radix;
+    __exr_display(x, f);
+    f.radix = old;
+    Ok(())
+}
+// (`fmt::LowerExp::fmt(&x, f)` / UpperExp of a number: as `{:e}` / `{:E}`)
+fn __exr_exp_fmt_float<G>(x: f64, is32: bool, upper: bool, f: &mut Formatter) -> Result<(), __FmtError> {
+    __exr_fmt_exp::<()>(f, x, is32, upper);
+    Ok(())
+}
+fn __exr_exp_fmt_int<G>(mag: u128, neg: bool, upper: bool, f: &mut Formatter) -> Result<(), __FmtError> {
+    __exr_fmt_exp_int::<()>(f, mag, neg, upper);
+    Ok(())
+}
+// (`fmt::Pointer::fmt(&p, f)` of a reference / raw pointer / Box: its address, as `{:p}`)
+fn __exr_pointer_fmt<G>(a: usize, f: &mut Formatter) -> Result<(), __FmtError> {
+    __exr_fmt_ptr::<()>(f, a);
     Ok(())
 }
 

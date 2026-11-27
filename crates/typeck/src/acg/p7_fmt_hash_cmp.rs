@@ -220,6 +220,7 @@ pub(crate) fn parse_fmt(
             "X?" => (true, 2),
             "e" => (false, 5),
             "E" => (false, 6),
+            "p" => (false, 7),
             t => return err(span, format!("unsupported format specifier `{t}`")),
         };
         spec.radix = radix;
@@ -482,7 +483,25 @@ impl Cx<'_> {
                         pt = *i;
                     }
                     let ptr_debug = *debug && matches!(pt, Ty::Ptr(_, i) if !i.is_fat()) && self.prog.index.contains_key("__exr_fmt_ptr");
-                    if !ptr_debug && !self.fmt_ok(t, *debug) {
+                    // (`{:p}` of a reference / raw pointer / Box: its address)
+                    let ptr_fmt = spec.radix == 7 && matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_)) && !t.is_fat() && self.prog.index.contains_key("__exr_fmt_ptr");
+                    // (`{:x}` / `{:b}` / `{:o}` / `{:X}` / `{:e}` / `{:E}` / `{:p}` of a type of the program's: its impl of the
+                    // trait, LowerHex .. (a number's is the compiler's own))
+                    let radix_tr = match spec.radix {
+                        1 => "LowerHex",
+                        2 => "UpperHex",
+                        3 => "Binary",
+                        4 => "Octal",
+                        5 => "LowerExp",
+                        6 => "UpperExp",
+                        7 => "Pointer",
+                        _ => "",
+                    };
+                    let own_radix = !radix_tr.is_empty() && !*debug && matches!(pt, Ty::Struct(_)) && self.prog.implements(pt, radix_tr);
+                    if spec.radix == 7 && !ptr_fmt && !own_radix {
+                        return err(asp, format!("`{}` doesn't implement `Pointer`", self.prog.tn(t)));
+                    }
+                    if !ptr_debug && !ptr_fmt && !own_radix && !self.fmt_ok(t, *debug) {
                         return err(
                             asp,
                             format!(
@@ -535,6 +554,23 @@ impl Cx<'_> {
                             span,
                         )?;
                         cur = spec.clone();
+                    }
+                    if ptr_fmt {
+                        let a = self.b.ins().load(PTR, mf(), v, 0);
+                        self.call_named("__exr_fmt_ptr", vec![Ty::Unit], &[(f, fref), (a, Ty::Usize)], span)?;
+                        continue;
+                    }
+                    if own_radix {
+                        // (through the trait's path, as `LowerHex::fmt(&x, f)` writes it: the type's impl)
+                        self.scopes.push(vec![]);
+                        self.bind("__exr_rv".into(), Ty::Ref(false, intern(t)), Some(v));
+                        self.bind("__exr_rf".into(), fref, Some(f));
+                        let e = crate::parse::parse_expr(&format!("{{ let _ = {radix_tr}::fmt(__exr_rv, __exr_rf); }}"))?;
+                        let e = self.keep_expr(e);
+                        let r = self.expr(e, None);
+                        self.scopes.pop();
+                        r?;
+                        continue;
                     }
                     if ptr_debug {
                         let (mut pv, mut rt) = (v, t);
@@ -693,6 +729,18 @@ impl Cx<'_> {
         let str_ref = Ty::Ref(false, intern(Ty::Str));
         let me = if debug { "__exr_debug" } else { "__exr_display" };
         match t {
+            // (a signed integer: its bits in `{:x}` / `{:b}` .., which the prelude tells by the formatter's radix)
+            t if t.bits() == 128 && t.signed() && self.prog.index.contains_key("__exr_fmt_int128_s") => {
+                let v = self.b.ins().load(types::I128, mf(), x, 0);
+                self.call_named("__exr_fmt_int128_s", vec![Ty::Unit], &[(f, fref), (v, Ty::I128)], span)?;
+            }
+            t if t.is_int() && t.signed() && t.bits() < 128 && self.prog.index.contains_key("__exr_fmt_int_s") => {
+                let ct = clif_ty(t).unwrap();
+                let v = self.b.ins().load(ct, mf(), x, 0);
+                let v64 = if ct == types::I64 { v } else { self.b.ins().sextend(types::I64, v) };
+                let bits = self.b.ins().iconst(types::I32, t.bits() as i64);
+                self.call_named("__exr_fmt_int_s", vec![Ty::Unit], &[(f, fref), (v64, Ty::I64), (bits, Ty::U32)], span)?;
+            }
             t if t.bits() == 128 => {
                 let v = self.b.ins().load(types::I128, mf(), x, 0);
                 let (mag, neg) = if t.signed() {
