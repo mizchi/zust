@@ -580,7 +580,7 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList" | "Thread" | "Once" | "OnceState"
                         | "Layout" | "LayoutError" | "__LayoutAlign" | "Infallible" | "Condvar" | "ControlFlow"
                         | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError"
-                        | "File" | "OpenOptions" | "Metadata" | "FileType" | "Permissions" => Some(w),
+                        | "File" | "OpenOptions" | "Metadata" | "FileType" | "Permissions" | "FpCategory" => Some(w),
                         // (std::num's NonZero types: their impls only with them)
                         w if w.starts_with("NonZero") => Some(w),
                         // HashMap's iterators (HmIter and so on) only when HashMap is used
@@ -623,7 +623,7 @@ const SHADOWABLE: &[&str] = &[
     "SocketAddr", "AddrParseError", "RwLock", "SystemTime", "SystemTimeError", "Bound", "Arguments", "Thread", "ThreadId",
     "Once", "OnceState", "Layout", "LayoutError", "Condvar", "ControlFlow", "Repeat",
     "File", "OpenOptions", "Metadata", "FileType", "Permissions", "RawFd", "AsRawFd", "FromRawFd", "IntoRawFd",
-    "MetadataExt", "OpenOptionsExt", "PermissionsExt",
+    "MetadataExt", "OpenOptionsExt", "PermissionsExt", "FpCategory",
 ];
 
 /// Whether the prelude's item of the name is renamed when the program defines one (SHADOWABLE, hashed: asked for each
@@ -1726,6 +1726,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     let float_dur = need.contains("Duration") && (sc.has("_f64") || sc.has("_f32"));
     if float_named || float_lit || float_dur {
         need.extend(["__exr_fmt_float", "__exr_powi", "__exr_powif", "__exr_ordering"]);
+        // (`x.classify()`: the prelude's classifier, which codegen calls, and its FpCategory)
+        if sc.has("classify") {
+            need.extend(["__exr_fp_classify", "FpCategory"]);
+        }
         // (paths such as `f64::max`: the wrapper whose name ends with the same name)
         for (a, bb) in [("f64", "__exr_f64_"), ("f32", "__exr_f32_")] {
             if sc.has(&format!("{a}::")) {

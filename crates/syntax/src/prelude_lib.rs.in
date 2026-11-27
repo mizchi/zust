@@ -16300,3 +16300,24 @@ fn __exr_read_to_string<R: Read + ?Sized>(r: &mut R, buf: &mut String) -> Result
         Err(_) => Err(IoError { code: -1 }),
     }
 }
+
+// `std::num::FpCategory` and `x.classify()` of an f32 / f64, which codegen calls with the value's bits (widened)
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum FpCategory {
+    Nan,
+    Infinite,
+    Zero,
+    Subnormal,
+    Normal,
+}
+
+fn __exr_fp_classify<G>(bits: u64, f32: bool) -> FpCategory {
+    let (exp, man, max) = if f32 { ((bits >> 23) & 0xff, bits & 0x7f_ffff, 0xff) } else { ((bits >> 52) & 0x7ff, bits & 0xf_ffff_ffff_ffff, 0x7ff) };
+    if exp == max {
+        if man == 0 { FpCategory::Infinite } else { FpCategory::Nan }
+    } else if exp == 0 {
+        if man == 0 { FpCategory::Zero } else { FpCategory::Subnormal }
+    } else {
+        FpCategory::Normal
+    }
+}

@@ -2967,9 +2967,13 @@ impl Inf<'_> {
                 }
             }
             return match name {
-                "is_nan" | "is_finite" | "is_infinite" | "is_sign_negative" | "is_sign_positive" | "is_normal" => self.known(Ty::Bool),
+                "is_nan" | "is_finite" | "is_infinite" | "is_sign_negative" | "is_sign_positive" | "is_normal" | "is_subnormal" => self.known(Ty::Bool),
                 "to_bits" => self.known(if t == Ty::F32 { Ty::U32 } else { Ty::U64 }),
                 "total_cmp" => match self.prog.struct_index.get("Ordering") {
+                    Some(&o) => self.known(Ty::Struct(o)),
+                    None => self.var(),
+                },
+                "classify" => match self.prog.struct_index.get("FpCategory") {
                     Some(&o) => self.known(Ty::Struct(o)),
                     None => self.var(),
                 },
