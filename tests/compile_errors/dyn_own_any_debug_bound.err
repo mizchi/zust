@@ -1,0 +1,1 @@
+9:20: the trait bound `dyn Any: Debug` is not satisfied (for `T`)

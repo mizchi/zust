@@ -17737,3 +17737,116 @@ fn __exr_fmt_upperexp<T: UpperExp>(x: &T, f: &mut Formatter) {
 fn __exr_fmt_pointer<T: Pointer>(x: &T, f: &mut Formatter) {
     let _ = Pointer::fmt(x, f);
 }
+
+// `std::time::Instant`: CLOCK_MONOTONIC's time (through the threads' `__exr_clock_gettime`)
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Instant {
+    // (CLOCK_MONOTONIC's time plus __EXR_INSTANT_BASE: an Instant before the clock's origin, `now - 1 day` on a
+    // machine up for an hour, as std's signed seconds can)
+    __in_d: Duration,
+}
+
+const __EXR_INSTANT_BASE: u64 = 4294967296;
+
+impl Instant {
+    pub fn now() -> Instant {
+        let mut ts = [0i64, 0i64];
+        if unsafe { __exr_clock_gettime(1, &mut ts) } != 0 {
+            panic!("clock_gettime(CLOCK_MONOTONIC) failed");
+        }
+        Instant { __in_d: Duration::new(ts[0] as u64 + __EXR_INSTANT_BASE, ts[1] as u32) }
+    }
+    pub fn duration_since(&self, earlier: Instant) -> Duration {
+        self.__in_d.checked_sub(earlier.__in_d).unwrap_or(Duration::ZERO)
+    }
+    pub fn checked_duration_since(&self, earlier: Instant) -> Option<Duration> {
+        self.__in_d.checked_sub(earlier.__in_d)
+    }
+    pub fn saturating_duration_since(&self, earlier: Instant) -> Duration {
+        self.duration_since(earlier)
+    }
+    pub fn elapsed(&self) -> Duration {
+        Instant::now().duration_since(*self)
+    }
+    pub fn checked_add(&self, d: Duration) -> Option<Instant> {
+        match self.__in_d.checked_add(d) {
+            Some(t) => Some(Instant { __in_d: t }),
+            None => None,
+        }
+    }
+    pub fn checked_sub(&self, d: Duration) -> Option<Instant> {
+        match self.__in_d.checked_sub(d) {
+            Some(t) => Some(Instant { __in_d: t }),
+            None => None,
+        }
+    }
+}
+
+impl Add<Duration> for Instant {
+    type Output = Instant;
+    fn add(self, d: Duration) -> Instant {
+        Instant { __in_d: self.__in_d + d }
+    }
+}
+impl AddAssign<Duration> for Instant {
+    fn add_assign(&mut self, d: Duration) {
+        self.__in_d = self.__in_d + d;
+    }
+}
+impl SubAssign<Duration> for Instant {
+    fn sub_assign(&mut self, rhs: Duration) {
+        *self = *self - rhs;
+    }
+}
+impl Sub<Duration> for Instant {
+    type Output = Instant;
+    fn sub(self, d: Duration) -> Instant {
+        Instant { __in_d: self.__in_d - d }
+    }
+}
+impl Sub<Instant> for Instant {
+    type Output = Duration;
+    fn sub(self, earlier: Instant) -> Duration {
+        self.duration_since(earlier)
+    }
+}
+
+impl Debug for Instant {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        // (the seconds less the base, as a sign and a u64: an Instant moved far ahead is past i64 before the base is
+        // taken off)
+        let t = self.__in_d.as_secs();
+        let (sign, mag) = if t < __EXR_INSTANT_BASE { ("-", __EXR_INSTANT_BASE - t) } else { ("", t - __EXR_INSTANT_BASE) };
+        let s = format!("Instant {{ tv_sec: {}{}, tv_nsec: {} }}", sign, mag, self.__in_d.subsec_nanos());
+        f.pad(&s)
+    }
+}
+
+
+/// `std::any::Any`: every type's TypeId (`dyn Any`'s `is`; a panic's payload, `Box<dyn Any + Send>`). `'static`, as
+/// std's: `T: Any` gives `T: 'static`, and `dyn Any + 'a` is E0478
+pub trait Any: 'static {
+    fn type_id(&self) -> TypeId;
+}
+impl<T: 'static + ?Sized> Any for T {
+    fn type_id(&self) -> TypeId {
+        TypeId::of::<T>()
+    }
+}
+// (for any object lifetime: std's `dyn Any` is always `'static`, as Any is, which `&dyn Any` takes here as `'_`)
+impl<'a> dyn Any + 'a {
+    pub fn is<T: 'static>(&self) -> bool {
+        self.type_id() == TypeId::of::<T>()
+    }
+}
+// (std's three inherent impls: an object's auto traits make it another type, so `dyn Any + Send`'s `is` is its own)
+impl<'a> dyn Any + Send + 'a {
+    pub fn is<T: 'static>(&self) -> bool {
+        self.type_id() == TypeId::of::<T>()
+    }
+}
+impl<'a> dyn Any + Send + Sync + 'a {
+    pub fn is<T: 'static>(&self) -> bool {
+        self.type_id() == TypeId::of::<T>()
+    }
+}
