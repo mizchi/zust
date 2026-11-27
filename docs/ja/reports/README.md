@@ -135,3 +135,4 @@ zustc / zust-analyzer の作業の記録 (日付順)。数値はそれぞれの�
 | 2026-11-26 | [リージョン (ライフタイム) 検査、その 39: dyn Error の `is`、deref を通して代入する let、fn ポインタとして持つクロージャ、トレイトのメソッドの省略された結果](2026-11-26-02-region-check-39.md) |
 | 2026-11-26 | [リージョン (ライフタイム) 検査、その 40: OnceCell、コンストラクタが作る値の well-formedness、呼ばれるジェネリック関数、受け手の self 型の省略されたライフタイム](2026-11-26-03-region-check-40.md) |
 | 2026-11-27 | [`std::thread` を OS スレッドに](2026-11-27-01-native-threads.md) |
+| 2026-11-27 | [OS スレッドの上で rustc のスレッドのテストを通す: `thread::Builder`、`recv_timeout`、`park_timeout`、`Barrier`、借りているものを通して Sync になるクロージャ](2026-11-27-02-threads-ui.md) |

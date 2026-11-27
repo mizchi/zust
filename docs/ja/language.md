@@ -99,10 +99,11 @@ Rc など) は、zustc が持つ組み込みの prelude (`crates/syntax/src/prel
   回る順・`entry().or_insert` / `or_default`・`first_key_value`・`pop_first`・`m[&k]` は std と同じ）、`VecDeque`（リングバッファ。`d[i]`・両端の push / pop）。
   キーが `&str` / String の map の `get("k")` は std の Borrow と同じく `&str` で引ける
 - スレッド（`tests/threads/`）：`thread::spawn` / `join` / `is_finished` / `yield_now` / `sleep` / `current` / `park` /
-  `Thread::unpark`、`mpsc` のチャネル（`channel`、`sync_channel`）、`Mutex`、`Condvar`、`RwLock`、`Once`、`OnceLock`、
-  atomic、`Arc`、`thread_local!`。std と同じく OS スレッド（pthread、スタック 2 MiB）で、並列に走る。atomic と `Arc` の
+  `park_timeout` / `Thread::unpark`、`thread::Builder`（`name`、`stack_size`、`spawn`）、`mpsc` のチャネル（`channel`、`sync_channel`。
+  `recv_timeout`、`Receiver` の `into_iter`）、`Mutex`、`Condvar`、`RwLock`、`Barrier`、`Once`、`OnceLock`、
+  atomic、`Arc`、`thread_local!`。std と同じく OS スレッド（pthread、スタックは既定で 2 MiB）で、並列に走る。atomic と `Arc` の
   カウントはアトミック命令で、ロックは std と同じ状態遷移で futex の上で待つ。何も終わらせられない待ちは、std と同じく
-  永久に待つ。spawn したスレッドの panic は `thread '<unnamed>' panicked at ..` を出し、そのスレッドの `thread_local!` の値を
+  永久に待つ。spawn したスレッドの panic は `thread '<unnamed>' panicked at ..`（Builder で名前を付けたスレッドならその名前）を出し、そのスレッドの `thread_local!` の値を
   drop して、そのスレッドだけを終わらせる。その `join` は `Err`（`Any { .. }`）を返す。巻き戻しはないので、そのスレッドの
   ほかの値は drop されず、持っていた Mutex や RwLock はロックされたまま残る（poisoning はない。走らせていた `Once` は std と同じく poison される）。スレッドが終わるときの `thread_local!` の値の drop での panic は、代わりにプログラムを abort する（std の "thread local panicked on drop"）。`join` はそれから回復できない
 - `impl Index` / `IndexMut`：`x[i]` は x が `index` / `index_mut` を持つ struct なら `*x.index_mut(i)` にする

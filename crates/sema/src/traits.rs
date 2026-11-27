@@ -1289,7 +1289,16 @@ impl Cx<'_> {
                     };
                 }
                 // (a struct, enum, tuple or closure: its fields (captures))
-                let mut fs: Vec<(Ty, bool)> = sd.fields.iter().map(|f| (f.1, sync)).collect();
+                // (a capture held by reference is a raw pointer: it is the `&T` it stands for, which needs `T: Sync`)
+                let mut fs: Vec<(Ty, bool)> = sd
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| match f.1 {
+                        Ty::Ptr(_, inner) if self.p.ref_capture(sid, i) => (*inner, true),
+                        _ => (f.1, sync),
+                    })
+                    .collect();
                 for v in &sd.variants {
                     fs.extend(v.fields.iter().map(|f| (f.1, sync)));
                 }

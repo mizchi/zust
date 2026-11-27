@@ -3,7 +3,8 @@
 //! (channel, pingpong), a Mutex another thread holds (mutex), a spin on an atomic flag (flag), many and nested threads
 //! (nested), a program with no threads at all (single), many threads at once on every primitive, where a total is
 //! exact only when each operation is atomic (parallel), a panic in a spawned thread (panic), thread_local! values of
-//! each thread (tls), and what a panic, a disconnect or a lock does at the edges (edges).
+//! each thread (tls), what a panic, a disconnect or a lock does at the edges (edges), and `thread::Builder`,
+//! `recv_timeout`, a `Barrier` and a closure that is Sync through what it borrows (builder).
 #![cfg(feature = "acg")]
 
 #[path = "common/par.rs"]
@@ -62,7 +63,7 @@ fn run_with_deadline(exe: &std::path::Path, secs: u64) -> Result<std::process::O
 fn threads_like_rustc() {
     let dir = std::env::temp_dir().join(format!("threads_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let names = ["channel", "pingpong", "producers", "mutex", "flag", "nested", "single", "parallel", "panic", "tls", "edges"];
+    let names = ["channel", "pingpong", "producers", "mutex", "flag", "nested", "single", "parallel", "panic", "tls", "edges", "builder"];
     let cases: Vec<(&str, bool)> = names.iter().flat_map(|&n| [(n, false), (n, true)]).collect();
     let bad: Vec<String> = par::par_map(&cases, |&(name, cl)| -> Option<String> {
         let src = std::fs::read_to_string(format!("tests/threads/{name}.rs")).unwrap();
@@ -88,6 +89,10 @@ fn threads_like_rustc() {
                 if err.matches("thread '<unnamed>' panicked at src/main.rs:").count() != 3 || err.matches("note: run with").count() != 1 || err.contains("'main'") {
                     return Some(format!("{name} ({be}): stderr\n{err}"));
                 }
+            }
+            // (a Builder's name is the panic message's)
+            if name == "builder" && !String::from_utf8_lossy(&o.stderr).contains("thread 'boom' panicked at src/main.rs:") {
+                return Some(format!("{name} ({be}): stderr\n{}", String::from_utf8_lossy(&o.stderr)));
             }
         }
         None

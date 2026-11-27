@@ -9670,6 +9670,12 @@ fn __exr_futex_wake(p: *mut u32, n: u32) {
         __exr_syscall(202, p, 129, n, 0, 0, 0);
     }
 }
+// (as __exr_futex_wait, for at most ts (seconds, nanoseconds))
+fn __exr_futex_wait_for(p: *mut u32, v: u32, ts: &[i64; 2]) {
+    unsafe {
+        __exr_syscall(202, p, 128, v, ts as *const [i64; 2] as usize, 0, 0);
+    }
+}
 fn __exr_futex_wake_all(p: *mut u32) {
     __exr_futex_wake(p, 2147483647);
 }
@@ -9679,6 +9685,8 @@ fn __exr_futex_wake_all(p: *mut u32) {
 struct __ThreadInner {
     refs: usize,
     id: u64,
+    // (a Builder's name)
+    name: Option<String>,
     // (the parker, std's futex one: 0 empty, 1 notified, u32::MAX parked)
     park: u32,
 }
@@ -9714,7 +9722,7 @@ struct __ThreadCtx {
     onces: Vec<*mut u32>,
 }
 
-static mut __EXR_MAIN_THREAD: __ThreadInner = __ThreadInner { refs: 1, id: 1, park: 0 };
+static mut __EXR_MAIN_THREAD: __ThreadInner = __ThreadInner { refs: 1, id: 1, name: None, park: 0 };
 static mut __EXR_MAIN_CTX: *mut __ThreadCtx = 0usize as *mut __ThreadCtx;
 // (the key of the spawned threads' contexts, made by the first spawn: before it there is only the main thread)
 static mut __EXR_TLS_KEY: u32 = 0;
@@ -9900,7 +9908,16 @@ fn __exr_thread_hook(q: u32) -> bool {
             return true;
         }
         if q == 0 {
-            __exr_err_str::<()>(if c.is_null() { "\nthread 'main' panicked" } else { "\nthread '<unnamed>' panicked" });
+            if c.is_null() {
+                __exr_err_str::<()>("\nthread 'main' panicked");
+            } else {
+                __exr_err_str::<()>("\nthread '");
+                match &(*(*c).th).name {
+                    Some(n) => __exr_err_str::<()>(n.as_str()),
+                    None => __exr_err_str::<()>("<unnamed>"),
+                }
+                __exr_err_str::<()>("' panicked");
+            }
             return true;
         }
         if __exr_atomic_xchg(&mut __EXR_PANICKED as *mut u32, 1) == 0 {
@@ -10004,6 +10021,7 @@ fn __exr_thread_retain(th: *mut __ThreadInner) -> Thread {
 fn __exr_thread_release(th: *mut __ThreadInner) {
     unsafe {
         if __exr_atomic_xadd(&mut (*th).refs as *mut usize, 18446744073709551615) == 1 && (*th).id != 1 {
+            __exr_drop_in_place(th);
             __exr_free(th as *mut u8);
         }
     }
@@ -10079,6 +10097,15 @@ impl<T> Drop for JoinHandle<T> {
 }
 
 pub fn __core_spawn<T, F: FnOnce() -> T>(f: F) -> JoinHandle<T> {
+    match __exr_spawn(f, None, 2097152) {
+        Ok(h) => h,
+        Err(r) => panic!("failed to spawn thread: Os {{ code: {}, kind: WouldBlock, message: \"Resource temporarily unavailable\" }}", r),
+    }
+}
+
+// (a thread with a name and a stack of `stack` bytes (in whole pages, as std rounds it, and at least 64 KiB: above
+// glibc's minimum, as a margin); Err: what pthread_create gave)
+fn __exr_spawn<T, F: FnOnce() -> T>(f: F, name: Option<String>, stack: usize) -> Result<JoinHandle<T>, i32> {
     __exr_threads_init();
     let pk = __exr_alloc_ok(core::mem::size_of::<__Packet<T>>()) as *mut __Packet<T>;
     unsafe {
@@ -10086,7 +10113,7 @@ pub fn __core_spawn<T, F: FnOnce() -> T>(f: F) -> JoinHandle<T> {
     }
     let th = __exr_alloc_ok(core::mem::size_of::<__ThreadInner>()) as *mut __ThreadInner;
     unsafe {
-        th.write(__ThreadInner { refs: 2, id: __exr_atomic_xadd(&mut __EXR_NEXT_TID as *mut u64, 1), park: 0 });
+        th.write(__ThreadInner { refs: 2, id: __exr_atomic_xadd(&mut __EXR_NEXT_TID as *mut u64, 1), name: name, park: 0 });
     }
     let mut f = Some(f);
     let run: Box<dyn FnMut()> = Box::new(move || {
@@ -10106,11 +10133,12 @@ pub fn __core_spawn<T, F: FnOnce() -> T>(f: F) -> JoinHandle<T> {
         (*c).run = Some(run);
     }
     let mut pt: u64 = 0;
-    // (a pthread_attr_t: 56 bytes in glibc on x86-64. 2 MiB of stack, as std's default)
+    // (a pthread_attr_t: 56 bytes in glibc on x86-64. 2 MiB of stack by default, as std's)
     let mut attr = [0u64; 8];
+    let size = if stack < 65536 { 65536 } else { (stack + 4095) / 4096 * 4096 };
     let r = unsafe {
         __exr_pthread_attr_init(attr.as_mut_ptr() as *mut u8);
-        __exr_pthread_attr_setstacksize(attr.as_mut_ptr() as *mut u8, 2097152);
+        __exr_pthread_attr_setstacksize(attr.as_mut_ptr() as *mut u8, size);
         __exr_pthread_create(&mut pt, attr.as_ptr() as *const u8, __exr_thread_start, c as *mut u8)
     };
     if r != 0 {
@@ -10119,11 +10147,36 @@ pub fn __core_spawn<T, F: FnOnce() -> T>(f: F) -> JoinHandle<T> {
             __exr_drop_in_place(c);
             __exr_free(c as *mut u8);
             __exr_free(pk as *mut u8);
+            __exr_drop_in_place(th);
             __exr_free(th as *mut u8);
         }
-        panic!("failed to spawn thread: Os {{ code: {}, kind: WouldBlock, message: \"Resource temporarily unavailable\" }}", r);
+        return Err(r);
     }
-    JoinHandle { pk: pk, pt: pt, th: Thread { __th: th } }
+    Ok(JoinHandle { pk: pk, pt: pt, th: Thread { __th: th } })
+}
+
+// `std::thread::Builder`: a thread's name and stack size before it is spawned
+pub struct Builder {
+    __b_name: Option<String>,
+    __b_stack: usize,
+}
+
+impl Builder {
+    pub fn new() -> Builder {
+        Builder { __b_name: None, __b_stack: 2097152 }
+    }
+    pub fn name(self, name: String) -> Builder {
+        Builder { __b_name: Some(name), __b_stack: self.__b_stack }
+    }
+    pub fn stack_size(self, size: usize) -> Builder {
+        Builder { __b_name: self.__b_name, __b_stack: size }
+    }
+    pub fn spawn<T, F: FnOnce() -> T>(self, f: F) -> Result<JoinHandle<T>, IoError> {
+        match __exr_spawn(f, self.__b_name, self.__b_stack) {
+            Ok(h) => Ok(h),
+            Err(r) => Err(IoError::from_raw_os_error(r)),
+        }
+    }
 }
 
 pub fn __core_yield_now() {
@@ -10165,9 +10218,15 @@ impl Thread {
     pub fn id(&self) -> ThreadId {
         ThreadId(unsafe { (*self.__th).id })
     }
-    // (no `Builder` here: only the main thread has a name)
+    // (the main thread's, or a Builder's)
     pub fn name(&self) -> Option<&str> {
-        if unsafe { (*self.__th).id } == 1 { Some("main") } else { None }
+        if unsafe { (*self.__th).id } == 1 {
+            return Some("main");
+        }
+        match unsafe { &(*self.__th).name } {
+            Some(n) => Some(n.as_str()),
+            None => None,
+        }
     }
     pub fn unpark(&self) {
         let p = unsafe { &mut (*self.__th).park as *mut u32 };
@@ -10200,6 +10259,17 @@ pub fn __core_park() {
             return;
         }
     }
+}
+
+// (as park, waiting at most d: one wait, as std's, so it may return early; a token is taken either way)
+pub fn __core_park_timeout(d: Duration) {
+    let p = unsafe { &mut (*(*__exr_thread_ctx()).th).park as *mut u32 };
+    if __exr_atomic_xadd(p, 4294967295) == 1 {
+        return;
+    }
+    let ts = [d.secs as i64, d.nanos as i64];
+    __exr_futex_wait_for(p, 4294967295, &ts);
+    __exr_atomic_xchg(p, 0);
 }
 
 /// `std::fmt::Arguments`: a formatted text (`format_args!` makes a String here, so this holds one)
@@ -10607,6 +10677,21 @@ pub enum TryRecvError {
     Disconnected,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecvTimeoutError {
+    Timeout,
+    Disconnected,
+}
+
+impl Display for RecvTimeoutError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        match self {
+            RecvTimeoutError::Timeout => f.pad("timed out waiting on channel"),
+            RecvTimeoutError::Disconnected => f.pad("channel is empty and sending half is closed"),
+        }
+    }
+}
+
 impl Display for TryRecvError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
         match self {
@@ -10641,6 +10726,40 @@ fn __exr_chan_wait<T>(c: *mut __Chan<T>) {
         let n = __exr_atomic_load(cv);
         __exr_unlock(m);
         __exr_futex_wait(cv, n);
+        __exr_lock(m);
+        (*c).nw -= 1;
+    }
+}
+
+unsafe extern "C" {
+    #[link_name = "clock_gettime"]
+    fn __exr_clock_gettime(clk: i32, ts: *mut [i64; 2]) -> i32;
+}
+
+// (CLOCK_MONOTONIC, in nanoseconds)
+fn __exr_mono_ns() -> u128 {
+    let mut ts = [0i64, 0i64];
+    unsafe {
+        __exr_clock_gettime(1, &mut ts);
+    }
+    ts[0] as u128 * 1000000000 + ts[1] as u128
+}
+
+// (as __exr_chan_wait, until the monotonic clock reads `end` at the latest)
+fn __exr_chan_wait_until<T>(c: *mut __Chan<T>, end: u128) {
+    let now = __exr_mono_ns();
+    if now >= end {
+        return;
+    }
+    let left = end - now;
+    let ts = [(left / 1000000000) as i64, (left % 1000000000) as i64];
+    unsafe {
+        let cv = &mut (*c).cv as *mut u32;
+        let m = &mut (*c).m as *mut u32;
+        (*c).nw += 1;
+        let n = __exr_atomic_load(cv);
+        __exr_unlock(m);
+        __exr_futex_wait_for(cv, n, &ts);
         __exr_lock(m);
         (*c).nw -= 1;
     }
@@ -10801,11 +10920,53 @@ impl<T> __Rcvr__<T> {
             Err(gone) => Err(if gone { TryRecvError::Disconnected } else { TryRecvError::Empty }),
         }
     }
+    // (Timeout when no value comes within d while a sender is left)
+    // (recv's loop with a deadline on the monotonic clock: here, so that a program that never calls it needs no clock)
+    pub fn recv_timeout(&self, d: Duration) -> Result<T, RecvTimeoutError> {
+        let end = __exr_mono_ns() + d.secs as u128 * 1000000000 + d.nanos as u128;
+        let c = __exr_chan_p(&self.c);
+        unsafe {
+            let m = &mut (*c).m as *mut u32;
+            __exr_lock(m);
+            loop {
+                if let Some(v) = (*c).q.pop_front() {
+                    (*c).recvd += 1;
+                    __exr_chan_notify(c);
+                    __exr_unlock(m);
+                    return Ok(v);
+                }
+                if (*c).senders == 0 {
+                    __exr_unlock(m);
+                    return Err(RecvTimeoutError::Disconnected);
+                }
+                if __exr_mono_ns() >= end {
+                    __exr_unlock(m);
+                    return Err(RecvTimeoutError::Timeout);
+                }
+                __exr_chan_wait_until(c, end);
+            }
+        }
+    }
     pub fn iter(&self) -> __RecvIter<T> {
         __RecvIter { c: self.c.clone(), wait: true }
     }
     pub fn try_iter(&self) -> __RecvIter<T> {
         __RecvIter { c: self.c.clone(), wait: false }
+    }
+    // (the receiver itself: it stays while the iterator does)
+    pub fn into_iter(self) -> __RecvIntoIter<T> {
+        __RecvIntoIter { r: self }
+    }
+}
+
+pub struct __RecvIntoIter<T> {
+    r: __Rcvr__<T>,
+}
+
+impl<T> Iterator for __RecvIntoIter<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        self.r.recv().ok()
     }
 }
 
@@ -11429,6 +11590,68 @@ impl Condvar {
 impl Debug for Condvar {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
         f.debug_struct("\x43ondvar").finish_non_exhaustive()
+    }
+}
+
+// `std::sync::Barrier`: as std's, a count under a lock and a generation. The thread that makes the count n is the
+// leader: it starts the next generation and wakes the others (a futex word that each new generation bumps)
+pub struct Barrier {
+    __b_m: u32,
+    __b_cv: u32,
+    __b_count: usize,
+    __b_gen: usize,
+    __b_n: usize,
+}
+
+pub struct BarrierWaitResult(bool);
+
+impl BarrierWaitResult {
+    pub fn is_leader(&self) -> bool {
+        self.0
+    }
+}
+
+impl Barrier {
+    pub const fn new(n: usize) -> Barrier {
+        Barrier { __b_m: 0, __b_cv: 0, __b_count: 0, __b_gen: 0, __b_n: n }
+    }
+    pub fn wait(&self) -> BarrierWaitResult {
+        let p = self as *const Barrier as *mut Barrier;
+        unsafe {
+            let m = &mut (*p).__b_m as *mut u32;
+            let cv = &mut (*p).__b_cv as *mut u32;
+            __exr_lock(m);
+            let g = (*p).__b_gen;
+            (*p).__b_count += 1;
+            if (*p).__b_count < (*p).__b_n {
+                while g == (*p).__b_gen {
+                    let n = __exr_atomic_load(cv);
+                    __exr_unlock(m);
+                    __exr_futex_wait(cv, n);
+                    __exr_lock(m);
+                }
+                __exr_unlock(m);
+                return BarrierWaitResult(false);
+            }
+            (*p).__b_count = 0;
+            (*p).__b_gen += 1;
+            __exr_atomic_xadd(cv, 1);
+            __exr_futex_wake_all(cv);
+            __exr_unlock(m);
+            BarrierWaitResult(true)
+        }
+    }
+}
+
+impl Debug for Barrier {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.debug_struct("\x42arrier").finish_non_exhaustive()
+    }
+}
+
+impl Debug for BarrierWaitResult {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.debug_struct("\x42arrierWaitResult").field("is_leader", &self.0).finish()
     }
 }
 

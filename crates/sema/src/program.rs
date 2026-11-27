@@ -3982,8 +3982,11 @@ impl Program {
                 if prelude {
                     return sd.args.iter().all(|&a| self.auto_trait(a, sync, d + 1));
                 }
-                sd.fields.iter().all(|f| self.auto_trait(f.1, sync, d + 1))
-                    && sd.variants.iter().all(|v| v.fields.iter().all(|f| self.auto_trait(f.1, sync, d + 1)))
+                // (a closure's capture held by reference is a raw pointer: the `&T` it stands for, which needs `T: Sync`)
+                sd.fields.iter().enumerate().all(|(i, f)| match f.1 {
+                    Ty::Ptr(_, inner) if self.ref_capture(sid, i) => self.auto_trait(*inner, true, d + 1),
+                    _ => self.auto_trait(f.1, sync, d + 1),
+                }) && sd.variants.iter().all(|v| v.fields.iter().all(|f| self.auto_trait(f.1, sync, d + 1)))
             }
             _ => true,
         }
@@ -5488,6 +5491,13 @@ impl Program {
             }
         }
         false
+    }
+
+    /// Field i of the struct sid is a closure's capture held by reference: its type is a raw pointer, which the auto
+    /// traits take as the `&T` it stands for (Send and Sync when T is Sync)
+    pub fn ref_capture(&self, sid: u32, i: usize) -> bool {
+        let b = self.base_of(sid);
+        self.closure_of_struct.get(&b).and_then(|f| self.closures.get(f)).is_some_and(|cd| !cd.by_move && cd.moved.get(i) == Some(&false))
     }
 
     /// The base b is a closure's struct (`f::{closure#0}`)

@@ -4945,8 +4945,13 @@ fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool
                 return false;
             }
             seen.push((sid, sync));
+            // (a closure's capture held by reference is a raw pointer: it is the `&T` it stands for)
+            let field = |i: usize, t: Ty, seen: &mut Vec<(u32, bool)>| match t {
+                Ty::Ptr(_, inner) if prog.ref_capture(sid, i) => sync_(*inner, seen),
+                _ => auto_trait_fails(prog, t, sync, seen, d + 1),
+            };
             sd.args.iter().any(|&a| auto_trait_fails(prog, a, sync, seen, d + 1))
-                || sd.fields.iter().any(|f| auto_trait_fails(prog, f.1, sync, seen, d + 1))
+                || sd.fields.iter().enumerate().any(|(i, f)| field(i, f.1, seen))
                 || sd.variants.iter().any(|v| v.fields.iter().any(|f| auto_trait_fails(prog, f.1, sync, seen, d + 1)))
         }
         _ => false,
