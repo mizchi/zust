@@ -2026,7 +2026,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         if fmt_radix & 0x40 == 0 && need.contains("Pointer") {
             fmt_radix |= 0x40;
             changed = true;
-            need.extend(["__exr_fmt_pointer", "__exr_pointer_fmt", "__exr_fat_pointer_fmt", "__exr_fmt_ptr", "__exr_fmt_fat_ptr"]);
+            need.extend(["__exr_fmt_pointer", "__exr_pointer_fmt", "__exr_fat_pointer_fmt", "__exr_dyn_pointer_fmt", "__exr_fat_words", "__exr_fmt_ptr", "__exr_fmt_fat_ptr", "__exr_fmt_dyn_ptr"]);
         }
         if fmt_radix & 0x3f != 0x3f {
             const RADIX: [(&str, &str); 6] = [

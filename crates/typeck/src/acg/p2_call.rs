@@ -522,11 +522,14 @@ impl Cx<'_> {
         };
         // (not `&E` of a type with its own Pointer impl, `Pointer::fmt(e_ref, f)`: E's impl, the ordinary lookup)
         let own = |p: Ty| matches!(p, Ty::Ref(_, Ty::Struct(_)));
-        // (`&p` of a pointer this does not write, a fat raw one (`*const [u8]`) or one to a `dyn`: not the address of the
-        // variable p, the outer reference's; the ordinary lookup)
-        let unsupported = |p: Ty| matches!(p, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_)) && !ptr_like(p);
+        // (`&p` of a fat pointer the above does not take, a raw one (`*const [u8]`) or one to a `dyn`: p itself, its two
+        // words read through the reference (never the address of the variable p, the outer reference's))
+        let fat_behind = |p: Ty| {
+            matches!(p, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_)) && !ptr_like(p) && matches!(p, Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) if matches!(*i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)))
+        };
+        let unsupported = |p: Ty| matches!(p, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_)) && !ptr_like(p) && !fat_behind(p);
         let ptr_at: Option<(Ty, bool)> = match t {
-            Ty::Ref(_, p) if ptr_like(*p) => Some((*p, true)),
+            Ty::Ref(_, p) if ptr_like(*p) || fat_behind(*p) => Some((*p, true)),
             Ty::Ref(_, p) if unsupported(*p) => None,
             p if ptr_like(p) && !own(p) => Some((p, false)),
             _ => None,
@@ -545,7 +548,7 @@ impl Cx<'_> {
         let text = {
             // (by the evaluated receiver's type, which match ergonomics may give one more reference than peek's)
             let (pt, through) = match rt {
-                Ty::Ref(_, p) if ptr_like(*p) => (*p, true),
+                Ty::Ref(_, p) if ptr_like(*p) || fat_behind(*p) => (*p, true),
                 Ty::Ref(_, p) if unsupported(*p) => ptr_at.unwrap(),
                 p if ptr_like(p) && !own(p) => (p, false),
                 _ => ptr_at.unwrap(),
@@ -556,7 +559,12 @@ impl Cx<'_> {
             });
             let p = if through { "*__exr_xv" } else { "__exr_xv" };
             let star = if matches!(pt, Ty::Box(_)) { format!("&*{p}") } else { p.to_string() };
-            if pt.is_fat() {
+            let dyn_pt = matches!(pt, Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) if matches!(*i, Ty::Dyn(_)));
+            if through && fat_behind(pt) || through && dyn_pt {
+                let w = if matches!(rt, Ty::Ref(..)) { "__exr_xv" } else { "&__exr_xv" };
+                let h = if dyn_pt { "__exr_dyn_pointer_fmt" } else { "__exr_fat_pointer_fmt" };
+                format!("{{ let (a, m) = __exr_fat_words({w}); {h}::<()>(a, m, __exr_xf) }}")
+            } else if pt.is_fat() {
                 format!("{{ let s = {star}; __exr_fat_pointer_fmt::<()>(s.as_ptr() as usize, s.len(), __exr_xf) }}")
             } else {
                 format!("__exr_pointer_fmt::<()>({star} as *const {tn} as usize, __exr_xf)")

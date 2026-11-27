@@ -17026,6 +17026,16 @@ fn __exr_fat_pointer_fmt<G>(a: usize, n: usize, f: &mut Formatter) -> Result<(),
     __exr_fmt_fat_ptr::<()>(f, a, n);
     Ok(())
 }
+fn __exr_dyn_pointer_fmt<G>(a: usize, vt: usize, f: &mut Formatter) -> Result<(), __FmtError> {
+    __exr_fmt_dyn_ptr::<()>(f, a, vt);
+    Ok(())
+}
+// (the two words of a fat pointer x points to: its address and its length or vtable, as `Pointer::fmt(&p, f)` of a
+// `*const [u8]` / `&dyn Tr` writes them)
+fn __exr_fat_words<T>(x: &T) -> (usize, usize) {
+    let w = x as *const T as *const usize;
+    unsafe { (*w, *w.add(1)) }
+}
 // (a number in the radix of the trait whose fmt is called, whatever spec the Formatter was given: 1 x, 2 X, 3 b, 4 o. A
 // signed one is given as the unsigned type of its width, whose value its bits are: `-1i8` is `ff`, as std's)
 fn __exr_radix_fmt<T>(x: &T, f: &mut Formatter, radix: u8) -> Result<(), __FmtError> {
