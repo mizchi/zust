@@ -6127,4 +6127,17 @@ fn main() {
     let _ = (Imp::Borrowed(&[1]).as_slice().len(), keep(&String::new()), opt(&None));
 }
 "#, &[], "r18");
+    // (the review's: a definition's bound written twice gives its equation (`T: Iterator` and `where T: Iterator<Item =
+    // u8>`), and a bound that makes a `?Sized` parameter Sized (Clone, Copy, a trait of the program's `: Sized`))
+    errors_at(r#"struct S<T: Iterator>(T) where T: Iterator<Item = u8>;
+impl<T: Iterator<Item = u8>> Drop for S<T> { fn drop(&mut self) {} }
+struct C<T: ?Sized + Clone>(Box<T>);
+impl<T: Clone> Drop for C<T> { fn drop(&mut self) {} }
+struct P<T: ?Sized + Copy>(Box<T>);
+impl<T: Copy> Drop for P<T> { fn drop(&mut self) {} }
+trait Tr: Sized {}
+struct Q<T: ?Sized + Tr>(Box<T>);
+impl<T: Tr> Drop for Q<T> { fn drop(&mut self) {} }
+fn main() {}
+"#, &[], "r19");
 }

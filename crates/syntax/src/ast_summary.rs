@@ -1271,12 +1271,15 @@ pub fn drop_impl_unmet(src: &str, imp: &SrcItem, adt: &SrcItem, supers: &crate::
                 }
                 let binds = p.segs.last().is_some_and(|s| s.args.iter().any(|a| matches!(a, GArg::Bind(..))));
                 let mut todo = vec![short(p)];
+                let first = short(p);
                 while let Some(t) = todo.pop() {
-                    if a_traits.iter().any(|x| x.0 == n && x.1 == t) {
+                    // (the same trait again (`T: Iterator` and `where T: Iterator<Item = u8>`): its equations too)
+                    if let Some(x) = a_traits.iter_mut().find(|x| x.0 == n && x.1 == t) {
+                        x.2 |= binds && t == first;
                         continue;
                     }
                     todo.extend(supers.get(&t).into_iter().flatten().cloned());
-                    a_traits.push((n.to_string(), t, binds));
+                    a_traits.push((n.to_string(), t.clone(), binds && t == first));
                 }
             }
         }
@@ -1375,7 +1378,10 @@ pub fn drop_impl_unmet(src: &str, imp: &SrcItem, adt: &SrcItem, supers: &crate::
     for p in &ig.params {
         if let GParam::Ty(n, ..) = p {
             if let Some(an) = to_adt(n) {
-                if a_unsized.contains(&an) && !i_unsized.contains(&n.as_str()) {
+                // (unless a bound there makes it Sized: `T: ?Sized + Clone`; one of the program's traits may (`trait
+                // Tr: Sized`): not reported)
+                let sized_by_bound = a_traits.iter().any(|x| x.0 == an && matches!(x.1.as_str(), "Clone" | "Copy" | "Default" | "Sized" | "#?"));
+                if a_unsized.contains(&an) && !i_unsized.contains(&n.as_str()) && !sized_by_bound {
                     return Some((1, unmet(format!("{n}: Sized"))));
                 }
             }
