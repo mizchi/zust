@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795806944504,
+  "lastUpdate": 1795806948014,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -151128,6 +151128,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/48ec084144de5b948f1250f3f23b03872a115299"
         },
         "date": 1795806177339,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 80.44,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1933,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 86.16,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1562,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 73.83,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5453,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a3959bf12a3b1b4e4cf36445673ea54a4cdede5d",
+          "message": "perf: the E0119 check's per-pair work and the float-literal scan (edit builds -2.5%) (#325)\n\nTraitDb::conflict computes once per impl whether it can be compared, and does not rename an impl with no parameters (cratebench hex's edit build 139.6M -> 130.3M instructions). Prelude selection's float-literal scan goes by memchr instead of byte by byte (14.3M -> 3.4M on gen5000). KPI: edit one fn -2.77%, crates edit -2.54%, traits edit -1.06%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-28T04:09:42+09:00",
+          "tree_id": "7c8bdd61c83eec7dfe9b9b5b2e8a8cb9fdc9c9fe",
+          "url": "https://github.com/mizchi/zust/commit/a3959bf12a3b1b4e4cf36445673ea54a4cdede5d"
+        },
+        "date": 1795806947445,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
