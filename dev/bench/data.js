@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795767419060,
+  "lastUpdate": 1795767422031,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -91132,6 +91132,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 106.969,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e2b10dc345f0553a7c32d296934c961cdf051b6d",
+          "message": "KPI: the base and the head measured side by side, in three parts on runners of their own (#226)\n\n* KPI: the base and the head measured side by side, each in two parts on runners of their own\n\nThe KPI job built and measured the base, then the head, on one runner: 14.6 minutes when the base was not cached\n(install 2:10, base 6:00, head 5:55), against 3 to 4 minutes for CI. Now:\n\n- plan finds the merge base and the keys, looks the base's KPIs up in the cache, and lists the parts to measure: the\n  head's, and the base's when they are not cached.\n- measure (a matrix of the parts) builds the workspace at its commit and runs `bench/kpi_track.py --dry-run --only\n  <part>`: gen5000 on one runner; traits, crates and patterns side by side, then the LSP session, on another\n  (locally 84 s and 56 + 42 s). valgrind is installed from the packages ci.yml keeps, while the workspace builds;\n  kache and rust-cache as in ci.yml.\n- report puts the parts together, keeps the base's KPIs (or main's on a push) and updates the comment.\n\nThe base is measured at the checkout's own path, as the head is (before, in ../base), and the key carries the kept\nvalgrind package's version: the keys are kpi-v3. A base whose kpi_track.py has no --only is measured whole.\n\nkpi_track.py: --only takes some of the sections (gen5000, traits, crates, patterns, lsp), with --dry-run only; the\nKPIs of the others are left out of what it prints, and kpi_pr.py reads the parts' outputs put together.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* KPI: three parts, read-only measuring jobs, and every part's KPIs and valgrind checked before they are kept\n\nThe first run of the split workflow (base not cached): 7.5 minutes, against 14.6. Its parts were uneven: gen5000\ntook 0:44 to measure, the traits, crates and patterns sections followed by the LSP session 1:54, after a 1:40 build\non each runner. Now:\n\n- three parts: gen5000; traits, crates and patterns side by side; the LSP session.\n- the workflow's token is read-only; only report, which comments, may write to the pull request (the measuring jobs\n  run the pull request's code and tools). kache-action posts no comment of its own (pr-comment: false; one a\n  measuring job).\n- each part records the valgrind that measured it; report fails when the parts disagree, or when the base's or the\n  head's KPIs put together lack one, so no such result is kept as a base.\n- kpi_pr.py's comment says how the KPIs are measured now.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* KPI: the key names the environment plan installs, and every part checks it measured there\n\nThe second run measured the base again instead of reading it from the cache: the key took valgrind's version from the\nname of a package kept in ~/apt-debs, which one run had and the other did not (review: the key did not name the\nvalgrind that measured). Now:\n\n- plan installs valgrind as the measuring jobs do (scripts/ci_install_valgrind.sh: the kept packages, or the\n  mirror) and keys the KPIs by `rustc -V | valgrind --version | the image | ldd --version`, which it passes on.\n- each measuring job installs with the head's script (for a base without one too), checks that its own environment\n  is plan's, and records it with its KPIs.\n- report fails when a part's record is not plan's environment, before it compares or keeps anything.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* KPI: the environment is the toolchain, valgrind, OS and C library, not the image's build\n\ndecdb7c8's run failed its LSP part at the environment check: plan's runner had ImageVersion 20261116.376.1, that\npart's 20261116.133.1 (a rollout), with the same rustc, valgrind and glibc. Those, and the OS, are what move the\ncounts; the image's build number is no longer part of the key or the check.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* KPI: plan passes the head's valgrind installer on; a fork's head commit is not in the base's checkout\n\nThe measuring jobs read the head's scripts/ci_install_valgrind.sh with `git show $HEAD_SHA:..`; a base runner of a\nfork's pull request checks out the base, whose repository has no such commit (review). plan, which checks the head\nout, passes the script on as an output (base64), and every measuring job installs with it.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-27T17:05:33+09:00",
+          "tree_id": "60507ebaad4b5dba6e81edd9ea6cea5c6c731b54",
+          "url": "https://github.com/mizchi/zust/commit/e2b10dc345f0553a7c32d296934c961cdf051b6d"
+        },
+        "date": 1795767421483,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.131,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.824,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.864,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 9.771,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 2.091,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.353,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 3.963,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 327.358,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 107.098,
             "unit": "MiB"
           }
         ]
