@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795770410078,
+  "lastUpdate": 1795770412945,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -123283,6 +123283,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/a744cd515e2ce8437bbabbd277af619c3a359437"
         },
         "date": 1795769774589,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 93.103,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 65,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 76.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.103,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 90.909,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 91.761,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "531afefdf139f0e5492eaaee4a6a1ee896adfe3a",
+          "message": "prelude: ExactSizeIterator's default len, from size_hint as std's (#300)\n\nThe prelude's `ExactSizeIterator` now has std's default `len`: `size_hint()`'s lower bound, asserting that the upper bound matches, as std does in every build. So `impl ExactSizeIterator for X {}` compiles. It also gains `Iterator` as its supertrait. An impl's own `len`, or an inherent `len`, still wins. The trait's members are selected only when a program names both `ExactSizeIterator` and `len`.\n\nsmallvec, bit-vec, thread_local, bit-set, regex-automata and matchers get past the missing-`len` error. parking_lot's build moves on to parking_lot_core's `Instant` (#250). The other std traits' default methods (`nth_back`, `rfold`, `rfind`, `size_hint`, `Error::source`, `read_exact`, `write_all`, `Hasher::write_*`) were already accepted when an impl leaves them out; a probe now covers them. `cratebench/survey/issues.tsv` maps the error to #298.\n\nFixes #298.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T09:00:56Z",
+          "tree_id": "cfc9f9d3a8e1f2966eb2a74da9031746be6add0d",
+          "url": "https://github.com/mizchi/zust/commit/531afefdf139f0e5492eaaee4a6a1ee896adfe3a"
+        },
+        "date": 1795770412357,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
