@@ -1049,6 +1049,22 @@ mod tests {
         assert!(out.contains("let _v = d__a__E::V;\n            let f = d__b__E;\n            d__b__E() + f()\n"), "{out}");
     }
 
+    /// A struct literal in a value's place names the type (rustc's tests/ui lint/use-redundant): a block's
+    /// `use m1::S;` beside the globs `use m1::*; use m2::*;` makes `let s = S {};` m1's S, as `=> S {}` and
+    /// `return S {}`; a comparison's operand before an `if`'s block is still a value
+    #[test]
+    fn a_struct_literal_takes_a_block_import_of_the_type() {
+        let src = "mod d {\n    mod m1 { pub struct S {} pub const B: u8 = 1; }\n    mod m2 { pub struct S {} pub const B: u8 = 2; }\n    use m1::*;\n    use m2::*;\n    pub fn run(x: u8) -> u8 {\n        use m1::S;\n        use m1::B;\n        let _s = S {};\n        let _t = match x { 0 => S {}, _ => return 0 };\n        if x == B { 1 } else { 2 }\n    }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["d".to_string()]).unwrap();
+        assert!(out.contains("let _s = d__m1__S {};"), "{out}");
+        assert!(out.contains("0 => d__m1__S {}"), "{out}");
+        assert!(out.contains("if x == d__m1__B { 1 }"), "{out}");
+        // (a struct with fields, which only the type namespace has: CodeRabbit's case on #277)
+        let src = "mod d {\n    pub mod a { pub struct E { pub x: u8 } }\n    pub fn run() { use crate::a::E; let e = E { x: 1 }; let _ = e.x; }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["d".to_string()]).unwrap();
+        assert!(out.contains("let e = d__a__E { x: 1 };"), "{out}");
+    }
+
     /// A source that starts with `(` (`(u8)` beside a renamed `fn u8`): the walk back of a call's argument stops at the
     /// first token (#254 review)
     #[test]
@@ -4316,16 +4332,19 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             //  `u32 != f` / `f <= u32` (fn pointers compare; arithmetic on them is no Rust), an arm's, `=> u32`, and after
             //  `return` / `break`. A type's place is many more (`[u8]`, `(u8, char)`, `impl X for u8`, ..): what is
             //  neither is a type. A path's head, `n == u32::MAX`, is the type's in any place)
+            // (a struct literal there, `let s = S {};` / `=> S { .. }` / `return S {}`, names the type: rustc resolves it
+            //  among types. After a comparison a `{` opens the `if`'s block, `if x == B { .. }`: the operand is a value)
+            let literal = k + 1 < toks.len() && is_sym(k + 1, b'{');
             let value_place = || {
                 if is_sym(k - 1, b'=') {
                     // (`==` / `!=` / `<=` / `>=`, or a compound assignment: an operand)
                     let op = k >= 2 && toks[k - 2].0 == 1 && toks[k - 2].2 == toks[k - 1].1 && b"=!<>+-*/%&|^".contains(&s[toks[k - 2].1]);
                     let binding = k >= 3 && toks[k - 2].0 == 0 && (is_sym(k - 3, b'<') || is_sym(k - 3, b','));
-                    return op || !binding;
+                    return op || (!binding && !literal);
                 }
                 // (the left operand of `==` / `!=`; not of `<=` / `>=`, whose `>` may close generics, `Vec<u8>= ..`)
                 let cmp_next = k + 2 < toks.len() && (is_sym(k + 1, b'=') || is_sym(k + 1, b'!')) && is_sym(k + 2, b'=') && toks[k + 1].2 == toks[k + 2].1;
-                cmp_next || (k >= 2 && is_sym(k - 1, b'>') && is_sym(k - 2, b'=')) || is_id(k - 1, b"return") || is_id(k - 1, b"break")
+                cmp_next || (!literal && ((k >= 2 && is_sym(k - 1, b'>') && is_sym(k - 2, b'=')) || is_id(k - 1, b"return") || is_id(k - 1, b"break")))
             };
             let prim = (j > k || !call) && is_primitive_name(n) && !(j == k && k >= 1 && want != NS_TYPE && (call_arg() || value_place()));
             // (a block's own import first: `fn f() { use b::g; g() }` beside a module-level `g`; for a primitive's name,
