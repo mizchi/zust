@@ -303,8 +303,12 @@ origin/main からの差分の行だけを変異させ、テストで見つか�
   走らせる。test ジョブはクレート内の ThinLTO なしでビルドし (`CARGO_PROFILE_RELEASE_LTO=off`: ワークスペースのビルドが
   2/3 ほどの時間になる)、ビルドの間に、キャッシュしたパッケージから valgrind を入れる。サイズ予算はリンカで変わるので、CI は wild 0.11.0 を入れて `ZUSTC_BENCH_LINKER=wild` で測る
   (`bench/budget.txt` も wild の大きさ)。
-- `.github/workflows/kpi.yml`: pull request への push ごとに走る。分岐点 (merge base) と head を同じランナーで順にビルドし、
-  どちらも `bench/kpi_track.py --lsp --dry-run` で測る (zust-analyzer のセッションも含む)。`bench/kpi_pr.py` が
+- `.github/workflows/kpi.yml`: pull request への push ごとに走る。head と分岐点 (merge base) を
+  `bench/kpi_track.py --dry-run --only <セクション>` で測る (zust-analyzer のセッションも含む)。測定は 3 つに分けて、並んだ
+  ランナーで同時に走らせる (ベースの分も head の分と同時に): gen5000、traits・crates・patterns、LSP セッション。
+  ベースの値は、測った環境 (ツールチェーン・valgrind・OS・C ライブラリ) をキーにして保存する。どの部分も、自分の環境が
+  そのキーの環境と同じかを確かめる。pull request に書き込めるのは、コメントするジョブだけ。命令数は、同じイメージならどのランナーでも
+  同じになる。ベースの値はキャッシュするので、一度測ったベースは測り直さない。`bench/kpi_pr.py` が
   pull request のコメントを 1 件だけ保ち、更新する。そこには KPI ごとのベースとの差と、push ごとの行 (前の push との差つき) が載る。1% を超えて増えた KPI には印を付け、
   警告を出す。ジョブは失敗にしない。
 - `.github/workflows/bench.yml`: main への push ごとに `bench/ci_bench.py` を走らせ、

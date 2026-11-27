@@ -1106,6 +1106,7 @@ compile-fail	borrowck/issue-81365-6.rs
 compile-fail	borrowck/issue-81365-7.rs
 compile-fail	borrowck/issue-81365-8.rs
 compile-fail	borrowck/issue-81365-9.rs
+compile-fail	borrowck/issue-82032.rs
 compile-fail	borrowck/issue-82126-mismatched-subst-and-hir.rs
 compile-fail	borrowck/issue-82462.rs
 compile-fail	borrowck/issue-83309-ice-immut-in-for-loop.rs
@@ -2284,6 +2285,7 @@ check-pass	diagnostic_namespace/do_not_recommend/malformed-diagnostic-attributes
 compile-fail	diagnostic_namespace/do_not_recommend/single-impl-candidate.rs
 check-pass	diagnostic_namespace/local-lint-level-issue-135772.rs
 check-pass	diagnostic_namespace/non_existing_attributes_accepted.rs
+compile-fail	diagnostic_namespace/on_move/std_impls.rs
 compile-fail	diagnostic_namespace/on_unimplemented/broken_format.rs
 compile-fail	diagnostic_namespace/on_unimplemented/custom-on-unimplemented-diagnostic.rs
 compile-fail	diagnostic_namespace/on_unimplemented/do_not_accept_options_of_the_internal_rustc_attribute.rs
@@ -6804,6 +6806,7 @@ run-pass	regions/regions-variance-covariant-use-covariant.rs
 compile-fail	regions/regions-variance-invariant-use-contravariant.rs
 compile-fail	regions/regions-variance-invariant-use-covariant.rs
 compile-fail	regions/regions-wf-trait-object.rs
+check-pass	regions/relate-bound-region-in-method-return.rs
 check-pass	regions/relate-bound-region-ref-type-param.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429-2.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429.rs
@@ -8381,6 +8384,7 @@ check-pass	tuple/coercion-never.rs
 check-pass	tuple/index-float.rs
 compile-fail	tuple/index-invalid.rs
 check-pass	tuple/indexing-in-macro.rs
+compile-fail	tuple/missing-field-access.rs
 run-pass	tuple/nested-index.rs
 run-pass	tuple/nested-zst-tuple-fields.rs
 check-pass	tuple/never-to-any-coercion-in-collection-issue-100727.rs

@@ -9,6 +9,10 @@ name: KPI
 # toolchain and valgrind's versions), so a push whose merge base was measured before builds and measures the head
 # only. Every push to main measures main and keeps it there, for the pull requests whose merge base it is (a cache
 # saved on main is read by every pull request; one saved by a pull request only by that one).
+#
+# The sections are measured in three parts on runners side by side, the base's beside the head's (`plan` lists the parts,
+# a `measure` job measures one, `report` puts them together): an instruction count is the same on any runner of the image, so a part's numbers do not depend on where
+# it ran. A base whose bench/kpi_track.py has no --only is measured whole on one runner.
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -20,46 +24,59 @@ concurrency:
   group: kpi-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# (read only, but for the job that comments: the measuring jobs run the pull request's code and tools)
 permissions:
   contents: read
-  pull-requests: write
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  kpi:
+  # (the merge base, the cache keys, and the parts to measure: the head's, and the base's when the cache does not have
+  # them)
+  plan:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    # (bash with pipefail: a measurement that fails fails its step, not hidden by its `| tee`, so no empty result is
-    # saved as a commit's KPIs)
+    timeout-minutes: 10
     defaults:
       run:
         shell: bash
+    outputs:
+      base_sha: ${{ steps.keys.outputs.base_sha }}
+      base: ${{ steps.keys.outputs.base }}
+      head: ${{ steps.keys.outputs.head }}
+      base_hit: ${{ steps.base_cache.outputs.cache-hit }}
+      parts: ${{ steps.parts.outputs.parts }}
+      env: ${{ steps.keys.outputs.env }}
+      installer: ${{ steps.keys.outputs.installer }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-          submodules: true
       - uses: dtolnay/rust-toolchain@stable
+      # (valgrind as the measuring jobs install it, from the packages ci.yml keeps or else from the mirror: the key
+      # names the version installed, which each measuring job checks it has too)
+      - name: Restore valgrind's packages
+        uses: actions/cache/restore@v4
         with:
-          # (zust-analyzer reads std from rust-src)
-          components: rust-src
-      - uses: Swatinem/rust-cache@v2
-      - name: Install wild and valgrind
-        run: |
-          command -v wild || cargo install --locked wild-linker@0.11.0
-          sudo apt-get update && sudo apt-get install -y valgrind
+          path: ~/apt-debs
+          key: apt-valgrind-ubuntu-24.04-v1
+      - name: Install valgrind
+        run: bash scripts/ci_install_valgrind.sh
       # (the key of a commit's KPIs: the files they are measured from (not the documents, nor the KPI log that main's
       # commits append to; submodules by their commits), and what moves the counts besides them: the toolchain,
-      # valgrind, the runner's image and its C library (cachegrind counts its instructions too). A commit that changes
+      # valgrind, the runner's OS and its C library (cachegrind counts its instructions too). A commit that changes
       # only documents keeps its parent's key)
       - name: Find the merge base and the cache keys
         id: keys
         run: |
+          env_now="$(rustc -V) | $(valgrind --version) | ${ImageOS:-} | $(ldd --version 2>&1 | sed -n 1p)"
+          echo "env=$env_now" | tee -a "$GITHUB_OUTPUT"
+          # (the head's installer, for the measuring jobs, the base's too: a fork's head commit is not in the base's
+          # checkout)
+          echo "installer=$(base64 -w0 scripts/ci_install_valgrind.sh)" >> "$GITHUB_OUTPUT"
           kpi_key() {
-            { rustc -V; valgrind --version; echo "${ImageOS:-} ${ImageVersion:-}"; ldd --version 2>&1 | sed -n 1p
+            { echo "$env_now"
               git ls-tree -r "$1" -- crates src cratebench Cargo.toml Cargo.lock build.rs .cargo bench \
                 | grep -v -e '\.md$' -e 'bench/kpi_log\.'
             } | sha256sum | cut -c1-24
@@ -67,40 +84,188 @@ jobs:
           if [ "${{ github.event_name }}" = pull_request ]; then
             base=$(git merge-base HEAD ${{ github.event.pull_request.base.sha }})
             echo "base_sha=$base" >> "$GITHUB_OUTPUT"
-            echo "base=kpi-v2-$(kpi_key "$base")" >> "$GITHUB_OUTPUT"
+            echo "base=kpi-v3-$(kpi_key "$base")" >> "$GITHUB_OUTPUT"
           fi
-          echo "head=kpi-v2-$(kpi_key HEAD)" >> "$GITHUB_OUTPUT"
-          mkdir -p ~/kpi
-      - name: Restore the base's KPIs
+          echo "head=kpi-v3-$(kpi_key HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Look up the base's KPIs
         if: github.event_name == 'pull_request'
         id: base_cache
         uses: actions/cache/restore@v4
         with:
           path: ~/kpi/base.txt
           key: ${{ steps.keys.outputs.base }}
-      # (the base in a worktree beside the head, with its own target directory and its own bench/kpi_track.py)
-      - name: Measure the base
-        if: github.event_name == 'pull_request' && steps.base_cache.outputs.cache-hit != 'true'
+          lookup-only: true
+      # (each part on a runner of its own: gen5000; traits, crates and patterns side by side; the LSP session alone,
+      # as its count moves with how often the client polls. With two parts, the second (the three, then the LSP
+      # session) took 1:54 on a runner where gen5000 took 0:44. A part's runner builds the workspace (1:40), so the
+      # wall time is the build and the longest part)
+      - name: List the parts to measure
+        id: parts
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ steps.keys.outputs.base_sha }}
+          MEASURE_BASE: ${{ github.event_name == 'pull_request' && steps.base_cache.outputs.cache-hit != 'true' }}
         run: |
-          git worktree add ../base ${{ steps.keys.outputs.base_sha }}
-          cd ../base
-          git submodule update --init --depth 1 cratebench/vendor
-          cargo build --release --workspace
-          jobs=""
-          if grep -q -- '"--jobs"' bench/kpi_track.py; then jobs="--jobs 4"; fi
-          python3 bench/kpi_track.py base --lsp --dry-run $jobs | tee ~/kpi/base.txt
+          parts=""
+          add() { parts="$parts${parts:+,}{\"side\":\"$1\",\"sha\":\"$2\",\"part\":\"$3\"}"; }
+          for p in gen5000 traits,crates,patterns lsp; do add head "$HEAD_SHA" "$p"; done
+          if [ "$MEASURE_BASE" = true ]; then
+            # (grep without -q reads all of it: git show is not cut off, which pipefail would take for a failure)
+            if git show "$BASE_SHA:bench/kpi_track.py" | grep -- '"--only"' >/dev/null; then
+              for p in gen5000 traits,crates,patterns lsp; do add base "$BASE_SHA" "$p"; done
+            else
+              add base "$BASE_SHA" all
+            fi
+          fi
+          echo "parts=[$parts]" | tee -a "$GITHUB_OUTPUT"
+
+  measure:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    # (bash with pipefail: a measurement that fails fails its step, not hidden by its `| tee`, so no empty result is
+    # saved as a commit's KPIs)
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.parts) }}
+    name: measure ${{ matrix.side }} (${{ matrix.part }})
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+          # (the LSP session reads a snapshot of an older commit: git archive)
+          fetch-depth: 0
+      - name: Fetch cratebench's crates
+        if: contains(matrix.part, 'crates') || matrix.part == 'all'
+        run: git submodule update --init --depth 1 cratebench/vendor
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # (zust-analyzer reads std from rust-src)
+          components: rust-src
+      # (as in ci.yml: kache keeps what each compiler run makes, rust-cache the registry and the tools. The release
+      # profile is built as it is, with its LTO: the counts are of that binary)
+      - uses: kunobi-ninja/kache-action@v1
+        with:
+          version: v2.3.1
+          cache-executables: true
+          # (its cache statistics in the job summary only: one comment a measuring job would be one too many)
+          pr-comment: false
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: "false"
+          shared-key: kpi
+          save-if: ${{ matrix.side == 'head' && matrix.part == 'gen5000' }}
+      - name: Restore valgrind's packages
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/apt-debs
+          key: apt-valgrind-ubuntu-24.04-v1
+      - name: Install wild, and valgrind in the background
+        env:
+          INSTALLER: ${{ needs.plan.outputs.installer }}
+        run: |
+          command -v wild || cargo install --locked wild-linker@0.11.0
+          # (as in ci.yml: the build does not need valgrind; nothing of the step's output stays open in the background.
+          # The head's script, which plan passes on, for the base too, as plan installed it)
+          echo "$INSTALLER" | base64 -d > ~/ci_install_valgrind.sh
+          { bash ~/ci_install_valgrind.sh >~/valgrind-install.log 2>&1 </dev/null && echo 0 || echo 1; } >~/valgrind-install.done 2>/dev/null &
+      - name: Build
+        run: cargo build --release --workspace
+      - name: Wait for valgrind
+        run: |
+          while [ ! -s ~/valgrind-install.done ]; do sleep 1; done
+          cat ~/valgrind-install.log
+          [ "$(cat ~/valgrind-install.done)" = 0 ] || { echo "valgrind's install failed"; exit 1; }
+          valgrind --version
+      # (what the key names: a part measured on another toolchain, valgrind, OS or C library than plan's is not kept.
+      # Not the image's build (ImageVersion): runners of one run had 20261116.376.1 and 20261116.133.1 during a
+      # rollout, with the same toolchain, valgrind and C library, which are what move the counts)
+      - name: Check the environment against the plan's
+        env:
+          PLANNED: ${{ needs.plan.outputs.env }}
+        run: |
+          env_now="$(rustc -V) | $(valgrind --version) | ${ImageOS:-} | $(ldd --version 2>&1 | sed -n 1p)"
+          echo "planned: $PLANNED"; echo "here:    $env_now"
+          [ "$env_now" = "$PLANNED" ] || { echo "::error::this runner's environment is not the one plan keyed the KPIs by"; exit 1; }
+      - name: Measure
+        env:
+          PLANNED: ${{ needs.plan.outputs.env }}
+          PART: ${{ matrix.part }}
+          OUT: ${{ runner.temp }}/kpi/${{ matrix.side }}-${{ strategy.job-index }}.txt
+        run: |
+          mkdir -p "$(dirname "$OUT")"
+          if [ "$PART" = all ]; then
+            jobs=""
+            if grep -q -- '"--jobs"' bench/kpi_track.py; then jobs="--jobs 4"; fi
+            python3 bench/kpi_track.py "$PART" --lsp --dry-run $jobs | tee "$OUT"
+          else
+            python3 bench/kpi_track.py "$PART" --dry-run --jobs 4 --only "$PART" | tee "$OUT"
+          fi
+          # (what measured it, which report compares with the plan's: no KPI's name, so kpi_pr.py skips the line)
+          echo "measured-with: $PLANNED" | tee -a "$OUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kpi-${{ matrix.side }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/kpi/${{ matrix.side }}-${{ strategy.job-index }}.txt
+          retention-days: 7
+
+  report:
+    needs: [plan, measure]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: kpi-*
+          path: ${{ runner.temp }}/parts
+          merge-multiple: true
+      - name: Put the parts together
+        env:
+          PLANNED: ${{ needs.plan.outputs.env }}
+        run: |
+          mkdir -p ~/kpi
+          ls -l "$RUNNER_TEMP/parts"
+          cat "$RUNNER_TEMP"/parts/head-*.txt > ~/kpi/head.txt
+          if ls "$RUNNER_TEMP"/parts/base-*.txt >/dev/null 2>&1; then
+            cat "$RUNNER_TEMP"/parts/base-*.txt > ~/kpi/base.txt
+          fi
+          # (every KPI once, and every part measured where plan keyed it: a base kept in the cache is compared with
+          # later heads)
+          for f in ~/kpi/head.txt ~/kpi/base.txt; do
+            [ -f "$f" ] || continue
+            python3 -c "import sys; sys.path.insert(0, 'bench'); import kpi_pr; got = kpi_pr.parse(sys.argv[1]); miss = [k for k in kpi_pr.KPIS if k not in got]; sys.exit(f'{sys.argv[1]}: no {miss}' if miss else 0)" "$f"
+          done
+          for f in "$RUNNER_TEMP"/parts/*.txt; do
+            if [ "$(grep '^measured-with:' "$f" || true)" != "measured-with: $PLANNED" ]; then
+              echo "::error::$(basename "$f") was not measured in the planned environment ($PLANNED)"; grep '^measured-with:' "$f" || true
+              exit 1
+            fi
+          done
+      - name: Restore the base's KPIs
+        if: github.event_name == 'pull_request' && needs.plan.outputs.base_hit == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/kpi/base.txt
+          key: ${{ needs.plan.outputs.base }}
+          fail-on-cache-miss: true
       - name: Keep the base's KPIs
-        if: github.event_name == 'pull_request' && steps.base_cache.outputs.cache-hit != 'true'
+        if: github.event_name == 'pull_request' && needs.plan.outputs.base_hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ~/kpi/base.txt
-          key: ${{ steps.keys.outputs.base }}
-      # (the sections side by side: --jobs 4. An instruction count does not depend on the load; the LSP session runs
-      # alone after them)
-      - name: Measure the head
-        run: |
-          cargo build --release --workspace
-          python3 bench/kpi_track.py ${{ github.event_name == 'push' && 'base' || 'head' }} --lsp --dry-run --jobs 4 | tee ~/kpi/head.txt
+          key: ${{ needs.plan.outputs.base }}
       - name: Keep main's KPIs for the pull requests based on it
         if: github.event_name == 'push'
         run: cp ~/kpi/head.txt ~/kpi/base.txt
@@ -109,15 +274,15 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ~/kpi/base.txt
-          key: ${{ steps.keys.outputs.head }}
+          key: ${{ needs.plan.outputs.head }}
       - name: Update the KPI comment on the PR
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "base: ${{ steps.base_cache.outputs.cache-hit == 'true' && 'from the cache' || 'measured in this run' }} (${{ steps.keys.outputs.base }})"
+          echo "base: ${{ needs.plan.outputs.base_hit == 'true' && 'from the cache' || 'measured in this run' }} (${{ needs.plan.outputs.base }})"
           python3 bench/kpi_pr.py --base ~/kpi/base.txt --head ~/kpi/head.txt \
-            --base-sha ${{ steps.keys.outputs.base_sha }} --head-sha ${{ github.event.pull_request.head.sha }} \
+            --base-sha ${{ needs.plan.outputs.base_sha }} --head-sha ${{ github.event.pull_request.head.sha }} \
             --pr ${{ github.event.pull_request.number }} --repo ${{ github.repository }} \
             --out "$RUNNER_TEMP/kpi.md"
           cat "$RUNNER_TEMP/kpi.md" >> "$GITHUB_STEP_SUMMARY"
