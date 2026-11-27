@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795765224606,
+  "lastUpdate": 1795765227366,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -147047,6 +147047,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/0277886f2b83880d55cafe4b1d1f4639b36f0b73"
         },
         "date": 1795759780219,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.86,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1919,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.93,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1558,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 73.68,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5442,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8be8b59d86a1934c31427d2f6bf38d08efc222bb",
+          "message": "Merge pull request #295 from mizchi/claude/lsp-edit-passes-4\n\nLSP edit: keep each item's refs while the program's names are the same (#188)",
+          "timestamp": "2026-11-27T16:35:09+09:00",
+          "tree_id": "b01fb598de0c0e2c5bfb0d4e9c2093d6c8dc6483",
+          "url": "https://github.com/mizchi/zust/commit/8be8b59d86a1934c31427d2f6bf38d08efc222bb"
+        },
+        "date": 1795765226862,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
