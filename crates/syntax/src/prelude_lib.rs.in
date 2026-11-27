@@ -4302,6 +4302,14 @@ fn __exr_fmt_spec<G>(
     f.radix = radix;
 }
 
+// (a program's `write!(f, ..)` into a Formatter: a Formatter of its own over the same String, with no spec of its own,
+// as std's `f.write_fmt(args)`; the indent of `{:#?}` is kept)
+fn __exr_sub_formatter<G>(f: &mut Formatter) -> Formatter {
+    let mut g = __exr_formatter::<()>(&mut *f.buf);
+    g.indent = f.indent;
+    g
+}
+
 fn __exr_fmt_lit<G>(f: &mut Formatter, s: &str) {
     f.buf.push_str(s);
 }
@@ -5115,9 +5123,28 @@ fn __exr_float_digits<G>(x: f64, is32: bool, out: &mut Vec<u8>) -> i32 {
 
 // `{}` / `{:?}` / `{:.N}` (Rust と同じ: Display は指数を使わず、Debug は 1e16 以上と 1e-5 未満を指数にし、整数なら `.0` を付ける)
 // `{:e}` / `{:E}`: 仮数の桁 (最短か、精度があれば prec + 1 桁に偶数丸め) と指数
+// (a number written whole: `{:08e}` pads with zeros after its sign, as std's; otherwise as a string, right-aligned)
+fn __exr_pad_num<G>(f: &mut Formatter, s: &str) {
+    if !f.zero || f.width <= s.len() {
+        __exr_pad::<()>(f, s, 2);
+        return;
+    }
+    let sb = s.as_bytes();
+    let signed = sb[0] == b'-' || sb[0] == b'+';
+    if signed {
+        f.buf.push(sb[0] as char);
+    }
+    let mut z = f.width - s.len();
+    while z > 0 {
+        f.buf.push('0');
+        z -= 1;
+    }
+    f.buf.push_str(if signed { &s[1..] } else { s });
+}
+
 fn __exr_fmt_exp<G>(f: &mut Formatter, x: f64, is32: bool, upper: bool) {
     if x != x {
-        __exr_pad::<()>(f, "NaN", 2);
+        __exr_pad_num::<()>(f, "NaN");
         return;
     }
     let neg = x.is_sign_negative();
@@ -5130,7 +5157,7 @@ fn __exr_fmt_exp<G>(f: &mut Formatter, x: f64, is32: bool, upper: bool) {
     }
     if a == 1.0 / 0.0 {
         s.push_str("inf");
-        __exr_pad::<()>(f, s.as_str(), 2);
+        __exr_pad_num::<()>(f, s.as_str());
         return;
     }
     let mut d: Vec<u8> = Vec::new();
@@ -5150,7 +5177,7 @@ fn __exr_fmt_exp<G>(f: &mut Formatter, x: f64, is32: bool, upper: bool) {
         }
     }
     __exr_exp_tail::<()>(&mut s, &d, dp - 1, if f.has_prec { f.prec + 1 } else { d.len }, upper);
-    __exr_pad::<()>(f, s.as_str(), 2);
+    __exr_pad_num::<()>(f, s.as_str());
 }
 
 fn __exr_fmt_exp_int<G>(f: &mut Formatter, mag: u128, neg: bool, upper: bool) {
@@ -5182,7 +5209,7 @@ fn __exr_fmt_exp_int<G>(f: &mut Formatter, mag: u128, neg: bool, upper: bool) {
     }
     let _ = e;
     __exr_exp_tail::<()>(&mut s, &d, dp - 1, if f.has_prec { f.prec + 1 } else { d.len }, upper);
-    __exr_pad::<()>(f, s.as_str(), 2);
+    __exr_pad_num::<()>(f, s.as_str());
 }
 
 // 仮数 d (n 桁まで 0 で埋める) と指数 e を `d.ddde-5` の形で書く
@@ -16868,4 +16895,474 @@ fn __exr_fp_classify<G>(bits: u64, f32: bool) -> FpCategory {
     } else {
         FpCategory::Normal
     }
+}
+
+// `fmt::Binary` / `Octal` / `LowerHex` / `UpperHex` / `LowerExp` / `UpperExp`: what `{:b}` / `{:o}` / `{:x}` / `{:X}` /
+// `{:e}` / `{:E}` of a type of the program's call, and std's impls for the numbers, which write as zustc's own `{:x}`
+// of a number does (`fmt::LowerHex::fmt(&self.0, f)` in a program's impl)
+pub trait Binary {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
+pub trait Octal {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
+pub trait LowerHex {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
+pub trait UpperHex {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
+pub trait LowerExp {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
+pub trait UpperExp {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
+// (a number in the radix of the trait whose fmt is called, whatever spec the Formatter was given: 1 x, 2 X, 3 b, 4 o. A
+// signed one is given as the unsigned type of its width, whose value its bits are: `-1i8` is `ff`, as std's)
+fn __exr_radix_fmt<T>(x: &T, f: &mut Formatter, radix: u8) -> Result<(), __FmtError> {
+    let r = f.radix;
+    f.radix = radix;
+    __exr_display(x, f);
+    f.radix = r;
+    Ok(())
+}
+impl LowerHex for i8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u8), f, 1)
+    }
+}
+impl LowerHex for i16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u16), f, 1)
+    }
+}
+impl LowerHex for i32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u32), f, 1)
+    }
+}
+impl LowerHex for i64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u64), f, 1)
+    }
+}
+impl LowerHex for i128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u128), f, 1)
+    }
+}
+impl LowerHex for isize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as usize), f, 1)
+    }
+}
+impl LowerHex for u8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 1)
+    }
+}
+impl LowerHex for u16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 1)
+    }
+}
+impl LowerHex for u32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 1)
+    }
+}
+impl LowerHex for u64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 1)
+    }
+}
+impl LowerHex for u128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 1)
+    }
+}
+impl LowerHex for usize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 1)
+    }
+}
+impl UpperHex for i8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u8), f, 2)
+    }
+}
+impl UpperHex for i16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u16), f, 2)
+    }
+}
+impl UpperHex for i32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u32), f, 2)
+    }
+}
+impl UpperHex for i64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u64), f, 2)
+    }
+}
+impl UpperHex for i128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u128), f, 2)
+    }
+}
+impl UpperHex for isize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as usize), f, 2)
+    }
+}
+impl UpperHex for u8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 2)
+    }
+}
+impl UpperHex for u16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 2)
+    }
+}
+impl UpperHex for u32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 2)
+    }
+}
+impl UpperHex for u64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 2)
+    }
+}
+impl UpperHex for u128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 2)
+    }
+}
+impl UpperHex for usize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 2)
+    }
+}
+impl Binary for i8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u8), f, 3)
+    }
+}
+impl Binary for i16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u16), f, 3)
+    }
+}
+impl Binary for i32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u32), f, 3)
+    }
+}
+impl Binary for i64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u64), f, 3)
+    }
+}
+impl Binary for i128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u128), f, 3)
+    }
+}
+impl Binary for isize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as usize), f, 3)
+    }
+}
+impl Binary for u8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 3)
+    }
+}
+impl Binary for u16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 3)
+    }
+}
+impl Binary for u32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 3)
+    }
+}
+impl Binary for u64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 3)
+    }
+}
+impl Binary for u128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 3)
+    }
+}
+impl Binary for usize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 3)
+    }
+}
+impl Octal for i8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u8), f, 4)
+    }
+}
+impl Octal for i16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u16), f, 4)
+    }
+}
+impl Octal for i32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u32), f, 4)
+    }
+}
+impl Octal for i64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u64), f, 4)
+    }
+}
+impl Octal for i128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u128), f, 4)
+    }
+}
+impl Octal for isize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as usize), f, 4)
+    }
+}
+impl Octal for u8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 4)
+    }
+}
+impl Octal for u16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 4)
+    }
+}
+impl Octal for u32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 4)
+    }
+}
+impl Octal for u64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 4)
+    }
+}
+impl Octal for u128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 4)
+    }
+}
+impl Octal for usize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 4)
+    }
+}
+impl LowerExp for i8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, false);
+        Ok(())
+    }
+}
+impl LowerExp for i16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, false);
+        Ok(())
+    }
+}
+impl LowerExp for i32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, false);
+        Ok(())
+    }
+}
+impl LowerExp for i64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, false);
+        Ok(())
+    }
+}
+impl LowerExp for i128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, false);
+        Ok(())
+    }
+}
+impl LowerExp for isize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, false);
+        Ok(())
+    }
+}
+impl LowerExp for u8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, false);
+        Ok(())
+    }
+}
+impl LowerExp for u16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, false);
+        Ok(())
+    }
+}
+impl LowerExp for u32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, false);
+        Ok(())
+    }
+}
+impl LowerExp for u64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, false);
+        Ok(())
+    }
+}
+impl LowerExp for u128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, false);
+        Ok(())
+    }
+}
+impl LowerExp for usize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, false);
+        Ok(())
+    }
+}
+impl LowerExp for f64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp::<()>(f, *self, false, false);
+        Ok(())
+    }
+}
+impl LowerExp for f32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp::<()>(f, *self as f64, true, false);
+        Ok(())
+    }
+}
+impl UpperExp for i8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, true);
+        Ok(())
+    }
+}
+impl UpperExp for i16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, true);
+        Ok(())
+    }
+}
+impl UpperExp for i32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, true);
+        Ok(())
+    }
+}
+impl UpperExp for i64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, true);
+        Ok(())
+    }
+}
+impl UpperExp for i128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, true);
+        Ok(())
+    }
+}
+impl UpperExp for isize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, true);
+        Ok(())
+    }
+}
+impl UpperExp for u8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, true);
+        Ok(())
+    }
+}
+impl UpperExp for u16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, true);
+        Ok(())
+    }
+}
+impl UpperExp for u32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, true);
+        Ok(())
+    }
+}
+impl UpperExp for u64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, true);
+        Ok(())
+    }
+}
+impl UpperExp for u128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, true);
+        Ok(())
+    }
+}
+impl UpperExp for usize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, true);
+        Ok(())
+    }
+}
+impl UpperExp for f64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp::<()>(f, *self, false, true);
+        Ok(())
+    }
+}
+impl UpperExp for f32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp::<()>(f, *self as f64, true, true);
+        Ok(())
+    }
+}
+// (what codegen calls for `{:b}` / `{:o}` / `{:x}` / `{:X}` / `{:e}` / `{:E}` of a value that is no number: the trait's fmt)
+fn __exr_fmt_binary<T: Binary>(x: &T, f: &mut Formatter) {
+    let _ = Binary::fmt(x, f);
+}
+fn __exr_fmt_octal<T: Octal>(x: &T, f: &mut Formatter) {
+    let _ = Octal::fmt(x, f);
+}
+fn __exr_fmt_lowerhex<T: LowerHex>(x: &T, f: &mut Formatter) {
+    let _ = LowerHex::fmt(x, f);
+}
+fn __exr_fmt_upperhex<T: UpperHex>(x: &T, f: &mut Formatter) {
+    let _ = UpperHex::fmt(x, f);
+}
+fn __exr_fmt_lowerexp<T: LowerExp>(x: &T, f: &mut Formatter) {
+    let _ = LowerExp::fmt(x, f);
+}
+fn __exr_fmt_upperexp<T: UpperExp>(x: &T, f: &mut Formatter) {
+    let _ = UpperExp::fmt(x, f);
 }
