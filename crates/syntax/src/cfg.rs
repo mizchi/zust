@@ -597,7 +597,9 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool, externs:
             *env |= matches!(t(i), b"env" | b"option_env");
             let g = if t(i + 2) == b"(" || t(i + 2) == b"[" || t(i + 2) == b"{" {
                 Some(i + 2)
-            } else if toks.get(i + 2).is_some_and(|x| x.0 == 0) && t(i + 3) == b"{" {
+            // (`macro_rules! name { .. }`; not `if !done { .. }`, whose block is code: aho-corasick's `if !cfg!(..) {
+            // debug!(..); }` keeps a `#[cfg(feature = "logging")]` from its expansion until it is stripped)
+            } else if t(i) == b"macro_rules" && toks.get(i + 2).is_some_and(|x| x.0 == 0) && t(i + 3) == b"{" {
                 Some(i + 3)
             } else {
                 None
