@@ -1,0 +1,5 @@
+[log] check_eq: 2 9
+[log] pick: Some(9) None
+[log] starts: other expr expr expr expr expr
+[log] no expr: other other other other other other
+[log] more: expr expr expr expr

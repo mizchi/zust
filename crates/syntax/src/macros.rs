@@ -517,6 +517,32 @@ fn is_expr_keyword(s: &str) -> bool {
     )
 }
 
+/// rustc's `Token::can_begin_expr`: whether an expression can start at t[0]. A rule whose `$e:expr` would start at a
+/// token no expression starts with does not match, and the next rule is tried: writeable's `(@internal, $a:expr, ..)`
+/// after `($a:expr, $b:expr, $c:expr, $($arg:tt)+)`, which would take `@internal` as `$a` and call itself without end
+fn expr_may_begin(t: &[TokenTree]) -> bool {
+    match t.first() {
+        Some(TokenTree::Punct(p)) => match p.as_char() {
+            // (unary operators, closures, references, a qualified path, an attribute, a label)
+            '!' | '*' | '|' | '&' | '<' | '#' | '\'' => true,
+            // (not `->`)
+            '-' => !pair_at(t, 0, '-', '>'),
+            // (a range `..x`, a path `::a`; not `.5` or `:x`)
+            '.' => pair_at(t, 0, '.', '.'),
+            ':' => pair_at(t, 0, ':', ':'),
+            _ => false,
+        },
+        // (the reserved words that start no expression in any edition: `pub`, `struct`, `mut` ..)
+        Some(TokenTree::Ident(i)) => !NO_EXPR_WORDS.iter().any(|w| i == w),
+        _ => true,
+    }
+}
+
+const NO_EXPR_WORDS: &[&str] = &[
+    "as", "else", "enum", "extern", "fn", "impl", "in", "mod", "mut", "pub", "ref", "struct", "trait", "type", "use", "where", "abstract", "become",
+    "final", "macro", "override", "priv", "typeof", "unsized", "virtual",
+];
+
 fn punct_at(t: &[TokenTree], i: usize, c: char) -> bool {
     matches!(t.get(i), Some(TokenTree::Punct(p)) if p.as_char() == c)
 }
@@ -893,6 +919,9 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&Stop>) -> Option<(usi
             if m == 0 { None } else { Some((m, false)) }
         }
         _ => {
+            if matches!(kind, "expr" | "expr_2021") && !expr_may_begin(toks) {
+                return None;
+            }
             // expr / pat / stmt / meta: 次の区切りまで (グループの中は見ない)
             let mut n = 0;
             // (式: オペランドの後にオペランドが続いたら式は終わっている: `$($len:expr)+` の `1 2 3`)
@@ -2314,6 +2343,19 @@ fn path_seg(t: &[u8]) -> bool {
     )
 }
 
+/// Whether the path of the macro call at toks[i] (its name) starts from `core`, `std` or `alloc`: `::core::assert!`,
+/// `std::println!`
+fn std_path(b: &[u8], toks: &[(u8, usize, usize)], i: usize) -> bool {
+    let tk = |k: usize| -> &[u8] { &b[toks[k].1..toks[k].2] };
+    let colons = |k: usize| toks[k].0 == 1 && b[toks[k].1] == b':' && toks[k + 1].0 == 1 && b[toks[k + 1].1] == b':';
+    let mut k = i;
+    // (a label is no segment: `break 'a ::std::m!()`)
+    while k >= 3 && toks[k - 3].0 == 0 && path_seg(tk(k - 3)) && colons(k - 2) && !(toks[k - 3].1 > 0 && b[toks[k - 3].1 - 1] == b'\'') {
+        k -= 3;
+    }
+    k < i && matches!(tk(k), b"core" | b"std" | b"alloc")
+}
+
 /// The outermost attribute and derive uses of the text, expanded (crate::pm::expand_items) and put in its place with
 /// as many lines as they had; the definitions' places (textual scope) move with the text. Whether one ran
 fn pm_items(text: &mut String, pms: &[crate::pm::Lib], env: &[(String, String)], cfg: Option<&crate::cfg::CfgSet>, first: &mut HashMap<String, usize>) -> Result<bool, String> {
@@ -2448,6 +2490,8 @@ fn expand_joined(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::
     // 2. 呼び出しを展開する (いちばん外側の呼び出しだけ。展開したものの中の呼び出しは次の周)
     let limit = text.len().saturating_mul(64).max(16 << 20);
     let depth_limit = recursion_limit(&text);
+    // (the first call the last round still expands, and its line: the error's, too_deep)
+    let mut deep: Option<(String, usize)> = None;
     // (one more round than the limit: the last one only finds that nothing is left to expand)
     for round in 0..=depth_limit {
         // (definitions an expansion produced: `macro_rules! foo { () => { macro_rules! bar { .. } } }`)
@@ -2498,6 +2542,11 @@ fn expand_joined(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::
             // (in `stringify!(..)`: a `macro_rules!` call is kept as written, as rustc does: `stringify!(m!())` is
             // "m!()")
             if i < inert_until {
+                rules = None;
+            }
+            // (a path from `core` / `std` / `alloc` names their macro, not a `macro_rules!` of that name: embassy's
+            // `macro_rules! assert { .. => { ::core::assert!($($x)*); } }`, which would call itself without end)
+            if rules.is_some() && i >= 3 && sym(i - 1, b':') && std_path(b, &toks, i) {
                 rules = None;
             }
             // (a proc macro's function-like call: `name!(..)`, `path::name!(..)`, a name no `macro_rules!` has. A path
@@ -2665,6 +2714,9 @@ fn expand_joined(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::
             if ((top && item_start) || drop_semi) && sym(ge + 1, b';') {
                 e = toks[ge + 1].2;
             }
+            if round == depth_limit && deep.is_none() {
+                deep = Some((String::from_utf8_lossy(tk(i)).into_owned(), pos().0));
+            }
             reps.push((a, e, rep));
             i = ge + 1;
         }
@@ -2721,7 +2773,54 @@ fn expand_joined(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::
             return Ok(Some(text));
         }
     }
-    Err(format!("1:1: macro expansion is too deep (recursion limit {depth_limit})"))
+    Err(too_deep(src, &macros, deep, depth_limit))
+}
+
+/// rustc's "recursion limit reached while expanding `m!`", for the call the last round still expanded (`deep`: its
+/// name and line). Each round puts an expansion on the line of the call it replaces, so that line is the line of
+/// the chain's first call in src: the error is at the first call of a known macro there, and names that macro too
+/// when it is another
+#[cold]
+fn too_deep(src: &str, macros: &HashMap<String, Vec<Rule>>, deep: Option<(String, usize)>, limit: usize) -> String {
+    let Some((name, line)) = deep else {
+        return format!("1:1: macro expansion is too deep (recursion limit {limit})");
+    };
+    // (`m__zm1`, rename_shadowed_macros's name for one of two `macro_rules! m`, is `m`)
+    let shown = |n: &str| -> String {
+        match n.rfind("__zm") {
+            Some(k) if k > 0 && n.len() > k + 4 && n[k + 4..].bytes().all(|c| c.is_ascii_digit()) => n[..k].to_string(),
+            _ => n.to_string(),
+        }
+    };
+    let known = |n: &str| n != "macro_rules" && (macros.contains_key(n) || macros.keys().any(|k| shown(k) == n));
+    let deep_name = shown(&name);
+    let start = src.split('\n').take(line - 1).map(|l| l.len() + 1).sum::<usize>().min(src.len());
+    let text = src[start..].split('\n').next().unwrap_or("");
+    let b = text.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let tk = |k: usize| -> &[u8] { &b[toks[k].1..toks[k].2] };
+    let sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && b[toks[k].1] == c;
+    let call = (0..toks.len()).find(|&k| {
+        toks[k].0 == 0 && sym(k + 1, b'!') && (sym(k + 2, b'(') || sym(k + 2, b'[') || sym(k + 2, b'{')) && known(std::str::from_utf8(tk(k)).unwrap_or(""))
+    });
+    let Some(k) = call else {
+        return format!("{line}:1: recursion limit reached while expanding `{deep_name}!` (recursion limit {limit})");
+    };
+    // (at the start of the call's path: `::core::assert!(..)`)
+    let mut p = k;
+    while p >= 2 && sym(p - 1, b':') && sym(p - 2, b':') {
+        p -= 2;
+        if p >= 1 && toks[p - 1].0 == 0 && path_seg(tk(p - 1)) {
+            p -= 1;
+        }
+    }
+    let col = text[..toks[p].1].chars().count() + 1;
+    let first = String::from_utf8_lossy(tk(k)).into_owned();
+    if first == deep_name {
+        format!("{line}:{col}: recursion limit reached while expanding `{deep_name}!` (recursion limit {limit})")
+    } else {
+        format!("{line}:{col}: recursion limit reached while expanding `{deep_name}!` (recursion limit {limit}), in the expansion of this call of `{first}!`")
+    }
 }
 
 /// 前の版の expand (ソース全体を proc_macro2 で読む)。expand と結果が同じかを確かめるため
@@ -2815,7 +2914,8 @@ pub fn expand_reference(src: &str) -> Result<Option<String>, String> {
     // 2. 呼び出しを展開する (展開したものの中の呼び出しも)
     let limit = text.len().saturating_mul(64).max(16 << 20);
     let depth_limit = recursion_limit(&text);
-    for _round in 0..=depth_limit {
+    let mut deep: Option<(String, usize)> = None;
+    for round in 0..=depth_limit {
         let ts = TokenStream::from_str(&text).map_err(|e| format!("1:1: {e}"))?;
         let mut reps: Vec<(usize, usize, String)> = vec![];
         find_calls(ts, &macros, &text, 0, false, true, &mut reps)?;
@@ -2824,6 +2924,12 @@ pub fn expand_reference(src: &str) -> Result<Option<String>, String> {
         }
         // 後ろから置き換える (1 行に収めるので、置き換えた範囲の改行は残す)
         reps.sort_by_key(|r| std::cmp::Reverse(r.0));
+        // (as expand_joined: the first call of the last round, its name the word before the `!`)
+        if let (true, Some(&(a, _, _))) = (round == depth_limit, reps.last()) {
+            let call = &text[a..];
+            let name = call[..call.find('!').unwrap_or(0)].rsplit(|c: char| !(c.is_alphanumeric() || c == '_')).next().unwrap_or("");
+            deep = Some((name.to_string(), text[..a].matches('\n').count() + 1));
+        }
         // (展開したものの中にマクロの名前が無ければ、もう一周しなくてよい)
         let again = reps.iter().any(|r| r.2.contains("macro_rules") || macros.keys().any(|m| r.2.contains(m.as_str())));
         for (a, e, rep) in reps {
@@ -2843,7 +2949,19 @@ pub fn expand_reference(src: &str) -> Result<Option<String>, String> {
             return Ok(Some(text));
         }
     }
-    Err(format!("1:1: macro expansion is too deep (recursion limit {depth_limit})"))
+    Err(too_deep(src, &macros, deep, depth_limit))
+}
+
+/// std_path for find_calls's token trees: whether the path of the call named at toks[i] starts from `core` / `std` /
+/// `alloc`
+fn std_path_tt(toks: &[TokenTree], i: usize) -> bool {
+    let mut k = i;
+    while k >= 3
+        && matches!((&toks[k - 3], &toks[k - 2], &toks[k - 1]), (TokenTree::Ident(seg), TokenTree::Punct(c1), TokenTree::Punct(c2)) if c1.as_char() == ':' && c2.as_char() == ':' && path_seg(seg.to_string().as_bytes()))
+    {
+        k -= 3;
+    }
+    k < i && matches!(&toks[k], TokenTree::Ident(r) if r == "core" || r == "std" || r == "alloc")
 }
 
 /// `name!(..)` / `name![..]` / `name!{..}` の呼び出し (いちばん外側だけ。中は次の周で展開する)
@@ -2863,7 +2981,8 @@ fn find_calls(
         if i + 2 < toks.len() {
             if let (TokenTree::Ident(name), TokenTree::Punct(p), TokenTree::Group(g)) = (&toks[i], &toks[i + 1], &toks[i + 2]) {
                 if p.as_char() == '!' {
-                    if let Some(rules) = macros.get(&name.to_string()) {
+                    // (as expand_joined: `::core::assert!` is core's, not a `macro_rules! assert`)
+                    if let Some(rules) = macros.get(&name.to_string()).filter(|_| !std_path_tt(&toks, i)) {
                         let args: Vec<TokenTree> = g.stream().into_iter().collect();
                         let mut done = false;
                         FRAG_FATAL.with(|c| c.set(false));
