@@ -505,7 +505,9 @@ impl Cx<'_> {
         let Some(tr) = self.explicit_trait.as_ref().filter(|(m, _)| m == "fmt").map(|(_, tr)| tr.rsplit("::").next().unwrap_or(tr).to_string()) else {
             return Ok(None);
         };
-        if tr != "Pointer" {
+        // (std's Pointer only: where the program has a Pointer of its own, std's is `__p_Pointer` and the program's
+        // goes through its impls)
+        if tr != if self.prog.traits.contains_key("__p_Pointer") { "__p_Pointer" } else { "Pointer" } {
             return Ok(None);
         }
         // (Pointer's receiver is `&self`: the pointer is what it points to, `&&u8`'s `&u8`)
@@ -520,8 +522,12 @@ impl Cx<'_> {
         };
         // (not `&E` of a type with its own Pointer impl, `Pointer::fmt(e_ref, f)`: E's impl, the ordinary lookup)
         let own = |p: Ty| matches!(p, Ty::Ref(_, Ty::Struct(_)));
+        // (`&p` of a pointer this does not write, a fat raw one (`*const [u8]`) or one to a `dyn`: not the address of the
+        // variable p, the outer reference's; the ordinary lookup)
+        let unsupported = |p: Ty| matches!(p, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_)) && !ptr_like(p);
         let ptr_at: Option<(Ty, bool)> = match t {
             Ty::Ref(_, p) if ptr_like(*p) => Some((*p, true)),
+            Ty::Ref(_, p) if unsupported(*p) => None,
             p if ptr_like(p) && !own(p) => Some((p, false)),
             _ => None,
         };
@@ -540,6 +546,7 @@ impl Cx<'_> {
             // (by the evaluated receiver's type, which match ergonomics may give one more reference than peek's)
             let (pt, through) = match rt {
                 Ty::Ref(_, p) if ptr_like(*p) => (*p, true),
+                Ty::Ref(_, p) if unsupported(*p) => ptr_at.unwrap(),
                 p if ptr_like(p) && !own(p) => (p, false),
                 _ => ptr_at.unwrap(),
             };
@@ -4865,7 +4872,7 @@ impl Cx<'_> {
                         // (std's Pointer, which the compiler writes itself, `fmt::Pointer::fmt(&r, f)`: the method call with the
                         // trait named (radix_fmt_method); its receiver keeps its `&`, as `Pointer::fmt(&rr, f)` of a `&&u8`
                         // writes rr itself, not *rr)
-                        let std_fmt = tr == "Pointer" && ms == "fmt";
+                        let std_fmt = ms == "fmt" && tr == if self.prog.traits.contains_key("__p_Pointer") { "__p_Pointer" } else { "Pointer" };
                         let recv = match a0 {
                             Expr::Ref(_, e) if !std_fmt => paren((**e).clone()),
                             _ => paren(a0.clone()),
