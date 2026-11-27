@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795812073962,
+  "lastUpdate": 1795812076915,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -93868,6 +93868,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 139.43,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f63b1d3dec63943a884210c0bd11e85695a242c3",
+          "message": "perf: a bound's text is read once per thread, and an instance's bound asked of the solver once (traits check -8%) (#327)\n\nparse_fn_bound, bound_args and assoc_bindings parsed the bound as a file of its own on every call; each reading is a function of the text alone, so it is kept by its text in a thread-local map. Insts::request asked TraitDb::holds_in the same goal twice for a bound of the program's traits; the second check takes the first answer. KPI: traits check -8.25%, patterns check -2.47%, patterns edit -2.90%, LSP session -4.30%.\n\nAlso: the blanket-impl E0119 fixture goes through TraitDb::conflict (a bounded `impl<T: Marker> Tr for T`).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01DA4GokUemhzj5xUVkRtGGb",
+          "timestamp": "2026-11-28T05:36:54+09:00",
+          "tree_id": "50a63b1a957c6062d86a4dd7eeb26eaf0d28823d",
+          "url": "https://github.com/mizchi/zust/commit/f63b1d3dec63943a884210c0bd11e85695a242c3"
+        },
+        "date": 1795812076211,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.854,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.727,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.3,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 9.075,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 4.046,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.868,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 6.089,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 259.919,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 139.445,
             "unit": "MiB"
           }
         ]
