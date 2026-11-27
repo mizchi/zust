@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795759772877,
+  "lastUpdate": 1795759775501,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -90448,6 +90448,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 136.348,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0277886f2b83880d55cafe4b1d1f4639b36f0b73",
+          "message": "Merge pull request #268 from mizchi/claude/tender-sagan-iatvun\n\nE0119: a blanket impl over a Sized parameter doesn't overlap std's Path / OsStr / CStr; std's AsMut",
+          "timestamp": "2026-11-27T15:03:36+09:00",
+          "tree_id": "9dc89f0823070326725d2fdc799a55db14d0056f",
+          "url": "https://github.com/mizchi/zust/commit/0277886f2b83880d55cafe4b1d1f4639b36f0b73"
+        },
+        "date": 1795759775107,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.31,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 1.008,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 2.377,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 16.939,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.064,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.406,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 4.713,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 381.259,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 136.766,
             "unit": "MiB"
           }
         ]
