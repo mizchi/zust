@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795788604512,
+  "lastUpdate": 1795791564246,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -64235,6 +64235,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 62.246,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e0a3d9ddde64ba3a2788177258f2d675b06bdb4f",
+          "message": "Threads: Builder, park_timeout, recv_timeout, Barrier; 6 more rustc thread UI tests (#309)\n\n- thread::Builder (name, stack_size, spawn -> io::Result); named threads in panic messages\n- thread::park_timeout; mpsc recv_timeout / RecvTimeoutError / into_iter; sync::Barrier\n- auto traits of closures: a by-reference capture is the reference it stands for (Sync needs T: Sync; Send\n  needs T: Send for a capture the body mutates, T: Sync + Send otherwise); &T is Send only when T is Sync\n- Builder::spawn checked as thread::spawn (method and path calls); a closure given as a value (a local, a\n  block, an `if`) is checked by its type\n- thread_local!: std's order when an initializer made the value itself; `!` fallback of `|| panic!()`\n- tests/security: 9 new cases; tests/threads/builder.rs; 6 more rustc UI tests pass\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01DA4GokUemhzj5xUVkRtGGb",
+          "timestamp": "2026-11-27T23:53:00+09:00",
+          "tree_id": "885014c112e0fff3d7fe5a2378eb6275eaeade1a",
+          "url": "https://github.com/mizchi/zust/commit/e0a3d9ddde64ba3a2788177258f2d675b06bdb4f"
+        },
+        "date": 1795791563657,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 164.888,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.97,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 25.63,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 67.277,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.902,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 324.086,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.557,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 131.049,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 799.624,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 721.256,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.96,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 89.027,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 307.316,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.629,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.445,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1903.182,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 611.723,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3932.281,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 72.607,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 115.218,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 48.738,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 91.447,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 93.132,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 232.537,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 77.544,
             "unit": "ms"
           }
         ]
