@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795784151699,
+  "lastUpdate": 1795784155042,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -123645,6 +123645,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 91.761,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "15a3cbd2c7d7fe1bf4b87bfdc1e2481da5191359",
+          "message": "Merge pull request #308 from mizchi/claude/focused-einstein-oeko82\n\nstd::thread as OS threads: pthreads, atomic instructions, futex locks",
+          "timestamp": "2026-11-27T21:51:17+09:00",
+          "tree_id": "36acc836d270acb95ec458999b13336f6f53f753",
+          "url": "https://github.com/mizchi/zust/commit/15a3cbd2c7d7fe1bf4b87bfdc1e2481da5191359"
+        },
+        "date": 1795784154504,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 93.103,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 65,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 74.194,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.103,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 90.909,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 91.513,
             "unit": "%"
           }
         ]
