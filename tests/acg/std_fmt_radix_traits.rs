@@ -94,6 +94,10 @@ fn nonzero_and_zero_pad() {
     println!("{:x} {:#b} {:o} {:X} {} {:x?} {:?}", n, n, n, n, n, n, n);
     println!("{:x} {:b} {} {:e} {:E}", m, m, m, k, k);
     println!("{} {}", hex(255u8), hex(-1i8));
+    // (NaN and infinity are padded with zeros too, the sign first; NaN takes no `+`)
+    for v in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        println!("[{:08e}] [{:+08e}] [{:8e}] [{:08e}]", v, v, v, F(v));
+    }
 }
 
 struct E(i32);
@@ -121,3 +125,10 @@ mod m {
     }
 }
 use m::M;
+
+struct F(f64);
+impl fmt::LowerExp for F {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::LowerExp::fmt(&self.0, f)
+    }
+}

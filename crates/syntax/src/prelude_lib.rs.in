@@ -5144,7 +5144,7 @@ fn __exr_pad_num<G>(f: &mut Formatter, s: &str) {
 
 fn __exr_fmt_exp<G>(f: &mut Formatter, x: f64, is32: bool, upper: bool) {
     if x != x {
-        __exr_pad::<()>(f, "NaN", 2);
+        __exr_pad_num::<()>(f, "NaN");
         return;
     }
     let neg = x.is_sign_negative();
@@ -5157,7 +5157,7 @@ fn __exr_fmt_exp<G>(f: &mut Formatter, x: f64, is32: bool, upper: bool) {
     }
     if a == 1.0 / 0.0 {
         s.push_str("inf");
-        __exr_pad::<()>(f, s.as_str(), 2);
+        __exr_pad_num::<()>(f, s.as_str());
         return;
     }
     let mut d: Vec<u8> = Vec::new();
