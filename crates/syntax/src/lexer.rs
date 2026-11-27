@@ -2702,7 +2702,9 @@ pub fn expand_thread_local(src: &str) -> Option<String> {
             // (std's LocalKey<Cell<T>> / LocalKey<RefCell<T>> helpers, on the slot once `with` has filled it)
             let tt = ty.trim();
             let slot = format!("{{ self.with(|_| ()); unsafe {{ (*__exr_tls_slot::<{ty}>(&{name}__tk)).as_ref().unwrap() }} }}");
-            // (null: the thread's value is being dropped, or was (std's AccessError))
+            // (null: the thread's value is being dropped, or was (std's AccessError). An initializer that made the value
+            // itself first (it called `with` again) is outlived by its own: that one replaces it, and the other is
+            // dropped after, seeing the new value, as std's)
             let extra = if let Some(inner) = tt.strip_prefix("Cell<").and_then(|r| r.strip_suffix('>')) {
                 format!(
                     "{vis} fn set(&'static self, v: {inner}) {{ {slot}.set(v) }} \
@@ -2724,7 +2726,7 @@ pub fn expand_thread_local(src: &str) -> Option<String> {
             expanded.push_str(&format!(
                 "#[allow(non_camel_case_types)] {vis} struct {name}__Key; static {name}__tk: __TlsKey = __TlsKey::new(); \
                  {vis} static {name}: {name}__Key = {name}__Key; impl {name}__Key {{ {vis} fn with<R, F: FnOnce(&{ty}) -> R>(&'static self, f: F) -> R \
-                 {{ let s = __exr_tls_slot::<{ty}>(&{name}__tk); if s.is_null() {{ __exr_tls_destroyed() }} unsafe {{ if (*s).is_none() {{ let v = {init}; *s = Some(v); __exr_tls_made::<{ty}>(&{name}__tk); }} f((*s).as_ref().unwrap()) }} }} \
+                 {{ let s = __exr_tls_slot::<{ty}>(&{name}__tk); if s.is_null() {{ __exr_tls_destroyed() }} unsafe {{ if (*s).is_none() {{ let v = {init}; let old = core::mem::replace(&mut *s, Some(v)); __exr_tls_made::<{ty}>(&{name}__tk); core::mem::drop(old); }} f((*s).as_ref().unwrap()) }} }} \
                  {vis} fn try_with<R, F: FnOnce(&{ty}) -> R>(&'static self, f: F) -> Result<R, __TlsAccessError> {{ if __exr_tls_slot::<{ty}>(&{name}__tk).is_null() {{ return Err(__exr_access_error()); }} Ok(self.with(f)) }} {extra}}} "
             ));
             j = i1 + 1;

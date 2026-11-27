@@ -591,7 +591,7 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "BufWriter" | "BufReader" | "Cursor" | "ChunksMut" | "IoError" | "__DynError" | "Args" | "DefaultHasher" | "VarError"
                         | "PathBuf" | "__PathExt" | "__AsPathStr" | "Command" | "__ExitStatus" | "Cow" | "__CowStr"
                         | "Duration" | "AtomicPtr" | "RangeTo" | "RangeToInclusive" | "Fuse" | "Wrapping" | "Saturating"
-                        | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList" | "Thread" | "__ThreadPanic" | "__TlsKey" | "AccessError" | "SendError" | "RecvError" | "TryRecvError" | "Once" | "OnceState"
+                        | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList" | "Thread" | "Builder" | "__ThreadPanic" | "__TlsKey" | "AccessError" | "SendError" | "RecvError" | "TryRecvError" | "RecvTimeoutError" | "__RecvIntoIter" | "Barrier" | "BarrierWaitResult" | "Once" | "OnceState"
                         | "Layout" | "LayoutError" | "__LayoutAlign" | "Infallible" | "Condvar" | "ControlFlow"
                         | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError"
                         | "SplitNStr" | "SliceSplitN" | "PoisonError"
@@ -631,7 +631,7 @@ const SHADOWABLE: &[&str] = &[
     "Chain", "Entry", "Enumerate", "Filter", "FilterMap", "Map", "OptIter", "Scan", "Skip", "Take", "TakeWhile", "Zip",
     "Command", "Mutex", "VarError", "Rev", "StepBy", "Peekable", "Cloned", "Flatten", "FlatMap", "Inspect", "SkipWhile",
     "PathBuf", "Args", "BufWriter", "BufReader", "Pin", "Windows", "Bytes", "MatchIndices", "MutexGuard", "Ref", "RefMut", "BorrowError", "BorrowMutError", "Chunks", "Duration", "Fuse", "Empty", "RangeTo", "RangeToInclusive", "RangeFull",
-    "AtomicPtr", "TryReserveError", "c_void", "Infallible", "Cycle", "JoinHandle", "AccessError", "SendError", "RecvError", "TryRecvError", "Chars", "Poll", "Waker", "Context", "Future",
+    "AtomicPtr", "TryReserveError", "c_void", "Infallible", "Cycle", "JoinHandle", "Builder", "AccessError", "SendError", "RecvError", "TryRecvError", "RecvTimeoutError", "Barrier", "BarrierWaitResult", "Chars", "Poll", "Waker", "Context", "Future",
     "Wrapping", "Saturating", "NonZeroU8", "NonZeroU16", "NonZeroU32", "NonZeroU64", "NonZeroU128", "NonZeroUsize",
     "NonZeroI8", "NonZeroI16", "NonZeroI32", "NonZeroI64", "NonZeroI128", "NonZeroIsize",
     "FromStr", "CString", "CStr", "NulError", "LinkedList", "Ipv4Addr", "Ipv6Addr", "IpAddr", "SocketAddrV4", "SocketAddrV6",
@@ -2034,7 +2034,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             // come from another prelude item too: HashMap's own `alloc`)
             if matches!(it.kind, ItemKind::Normal) {
                 let ok = match name.as_deref() {
-                    Some("current" | "park") => *thread_text.get_or_insert_with(|| sc.has("thread")),
+                    Some("current" | "park" | "park_timeout") => *thread_text.get_or_insert_with(|| sc.has("thread")),
                     Some("alloc" | "alloc_zeroed" | "dealloc" | "realloc" | "handle_alloc_error") => *layout_text.get_or_insert_with(|| sc.has("Layout")),
                     _ => true,
                 };

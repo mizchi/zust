@@ -42,6 +42,9 @@ Rc など) は、zustc が持つ組み込みの prelude (`crates/syntax/src/prel
   - `&dyn Trait` / `&mut dyn Trait`。`&T` からの暗黙の変換（引数・let・フィールド・配列・戻り値）と `as &dyn Trait`
   - デフォルトメソッド、ジェネリックな impl（`impl<T> Tr for W<T>`）、プリミティブ型への impl を vtable 経由で呼ぶ
   - `&dyn Fn(A) -> B`（クロージャを vtable 経由で呼ぶ）
+  - auto trait: `dyn Trait + Send` / `+ Sync` は rustc と同じくそれを持つ。値をそれにするには、その型がそれを持たなければならない（E0277）。
+    ただの `dyn Trait` は、トレイトがスーパートレイトとして持つ（`trait Tr: Send`）のでなければ Send でも Sync でもない。
+    型強制はそれを外せる（`Box<dyn Tr + Send>` → `Box<dyn Tr>`）が、足すことはできない（E0308）
 - 関数ポインタ（`examples/fn_ptr_box.rs`）：
   - `fn(A, B) -> R` 型。関数アイテムを値として使う（引数・戻り値・let・struct のフィールド・配列）、`(op.f)(a, b)`
   - `F: Fn(A) -> B` に関数を渡す（`apply(double, 5)`、`o.map(double)`）
@@ -99,10 +102,11 @@ Rc など) は、zustc が持つ組み込みの prelude (`crates/syntax/src/prel
   回る順・`entry().or_insert` / `or_default`・`first_key_value`・`pop_first`・`m[&k]` は std と同じ）、`VecDeque`（リングバッファ。`d[i]`・両端の push / pop）。
   キーが `&str` / String の map の `get("k")` は std の Borrow と同じく `&str` で引ける
 - スレッド（`tests/threads/`）：`thread::spawn` / `join` / `is_finished` / `yield_now` / `sleep` / `current` / `park` /
-  `Thread::unpark`、`mpsc` のチャネル（`channel`、`sync_channel`）、`Mutex`、`Condvar`、`RwLock`、`Once`、`OnceLock`、
-  atomic、`Arc`、`thread_local!`。std と同じく OS スレッド（pthread、スタック 2 MiB）で、並列に走る。atomic と `Arc` の
+  `park_timeout` / `Thread::unpark`、`thread::Builder`（`name`、`stack_size`、`spawn`）、`mpsc` のチャネル（`channel`、`sync_channel`。
+  `recv_timeout`、`Receiver` の `into_iter`）、`Mutex`、`Condvar`、`RwLock`、`Barrier`、`Once`、`OnceLock`、
+  atomic、`Arc`、`thread_local!`。std と同じく OS スレッド（pthread、スタックは既定で 2 MiB）で、並列に走る。atomic と `Arc` の
   カウントはアトミック命令で、ロックは std と同じ状態遷移で futex の上で待つ。何も終わらせられない待ちは、std と同じく
-  永久に待つ。spawn したスレッドの panic は `thread '<unnamed>' panicked at ..` を出し、そのスレッドの `thread_local!` の値を
+  永久に待つ。spawn したスレッドの panic は `thread '<unnamed>' panicked at ..`（Builder で名前を付けたスレッドならその名前）を出し、そのスレッドの `thread_local!` の値を
   drop して、そのスレッドだけを終わらせる。その `join` は `Err`（`Any { .. }`）を返す。巻き戻しはないので、そのスレッドの
   ほかの値は drop されず、持っていた Mutex や RwLock はロックされたまま残る（poisoning はない。走らせていた `Once` は std と同じく poison される）。スレッドが終わるときの `thread_local!` の値の drop での panic は、代わりにプログラムを abort する（std の "thread local panicked on drop"）。`join` はそれから回復できない
 - `impl Index` / `IndexMut`：`x[i]` は x が `index` / `index_mut` を持つ struct なら `*x.index_mut(i)` にする

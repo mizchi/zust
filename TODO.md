@@ -17,7 +17,7 @@ needs one filed first (then add it to [cratebench/survey/issues.tsv](cratebench/
 
 <!-- crate-priorities -->
 
-Survey of 2026-11-27 14:11 UTC on `2a60144`: 45 of 273 crates build (16.4% of their downloads); 937 errors in 176 packages.
+Survey of 2026-11-27 17:08 UTC on `1b74ff2`: 45 of 273 crates build (16.4% of their downloads); 941 errors in 177 packages.
 
 | # | fix | issue | holds back | crates it alone unblocks |
 |---:|---|---|---:|---:|
@@ -30,15 +30,15 @@ Survey of 2026-11-27 14:11 UTC on `2a60144`: 45 of 273 crates build (16.4% of th
 | 7 | `missing generics for` a type used without its parameters | [#260](https://github.com/mizchi/zust/issues/260) | 2.4% | 1 |
 | 8 | value paths zustc cannot resolve | [#265](https://github.com/mizchi/zust/issues/265) | 2.3% | 0 |
 | 9 | macro expansion too deep at a crate's first line | [#252](https://github.com/mizchi/zust/issues/252) | 2.2% | 5 |
-| 10 | cannot infer an `impl Trait` return type | [#262](https://github.com/mizchi/zust/issues/262) | 2.0% | 5 |
-| 11 | prelude: `impl Error for fmt::Error` | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 2 |
-| 12 | cannot evaluate `…` in a constant | none yet | 1.8% | 3 |
+| 10 | prelude: type `Instant` | [#250](https://github.com/mizchi/zust/issues/250) | 2.1% | 6 |
+| 11 | cannot infer an `impl Trait` return type | [#262](https://github.com/mizchi/zust/issues/262) | 2.0% | 5 |
+| 12 | prelude: `impl Error for fmt::Error` | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 2 |
 
 By issue, with its tier (the issue's label: **T0** holds back 2% or more of the surveyed downloads with all its fixes, **T1** 1% or more, **T2** less; relabel an issue when its tier here changes):
 
 | tier | issue | holds back | fixes | the largest |
 |---|---|---:|---:|---|
-| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 7.8% | 26 | prelude: type `Builder` |
+| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 7.6% | 25 | prelude: type `Instant` |
 | T0 | [#254](https://github.com/mizchi/zust/issues/254) | 7.5% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
 | T0 | [#144](https://github.com/mizchi/zust/issues/144) | 7.2% | 1 | `impl<T: Tr> Tr for &T` |
 | T0 | [#259](https://github.com/mizchi/zust/issues/259) | 6.9% | 1 | mismatched types (to sort by cause) |
@@ -51,7 +51,7 @@ By issue, with its tier (the issue's label: **T0** holds back 2% or more of the 
 | T1 | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 1 | prelude: `impl Error for fmt::Error` |
 | T1 | [#256](https://github.com/mizchi/zust/issues/256) | 1.7% | 1 | methods zustc does not find (std methods the prelude lacks; lookup) |
 | T1 | [#264](https://github.com/mizchi/zust/issues/264) | 1.5% | 1 | false E0276 in bitflags' impls |
-| T1 | [#266](https://github.com/mizchi/zust/issues/266) | 1.3% | 1 | std iterator adapters' arity (`Copied`, `Cloned`, `Map`) |
+| T1 | [#266](https://github.com/mizchi/zust/issues/266) | 1.4% | 1 | std iterator adapters' arity (`Copied`, `Cloned`, `Map`) |
 | T2 | [#28](https://github.com/mizchi/zust/issues/28) | 0.7% | 1 | zurgo: two versions of one crate in a graph |
 | T2 | [#253](https://github.com/mizchi/zust/issues/253) | 0.7% | 1 | a fn pointer cast to `*mut ()` in a static |
 | T2 | [#258](https://github.com/mizchi/zust/issues/258) | 0.4% | 1 | macro_rules: calls zustc's matcher rejects |
@@ -81,7 +81,6 @@ invariants.
 | case | what is accepted that rustc rejects |
 |---|---|
 | `unsafe_fn_pointer` | fn pointer types do not record `unsafe`, so calling an `unsafe fn` pointer needs no unsafe block |
-| `send_dyn_thread` | `dyn Trait` types do not keep `+ Send`, so a `Box<dyn Fn()>` (which may hold an `Rc`) moves to a thread |
 | `cve_2019_12083_error_type_id` | an impl may define a method its trait does not declare (E0407). zustc has no downcast, so no type confusion follows |
 | `const_overflow` | overflow in a const (E0080) is found only when it is evaluated at run time (a panic) |
 
@@ -101,9 +100,13 @@ OS threads since [report 2026-11-27-01](docs/reports/2026-11-27-01-native-thread
   threads that wait for it wait forever (std's is unlocked and poisoned; `lock` then gives `Err`). The other values of
   that thread are not dropped either. Both need unwinding (SUPPORT.md, "Large features"). (A Once or OnceLock the
   thread was running, and a StdoutLock it held, are let go: the thread's context keeps them.)
-- Not there: `thread::scope`, `thread::Builder` (names, stack sizes), `park_timeout`, `recv_timeout`,
-  `Condvar::wait_timeout`, `Mutex::try_lock`, `Receiver` as `IntoIterator`. `JoinHandle::join`'s Err is not a
-  `Box<dyn Any + Send>` (no downcast of the payload).
+- Not there: `thread::scope`, `Condvar::wait_timeout`, `Mutex::try_lock`, `sync::Weak`,
+  `std::time::Instant`. `JoinHandle::join`'s Err is not a `Box<dyn Any + Send>` (no downcast of the payload).
+  `Builder::spawn_scoped` needs `thread::scope`.
+- A closure's capture held by reference is known to be mutable only when the body assigns to it or takes a `&mut` of
+  it (ast_closure::mutates_capture). One it changes only through a `&mut self` method (`|| v.push(Cell::new(1))`)
+  may be either kind, so the auto traits ask both rules of it (Send needs the value to be Sync and Send): such a
+  closure of a `Vec<Cell<_>>` is not Send, where rustc's is.
 - The main thread's thread_local! values are not dropped at exit (glibc's std runs their drops).
 - The location of an `unwrap` that panics is kept in one static (`__EXR_CALLER`), which another thread may write
   meanwhile: the message can point at another thread's call. It needs a thread-local of its own (an ELF TLS slot).
@@ -304,8 +307,9 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
     block); the hand-written one in wasm-bindgen's lib.rs (`__wbindgen_skip_interpret_calls`) is not compiled. One
     whose fn, `use`, trait or impl that would go out names a const, static or type that stays in it (`const N` or
     `struct Local<T>` beside an `impl Tr for u8` that names it) is skipped whole, as before this branch.
-  - a trait object's auto traits are not in zustc's types (`dyn Obj + Send` is `dyn Obj`, ast_types::tysyn): an impl
-    for `dyn Obj + Send` is one for `dyn Obj` too, where rustc reports E0277.
+  - an impl for a trait object with auto traits (`impl M for dyn Obj + Send`) is found by the object's trait alone, so
+    a call of its method on a `dyn Obj` is rejected as a mismatched type (E0308), where rustc reports E0599 (no
+    method). The object's types do keep `+ Send` / `+ Sync` (report 2026-11-27-03).
   - a blanket impl's `self`-by-value method on a `&Box<u8>` (`impl<T: Marker> Tr for T` with `impl Marker for
     &Box<u8>`) asks the bound of the Box's content ("`u8: Marker` is not satisfied").
   - impls for trait objects with parameters (`impl<R> Tr for dyn Fn() -> R`) are matched by the object's trait's name;

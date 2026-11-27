@@ -1017,6 +1017,18 @@ impl Cx<'_> {
                 return Ok((Some(fat), want));
             }
         }
+        // (`Box<dyn Tr + Send>` → `Box<dyn Tr>`, also behind `&` / `*const`: an object that drops auto traits is the
+        // same value)
+        if let (Some(want), Some(v)) = (expected, v) {
+            let drops = match (want, t) {
+                (Ty::Box(Ty::Dyn(w)), Ty::Box(Ty::Dyn(g))) => w != g && self.dyn_coerces(g, w),
+                (Ty::Ref(m2, Ty::Dyn(w)), Ty::Ref(m1, Ty::Dyn(g))) | (Ty::Ptr(m2, Ty::Dyn(w)), Ty::Ptr(m1, Ty::Dyn(g))) => w != g && (m1 || !m2) && self.dyn_coerces(g, w),
+                _ => false,
+            };
+            if drops {
+                return Ok((Some(v), want));
+            }
+        }
         // `Box<T>` → `Box<dyn Trait>`
         if let (Some(want @ Ty::Box(Ty::Dyn(tr))), Some(v), Ty::Box(inner)) = (expected, v, t) {
             if !matches!(inner, Ty::Dyn(_)) {
@@ -1034,7 +1046,7 @@ impl Cx<'_> {
         // `&T` → `*const dyn Trait` (the same fat value as `&dyn Trait`)
         if let (Some(want @ Ty::Ptr(m2, Ty::Dyn(tr))), Some(v), Ty::Ref(m1, inner)) = (expected, v, t) {
             if m1 || !m2 {
-                if matches!(inner, Ty::Dyn(t2) if t2 == tr) {
+                if matches!(inner, Ty::Dyn(t2) if t2 == tr || self.dyn_coerces(t2, tr)) {
                     return Ok((Some(v), want));
                 }
                 if !matches!(inner, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str) {
@@ -1917,7 +1929,7 @@ impl Cx<'_> {
                     }
                     // (`&[T]` as `*const [T]` / `&dyn Tr` as `*const dyn Tr`: the same fat pointer)
                     (Ty::Ref(_, Ty::Slice(e)), Ty::Ptr(_, Ty::Slice(e2))) if e == e2 => return Ok((v, to)),
-                    (Ty::Ref(m, Ty::Dyn(a)), Ty::Ptr(pm, Ty::Dyn(b))) if a == b && (m || !pm) => return Ok((v, to)),
+                    (Ty::Ref(m, Ty::Dyn(a)), Ty::Ptr(pm, Ty::Dyn(b))) if (a == b || self.dyn_coerces(a, b)) && (m || !pm) => return Ok((v, to)),
                     (Ty::Ref(_, a), Ty::Ptr(_, b)) if a == b || matches!(*a, Ty::Array(e, _) if e == b) => {
                         return Ok((v, to));
                     }
@@ -1952,6 +1964,14 @@ impl Cx<'_> {
                             Err(e) => return Err(e),
                         };
                         return Ok((Some(fat), to));
+                    }
+                    // (a cast may drop an object's auto traits, not add them (E0804): the value behind the pointer may not
+                    // have them. As rustc's, only an object with a principal trait: one of auto traits alone (`dyn Sync`
+                    // as `dyn Send + Sync`) has no methods to call)
+                    (Ty::Ptr(_, Ty::Dyn(g)), Ty::Ptr(_, Ty::Dyn(w))) if g != w && dyn_norm(g).0.is_some() && dyn_norm(g).0 == dyn_norm(w).0 && !self.dyn_coerces(g, w) => {
+                        let ((_, gs, _), (_, ws, _)) = (dyn_norm(g), dyn_norm(w));
+                        let added = if ws && !gs { "Send" } else { "Sync" };
+                        return err(SP, format!("cannot add auto trait `{added}` to dyn bound via pointer cast (E0804)"));
                     }
                     (Ty::Ptr(..), Ty::Ptr(..)) => return Ok((v, to)),
                     // (a fn pointer as a raw pointer: the same address)
@@ -2887,6 +2907,11 @@ impl Cx<'_> {
         if sol[ri].is_none() && diverging_tail(&c_body(c)) {
             sol[ri] = Some(Ty::Unit);
         }
+        // (a bare `|_| panic!()` that nothing else types: rustc's fallback, `!` (in every edition since 1.100), so
+        // a bound on the callee's R is checked against `!` where the call resolves (`R: Bar` fails))
+        if sol[ri].is_none() && panic_tail(&c_body(c)) {
+            sol[ri] = Some(Ty::Never);
+        }
         // (a parameter of a size not known: `|a0: [i32]| ..`, as the constructor of `struct Test([i32]);` used as a
         // value is written (E0277))
         if let Some(u) = pslots.iter().filter_map(|&(_, g)| sol[g]).find(|t| matches!(t, Ty::Slice(_) | Ty::Str | Ty::Dyn(_))) {
@@ -3201,7 +3226,28 @@ impl Cx<'_> {
     }
 
     /// Makes a `&T` (address v) into a `&dyn tr` fat pointer
+    /// A trait object of the text `got` may become one of `want` keeping its value: the same trait, and every auto trait
+    /// `want` has is one `got` has, written or by its trait's supertraits (`trait Job: Send`: a `dyn Job` is a `dyn Job +
+    /// Send`). An object of auto traits alone is the set of them (`dyn Send + Sync` is a `dyn Sync`)
+    pub(crate) fn dyn_coerces(&self, got: &str, want: &str) -> bool {
+        let ((gc, gs, gy), (wc, ws, wy)) = (dyn_norm(got), dyn_norm(want));
+        let gives = |a: &str| gc.is_some_and(|c| self.prog.tdb.gives_auto(self.prog, c, a) == Some(true));
+        gc == wc && (!ws || gs || gives("Send")) && (!wy || gy || gives("Sync"))
+    }
+
     pub(crate) fn to_dyn(&mut self, v: Value, t: Ty, tr: &str, span: Sp) -> R<Value> {
+        // (`dyn Tr + Send` / `+ Sync`: the value's type must have them (E0277), as the object says it does; the vtable
+        // is the trait's)
+        let (tr, mut send, mut sync) = crate::types::dyn_autos(tr);
+        // (`dyn Send` / `dyn Sync` alone: the auto trait is the object's trait)
+        send |= tr == "Send";
+        sync |= tr == "Sync";
+        if self.user_code && send && super::p2_call::not_send(self.prog, t) {
+            return err(span, format!("`{}` cannot be sent between threads safely (E0277)", self.prog.tn(super::p2_call::auto_culprit(self.prog, t, false))));
+        }
+        if self.user_code && sync && super::p2_call::not_sync(self.prog, t) {
+            return err(span, format!("`{}` cannot be shared between threads safely (E0277)", self.prog.tn(super::p2_call::auto_culprit(self.prog, t, true))));
+        }
         let mut fns = vec![];
         if let (Some((_, bps, _)), Ty::Fn(f)) = (crate::ast_summary::parse_fn_bound(tr), t) {
             // Function pointer: a prelude shim that calls it from the data (the place holding the function pointer)
@@ -3442,6 +3488,8 @@ impl Cx<'_> {
 
     /// The trait of `dyn Tr<A, B, Assoc = C>` and the types of its own arguments (the bindings are left out)
     pub(crate) fn dyn_trait_args(&mut self, tr: &str) -> (String, Vec<Ty>) {
+        // (the object's trait, not the auto traits it keeps: `Tr<u8> + Send`)
+        let tr = crate::types::dyn_autos(tr).0;
         let Some((n, rest)) = tr.split_once('<') else { return (tr.trim().to_string(), vec![]) };
         let inner = rest.trim_end().strip_suffix('>').unwrap_or(rest);
         let mut args = vec![];
@@ -3477,6 +3525,7 @@ impl Cx<'_> {
 
     /// the associated type bindings of `dyn Tr<A, Out = u32>`: (name, type)
     pub(crate) fn dyn_bindings(&mut self, tr: &str) -> Vec<(String, Ty)> {
+        let tr = crate::types::dyn_autos(tr).0;
         let Some((_, rest)) = tr.split_once('<') else { return vec![] };
         let inner = rest.trim_end().strip_suffix('>').unwrap_or(rest);
         let mut out = vec![];
@@ -4052,6 +4101,7 @@ impl Cx<'_> {
     }
 
     pub(crate) fn dyn_fn_sig(&self, s: &str) -> R<(Vec<Ty>, Ty)> {
+        let s = crate::types::dyn_autos(s).0;
         let Some((_, ps, r)) = crate::ast_summary::parse_fn_bound(s) else {
             return Err(format!("`dyn {s}` is not a function type"));
         };
@@ -4932,6 +4982,22 @@ fn c_body(c: &Expr) -> Expr {
     }
 }
 
+/// whether a closure body is (or ends with) a `panic!`-like macro
+fn panic_tail(e: &Expr) -> bool {
+    let mut e = e;
+    loop {
+        match e {
+            Expr::Paren(x) => e = x,
+            Expr::Block(_, _, b) => match b.stmts.last() {
+                Some(Stmt::Expr(x, _)) => e = x,
+                _ => return false,
+            },
+            Expr::Macro(p, _, _) => return p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")),
+            _ => return false,
+        }
+    }
+}
+
 /// whether a closure body ends by diverging in a way that makes `()` its return type: a `loop` with no `break`, a
 /// `return`, or a `panic!`-like macro when a `return;` elsewhere says the type is `()` (a bare `|| panic!()` stays
 /// open: passed to `fn f<R: Tr>(_: impl Fn() -> R)` rustc's fallback is `!`, not `()`)
@@ -5004,5 +5070,16 @@ fn has_ref(t: Ty, depth: u32) -> bool {
         Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => has_ref(*i, depth + 1),
         Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&x| has_ref(x, depth + 1)),
         _ => false,
+    }
+}
+
+/// A trait object's principal trait (None for an auto-only object: `dyn Send`, `dyn Sync`, `dyn Send + Sync`) and
+/// whether it names Send and Sync.
+fn dyn_norm(s: &str) -> (Option<&str>, bool, bool) {
+    let (c, send, sync) = crate::types::dyn_autos(s);
+    match c {
+        "Send" => (None, true, sync),
+        "Sync" => (None, send, true),
+        c => (Some(c), send, sync),
     }
 }

@@ -42,6 +42,9 @@ for building programs that already pass rustc quickly, not a replacement for rus
   - `&dyn Trait` / `&mut dyn Trait`. Implicit conversion from `&T` (arguments, let, fields, arrays, return values) and `as &dyn Trait`
   - Calls through the vtable to default methods, generic impls (`impl<T> Tr for W<T>`), and impls on primitive types
   - `&dyn Fn(A) -> B` (calls a closure through the vtable)
+  - Auto traits: `dyn Trait + Send` / `+ Sync` keep them, as rustc's. A value becomes one only if its type has them
+    (E0277); a plain `dyn Trait` is neither Send nor Sync unless its trait has them as supertraits (`trait Tr: Send`);
+    a coercion may drop them (`Box<dyn Tr + Send>` → `Box<dyn Tr>`), never add them (E0308)
 - Function pointers (`examples/fn_ptr_box.rs`):
   - The `fn(A, B) -> R` type. Using function items as values (arguments, return values, let, struct fields, arrays), `(op.f)(a, b)`
   - Passing a function to `F: Fn(A) -> B` (`apply(double, 5)`, `o.map(double)`)
@@ -99,10 +102,11 @@ for building programs that already pass rustc quickly, not a replacement for rus
   iteration order, `entry().or_insert` / `or_default`, `first_key_value`, `pop_first` and `m[&k]` are the same as std), `VecDeque` (ring buffer; `d[i]`, push / pop at both ends).
   `get("k")` on a map with `&str` / String keys can look up by `&str`, the same as std's Borrow
 - Threads (`tests/threads/`): `thread::spawn` / `join` / `is_finished` / `yield_now` / `sleep` / `current` / `park` /
-  `Thread::unpark`, `mpsc` channels (`channel`, `sync_channel`), `Mutex`, `Condvar`, `RwLock`, `Once`, `OnceLock`,
-  atomics, `Arc`, `thread_local!`. They are OS threads (pthreads, 2 MiB stacks), run in parallel, as std's: the atomics
+  `park_timeout` / `Thread::unpark`, `thread::Builder` (`name`, `stack_size`, `spawn`), `mpsc` channels (`channel`, `sync_channel`;
+  `recv_timeout`, a `Receiver`'s `into_iter`), `Mutex`, `Condvar`, `RwLock`, `Barrier`, `Once`, `OnceLock`,
+  atomics, `Arc`, `thread_local!`. They are OS threads (pthreads, 2 MiB stacks by default), run in parallel, as std's: the atomics
   and `Arc`'s count are atomic instructions, and the locks wait on futexes with std's state machines. A wait that
-  nothing can end waits forever, as std's. A panic in a spawned thread prints `thread '<unnamed>' panicked at ..`, drops
+  nothing can end waits forever, as std's. A panic in a spawned thread prints `thread '<unnamed>' panicked at ..` (a Builder's name in its place), drops
   that thread's `thread_local!` values and ends it, and its `join` gives `Err` (`Any { .. }`). There is no unwinding,
   so its other values are not dropped and a Mutex or RwLock it holds stays locked (no poisoning; a `Once` it was
   running is poisoned, as std's). A panic in a `thread_local!` value's drop, while the thread ends, aborts the program
