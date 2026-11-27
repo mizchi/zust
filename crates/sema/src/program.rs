@@ -2942,16 +2942,23 @@ impl Program {
             }; // derived built-in traits
             for &d in decls {
                 let m = p.names[d as usize].rsplit("::").next().unwrap();
-                // (Display / Debug methods are `S::<Display>::fmt`)
-                let found = if crate::ast_summary::is_fmt_trait(tr) {
+                // (the fmt traits' methods are `S::<Display>::fmt` / `S::<LowerHex>::fmt`)
+                let fmt_tr = crate::ast_summary::is_fmt_trait(tr);
+                let found = if fmt_tr {
                     p.index
                         .contains_key(&format!("{}::<{tr}>::{m}", p.structs[*sid as usize].name))
                 } else {
                     p.method(*sid, m).is_some()
                 };
-                // (the impl's method against the trait's: the number of parameters (E0050) and the kind of receiver (E0053))
-                if !crate::ast_summary::is_fmt_trait(tr) {
-                    if let Some(mi) = p.method(*sid, m).filter(|&mi| p.sigs[mi as usize].impl_trait.as_deref() == Some(tr.as_str()) && mi != d) {
+                // (the impl's method against the trait's: the number of parameters (E0050) and the kind of receiver (E0053);
+                // a fmt trait's by its qualified name, as a program's own `Binary` with a method of another arity has it)
+                let impl_m = if fmt_tr {
+                    p.index.get(&format!("{}::<{tr}>::{m}", p.structs[*sid as usize].name)).copied()
+                } else {
+                    p.method(*sid, m)
+                };
+                {
+                    if let Some(mi) = impl_m.filter(|&mi| p.sigs[mi as usize].impl_trait.as_deref() == Some(tr.as_str()) && mi != d) {
                         let (ds, ms) = (&p.sigs[d as usize], &p.sigs[mi as usize]);
                         let line = p.item_of[mi as usize].map_or(String::new(), |ii| format!("{}:1: ", items[ii as usize].line));
                         // (E0185 / E0186: a receiver on one side only)

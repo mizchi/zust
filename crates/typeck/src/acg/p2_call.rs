@@ -483,7 +483,13 @@ impl Cx<'_> {
         // (Pointer's receiver is `&self`: the pointer is what it points to, `&&u8`'s `&u8`)
         // (the pointer: `*recv` of a `&&u8` receiver, or the receiver itself, `r` of `fmt::Pointer::fmt(&r, f)` as the
         // method call has it)
-        let ptr_like = |p: Ty| matches!(p, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_)) && !p.is_fat();
+        // (a fat one to a slice / str, `&str` / `&[T]` / `Box<[T]>`, too: `Pointer { addr, metadata }`; not a raw one, nor
+        // one to a `dyn`)
+        let ptr_like = |p: Ty| match p {
+            Ty::Ref(_, i) | Ty::Box(i) => !i.is_unsized() || matches!(*i, Ty::Slice(_) | Ty::Str),
+            Ty::Ptr(..) => !p.is_fat(),
+            _ => false,
+        };
         // (not `&E` of a type with its own Pointer impl, `Pointer::fmt(e_ref, f)`: E's impl, the ordinary lookup)
         let own = |p: Ty| matches!(p, Ty::Ref(_, Ty::Struct(_)));
         let ptr_at: Option<(Ty, bool)> = match t {
@@ -521,7 +527,11 @@ impl Cx<'_> {
             });
             let p = if through { "*__exr_xv" } else { "__exr_xv" };
             let star = if matches!(pt, Ty::Box(_)) { format!("&*{p}") } else { p.to_string() };
-            format!("__exr_pointer_fmt::<()>({star} as *const {tn} as usize, __exr_xf)")
+            if pt.is_fat() {
+                format!("{{ let s = {star}; __exr_fat_pointer_fmt::<()>(s.as_ptr() as usize, s.len(), __exr_xf) }}")
+            } else {
+                format!("__exr_pointer_fmt::<()>({star} as *const {tn} as usize, __exr_xf)")
+            }
         } else {
             let up = code == 6;
             if base.is_float() {
@@ -4818,15 +4828,16 @@ impl Cx<'_> {
                         let mut args = cargs.iter();
                         let a0 = args.next()?;
                         let rest: Vec<Expr> = args.cloned().collect();
+                        // (std's fmt traits the compiler writes itself, `fmt::LowerHex::fmt(x, f)` / `fmt::Pointer::fmt(&r, f)`:
+                        // the method call with the trait named (radix_fmt_method), whatever a number's other `fmt` is; its
+                        // receiver keeps its `&`, as `Pointer::fmt(&rr, f)` of a `&&u8` writes rr itself, not *rr)
+                        let std_fmt = matches!(tr.as_str(), "Binary" | "LowerHex" | "UpperHex" | "Octal" | "LowerExp" | "UpperExp" | "Pointer") && ms == "fmt";
                         let recv = match a0 {
-                            Expr::Ref(_, e) => paren((**e).clone()),
+                            Expr::Ref(_, e) if !std_fmt => paren((**e).clone()),
                             _ => paren(a0.clone()),
                         };
                         // (a primitive receiver with an impl of this trait: `<u32 as Tr>::m(&x)`, which a builtin
                         // method of the same name (`to_string`) cannot take over as `x.m()` would let it)
-                        // (std's fmt traits the compiler writes itself, `fmt::LowerHex::fmt(x, f)` / `fmt::Pointer::fmt(&r, f)`:
-                        // the method call with the trait named (radix_fmt_method), whatever a number's other `fmt` is)
-                        let std_fmt = matches!(tr.as_str(), "Binary" | "LowerHex" | "UpperHex" | "Octal" | "LowerExp" | "UpperExp" | "Pointer") && ms == "fmt";
                         if let Some(t) = self.peek(&recv).map(|t| self.strip_refs(t)).filter(|_| !std_fmt) {
                             if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) {
                                 let key = format!("{}::{ms}", self.ty_key(t));

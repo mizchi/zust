@@ -4342,7 +4342,79 @@ fn __exr_fmt_ptr<G>(f: &mut Formatter, a: usize) {
         i -= 1;
         s.push(d[i] as char);
     }
-    __exr_pad::<()>(f, &s, 2);
+    // (`{:#p}`: zero-extended to the pointer's width, as std writes it; `{:010p}`: the zeros after `0x`)
+    if f.alt {
+        let (w, z) = (f.width, f.zero);
+        if w == 0 {
+            f.width = 2 + 2 * core::mem::size_of::<usize>();
+        }
+        f.zero = true;
+        __exr_pad_zero::<()>(f, &s, 2);
+        f.width = w;
+        f.zero = z;
+        return;
+    }
+    __exr_pad_zero::<()>(f, &s, 2);
+}
+
+// a number's text with `{:0w}`: the zeros after its first `lead` bytes (its sign / `0x`), as std pads a number;
+// without the 0 flag, __exr_pad's fill and alignment
+fn __exr_pad_zero<G>(f: &mut Formatter, s: &str, lead: usize) {
+    let sb = s.as_bytes();
+    if !f.zero || f.width <= sb.len() {
+        __exr_pad::<()>(f, s, 2);
+        return;
+    }
+    let mut i = 0;
+    while i < lead {
+        f.buf.push(sb[i] as char);
+        i += 1;
+    }
+    let mut z = f.width - sb.len();
+    while z > 0 {
+        f.buf.push('0');
+        z -= 1;
+    }
+    while i < sb.len() {
+        f.buf.push(sb[i] as char);
+        i += 1;
+    }
+}
+
+// `{:p}` of a pointer to a slice / str: `Pointer { addr: 0x.., metadata: 5 }`, its address and length each with the
+// spec's width, as std writes it (`{:#p}`: on lines, the address zero-extended)
+fn __exr_fmt_fat_ptr<G>(f: &mut Formatter, a: usize, n: usize) {
+    let r = f.radix;
+    let alt = f.alt;
+    if alt {
+        f.buf.push_str("Pointer {\n");
+        f.indent += 1;
+        __exr_indent::<()>(f);
+        f.buf.push_str("addr: ");
+    } else {
+        f.buf.push_str("Pointer { addr: ");
+    }
+    __exr_fmt_ptr::<()>(f, a);
+    if alt {
+        f.buf.push_str(",\n");
+        __exr_indent::<()>(f);
+        f.buf.push_str("metadata: ");
+    } else {
+        f.buf.push_str(", metadata: ");
+    }
+    f.radix = 0;
+    f.alt = false;
+    __exr_fmt_int::<()>(f, n as u64, false);
+    f.radix = r;
+    f.alt = alt;
+    if alt {
+        f.buf.push_str(",\n");
+        f.indent -= 1;
+        __exr_indent::<()>(f);
+        f.buf.push('}');
+    } else {
+        f.buf.push_str(" }");
+    }
 }
 
 // 幅に足りない分を fill で埋める (既定の寄せは def_align)
@@ -5189,7 +5261,8 @@ fn __exr_fmt_exp<G>(f: &mut Formatter, x: f64, is32: bool, upper: bool) {
         }
     }
     __exr_exp_tail::<()>(&mut s, &d, dp - 1, if f.has_prec { f.prec + 1 } else { d.len }, upper);
-    __exr_pad::<()>(f, s.as_str(), 2);
+    let lead = if neg || f.plus { 1 } else { 0 };
+    __exr_pad_zero::<()>(f, s.as_str(), lead);
 }
 
 fn __exr_fmt_exp_int<G>(f: &mut Formatter, mag: u128, neg: bool, upper: bool) {
@@ -5221,7 +5294,8 @@ fn __exr_fmt_exp_int<G>(f: &mut Formatter, mag: u128, neg: bool, upper: bool) {
     }
     let _ = e;
     __exr_exp_tail::<()>(&mut s, &d, dp - 1, if f.has_prec { f.prec + 1 } else { d.len }, upper);
-    __exr_pad::<()>(f, s.as_str(), 2);
+    let lead = if neg || f.plus { 1 } else { 0 };
+    __exr_pad_zero::<()>(f, s.as_str(), lead);
 }
 
 // 仮数 d (n 桁まで 0 で埋める) と指数 e を `d.ddde-5` の形で書く
@@ -8400,6 +8474,11 @@ fn __exr_exp_fmt_int<G>(mag: u128, neg: bool, upper: bool, f: &mut Formatter) ->
 // (`fmt::Pointer::fmt(&p, f)` of a reference / raw pointer / Box: its address, as `{:p}`)
 fn __exr_pointer_fmt<G>(a: usize, f: &mut Formatter) -> Result<(), __FmtError> {
     __exr_fmt_ptr::<()>(f, a);
+    Ok(())
+}
+
+fn __exr_fat_pointer_fmt<G>(a: usize, n: usize, f: &mut Formatter) -> Result<(), __FmtError> {
+    __exr_fmt_fat_ptr::<()>(f, a, n);
     Ok(())
 }
 

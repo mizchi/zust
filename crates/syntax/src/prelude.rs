@@ -1134,19 +1134,22 @@ impl<'a> PreludeScan<'a> {
 
 /// Whether src writes a C string literal, `c"..."` / `cr"..."`: a `c` that starts a token (not the end of `"abc"` or of a
 /// name)
-/// Whether the source has a radix format spec: `:` with flags / width (`#`, `08`, `>5`) and then `x` / `X` / `b` / `o`
-/// and `}` (`{:x}`, `{v:#010b}`), as a format string writes one
-fn has_radix_spec(src: &str) -> bool {
+/// Whether the source has a format spec ending in one of `ty` (`x` / `X` / `b` / `o`, or `p`): `:` with fill /
+/// flags / width / precision (`#`, `08`, `*>5`, `>w$`) between it and the letter, then `}` (`{:x}`, `{v:#010b}`,
+/// `{pointer:p}`), as a format string writes one
+fn has_fmt_spec(src: &str, ty: &[u8]) -> bool {
     let b = src.as_bytes();
     let mut i = 0;
     while let Some(k) = memchr_byte(b'}', &b[i..]) {
         let e = i + k;
-        if e >= 2 && matches!(b[e - 1], b'x' | b'X' | b'b' | b'o') {
+        if e >= 2 && ty.contains(&b[e - 1]) {
+            // (back to the spec's `:`, over what a spec may hold; a `{` / `}` / quote / line break first means it is not one)
             let mut j = e - 2;
-            while j > 0 && matches!(b[j], b'0'..=b'9' | b'#' | b'+' | b'-' | b'.' | b'<' | b'>' | b'^' | b'$' | b'*') {
+            let lo = e.saturating_sub(40);
+            while j > lo && !matches!(b[j], b':' | b'{' | b'}' | b'\n' | b'"') {
                 j -= 1;
             }
-            if b[j] == b':' {
+            if b[j] == b':' && j > 0 && b[j - 1] != b':' {
                 return true;
             }
         }
@@ -1310,6 +1313,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         // (`{:?}` of a raw pointer)
         if sc.has("*const") || sc.has("*mut") {
             need.insert("__exr_fmt_ptr");
+        }
+        // (`{:p}`, `{pointer:p}`: a thin pointer's address, a slice's `Pointer { addr, metadata }`)
+        if has_fmt_spec(sc.src, b"p") {
+            need.extend(["__exr_fmt_ptr", "__exr_fmt_fat_ptr"]);
         }
     }
     // `vec![..]` becomes Vec::with_capacity + push, and `"..".to_string()` becomes String::from
@@ -1657,7 +1664,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         need.extend(["__exr_display_fmt", "__exr_debug_fmt"]);
         // (and the radix / exponent / pointer traits' `fmt::LowerHex::fmt(x, f)` of a number or a pointer)
         if ["Binary", "LowerHex", "UpperHex", "Octal", "LowerExp", "UpperExp", "Pointer"].iter().any(|t| sc.has(t)) {
-            need.extend(["__exr_radix_fmt", "__exr_exp_fmt_float", "__exr_exp_fmt_int", "__exr_pointer_fmt", "__exr_fmt_exp", "__exr_fmt_exp_int", "__exr_fmt_ptr"]);
+            need.extend(["__exr_radix_fmt", "__exr_exp_fmt_float", "__exr_exp_fmt_int", "__exr_pointer_fmt", "__exr_fat_pointer_fmt", "__exr_fmt_exp", "__exr_fmt_exp_int", "__exr_fmt_ptr"]);
         }
     }
     // (ManuallyDrop is used through Deref: `m.0`, `*m`)
@@ -1715,7 +1722,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     let isqrt = sc.has("isqrt");
     // (a radix spec, `{:x}` / `{:#b}` / `{v:08o}` / `{:X}`, or a radix trait: a signed integer's two's-complement bits
     // (__exr_fmt_int_s); left out where nothing looks like one)
-    let radix_fmt = has_radix_spec(sc.src) || ["Binary", "LowerHex", "UpperHex", "Octal"].iter().any(|t| sc.has(t));
+    let radix_fmt = has_fmt_spec(sc.src, b"xXbo") || ["Binary", "LowerHex", "UpperHex", "Octal"].iter().any(|t| sc.has(t));
     if radix_fmt {
         need.insert("__exr_fmt_int_s");
     }

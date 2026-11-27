@@ -483,8 +483,13 @@ impl Cx<'_> {
                         pt = *i;
                     }
                     let ptr_debug = *debug && matches!(pt, Ty::Ptr(_, i) if !i.is_fat()) && self.prog.index.contains_key("__exr_fmt_ptr");
-                    // (`{:p}` of a reference / raw pointer / Box: its address)
-                    let ptr_fmt = spec.radix == 7 && matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_)) && !t.is_fat() && self.prog.index.contains_key("__exr_fmt_ptr");
+                    // (`{:p}` of a reference / raw pointer / Box: its address; of one to a slice / str, the address and
+                    // length (not of a `dyn`, whose metadata is its vtable))
+                    let slice_ptr = matches!(t, Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) if matches!(*i, Ty::Slice(_) | Ty::Str));
+                    let ptr_fmt = spec.radix == 7
+                        && matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_))
+                        && (!t.is_fat() || slice_ptr && self.prog.index.contains_key("__exr_fmt_fat_ptr"))
+                        && self.prog.index.contains_key("__exr_fmt_ptr");
                     // (`{:x}` / `{:b}` / `{:o}` / `{:X}` / `{:e}` / `{:E}` / `{:p}` of a type of the program's: its impl of the
                     // trait, LowerHex .. (a number's is the compiler's own))
                     let radix_tr = match spec.radix {
@@ -557,7 +562,12 @@ impl Cx<'_> {
                     }
                     if ptr_fmt {
                         let a = self.b.ins().load(PTR, mf(), v, 0);
-                        self.call_named("__exr_fmt_ptr", vec![Ty::Unit], &[(f, fref), (a, Ty::Usize)], span)?;
+                        if t.is_fat() {
+                            let n = self.b.ins().load(types::I64, mf(), v, 8);
+                            self.call_named("__exr_fmt_fat_ptr", vec![Ty::Unit], &[(f, fref), (a, Ty::Usize), (n, Ty::Usize)], span)?;
+                        } else {
+                            self.call_named("__exr_fmt_ptr", vec![Ty::Unit], &[(f, fref), (a, Ty::Usize)], span)?;
+                        }
                         continue;
                     }
                     if own_radix {
@@ -570,6 +580,9 @@ impl Cx<'_> {
                         let r = self.expr(e, None);
                         self.scopes.pop();
                         r?;
+                        // (the impl may have set the formatter's spec itself, `write!(f, "{:08x}", ..)`: the next
+                        // piece sets its own)
+                        cur = FmtSpec { radix: 255, ..Default::default() };
                         continue;
                     }
                     if ptr_debug {
