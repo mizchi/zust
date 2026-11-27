@@ -1,0 +1,6 @@
+Bits { words: [29], len: 5 }
+Bits { words: [22, 1], len: 9 }
+9 [61, 1]
+[true, false, false]
+Sum { total: 22, n: 4 }
+abxyz
