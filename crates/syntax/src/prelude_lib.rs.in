@@ -9981,17 +9981,20 @@ fn __exr_once_track(o: *mut u32, begin: bool) {
 }
 
 // (the first spawn, on the only thread there is: no other one can race it)
-fn __exr_threads_init() {
+// (0, or what pthread_key_create failed with (EAGAIN: no key is left): the spawn fails with it)
+fn __exr_threads_init() -> i32 {
     unsafe {
         if __EXR_TLS_READY == 0 {
-            if __exr_pthread_key_create(&mut __EXR_TLS_KEY as *mut u32, 0usize as *const u8) != 0 {
-                panic!("failed to spawn thread: no thread-local key is left");
+            let e = __exr_pthread_key_create(&mut __EXR_TLS_KEY as *mut u32, 0usize as *const u8);
+            if e != 0 {
+                return e;
             }
             __EXR_THREAD_HOOK = Some(__exr_thread_hook);
             __EXR_ONCE_HOOK = Some(__exr_once_track);
             __exr_atomic_store(&mut __EXR_TLS_READY as *mut u32, 1);
         }
     }
+    0
 }
 
 extern "C" fn __exr_thread_start(arg: *mut u8) -> *mut u8 {
@@ -10106,7 +10109,10 @@ pub fn __core_spawn<T, F: FnOnce() -> T>(f: F) -> JoinHandle<T> {
 // (a thread with a name and a stack of `stack` bytes (in whole pages, as std rounds it, and at least 64 KiB: above
 // glibc's minimum, as a margin); Err: what pthread_create gave)
 fn __exr_spawn<T, F: FnOnce() -> T>(f: F, name: Option<String>, stack: usize) -> Result<JoinHandle<T>, i32> {
-    __exr_threads_init();
+    let e = __exr_threads_init();
+    if e != 0 {
+        return Err(e);
+    }
     let pk = __exr_alloc_ok(core::mem::size_of::<__Packet<T>>()) as *mut __Packet<T>;
     unsafe {
         pk.write(__Packet { h: __PacketHead { refs: 2, state: 0 }, val: None });

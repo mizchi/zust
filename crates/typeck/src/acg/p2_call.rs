@@ -3608,8 +3608,11 @@ impl Cx<'_> {
         // (the receiver's region tree is this call's: the calls in the arguments must not take it)
         let rg_recv = if recv.is_some() { self.rg.recv.take() } else { None };
         let rg_sp = std::mem::take(&mut self.rg.call_sp);
+        // (the closure: spawn's argument, or Builder::spawn's after its receiver, which a path call
+        // (`Builder::spawn(b, f)`) passes as the first argument)
         if self.spawns(id) {
-            if let Some(c) = args.first() {
+            let at = usize::from(recv.is_none() && self.prog.names[id as usize] != "__core_spawn");
+            if let Some(c) = args.get(at) {
                 self.check_spawn_closure(c)?;
             }
         }

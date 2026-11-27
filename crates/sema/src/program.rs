@@ -3964,7 +3964,9 @@ impl Program {
         }
         match t {
             Ty::Ptr(..) => false,
-            Ty::Ref(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => self.auto_trait(*i, sync, d + 1),
+            // (`&T` is Send and Sync when T is Sync; `&mut T` is Send when T is Send, Sync when T is Sync)
+            Ty::Ref(m, i) => self.auto_trait(*i, sync || !m, d + 1),
+            Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => self.auto_trait(*i, sync, d + 1),
             Ty::Struct(sid) => {
                 let b = self.base_of(sid);
                 let name = self.structs[b as usize].name.as_str();
