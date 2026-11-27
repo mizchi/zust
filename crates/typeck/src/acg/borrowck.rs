@@ -2129,7 +2129,11 @@ impl Bk {
                                     } else if lo.capture {
                                         BkError { sp: lo.sp, msg: format!("closure may outlive the current function, but it borrows `{name}`, which is owned by the current function (E0373)") }
                                     } else {
-                                        BkError { sp: *sp, msg: format!("cannot return a reference to {what}: `{name}` is dropped when the function returns (E0515)") }
+                                        if synthetic_param(&name) {
+                                            BkError { sp: *sp, msg: "cannot return value referencing function parameter (E0515)".to_string() }
+                                        } else {
+                                            BkError { sp: *sp, msg: format!("cannot return a reference to {what}: `{name}` is dropped when the function returns (E0515)") }
+                                        }
                                     });
                                     break;
                                 }
@@ -2784,6 +2788,14 @@ impl Cx<'_> {
             self.rg_late_on();
         }
         self.rg.scrut = if self.rg_on() { self.rt_expr(e) } else { None };
+        // (a place the function owns, not reached through a reference: what a `ref` binding of it borrows)
+        self.rg.scrut_place = match self.rg.scrut {
+            Some(_) if !matches!(e, Expr::Call(..) | Expr::MethodCall(..)) => match self.rt_place(e) {
+                Some((_, _, ds)) if ds.is_empty() => super::regionck::place_text(e).map(|n| (n, err_pos(e))),
+                _ => None,
+            },
+            _ => None,
+        };
         self.bk.scrut_place = self.bk_place(e).map(|p| (p.0, err_pos(e)));
         // (a temporary matched by a `&` pattern that binds by value (`match (l1, l2) { (_, &[hd, ..]) => .. }`): a
         // place of its own, so that what the binding moves out through the reference is an error at the scrutinee,
@@ -2886,6 +2898,7 @@ impl Cx<'_> {
     pub(crate) fn bk_bind_begin(&mut self) {
         self.rg.pat = self.rg.scrut.clone();
         self.rg.pat_ref = None;
+        self.rg.pat_place = self.rg.scrut_place.clone();
         if self.bk_on() {
             self.bk.bind_srcs = Some(self.bk.scrut.clone());
             self.bk.pat_path = self.bk.scrut_place.as_ref().map(|x| x.0.clone());
@@ -2893,6 +2906,7 @@ impl Cx<'_> {
     }
     pub(crate) fn bk_bind_end(&mut self) {
         self.rg.pat = None;
+        self.rg.pat_place = None;
         self.bk.bind_srcs = None;
         self.bk.pat_path = None;
     }
@@ -5229,4 +5243,10 @@ impl Cx<'_> {
             None => Ok(()),
         }
     }
+}
+
+/// A closure's parameter that a pattern binds from (`__p0` for `|(a, ref b)| ..`, closure_synth), or a place in it
+/// (`__p0.0`)
+pub(crate) fn synthetic_param(name: &str) -> bool {
+    name.strip_prefix("__p").is_some_and(|r| r.starts_with(|c: char| c.is_ascii_digit()) && r.trim_start_matches(|c: char| c.is_ascii_digit()).chars().next().is_none_or(|c| c == '.'))
 }

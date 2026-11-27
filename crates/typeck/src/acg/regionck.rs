@@ -93,6 +93,10 @@ pub struct Rg {
     pub scrut: Option<(Ty, RT)>,
     pub pat: Option<(Ty, RT)>,
     pub pat_ref: Option<u32>,
+    /// The last scrutinee as a place the function owns (`s`, `__p0` of a closure's parameter pattern), and the one
+    /// the pattern being bound matches: a `ref` binding there borrows it (a loan of it)
+    pub scrut_place: Option<(String, Sp)>,
+    pub pat_place: Option<(String, Sp)>,
     /// The method call being made (call_fn is given no span for it)
     pub call_sp: Sp,
     /// The elements' tree of the array or slice a slice pattern matches
@@ -991,7 +995,7 @@ fn strip(e: &Expr) -> &Expr {
 }
 
 /// `x`, `x.f`: the text of a place for messages
-fn place_text(e: &Expr) -> Option<String> {
+pub(crate) fn place_text(e: &Expr) -> Option<String> {
     match strip(e) {
         Expr::Path(None, p) if p.segs.len() == 1 => Some(p.segs[0].name.clone()),
         Expr::Field(x, f, _) => Some(format!("{}.{f}", place_text(x)?)),
@@ -2140,7 +2144,13 @@ impl RgSt {
                 }
             }
             match ret_at {
-                Some(sp) if bad => errs.push((sp, if name.is_empty() { "cannot return value referencing temporary value (E0515)".to_string() } else { format!("cannot return value referencing local variable `{name}` (E0515)") })),
+                Some(sp) if bad => errs.push((sp, if name.is_empty() {
+                    "cannot return value referencing temporary value (E0515)".to_string()
+                } else if super::borrowck::synthetic_param(name) {
+                    "cannot return value referencing function parameter (E0515)".to_string()
+                } else {
+                    format!("cannot return value referencing local variable `{name}` (E0515)")
+                })),
                 _ if bad => errs.push((*lsp, if name.is_empty() { "temporary value dropped while borrowed (it must outlive the function)".to_string() } else { format!("`{name}` does not live long enough (borrowed value must outlive the function)") })),
                 _ => {}
             }
@@ -5096,10 +5106,17 @@ impl Cx<'_> {
         let Some((_, tr)) = self.rg.pat.clone() else { return };
         let Some((loc, t)) = self.lookup(name) else { return };
         let tree = if by_ref {
-            // (by the reference matched through, or a `ref` binding's own borrow: a region of its own)
+            // (by the reference matched through, or a `ref` binding's own borrow: a region of its own, a loan of the
+            // place matched when the function owns it (`|ref line: String| ..`, `let ref r = s;`))
             let r = match self.rg.pat_ref {
                 Some(r) => r,
-                None => self.rg.var(),
+                None => {
+                    let r = self.rg.var();
+                    if let Some((n, sp)) = self.rg.pat_place.clone() {
+                        self.rg.loans.push((r, n, sp));
+                    }
+                    r
+                }
             };
             let mut v = vec![r];
             v.extend(tr);
