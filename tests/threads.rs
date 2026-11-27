@@ -17,6 +17,47 @@ fn build(src: &str, out: &std::path::Path, cl: bool) -> Result<zustc::session::B
     zustc::session::Session::new(o).build(src, out)
 }
 
+/// Runs exe to its end, or kills it after `secs` (a synchronization bug that blocks must fail the test, not hang it):
+/// Err holds what it printed before the kill
+fn run_with_deadline(exe: &std::path::Path, secs: u64) -> Result<std::process::Output, String> {
+    let mut child = std::process::Command::new(exe)
+        .env_remove("RUST_BACKTRACE")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    // (the pipes are read meanwhile, so a child that prints much never blocks on a full one)
+    let mut out = child.stdout.take().unwrap();
+    let mut err = child.stderr.take().unwrap();
+    let ro = std::thread::spawn(move || {
+        let mut v = vec![];
+        let _ = std::io::Read::read_to_end(&mut out, &mut v);
+        v
+    });
+    let re = std::thread::spawn(move || {
+        let mut v = vec![];
+        let _ = std::io::Read::read_to_end(&mut err, &mut v);
+        v
+    });
+    let start = std::time::Instant::now();
+    let status = loop {
+        if let Some(s) = child.try_wait().unwrap() {
+            break Some(s);
+        }
+        if start.elapsed() > std::time::Duration::from_secs(secs) {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    let (stdout, stderr) = (ro.join().unwrap(), re.join().unwrap());
+    match status {
+        Some(status) => Ok(std::process::Output { status, stdout, stderr }),
+        None => Err(String::from_utf8_lossy(&stdout).into_owned()),
+    }
+}
+
 #[test]
 fn threads_like_rustc() {
     let dir = std::env::temp_dir().join(format!("threads_{}", std::process::id()));
@@ -33,7 +74,10 @@ fn threads_like_rustc() {
         }
         // (a race shows only sometimes: the parallel one runs a few times)
         for _ in 0..if name == "parallel" { 5 } else { 1 } {
-            let o = std::process::Command::new(&exe).env_remove("RUST_BACKTRACE").output().unwrap();
+            let o = match run_with_deadline(&exe, 60) {
+                Ok(o) => o,
+                Err(partial) => return Some(format!("{name} ({be}): still running after 60 s (a lost wakeup or a deadlock?), killed\n--- got\n{partial}")),
+            };
             let got = String::from_utf8_lossy(&o.stdout);
             if !o.status.success() || got != want {
                 return Some(format!("{name} ({be}): exit {:?}\n--- got\n{got}--- want\n{want}", o.status.code()));
