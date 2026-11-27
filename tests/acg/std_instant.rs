@@ -17,4 +17,7 @@ fn main() {
     println!("{:?} {:?}", c - Duration::from_secs(1) == a, a.checked_duration_since(c));
     println!("{:?}", c.checked_sub(Duration::from_secs(1)).map(|t| t == a));
     println!("{:?}", a.saturating_duration_since(c));
+    // (an Instant moved far ahead: its Debug's seconds are past i64 before the clock's base is taken off)
+    let far = Instant::now().checked_add(Duration::from_secs(9223372032559808512));
+    println!("{} {}", far.is_some(), far.map_or(false, |f| format!("{:?}", f).starts_with("Instant { tv_sec: 92233720")));
 }

@@ -5,3 +5,4 @@ true
 true None
 Some(true)
 0ns
+true true

@@ -17813,7 +17813,11 @@ impl Sub<Instant> for Instant {
 
 impl Debug for Instant {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
-        let s = format!("Instant {{ tv_sec: {}, tv_nsec: {} }}", self.__in_d.as_secs() as i64 - __EXR_INSTANT_BASE as i64, self.__in_d.subsec_nanos());
+        // (the seconds less the base, as a sign and a u64: an Instant moved far ahead is past i64 before the base is
+        // taken off)
+        let t = self.__in_d.as_secs();
+        let (sign, mag) = if t < __EXR_INSTANT_BASE { ("-", __EXR_INSTANT_BASE - t) } else { ("", t - __EXR_INSTANT_BASE) };
+        let s = format!("Instant {{ tv_sec: {}{}, tv_nsec: {} }}", sign, mag, self.__in_d.subsec_nanos());
         f.pad(&s)
     }
 }
