@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795803771667,
+  "lastUpdate": 1795803774820,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -124873,6 +124873,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 90.697,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9e737c42610982306bcc7ee2d68d2123cbce1149",
+          "message": "macros: end three expansions rustc ends, and name the macro at the recursion limit (#322)\n\nThe seven crates that stopped at \"macro expansion is too deep (recursion limit 128)\" at src/lib.rs:1:1 now get past macro expansion: aho-corasick, writeable, embassy-executor, embassy-sync, embassy-futures, sharded-slab and clap_builder. There were three causes:\n\n- `$x:expr` took tokens no expression can start with. It now checks `expr_may_begin`, which is rustc's `can_begin_expr`, and rejects a joint `!=`, `*=`, `|=`, `&=`, `-=`, `<=`, `<-` or `<<=`. writeable's and sharded-slab's `(@internal, ..)` rules are reached as in rustc.\n- A call by path resolved only by its last segment. `::core::assert!`, `::std::panic!` and similar paths rooted at `core`, `std` or `alloc` now go to the builtin, not to a crate's own `macro_rules! assert` (embassy) or a dependency's `panic` (clap_builder through anstream). A local `macro_rules! stringify` shadows only the bare `stringify!`, so a qualified call's arguments stay text.\n- `cfg::strip` skipped the block of `if !x { .. }`. Only `macro_rules` takes the `name! ident { .. }` form now (aho-corasick).\n\nThe limit error now uses rustc's wording, names the macro, and points at the line and column of the chain's first call. `cratebench/survey/issues.tsv` maps both the old and the new message to #252. The compile-fail ratchet is 5392.\n\nDeferred: #310 (the origin call's position on a line with several calls; the reference expander's macro name), #287 (a bare `stringify!` before a local `macro_rules! stringify`).\n\nFixes #252.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T18:16:33Z",
+          "tree_id": "605413f23ce81b3e80216bdbc7c38b707f5f0c22",
+          "url": "https://github.com/mizchi/zust/commit/9e737c42610982306bcc7ee2d68d2123cbce1149"
+        },
+        "date": 1795803774130,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 90.625,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 77.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 71.875,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 90.323,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 85,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.915,
             "unit": "%"
           }
         ]
