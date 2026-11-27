@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795791566997,
+  "lastUpdate": 1795791569654,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -124204,6 +124204,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/2a60144cd2f487535522509fccfc5f5272a7f9b9"
         },
         "date": 1795788601433,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 93.103,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 65,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 76.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.103,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 90.909,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 91.761,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e0a3d9ddde64ba3a2788177258f2d675b06bdb4f",
+          "message": "Threads: Builder, park_timeout, recv_timeout, Barrier; 6 more rustc thread UI tests (#309)\n\n- thread::Builder (name, stack_size, spawn -> io::Result); named threads in panic messages\n- thread::park_timeout; mpsc recv_timeout / RecvTimeoutError / into_iter; sync::Barrier\n- auto traits of closures: a by-reference capture is the reference it stands for (Sync needs T: Sync; Send\n  needs T: Send for a capture the body mutates, T: Sync + Send otherwise); &T is Send only when T is Sync\n- Builder::spawn checked as thread::spawn (method and path calls); a closure given as a value (a local, a\n  block, an `if`) is checked by its type\n- thread_local!: std's order when an initializer made the value itself; `!` fallback of `|| panic!()`\n- tests/security: 9 new cases; tests/threads/builder.rs; 6 more rustc UI tests pass\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01DA4GokUemhzj5xUVkRtGGb",
+          "timestamp": "2026-11-27T23:53:00+09:00",
+          "tree_id": "885014c112e0fff3d7fe5a2378eb6275eaeade1a",
+          "url": "https://github.com/mizchi/zust/commit/e0a3d9ddde64ba3a2788177258f2d675b06bdb4f"
+        },
+        "date": 1795791569245,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
