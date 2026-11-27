@@ -1011,7 +1011,7 @@ fn natural_loops<'s>(n: usize, succ: &dyn Fn(usize) -> &'s [usize]) -> Vec<Vec<b
     out.into_iter().map(|x| x.1).collect()
 }
 
-fn path_str(locals: &[Local], p: &BPlace) -> String {
+pub(crate) fn path_str(locals: &[Local], p: &BPlace) -> String {
     let mut s = locals[p.local as usize].name.clone();
     // (a closure's capture held by reference is shown as the variable: `this.x`, not `*this.x`)
     let skip = (locals[p.local as usize].via_ref && p.proj.first() == Some(&Proj::Deref(false))) as usize;
@@ -2788,14 +2788,6 @@ impl Cx<'_> {
             self.rg_late_on();
         }
         self.rg.scrut = if self.rg_on() { self.rt_expr(e) } else { None };
-        // (a place the function owns, not reached through a reference: what a `ref` binding of it borrows)
-        self.rg.scrut_place = match self.rg.scrut {
-            Some(_) if !matches!(e, Expr::Call(..) | Expr::MethodCall(..)) => match self.rt_place(e) {
-                Some((_, _, ds)) if ds.is_empty() => super::regionck::place_text(e).map(|n| (n, err_pos(e))),
-                _ => None,
-            },
-            _ => None,
-        };
         self.bk.scrut_place = self.bk_place(e).map(|p| (p.0, err_pos(e)));
         // (a temporary matched by a `&` pattern that binds by value (`match (l1, l2) { (_, &[hd, ..]) => .. }`): a
         // place of its own, so that what the binding moves out through the reference is an error at the scrutinee,
@@ -2898,7 +2890,6 @@ impl Cx<'_> {
     pub(crate) fn bk_bind_begin(&mut self) {
         self.rg.pat = self.rg.scrut.clone();
         self.rg.pat_ref = None;
-        self.rg.pat_place = self.rg.scrut_place.clone();
         if self.bk_on() {
             self.bk.bind_srcs = Some(self.bk.scrut.clone());
             self.bk.pat_path = self.bk.scrut_place.as_ref().map(|x| x.0.clone());
@@ -2906,7 +2897,6 @@ impl Cx<'_> {
     }
     pub(crate) fn bk_bind_end(&mut self) {
         self.rg.pat = None;
-        self.rg.pat_place = None;
         self.bk.bind_srcs = None;
         self.bk.pat_path = None;
     }

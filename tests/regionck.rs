@@ -6100,4 +6100,31 @@ fn main() {
     let _ = (h.page(), v);
 }
 "#, &[], "r17");
+    // (a `ref` binding through a reference borrows what it points to, not the place matched: `|&ref ints| ints`,
+    // `match self { Imp::Owned(ref x) => x }` of `self: &Imp`)
+    errors_at(r#"fn with<'a, F>(_: F) where F: FnOnce(&'a Vec<isize>) -> &'a Vec<isize> {}
+enum Imp<'a> { Borrowed(&'a [u8]), Owned(Box<[u8]>) }
+impl<'a> Imp<'a> {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Imp::Owned(ref x) => x,
+            Imp::Borrowed(x) => x,
+        }
+    }
+}
+fn keep<'a>(x: &'a String) -> &'a str {
+    let ref r = *x;
+    r.as_str()
+}
+fn opt<'a>(o: &'a Option<String>) -> Option<&'a str> {
+    match *o {
+        Some(ref s) => Some(s.as_str()),
+        None => None,
+    }
+}
+fn main() {
+    with(|&ref ints| ints);
+    let _ = (Imp::Borrowed(&[1]).as_slice().len(), keep(&String::new()), opt(&None));
+}
+"#, &[], "r18");
 }

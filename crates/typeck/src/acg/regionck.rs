@@ -93,10 +93,6 @@ pub struct Rg {
     pub scrut: Option<(Ty, RT)>,
     pub pat: Option<(Ty, RT)>,
     pub pat_ref: Option<u32>,
-    /// The last scrutinee as a place the function owns (`s`, `__p0` of a closure's parameter pattern), and the one
-    /// the pattern being bound matches: a `ref` binding there borrows it (a loan of it)
-    pub scrut_place: Option<(String, Sp)>,
-    pub pat_place: Option<(String, Sp)>,
     /// The method call being made (call_fn is given no span for it)
     pub call_sp: Sp,
     /// The elements' tree of the array or slice a slice pattern matches
@@ -995,7 +991,7 @@ fn strip(e: &Expr) -> &Expr {
 }
 
 /// `x`, `x.f`: the text of a place for messages
-pub(crate) fn place_text(e: &Expr) -> Option<String> {
+fn place_text(e: &Expr) -> Option<String> {
     match strip(e) {
         Expr::Path(None, p) if p.segs.len() == 1 => Some(p.segs[0].name.clone()),
         Expr::Field(x, f, _) => Some(format!("{}.{f}", place_text(x)?)),
@@ -5112,7 +5108,12 @@ impl Cx<'_> {
                 Some(r) => r,
                 None => {
                     let r = self.rg.var();
-                    if let Some((n, sp)) = self.rg.pat_place.clone() {
+                    // (the place the borrow check has the pattern at: one the function owns, through no reference
+                    // (it drops the place where a pattern matches through one: `|&ref x| ..`, `match self { S(ref
+                    // x) => .. }` of `self: &S`))
+                    if let Some(pp) = self.bk.pat_path.as_ref().filter(|pp| pp.proj.iter().all(|x| matches!(x, super::borrowck::Proj::Field(_) | super::borrowck::Proj::Deref(true)))) {
+                        let n = super::borrowck::path_str(&self.bk.locals, pp);
+                        let sp = self.bk.locals.get(pp.local as usize).map(|l| l.decl).unwrap_or(super::SP);
                         self.rg.loans.push((r, n, sp));
                     }
                     r
