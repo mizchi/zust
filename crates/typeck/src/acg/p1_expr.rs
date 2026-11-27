@@ -1046,7 +1046,7 @@ impl Cx<'_> {
         // `&T` → `*const dyn Trait` (the same fat value as `&dyn Trait`)
         if let (Some(want @ Ty::Ptr(m2, Ty::Dyn(tr))), Some(v), Ty::Ref(m1, inner)) = (expected, v, t) {
             if m1 || !m2 {
-                if matches!(inner, Ty::Dyn(t2) if t2 == tr) {
+                if matches!(inner, Ty::Dyn(t2) if t2 == tr || self.dyn_coerces(t2, tr)) {
                     return Ok((Some(v), want));
                 }
                 if !matches!(inner, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str) {

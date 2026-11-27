@@ -39,6 +39,8 @@ Send かつ Sync とみなしていた。そのため、`Rc` を持つ `Box<dyn 
   （cast/ptr-to-trait-obj-add-auto.rs が通る）。rustc と同じく、これは主トレイトのあるオブジェクトについてである。auto trait だけのオブジェクトには
   メソッドがなく、`*const dyn Sync as *const (dyn Send + Sync)` は受け付ける（tests/security/send_dyn_ptr_cast_auto_only.rs。前は
   `dyn Send` から `dyn Send + Sync` を拒んでいた）。
+- `&(dyn Tr + Send)` → `*const dyn Tr`（参照から生ポインタへの型強制）も、同じ `dyn_coerces` で auto trait を外せる
+  （tests/security/send_dyn_ref_to_ptr_drop_auto.rs）。
 - フィールドを持つプログラム自身の構造体は、型引数ではなくフィールドで判定する（`fn() -> T` のフィールドの `Maker<Rc<u32>>` は Send）。
 - `static` の型は Sync でなければならない（E0277）。この検査を、プログラムのトレイトのスーパートレイトの auto trait を読んだ後に移した。
   そのため、`trait Stage: Sync` の `&dyn Stage` は Sync になる（consts/issue-54582.rs）。
