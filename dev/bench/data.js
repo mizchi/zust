@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795746608239,
+  "lastUpdate": 1795747146394,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -62168,6 +62168,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 37.97,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b18f94f3cb3ba0084621249140682fa172f3cce6",
+          "message": "syntax: crate items zustc lost — primitive-named items, {self} in use trees, use-tree aliases, macro self (#254) (#277)\n\nFixes the most common ways zustc lost a crate's own items, the top fix of the crate survey (#254, 11% of the surveyed crates' downloads):\n\n- Items named like primitives (`fn u32`, `mod char`, `const u8`): the renaming pass now tells type positions from value positions.\n  - Value positions: call arguments, let and assignment values, comparison operands, match arm values, and after return or break.\n  - A struct expression's head (`S { .. }`) is a type.\n  - Numeric suffixes are never renamed.\n- `{self}` in a use tree: it imports only the type namespace, so a value of the same name is not brought in.\n- Use-tree entries are not expanded through module aliases inside a prefixed group. A group right after `use` is still expanded.\n- Block imports are looked up by the reference's namespace: a call does not take a type-only `use E::{self}`.\n- Macro hygiene: `self` / `super` / `crate` are not taken as match-arm bindings in a macro body.\n\nTests: probes prim_named_fns, use_tree_self and macro_self_arrow, with expected output from rustc 1.97; lexer unit tests; tests/workspace.rs. rust-ui: 0 regressions.\n\nLeftover from the review: #283. Fixes #254 (the parts in the issue's top list; the rest is tracked there).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T11:33:32+09:00",
+          "tree_id": "375d80d7811d4325d298e403e7f4c94a83e184c8",
+          "url": "https://github.com/mizchi/zust/commit/b18f94f3cb3ba0084621249140682fa172f3cce6"
+        },
+        "date": 1795747146054,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 130.407,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.751,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 19.323,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 42.945,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.539,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.548,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 129.765,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 797.181,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 599.852,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.719,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 72.047,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 195.246,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.617,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.548,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 610.297,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3923.941,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.901,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 92.468,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 42.932,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 53.124,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 96.435,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 159.454,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 38.594,
             "unit": "ms"
           }
         ]
