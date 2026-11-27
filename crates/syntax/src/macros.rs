@@ -586,12 +586,14 @@ fn path_end(t: &[TokenTree], i: usize) -> Option<usize> {
             _ => return None,
         }
         j += 1;
+        // (generic arguments `B<T>` / `B::<T>`, or parenthesized ones `Fn(A) -> R` / `Fn::(A) -> R`)
+        let paren = |k: usize| matches!(t.get(k), Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Parenthesis);
         if pair_at(t, j, ':', ':') && punct_at(t, j + 2, '<') {
             j = angle_end(t, j + 2)?;
         } else if punct_at(t, j, '<') {
             j = angle_end(t, j)?;
-        } else if matches!(t.get(j), Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Parenthesis) {
-            j += 1;
+        } else if paren(j) || (pair_at(t, j, ':', ':') && paren(j + 2)) {
+            j += if paren(j) { 1 } else { 3 };
             if pair_at(t, j, '-', '>') {
                 j = ty_end(t, j + 2, false)?;
             }
@@ -2624,8 +2626,10 @@ fn expand_joined(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::
             // let x = ..;`)
             //  Attributes that are only `#[cfg(..)]` / `#[cfg_attr(..)]` (cfg-if's expansions) are evaluated with what they
             //  are on, so they leave nothing behind)
-            //  A braced call followed by `.` / `?` is an expression's operand, `outer! {}.abs()`: kept in its block)
-            let alone = ge + 1 >= toks.len() || sym(ge + 1, b';') || sym(ge + 1, b'}') || (sym(ge, b'}') && !sym(ge + 1, b'.') && !sym(ge + 1, b'?'));
+            //  A braced call followed by `.` / `?` is an expression's operand, `outer! {}.abs()`: kept in its block. A
+            //  `..` / `..=` after it is no such `.`: `{ noop! {} .. }` is `..`)
+            let dot = sym(ge + 1, b'.') && !(sym(ge + 2, b'.') && toks[ge + 2].1 == toks[ge + 1].2);
+            let alone = ge + 1 >= toks.len() || sym(ge + 1, b';') || sym(ge + 1, b'}') || (sym(ge, b'}') && !dot && !sym(ge + 1, b'?'));
             let spliced = !top && stmt_pos && alone && only_cfg_attrs(&body);
             // (the call's own `;` goes when the expansion ends a statement itself: no stray `;` after attributes)
             let drop_semi = spliced && sym(ge + 1, b';') && body.trim_end().ends_with(';');
@@ -2894,10 +2898,11 @@ fn find_calls(
                                 let next_semi = matches!(toks.get(i + 3), Some(TokenTree::Punct(q)) if q.as_char() == ';');
                                 // (`m! { .. }` is a statement by itself, whatever follows, as in expand_cfg)
                                 let braced = matches!(toks.get(i + 2), Some(TokenTree::Group(cg)) if cg.delimiter() == proc_macro2::Delimiter::Brace);
-                                // (a braced call followed by `.` / `?` is an expression's operand: kept in its block)
-                                let alone = next_semi
-                                    || toks.get(i + 3).is_none()
-                                    || (braced && !matches!(toks.get(i + 3), Some(TokenTree::Punct(q)) if matches!(q.as_char(), '.' | '?')));
+                                // (a braced call followed by `.` / `?` is an expression's operand: kept in its block;
+                                // not one followed by `..` / `..=`)
+                                let postfix = matches!(toks.get(i + 3), Some(TokenTree::Punct(q)) if q.as_char() == '?'
+                                    || (q.as_char() == '.' && op_len(&toks, i + 3) == 1));
+                                let alone = next_semi || toks.get(i + 3).is_none() || (braced && !postfix);
                                 let spliced = depth > 0 && stmt_pos && alone && only_cfg_attrs(&body);
                                 let drop_semi = spliced && next_semi && body.trim_end().ends_with(';');
                                 // (as expand_cfg: at the top, an item only where an item starts (after an attribute
@@ -3431,6 +3436,19 @@ mod env_tests {
     /// A `macro_rules!` inside another macro's arguments is that macro's input, not a definition yet: quote 1.0
     /// wraps its `quote!` in `__quote![ #[macro_export] macro_rules! quote { .. } ];`. Taking it out of the call
     /// left the call empty ("no rules matched"); it is defined when the call's expansion puts it in place
+    /// A braced statement call followed by `..` is no operand of a method call: `{ noop! {} .. }` is the full range
+    /// `..`, not `({ }) ..` (a range of `()`), while `.abs()` / `?` after one keep its block. (Not a probe: zustc does
+    /// not make a `..` value yet)
+    #[test]
+    fn braced_call_before_a_range_or_a_method() {
+        let src = "macro_rules! noop { () => {}; }\nmacro_rules! one { () => { 1_i32 - 2_i32 }; }\nfn f() -> std::ops::RangeFull { noop! {} .. }\nfn g() -> std::ops::RangeToInclusive<i32> { noop! {} ..=5 }\nfn h() -> i32 { one! {}.abs() }\n";
+        for (name, e) in [("fast", expand(src)), ("reference", expand_reference(src))] {
+            let norm = e.unwrap().unwrap().split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(norm.contains("RangeFull { .. }") && norm.contains("RangeToInclusive<i32> { ..=5 }"), "{name}: {norm}");
+            assert!(norm.contains("({ 1_i32 - 2_i32 }) .abs()") || norm.contains("({ 1_i32 - 2_i32 }).abs()"), "{name}: {norm}");
+        }
+    }
+
     #[test]
     fn macro_rules_in_call_arguments() {
         let src = "macro_rules! wrap { ($it:item) => { $it }; }\nwrap![ #[macro_export] macro_rules! q { () => { 0 }; ($t:tt) => { $t }; } ];\nfn main() { let _a = q!(); let _b = q!(5); }\n";

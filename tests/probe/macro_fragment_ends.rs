@@ -318,13 +318,27 @@ fn absolute() -> i32 {
     outer_diff! {}.abs()
 }
 fn tried() -> Option<i32> {
-    let v = outer_negated! {}?;
-    Some(v * 2)
+    outer_negated! {}?.checked_mul(2)
+}
+
+// a `path` fragment's parenthesized arguments, also after `::`: `Fn(u8) -> u8` and `Fn::(u8) -> u8` are one path
+// each (the first rule), not `Fn` and more
+macro_rules! fn_path {
+    ($p:path) => {
+        1
+    };
+    ($f:ident :: ($a:ty) -> $r:ty) => {
+        2
+    };
+    ($f:ident ($a:ty) -> $r:ty) => {
+        3
+    };
 }
 
 fn main() {
     println!("{} {} {}", le_or_ty!(<=), le_or_ty!(<u8 as Store<Vec<u8>>>::Item ,), object_size!((u8, char)));
     println!("{} {} {:?}", opt_group!([a] [a]), opt_group!([a]), (absolute(), tried()));
+    println!("{} {}", fn_path!(Fn(u8) -> u8), fn_path!(Fn::(u8) -> u8));
     println!("{:?} {:?} {}", arrow!(1 == 1 => 2), arrow!(2 >= 3 => 4), times_three());
     println!("{} {} {}", opt_prefix!(, a), opt_prefix!(, a, a), boxed_size!(dyn core::fmt::Debug +));
     println!("{:?} {:?}", micro(), milli());
