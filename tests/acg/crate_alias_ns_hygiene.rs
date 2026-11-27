@@ -3,6 +3,8 @@
 // - an alias with a default type parameter used without it (miniz_oxide's `type Result<T, E = Error>`)
 // - `use m::sigaction;` where m has `fn sigaction` and a glob brings `struct sigaction` (libc, as
 //   signal-hook-registry imports it): the type is the struct, the call the fn
+// - a macro body's `let x: ::std::primitive::u8` (a type that starts with `::`): `x` is still the body's own
+//   binding, apart from the caller's `x`; and `let One::V(z)` / `if let E::V = ..` in an expression's body
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum DecoderResult {
     InputEmpty,
@@ -25,6 +27,25 @@ macro_rules! decode_fn {
     };
 }
 decode_fn!(decode);
+macro_rules! abs_ty {
+    ($e:expr) => {{ let x: ::std::primitive::u8 = 1; $e + x }};
+}
+#[derive(Clone, Copy)]
+enum One {
+    V(u8),
+}
+macro_rules! abs_ty_mut {
+    ($e:expr) => {{
+        let mut x: ::core::primitive::u8 = 2;
+        x += 1;
+        let One::V(z) = One::V(4);
+        let mut n = 0u8;
+        if let DecoderResult::OutputFull = decode(1).0 {
+            n += 1;
+        }
+        $e + x + z + n
+    }};
+}
 mod deflate {
     pub mod compress {
         #[derive(Debug)]
@@ -93,4 +114,6 @@ fn main() {
     let p = Prev { info: sigaction { sa_flags: 3 } };
     println!("{} {}", p.clone().info.sa_flags, libc::sigaction(2, &p.info));
     println!("{}", sigaction(5, std::ptr::null()));
+    let x = 10u8;
+    println!("{} {}", abs_ty!(x), abs_ty_mut!(x * 2));
 }
