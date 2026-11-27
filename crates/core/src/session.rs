@@ -948,19 +948,23 @@ pub struct Session {
     sum_keep: Option<FxMap<Key, Vec<Summary>>>,
     /// What the last E0038 check found of the program's traits (dyncompat::check)
     dyn_memo: dyncompat::DynMemo,
+    /// (keep_for_edits) Each item's refs (Program::refs_in) by its hash, for the program's name tables of the
+    /// fingerprint (Program::ref_tables_fp): an edit that adds or renames nothing reads only the changed items again
+    refs_memo: Option<(Key, FxMap<Key, (Vec<u32>, Vec<u32>, Vec<u32>)>)>,
 }
 
 impl Session {
     pub fn new(opts: Options) -> Session {
-        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new(), #[cfg(feature = "build")] ws_diags: None, sum_keep: None, dyn_memo: Default::default() }
+        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new(), #[cfg(feature = "build")] ws_diags: None, sum_keep: None, dyn_memo: Default::default(), refs_memo: None }
     }
 
     /// For a session whose document will be edited (zust-analyzer): the preprocessing keeps its chunks from the first
     /// analysis on, so that the first edit preprocesses only what it changed (PrepMemo::keep_from_first)
     pub fn keep_for_edits(&mut self) {
         self.sel.prep.keep_from_first();
-        // (and the item summaries, decoded, from one analysis to the next)
+        // (and the item summaries, decoded, from one analysis to the next, and the items' refs)
         self.sum_keep = Some(FxMap::default());
+        self.refs_memo = Some((0, FxMap::default()));
     }
 
     pub fn load_cache(&mut self, path: &std::path::Path) {
@@ -2725,11 +2729,36 @@ impl Session {
         let mut srefs = Vec::with_capacity(prog.item_of.len());
         let mut crefs = Vec::with_capacity(prog.item_of.len());
         let names = prog.ref_names();
+        // (keep_for_edits: the refs of an item of the same hash, read in a program of the same name tables, are the
+        // same: an item's hash is of its tokens, identifiers and all)
+        let mut memo = self.refs_memo.take().map(|(fp, m)| {
+            let now = prog.ref_tables_fp();
+            (now, if fp == now { m } else { FxMap::default() })
+        });
+        let mut used: FxMap<Key, (Vec<u32>, Vec<u32>, Vec<u32>)> = FxMap::default();
         for ii in &prog.item_of {
-            let (f, st, c) = ii.map(|ii| prog.refs_in(&src, &items[ii as usize], Some(&names))).unwrap_or_default();
+            let (f, st, c) = match (ii, &mut memo) {
+                (Some(ii), Some((_, m))) => {
+                    let it = &items[*ii as usize];
+                    let r = match used.get(&it.hash) {
+                        Some(r) => r.clone(),
+                        None => match m.remove(&it.hash) {
+                            Some(r) => r,
+                            None => prog.refs_in(&src, it, Some(&names)),
+                        },
+                    };
+                    used.entry(it.hash).or_insert_with(|| r.clone());
+                    r
+                }
+                (Some(ii), None) => prog.refs_in(&src, &items[*ii as usize], Some(&names)),
+                (None, _) => Default::default(),
+            };
             refs.push(f);
             srefs.push(st);
             crefs.push(c);
+        }
+        if let Some((fp, _)) = memo {
+            self.refs_memo = Some((fp, used));
         }
         tm.lap("refs", String::new());
         let mut a = Analysis { late_err, iface_fp, src, items, prog, refs, group_keys: Mutex::new((vec![], FxMap::default())), srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()), assoc_keys: (0, vec![]) };

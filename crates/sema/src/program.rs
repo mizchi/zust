@@ -3602,8 +3602,11 @@ impl Program {
             while let Ty::Ref(true, i) = b {
                 b = *i;
             }
+            // (std's String / Vec, not a program's type of the name)
             let name = match b {
-                Ty::Struct(sid) => self.structs[self.base_of(sid) as usize].name.as_str(),
+                Ty::Struct(sid) if self.struct_item.get(self.base_of(sid) as usize).is_some_and(|&i| i >= self.prelude_from) => {
+                    self.structs[self.base_of(sid) as usize].name.as_str()
+                }
                 _ => "",
             };
             let elem = match b {
@@ -7517,6 +7520,35 @@ impl Program {
     }
 
     /// The set of names refs looks up (names in any table). Most identifiers (variables, keywords) need one lookup
+    /// A fingerprint of what refs_in reads of the program: the names of its fns (with their groups), structs / enums,
+    /// consts and aliases, and what each leads to. Two programs of one fingerprint give an item the same refs. Each
+    /// entry is hashed on its own and the hashes are added, so no map's order matters
+    pub fn ref_tables_fp(&self) -> Key {
+        fn sum<'a, K: std::hash::Hash + ?Sized + 'a, V: std::hash::Hash + 'a>(tag: u8, it: impl Iterator<Item = (&'a K, &'a V)>) -> Key {
+            let (mut s, mut n): (Key, u64) = (0, 0);
+            for (k, v) in it {
+                let mut h = KeyHasher::new();
+                h.add(&tag);
+                h.add(k);
+                h.add(v);
+                s = s.wrapping_add(h.finish());
+                n += 1;
+            }
+            let mut h = KeyHasher::new();
+            h.add(&tag);
+            h.add(&n);
+            h.add(&s);
+            h.finish()
+        }
+        let mut h = KeyHasher::new();
+        h.add(&sum(0, self.by_last.iter()));
+        h.add(&sum(1, self.struct_index.iter()));
+        h.add(&sum(2, self.const_index.iter()));
+        h.add(&sum(3, self.const_by_last.iter()));
+        h.add(&sum(4, self.aliases.iter()));
+        h.finish()
+    }
+
     pub fn ref_names(&self) -> FxSet<&str> {
         let mut s: FxSet<&str> = FxSet::default();
         s.extend(self.by_last.keys().map(|k| k.as_str()));
@@ -7817,7 +7849,13 @@ fn syn_unify(a: &TySyn, ga: &[String], b: &TySyn, gb: &[String], sub: &mut Vec<(
         };
         if let Some(n) = var(a, sa) {
             let sized = !g[sa as usize].iter().any(|x| x.strip_prefix('?') == Some(n.as_str()));
-            if sized && matches!(b, TySyn::Slice(_) | TySyn::Str | TySyn::Dyn(_)) {
+            // (and std's unsized types, `impl<T> AsMut<T>` beside `impl AsMut<::std::path::Path>`: `Path`, `OsStr`,
+            // `CStr`, by their last segment)
+            let std_unsized = |t: &TySyn| {
+                matches!(t, TySyn::Named(m) if matches!(m.rsplit("::").next().unwrap_or(m), "Path" | "OsStr" | "CStr"))
+            };
+            // (not the other impl's own parameter of the name, `impl<Path> Pick<Path> for S`)
+            if sized && (matches!(b, TySyn::Slice(_) | TySyn::Str | TySyn::Dyn(_)) || (var(b, sb).is_none() && std_unsized(b))) {
                 return false;
             }
             if let Some((_, (s2, t2))) = sub.iter().find(|x| x.0 == (sa, n.clone())).cloned() {
