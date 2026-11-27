@@ -125,14 +125,6 @@ pub fn dyn_autos(s: &str) -> (&str, bool, bool) {
     (s, send, sync)
 }
 
-/// A trait object of the text `want` takes one of `got`'s: the same trait, with no auto trait `got` lacks (`dyn Tr +
-/// Send` is a `dyn Tr`, not the other way round)
-pub fn dyn_drops_autos(got: &str, want: &str) -> bool {
-    let (g, gs, gy) = dyn_autos(got);
-    let (w, ws, wy) = dyn_autos(want);
-    g == w && (gs || !ws) && (gy || !wy)
-}
-
 pub fn intern_str(s: &str) -> &'static String {
     static TABLE: OnceLock<Mutex<HashSet<&'static String>>> = OnceLock::new();
     let mut tab = TABLE.get_or_init(|| Mutex::new(HashSet::default())).lock().unwrap();

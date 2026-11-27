@@ -1291,6 +1291,7 @@ run-pass	cast/owned-struct-to-trait-cast-6318.rs
 check-pass	cast/ptr-ptr-to-ptr-ptr-different-regions.rs
 compile-fail	cast/ptr-to-ptr-different-regions.rs
 compile-fail	cast/ptr-to-ptr-indirect-different-regions.rs
+compile-fail	cast/ptr-to-trait-obj-add-auto.rs
 check-pass	cast/ptr-to-trait-obj-add-super-auto.rs
 build-pass	cast/raw-pointer-from-str-comparison.rs
 compile-fail	cast/raw-ptr-to-dyn-fn-raw-ptr.rs

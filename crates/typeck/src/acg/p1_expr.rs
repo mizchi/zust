@@ -1021,8 +1021,8 @@ impl Cx<'_> {
         // same value)
         if let (Some(want), Some(v)) = (expected, v) {
             let drops = match (want, t) {
-                (Ty::Box(Ty::Dyn(w)), Ty::Box(Ty::Dyn(g))) => w != g && crate::types::dyn_drops_autos(g, w),
-                (Ty::Ref(m2, Ty::Dyn(w)), Ty::Ref(m1, Ty::Dyn(g))) | (Ty::Ptr(m2, Ty::Dyn(w)), Ty::Ptr(m1, Ty::Dyn(g))) => w != g && (m1 || !m2) && crate::types::dyn_drops_autos(g, w),
+                (Ty::Box(Ty::Dyn(w)), Ty::Box(Ty::Dyn(g))) => w != g && self.dyn_coerces(g, w),
+                (Ty::Ref(m2, Ty::Dyn(w)), Ty::Ref(m1, Ty::Dyn(g))) | (Ty::Ptr(m2, Ty::Dyn(w)), Ty::Ptr(m1, Ty::Dyn(g))) => w != g && (m1 || !m2) && self.dyn_coerces(g, w),
                 _ => false,
             };
             if drops {
@@ -1964,6 +1964,14 @@ impl Cx<'_> {
                             Err(e) => return Err(e),
                         };
                         return Ok((Some(fat), to));
+                    }
+                    // (a cast may drop an object's auto traits, not add them (E0804): the value behind the pointer may not
+                    // have them)
+                    (Ty::Ptr(_, Ty::Dyn(g)), Ty::Ptr(_, Ty::Dyn(w))) if g != w && crate::types::dyn_autos(g).0 == crate::types::dyn_autos(w).0 && !self.dyn_coerces(g, w) => {
+                        let (_, ws, wy) = crate::types::dyn_autos(w);
+                        let (_, gs, _) = crate::types::dyn_autos(g);
+                        let added = if ws && !gs { "Send" } else if wy { "Sync" } else { "Send" };
+                        return err(SP, format!("cannot add auto trait `{added}` to dyn bound via pointer cast (E0804)"));
                     }
                     (Ty::Ptr(..), Ty::Ptr(..)) => return Ok((v, to)),
                     // (a fn pointer as a raw pointer: the same address)
@@ -3218,6 +3226,23 @@ impl Cx<'_> {
     }
 
     /// Makes a `&T` (address v) into a `&dyn tr` fat pointer
+    /// A trait object of the text `got` may become one of `want` keeping its value: the same trait, and every auto trait
+    /// `want` has is one `got` has, written or by its trait's supertraits (`trait Job: Send`: a `dyn Job` is a `dyn Job +
+    /// Send`). An object of auto traits alone is the set of them (`dyn Send + Sync` is a `dyn Sync`)
+    pub(crate) fn dyn_coerces(&self, got: &str, want: &str) -> bool {
+        fn norm(s: &str) -> (Option<&str>, bool, bool) {
+            let (c, send, sync) = crate::types::dyn_autos(s);
+            match c {
+                "Send" => (None, true, sync),
+                "Sync" => (None, send, true),
+                c => (Some(c), send, sync),
+            }
+        }
+        let ((gc, gs, gy), (wc, ws, wy)) = (norm(got), norm(want));
+        let gives = |a: &str| gc.is_some_and(|c| self.prog.tdb.gives_auto(self.prog, c, a) == Some(true));
+        gc == wc && (!ws || gs || gives("Send")) && (!wy || gy || gives("Sync"))
+    }
+
     pub(crate) fn to_dyn(&mut self, v: Value, t: Ty, tr: &str, span: Sp) -> R<Value> {
         // (`dyn Tr + Send` / `+ Sync`: the value's type must have them (E0277), as the object says it does; the vtable
         // is the trait's)

@@ -32,20 +32,24 @@ Send かつ Sync とみなしていた。そのため、`Rc` を持つ `Box<dyn 
 - `TraitDb::gives_auto` は、答えを未定とする前に、トレイトのスーパートレイトをすべて見る。`trait Tr: A + Error` と `trait A: Send` なら、zustc が
   `Error` のスーパートレイトを知らなくても `dyn Tr` は Send である。
 - `dyn Tr + Send` の型のハッシュは、`dyn Tr` のものと同じく `Tr` のメソッドを含む。
-- オブジェクトの `Box`、`&`、`*const` から、auto trait のより少ないものへの型強制は同じ値である（`types::dyn_drops_autos`）。
-  より多いものへは、これまでどおり型の不一致（E0308）である。
+- オブジェクトの `Box`、`&`、`*const` から、auto trait のより少ないものへの型強制は同じ値である。より多いものへは、これまでどおり型の不一致（E0308）である。
+  それを決めるのは `dyn_coerces` である。オブジェクトのトレイトがスーパートレイトとして持つ auto trait は、持つものと数える（`trait Job: Send` の
+  `Box<dyn Job>` は `Box<dyn Job + Send>` である）。auto trait だけのオブジェクトは、その集合とみなす（`Box<dyn Send + Sync>` は `Box<dyn Sync>` である）。
+- ポインタのキャストは、オブジェクトの auto trait を外せるが足せない。`*const dyn Job as *const (dyn Job + Send)` は rustc と同じく E0804 である
+  （cast/ptr-to-trait-obj-add-auto.rs が通る）。
+- フィールドを持つプログラム自身の構造体は、型引数ではなくフィールドで判定する（`fn() -> T` のフィールドの `Maker<Rc<u32>>` は Send）。
 - `static` の型は Sync でなければならない（E0277）。この検査を、プログラムのトレイトのスーパートレイトの auto trait を読んだ後に移した。
   そのため、`trait Stage: Sync` の `&dyn Stage` は Sync になる（consts/issue-54582.rs）。
 
 ## 確かめたこと
 
 - tests/security: send_dyn_thread.rs が通る（もう TODO ではない）。新しいケースは send_rc_dyn_send_coerce.rs（`Box<dyn Fn() + Send>` にする
-  `Rc` のクロージャ）、sync_cell_dyn_sync_coerce.rs（`&(dyn Fn() + Sync)` にする `Cell` のクロージャ）、send_rc_bare_dyn_send.rs（`Box<dyn Send>` にする `Rc`）、send_dyn_add_auto.rs
+  `Rc` のクロージャ）、sync_cell_dyn_sync_coerce.rs（`&(dyn Fn() + Sync)` にする `Cell` のクロージャ）、send_rc_bare_dyn_send.rs（`Box<dyn Send>` にする `Rc`）、send_dyn_ptr_cast_add_auto.rs（E0804）、send_dyn_add_auto.rs
   （`Box<dyn Fn()>` から `Box<dyn Fn() + Send>`、E0308）。どれも rustc が拒否する場所で拒否される。
 - rustc と比べた。`Box<dyn Tr + Send>`（とその `Vec`）はスレッドへ移れる。`Box<dyn Tr>` は移れず、`T: Send` の境界も満たさない。
   `Mutex<Box<dyn Tr + Send>>` は動く。`?`、`Box::new(e)`、`"msg".into()` での `Box<dyn Error + Send + Sync>` は前と同じく動く。
-- rustc の UI テスト：後退は 0、新たに通るのは 4 つ（coercion/retslot-cast.rs、mismatched_types/trait-bounds-cant-coerce.rs、
-  traits/bound/sugar.rs、traits/issue-7013.rs）。
+- rustc の UI テスト：後退は 0、新たに通るのは 5 つ（coercion/retslot-cast.rs、mismatched_types/trait-bounds-cant-coerce.rs、
+  traits/bound/sugar.rs、traits/issue-7013.rs、cast/ptr-to-trait-obj-add-auto.rs）。
 - `cargo test --release --workspace`。
 
 ## 残っていること

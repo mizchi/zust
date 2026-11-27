@@ -5022,8 +5022,11 @@ fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool
                 (Ty::Ptr(_, inner), Some(false)) => sync_(*inner, seen) || (!sync && send(*inner, seen)),
                 _ => auto_trait_fails(prog, t, sync, seen, d + 1),
             };
+            // (a struct of the program's with fields is judged by them (`Maker<Rc<u32>>` of a `fn() -> T` field is
+            // Send); one without (a placeholder instance) by its arguments)
             let closure = prog.closure_of_struct.contains_key(&base);
-            (!closure && sd.args.iter().any(|&a| auto_trait_fails(prog, a, sync, seen, d + 1)))
+            let laid_out = !sd.fields.is_empty() || !sd.variants.is_empty();
+            (!closure && !laid_out && sd.args.iter().any(|&a| auto_trait_fails(prog, a, sync, seen, d + 1)))
                 || sd.fields.iter().enumerate().any(|(i, f)| field(i, f.1, seen))
                 || sd.variants.iter().any(|v| v.fields.iter().any(|f| auto_trait_fails(prog, f.1, sync, seen, d + 1)))
         }

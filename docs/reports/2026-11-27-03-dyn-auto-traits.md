@@ -35,8 +35,14 @@ keeps them, as rustc does.
 - `TraitDb::gives_auto` looks through all of a trait's supertraits before it calls the answer open: with
   `trait Tr: A + Error` and `trait A: Send`, `dyn Tr` is Send though zustc does not know `Error`'s supertraits.
 - The type hash of a `dyn Tr + Send` takes in `Tr`'s methods, as a `dyn Tr`'s does.
-- A coercion of `Box`, `&` or `*const` of an object to one with fewer auto traits is the same value
-  (`types::dyn_drops_autos`); one to more is still a mismatched type (E0308).
+- A coercion of `Box`, `&` or `*const` of an object to one with fewer auto traits is the same value; one to more is
+  still a mismatched type (E0308). `dyn_coerces` decides it: an auto trait the object's trait has as a supertrait counts
+  as one it has (a `Box<dyn Job>` of `trait Job: Send` is a `Box<dyn Job + Send>`), and an object of auto traits alone
+  is the set of them (`Box<dyn Send + Sync>` is a `Box<dyn Sync>`).
+- A pointer cast may drop an object's auto traits, not add them: `*const dyn Job as *const (dyn Job + Send)` is E0804,
+  as rustc's (cast/ptr-to-trait-obj-add-auto.rs passes).
+- The program's own structs with fields are judged by their fields, not their type arguments (a `Maker<Rc<u32>>` of
+  a `fn() -> T` field is Send).
 - A `static`'s type must be Sync (E0277). That check now comes after the auto traits of the program's traits'
   supertraits are read, so a `&dyn Stage` of `trait Stage: Sync` is Sync (consts/issue-54582.rs).
 
@@ -44,13 +50,14 @@ keeps them, as rustc does.
 
 - tests/security: send_dyn_thread.rs passes (no longer a TODO); new cases send_rc_dyn_send_coerce.rs (an `Rc` closure
   as a `Box<dyn Fn() + Send>`), sync_cell_dyn_sync_coerce.rs (a `Cell` closure as a `&(dyn Fn() + Sync)`),
-  send_rc_bare_dyn_send.rs (an `Rc` as a `Box<dyn Send>`) and send_dyn_add_auto.rs (`Box<dyn Fn()>` to
-  `Box<dyn Fn() + Send>`, E0308). Each is rejected where rustc rejects it.
+  send_rc_bare_dyn_send.rs (an `Rc` as a `Box<dyn Send>`), send_dyn_add_auto.rs (`Box<dyn Fn()>` to
+  `Box<dyn Fn() + Send>`, E0308) and send_dyn_ptr_cast_add_auto.rs (E0804). Each is rejected where rustc rejects it.
 - Against rustc: a `Box<dyn Tr + Send>` (and a `Vec` of them) moves to a thread; a `Box<dyn Tr>` does not, nor meets a
   `T: Send` bound; `Mutex<Box<dyn Tr + Send>>` works; `Box<dyn Error + Send + Sync>` with `?`, `Box::new(e)` and
   `"msg".into()` behaves as before.
-- The rustc UI tests: 0 regressions, 4 newly passing (coercion/retslot-cast.rs,
-  mismatched_types/trait-bounds-cant-coerce.rs, traits/bound/sugar.rs, traits/issue-7013.rs).
+- The rustc UI tests: 0 regressions, 5 newly passing (coercion/retslot-cast.rs,
+  mismatched_types/trait-bounds-cant-coerce.rs, traits/bound/sugar.rs, traits/issue-7013.rs,
+  cast/ptr-to-trait-obj-add-auto.rs).
 - `cargo test --release --workspace`.
 
 ## What is left
