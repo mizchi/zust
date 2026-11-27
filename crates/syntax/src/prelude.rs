@@ -280,7 +280,7 @@ fn gated_trait(h: usize) -> Option<&'static str> {
                     matches!(*w, "Hasher" | "Hash" | "__BoolThen" | "__AsBytes" | "__PathExt" | "__AsPathStr" | "BufRead" | "Read" | "Seek" | "Write" | "__FWr" | "ExactSizeIterator" | "BuildHasher"
                         // (std::os::unix's: `size()` / `mode()` / `as_raw_fd()` of a program's own are no reason for them)
                         | "MetadataExt" | "OpenOptionsExt" | "PermissionsExt" | "AsRawFd" | "FromRawFd" | "IntoRawFd")
-                        || matches!(*w, "Binary" | "Octal" | "LowerHex" | "UpperHex" | "LowerExp" | "UpperExp")
+                        || matches!(*w, "Binary" | "Octal" | "LowerHex" | "UpperHex" | "LowerExp" | "UpperExp" | "Pointer")
                 })
             })
             .collect()
@@ -641,7 +641,7 @@ const SHADOWABLE: &[&str] = &[
     "File", "OpenOptions", "Metadata", "FileType", "Permissions", "RawFd", "AsRawFd", "FromRawFd", "IntoRawFd",
     "MetadataExt", "OpenOptionsExt", "PermissionsExt", "FpCategory",
     "Instant", "Any",
-    "Binary", "Octal", "LowerHex", "UpperHex", "LowerExp", "UpperExp",
+    "Binary", "Octal", "LowerHex", "UpperHex", "LowerExp", "UpperExp", "Pointer",
 ];
 
 /// Whether the prelude's item of the name is renamed when the program defines one (SHADOWABLE, hashed: asked for each
@@ -1149,6 +1149,32 @@ impl<'a> PreludeScan<'a> {
 
 /// Whether src writes a C string literal, `c"..."` / `cr"..."`: a `c` that starts a token (not the end of `"abc"` or of a
 /// name)
+/// Whether the source has a format spec ending in `p`: `:` with fill / flags / width (`#`, `018`, `*>20`, `>w$`) between
+/// it and the `p`, then `}` (`{:p}`, `{pointer:#p}`), as a format string writes one. Only at the source's `p}`s, looked
+/// up first (the byte index of a large source): most sources have none
+fn has_ptr_spec(sc: &mut PreludeScan) -> bool {
+    if !sc.has("p}") {
+        return false;
+    }
+    let b = sc.src.as_bytes();
+    sc.src.match_indices("p}").any(|(at, _)| {
+        // (back to the spec's `:`, over what a spec may hold; a `{` / `}` / quote / line break first means it is not
+        // one. A `:` with another before it is the fill of `{::>8p}` when an alignment follows it, else a path's `::`)
+        let lo = at.saturating_sub(128);
+        let mut j = at;
+        while j > lo {
+            j -= 1;
+            match b[j] {
+                b'{' | b'}' | b'"' | b'\n' => return false,
+                b':' if j > 0 && b[j - 1] == b':' && !matches!(b.get(j + 1), Some(b'<' | b'^' | b'>')) => return false,
+                b':' => return j > 0 && (matches!(b[j - 1], b'{' | b':' | b'_') || b[j - 1].is_ascii_alphanumeric()),
+                _ => {}
+            }
+        }
+        false
+    })
+}
+
 fn has_cstr_literal(src: &str) -> bool {
     let b = src.as_bytes();
     let mut i = 0;
@@ -1187,7 +1213,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             // (the trait `Any`, a TraitHeader and so with no name of its own: `Box<dyn Any + Send>` alone needs it)
             "Any",
             // (the fmt traits of `{:b}` / `{:x}` / `{:e}` .., TraitHeaders and so with no names of their own)
-            "Binary", "Octal", "LowerHex", "UpperHex", "LowerExp", "UpperExp",
+            "Binary", "Octal", "LowerHex", "UpperHex", "LowerExp", "UpperExp", "Pointer",
         ]);
         // Candidates per (first byte, length): however many prelude names there are, 0 or 1 comparisons per identifier
         let mut t: Vec<Vec<&'static str>> = vec![vec![]; 256 * 32];
@@ -1309,6 +1335,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         // (`{:?}` of a raw pointer)
         if sc.has("*const") || sc.has("*mut") {
             need.insert("__exr_fmt_ptr");
+        }
+        // (`{:p}`, `{pointer:p}`: a thin pointer's address, a slice's / dyn's `Pointer { addr, metadata }`)
+        if has_ptr_spec(&mut sc) {
+            need.extend(["__exr_fmt_ptr", "__exr_fmt_fat_ptr", "__exr_fmt_dyn_ptr"]);
         }
     }
     // `vec![..]` becomes Vec::with_capacity + push, and `"..".to_string()` becomes String::from
@@ -2003,7 +2033,13 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             changed = true;
             need.extend(["type_id", "TypeId"]);
         }
-        if fmt_radix != 0x3f {
+        // (std's Pointer: `{:p}` of a type of the program's, and `fmt::Pointer::fmt(&r, f)` of a reference)
+        if fmt_radix & 0x40 == 0 && need.contains("Pointer") {
+            fmt_radix |= 0x40;
+            changed = true;
+            need.extend(["__exr_fmt_pointer", "__exr_pointer_fmt", "__exr_fat_pointer_fmt", "__exr_dyn_pointer_fmt", "__exr_fat_words", "__exr_fmt_ptr", "__exr_fmt_fat_ptr", "__exr_fmt_dyn_ptr"]);
+        }
+        if fmt_radix & 0x3f != 0x3f {
             const RADIX: [(&str, &str); 6] = [
                 ("Binary", "__exr_fmt_binary"),
                 ("Octal", "__exr_fmt_octal"),

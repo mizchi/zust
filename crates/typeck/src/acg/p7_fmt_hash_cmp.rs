@@ -220,6 +220,7 @@ pub(crate) fn parse_fmt(
             "X?" => (true, 2),
             "e" => (false, 5),
             "E" => (false, 6),
+            "p" => (false, 7),
             t => return err(span, format!("unsupported format specifier `{t}`")),
         };
         spec.radix = radix;
@@ -493,7 +494,7 @@ impl Cx<'_> {
                     // (a radix or exponent spec of std's NonZero types: their number's, which is their one field, as
                     // std's impls delegate to it: `{:x}` of `NonZeroU8::new(255)` is `ff`)
                     let (v, t, pt) = match self.nonzero_inner(pt) {
-                        Some(it) if spec.radix != 0 => {
+                        Some(it) if (1..=6).contains(&spec.radix) => {
                             let (mut pv, mut rt) = (v, t);
                             while let Ty::Ref(_, i) = rt {
                                 pv = self.b.ins().load(PTR, mf(), pv, 0);
@@ -507,14 +508,25 @@ impl Cx<'_> {
                     // (`{:x}` / `{:X}` / `{:b}` / `{:o}` / `{:e}` / `{:E}` of a value that is no number (a float's only in
                     // `{:e}` / `{:E}`): its fmt trait's impl, the prelude's LowerHex and so on (`__p_LowerHex` where the
                     // program defines a LowerHex of its own))
-                    let radix_tr = if !*debug && spec.radix != 0 && !(pt.is_int() || (pt.is_float() && spec.radix >= 5)) {
+                    // (`{:p}` of a reference / raw pointer / Box: its address; of one to a slice / str, the address and
+                    // length; to a `dyn`, the address and the vtable's; of another type, its Pointer impl below)
+                    let slice_ptr = matches!(t, Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) if matches!(*i, Ty::Slice(_) | Ty::Str));
+                    let dyn_ptr = matches!(t, Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) if matches!(*i, Ty::Dyn(_)));
+                    let ptr_fmt = spec.radix == 7
+                        && matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_))
+                        && (!t.is_fat()
+                            || slice_ptr && self.prog.index.contains_key("__exr_fmt_fat_ptr")
+                            || dyn_ptr && self.prog.index.contains_key("__exr_fmt_dyn_ptr"))
+                        && self.prog.index.contains_key("__exr_fmt_ptr");
+                    let radix_tr = if !*debug && spec.radix != 0 && !ptr_fmt && (spec.radix == 7 || !(pt.is_int() || (pt.is_float() && spec.radix >= 5))) {
                         let tr = match spec.radix {
                             1 => "LowerHex",
                             2 => "UpperHex",
                             3 => "Binary",
                             4 => "Octal",
                             5 => "LowerExp",
-                            _ => "UpperExp",
+                            6 => "UpperExp",
+                            _ => "Pointer",
                         };
                         let shadowed = format!("__p_{tr}");
                         let tn = if self.prog.traits.contains_key(&shadowed) { shadowed } else { tr.to_string() };
@@ -526,7 +538,7 @@ impl Cx<'_> {
                     } else {
                         None
                     };
-                    if radix_tr.is_none() && !ptr_debug && !self.fmt_ok(t, *debug) {
+                    if radix_tr.is_none() && !ptr_debug && !ptr_fmt && !self.fmt_ok(t, *debug) {
                         return err(
                             asp,
                             format!(
@@ -579,6 +591,19 @@ impl Cx<'_> {
                             span,
                         )?;
                         cur = spec.clone();
+                    }
+                    if ptr_fmt {
+                        let a = self.b.ins().load(PTR, mf(), v, 0);
+                        if dyn_ptr {
+                            let vt = self.b.ins().load(PTR, mf(), v, 8);
+                            self.call_named("__exr_fmt_dyn_ptr", vec![Ty::Unit], &[(f, fref), (a, Ty::Usize), (vt, Ty::Usize)], span)?;
+                        } else if t.is_fat() {
+                            let n = self.b.ins().load(types::I64, mf(), v, 8);
+                            self.call_named("__exr_fmt_fat_ptr", vec![Ty::Unit], &[(f, fref), (a, Ty::Usize), (n, Ty::Usize)], span)?;
+                        } else {
+                            self.call_named("__exr_fmt_ptr", vec![Ty::Unit], &[(f, fref), (a, Ty::Usize)], span)?;
+                        }
+                        continue;
                     }
                     if ptr_debug {
                         let (mut pv, mut rt) = (v, t);
