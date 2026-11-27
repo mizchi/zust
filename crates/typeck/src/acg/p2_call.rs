@@ -2251,7 +2251,7 @@ impl Cx<'_> {
         }
         match t {
             Ty::Struct(sid) if self.std_struct_name(sid) == "String" => Some(mcall(paren(recv.clone()), "as_mut_str", vec![])),
-            Ty::Str if derefs > 0 => {
+            Ty::Str => {
                 let mut e = paren(recv.clone());
                 for _ in 0..derefs {
                     e = paren(Expr::Unary("*".into(), Box::new(e), crate::parse::Span::default()));

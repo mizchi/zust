@@ -71,6 +71,11 @@ fn str_len<T: AsMut<str>>(t: &mut T) -> usize {
     t.as_mut().len()
 }
 
+// (a `str` place's own `as_mut()`, `(*v).as_mut()` of `T = str`)
+fn view<T: AsMut<str> + ?Sized>(v: &mut T) -> usize {
+    (*v).as_mut().len()
+}
+
 fn main() {
     check_mut::<Either<String, String>>();
     check_slice_mut::<Either<Vec<u8>, [u8; 2]>, u8>();
@@ -90,4 +95,6 @@ fn main() {
     };
     let _: Option<(&OsStr, &CStr)> = None;
     println!("{:?} {:?} {} {} {}", v, a, n, m.len(), k);
+    let mut t = String::from("abcd");
+    println!("{}", view(t.as_mut_str()));
 }
