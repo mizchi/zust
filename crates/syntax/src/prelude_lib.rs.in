@@ -11185,7 +11185,7 @@ impl Condvar {
     pub const fn new() -> Condvar {
         Condvar { __cv_n: 0 }
     }
-    pub fn wait<T>(&self, guard: MutexGuard<T>) -> Result<MutexGuard<T>, ()> {
+    pub fn wait<T>(&self, guard: MutexGuard<T>) -> Result<MutexGuard<T>, PoisonError<MutexGuard<T>>> {
         let n = &self.__cv_n as *const u64;
         let seen = unsafe { *n };
         let m = guard.m;
@@ -11202,7 +11202,7 @@ impl Condvar {
         }
         Ok(guard)
     }
-    pub fn wait_while<T, F: FnMut(&mut T) -> bool>(&self, guard: MutexGuard<T>, condition: F) -> Result<MutexGuard<T>, ()> {
+    pub fn wait_while<T, F: FnMut(&mut T) -> bool>(&self, guard: MutexGuard<T>, condition: F) -> Result<MutexGuard<T>, PoisonError<MutexGuard<T>>> {
         let mut g = guard;
         let mut condition = condition;
         while condition(unsafe { &mut *g.p }) {
@@ -11211,7 +11211,7 @@ impl Condvar {
         Ok(g)
     }
     // (no clock: the time is up when no thread is left that could notify, where `wait` would be std's wait forever)
-    pub fn wait_timeout<T>(&self, guard: MutexGuard<T>, _dur: Duration) -> Result<(MutexGuard<T>, WaitTimeoutResult), ()> {
+    pub fn wait_timeout<T>(&self, guard: MutexGuard<T>, _dur: Duration) -> Result<(MutexGuard<T>, WaitTimeoutResult), PoisonError<(MutexGuard<T>, WaitTimeoutResult)>> {
         let n = &self.__cv_n as *const u64;
         let seen = unsafe { *n };
         let m = guard.m;
@@ -16143,8 +16143,12 @@ unsafe extern "C" {
 // `std::time::Instant`: CLOCK_MONOTONIC's time
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Instant {
+    // (CLOCK_MONOTONIC's time plus __EXR_INSTANT_BASE: an Instant before the clock's origin, `now - 1 day` on a
+    // machine up for an hour, as std's signed seconds can)
     __in_d: Duration,
 }
+
+const __EXR_INSTANT_BASE: u64 = 4294967296;
 
 impl Instant {
     pub fn now() -> Instant {
@@ -16152,7 +16156,7 @@ impl Instant {
         unsafe {
             __exr_clock_gettime(1, ts.as_mut_ptr());
         }
-        Instant { __in_d: Duration::new(ts[0] as u64, ts[1] as u32) }
+        Instant { __in_d: Duration::new(ts[0] as u64 + __EXR_INSTANT_BASE, ts[1] as u32) }
     }
     pub fn duration_since(&self, earlier: Instant) -> Duration {
         self.__in_d.checked_sub(earlier.__in_d).unwrap_or(Duration::ZERO)
@@ -16206,7 +16210,7 @@ impl Sub<Instant> for Instant {
 
 impl Debug for Instant {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
-        let s = format!("Instant {{ tv_sec: {}, tv_nsec: {} }}", self.__in_d.as_secs(), self.__in_d.subsec_nanos());
+        let s = format!("Instant {{ tv_sec: {}, tv_nsec: {} }}", self.__in_d.as_secs() as i64 - __EXR_INSTANT_BASE as i64, self.__in_d.subsec_nanos());
         f.pad(&s)
     }
 }

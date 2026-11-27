@@ -1932,6 +1932,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     let mut dur_ops = false;
     let mut any_trait = false;
+    // (`thread::Result<T>` is read as `Result<T, Box<dyn Any + Send>>`: the trait with it, unnamed as it may be. The
+    // source is searched only when it names `thread`)
+    if need.contains("thread") && sc.has("thread::Result") {
+        need.insert("Any");
+    }
     let mut fmt_write = false;
     // (whether the program writes `thread` / `Layout`: asked once one of the functions below is wanted)
     let mut thread_text: Option<bool> = None;
