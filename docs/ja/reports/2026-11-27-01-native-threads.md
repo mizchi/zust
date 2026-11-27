@@ -75,7 +75,8 @@ panic と print の経路のうちスレッドを意識する部分は、1 つ�
 TODO.md の「Threads」:
 
 - Mutex と RwLock の poisoning はなく、panic したスレッドの値の drop もない。どちらも巻き戻しが要る。
-- `thread::scope`、`Builder`、タイムアウト（`park_timeout`、`recv_timeout`、`wait_timeout`）、`Mutex::try_lock` はない。
+- `thread::scope`、`Condvar::wait_timeout`、`Mutex::try_lock` はない。（`Builder`、`park_timeout`、`recv_timeout`、
+  `Barrier` はその後、[レポート 2026-11-27-02](2026-11-27-02-threads-ui.md) で入った。）
 - main スレッドのスレッドローカルは、終了時に drop されない。
 - `unwrap` が出す場所は 1 つの static で、その間に他のスレッドが上書きしうる。
 - wasm32 には `spawn` がない（ホストに pthread がない）。そこでは atomic とロックはただのアクセスとして動く。

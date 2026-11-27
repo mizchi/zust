@@ -927,6 +927,8 @@ pub struct ClosureDef {
     pub by_move: bool,
     /// For each capture, whether it is held by value (the rest are held by reference)
     pub moved: Vec<bool>,
+    /// For each capture, whether the body assigns to it or borrows it mutably (ClosureSyn::mutated)
+    pub mutated: Vec<bool>,
     /// The number of the parent's type parameters (they lead the type arguments)
     pub n_parent: usize,
     /// The annotated return type (may contain the parent's type parameters as Param)
@@ -2456,6 +2458,7 @@ impl Program {
                         n_parent: c.n_parent as usize,
                         ret_ann,
                         fake_reads: c.fake_reads.clone(),
+                        mutated: c.mutated.clone(),
                     },
                 );
                 p.closure_by.insert((first, k as u32), fid);
@@ -3979,7 +3982,15 @@ impl Program {
         }
         match t {
             Ty::Ptr(..) => false,
-            Ty::Ref(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => self.auto_trait(*i, sync, d + 1),
+            // (a trait object has an auto trait it is written with (`dyn Tr + Send`), or one its trait has as a
+            // supertrait: it may hold any type of its trait, one without it too)
+            Ty::Dyn(d) => {
+                let (core, send, sync_) = crate::types::dyn_autos(d);
+                (if sync { sync_ } else { send }) || self.tdb.gives_auto(self, core, if sync { "Sync" } else { "Send" }) == Some(true)
+            }
+            // (`&T` is Send and Sync when T is Sync; `&mut T` is Send when T is Send, Sync when T is Sync)
+            Ty::Ref(m, i) => self.auto_trait(*i, sync || !m, d + 1),
+            Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => self.auto_trait(*i, sync, d + 1),
             Ty::Struct(sid) => {
                 let b = self.base_of(sid);
                 let name = self.structs[b as usize].name.as_str();
@@ -3989,9 +4000,17 @@ impl Program {
                 }
                 // (the prelude's, not a program's own type of the name)
                 let ours = self.struct_item.get(b as usize).is_some_and(|&i| i >= self.prelude_from);
+                // (as acg's auto_trait_fails: a lock's guard is not Send, a RefCell's guards neither Send nor Sync, a
+                // Mutex is Sync when T is Send, an Arc or RwLock when T is Send and Sync)
+                let args = &self.structs[sid as usize].args;
                 match name {
-                    "Rc" if ours => return false,
-                    "Cell" | "RefCell" | "LazyCell" | "OnceCell" if sync && ours => return false,
+                    "Rc" | "Ref" | "RefMut" if ours => return false,
+                    "MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard" | "StdoutLock" if !sync && ours => return false,
+                    "Cell" | "RefCell" | "LazyCell" | "OnceCell" | "UnsafeCell" | "__Rcvr__" if sync && ours => return false,
+                    "Mutex" if sync && ours => return args.iter().all(|&a| self.auto_trait(a, false, d + 1)),
+                    "Arc" | "RwLock" | "OnceLock" if ours && (sync || name == "Arc") => {
+                        return args.iter().all(|&a| self.auto_trait(a, false, d + 1) && self.auto_trait(a, true, d + 1));
+                    }
                     // (the prelude's own types hold raw pointers: what they hold decides)
                     _ => {}
                 }
@@ -4000,8 +4019,14 @@ impl Program {
                 if prelude {
                     return sd.args.iter().all(|&a| self.auto_trait(a, sync, d + 1));
                 }
-                sd.fields.iter().all(|f| self.auto_trait(f.1, sync, d + 1))
-                    && sd.variants.iter().all(|v| v.fields.iter().all(|f| self.auto_trait(f.1, sync, d + 1)))
+                // (a closure's capture held by reference is a raw pointer: the reference it stands for. Sync needs
+                // `T: Sync` (as `&T` and `&mut T`); Send needs `T: Send` of a `&mut T`, and of one that may be either
+                // kind `T: Sync` (`&T`) too)
+                sd.fields.iter().enumerate().all(|(i, f)| match (f.1, self.ref_capture(sid, i)) {
+                    (Ty::Ptr(_, inner), Some(true)) => self.auto_trait(*inner, sync, d + 1),
+                    (Ty::Ptr(_, inner), Some(false)) => self.auto_trait(*inner, true, d + 1) && (sync || self.auto_trait(*inner, false, d + 1)),
+                    _ => self.auto_trait(f.1, sync, d + 1),
+                }) && sd.variants.iter().all(|v| v.fields.iter().all(|f| self.auto_trait(f.1, sync, d + 1)))
             }
             _ => true,
         }
@@ -4350,10 +4375,11 @@ impl Program {
                     },
                 }
             }
-            // `Box<dyn Error>`: the prelude's __DynError (holds the Display and Debug strings)
+            // `Box<dyn Error>`: the prelude's __DynError (holds the Display and Debug strings). Also `+ Send + Sync`: it
+            // holds two Strings, Send and Sync whatever the error was
             TySyn::App(n, args)
                 if n == "Box"
-                    && matches!(args.as_slice(), [TySyn::Dyn(d)] if d == "Error")
+                    && matches!(args.as_slice(), [TySyn::Dyn(d)] if crate::types::dyn_autos(d).0 == "Error")
                     && self.struct_index.contains_key("__DynError") =>
             {
                 Ty::Struct(self.struct_index["__DynError"])
@@ -5506,6 +5532,16 @@ impl Program {
             }
         }
         false
+    }
+
+    /// Field i of the struct sid is a closure's capture held by reference: its type is a raw pointer, which the auto
+    /// traits take as the reference it stands for. Some(true): a `&mut T` (the body assigns to it or borrows it
+    /// mutably), Send when T is Send; Some(false): either kind (a `&mut self` method may be called on it), so Send when
+    /// T is Sync and Send. Sync when T is Sync either way
+    pub fn ref_capture(&self, sid: u32, i: usize) -> Option<bool> {
+        let b = self.base_of(sid);
+        let cd = self.closure_of_struct.get(&b).and_then(|f| self.closures.get(f))?;
+        (!cd.by_move && cd.moved.get(i) == Some(&false)).then(|| cd.mutated.get(i) == Some(&true))
     }
 
     /// The base b is a closure's struct (`f::{closure#0}`)
@@ -7387,7 +7423,8 @@ impl Program {
             // The vtable order (the trait's method order) is embedded in the code too
             Ty::Dyn(s) => {
                 h.add(&(108u8, s));
-                for &f in self.traits.get(s).map(|v| &v[..]).unwrap_or(&[]) {
+                // (the trait's methods: of `Tr` for a `dyn Tr + Send`)
+                for &f in self.traits.get(crate::types::dyn_autos(s).0).map(|v| &v[..]).unwrap_or(&[]) {
                     h.add(&self.names[f as usize]);
                 }
             }
@@ -8198,6 +8235,7 @@ impl Program {
 
     /// The methods a `dyn tr` vtable holds, in order: the trait's own, then those of its supertraits (each name once)
     pub fn dyn_methods(&self, tr: &str) -> Vec<u32> {
+        let tr = crate::types::dyn_autos(tr).0;
         let mut out: Vec<u32> = self.traits.get(tr).cloned().unwrap_or_default();
         let mut todo: Vec<String> = self.trait_supers.get(tr).cloned().unwrap_or_default();
         let mut seen = vec![tr.to_string()];

@@ -475,6 +475,9 @@ impl TraitDb {
         if self.user.contains(name) {
             let mut seen: Vec<String> = vec![];
             let mut todo = vec![name.to_string()];
+            // (a std trait zustc does not know the supertraits of, met on the way: the answer is open only if no other
+            // path gives the auto trait)
+            let mut unknown = false;
             while let Some(t) = todo.pop() {
                 if seen.contains(&t) {
                     continue;
@@ -487,14 +490,15 @@ impl TraitDb {
                     let n = n.rsplit("::").next().unwrap_or(n).to_string();
                     if self.user.contains(&n) {
                         todo.push(n);
+                    } else if n == tr {
+                        return Some(true);
                     } else if !STD_EXACT.contains(&n.as_str()) && !n.starts_with('#') && !matches!(n.as_str(), "Sized" | "Send" | "Sync" | "Unpin") {
-                        // (a std trait zustc does not know the supertraits of)
-                        return None;
+                        unknown = true;
                     }
                 }
                 seen.push(t);
             }
-            return Some(false);
+            return if unknown { None } else { Some(false) };
         }
         // (std's traits zustc knows: none of them has an auto trait as a supertrait; nor do the Fn traits)
         if STD_EXACT.contains(&name) || matches!(name, "Sized" | "Send" | "Sync" | "Unpin" | "Fn" | "FnMut" | "FnOnce" | "Iterator" | "IntoIterator") || b.starts_with('\'') {
@@ -1230,11 +1234,16 @@ impl Cx<'_> {
             Ty::Ref(m, i) => self.auto_rec(*i, sync || !m, stack, depth + 1),
             Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => self.auto_rec(*i, sync, stack, depth + 1),
             Ty::Param(_) | Ty::Assoc(_) => Ans::Overflow,
+            // (an auto trait the object is written with, or one its trait gives: else not, as rustc's (it may hold any
+            // type of its trait); a std trait zustc does not know the supertraits of is left open)
             Ty::Dyn(d) => {
-                if d.split('+').any(|b| self.db.gives_auto(self.p, b, tr) == Some(true)) {
+                let gives: Vec<Option<bool>> = d.split('+').map(|b| self.db.gives_auto(self.p, b, tr)).collect();
+                if gives.contains(&Some(true)) {
                     Ans::Yes
-                } else {
+                } else if gives.contains(&None) {
                     Ans::Overflow
+                } else {
+                    Ans::No
                 }
             }
             Ty::Struct(sid) => {
@@ -1289,7 +1298,21 @@ impl Cx<'_> {
                     };
                 }
                 // (a struct, enum, tuple or closure: its fields (captures))
-                let mut fs: Vec<(Ty, bool)> = sd.fields.iter().map(|f| (f.1, sync)).collect();
+                // (a capture held by reference is a raw pointer: the reference it stands for. Both kinds are Sync when T
+                // is; a `&mut T` (one the body mutates) is Send when T is, and one that may be either kind needs both)
+                let mut fs: Vec<(Ty, bool)> = vec![];
+                for (i, f) in sd.fields.iter().enumerate() {
+                    match (f.1, self.p.ref_capture(sid, i)) {
+                        (Ty::Ptr(_, inner), Some(true)) => fs.push((*inner, sync)),
+                        (Ty::Ptr(_, inner), Some(false)) => {
+                            fs.push((*inner, true));
+                            if !sync {
+                                fs.push((*inner, false));
+                            }
+                        }
+                        _ => fs.push((f.1, sync)),
+                    }
+                }
                 for v in &sd.variants {
                     fs.extend(v.fields.iter().map(|f| (f.1, sync)));
                 }

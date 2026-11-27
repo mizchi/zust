@@ -2283,6 +2283,7 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
         let assigns = ast_closure::assigns_capture(c, &caps);
         let mut moved: Vec<bool> = Vec::new();
         let mut deref: Vec<bool> = Vec::new();
+        let mutated: Vec<bool> = caps.iter().map(|n| ast_closure::mutates_capture(c, n)).collect();
         for n in &caps {
             moved.push(*mv || (ast_closure::moves_capture(c, &[n.clone()]) && !assigns));
             // (a parameter that is a shared reference (`h: &T`, `&self`), used only through a deref of it: edition 2021
@@ -2309,6 +2310,7 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
             n_parent: n_parent,
             fake_reads: ast_closure::fake_reads(c).into_iter().filter(|n| bound.contains(n)).collect(),
             deref,
+            mutated,
         });
     }
     // `-> impl Fn(A) -> B { move |x| .. }`: the type is the struct of the trailing closure

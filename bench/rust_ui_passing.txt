@@ -1292,6 +1292,7 @@ run-pass	cast/owned-struct-to-trait-cast-6318.rs
 check-pass	cast/ptr-ptr-to-ptr-ptr-different-regions.rs
 compile-fail	cast/ptr-to-ptr-different-regions.rs
 compile-fail	cast/ptr-to-ptr-indirect-different-regions.rs
+compile-fail	cast/ptr-to-trait-obj-add-auto.rs
 check-pass	cast/ptr-to-trait-obj-add-super-auto.rs
 build-pass	cast/raw-pointer-from-str-comparison.rs
 compile-fail	cast/raw-ptr-to-dyn-fn-raw-ptr.rs
@@ -1618,6 +1619,7 @@ compile-fail	coercion/no-implicit-box-to-ref-coercion.rs
 compile-fail	coercion/non-primitive-cast-135412.rs
 compile-fail	coercion/pin-dyn-dispatch-sound.rs
 compile-fail	coercion/ptr-mutability-errors.rs
+compile-fail	coercion/retslot-cast.rs
 check-pass	coercion/struct-literal-field-type-coercion-to-expected-type.rs
 run-pass	coercion/trait-object-arrays-11205.rs
 compile-fail	coercion/type-errors.rs
@@ -5017,6 +5019,7 @@ compile-fail	mismatched_types/suggest-option-asderef-inference-var.rs
 compile-fail	mismatched_types/suggest-option-asderef-unfixable.rs
 compile-fail	mismatched_types/suggest-option-asderef.rs
 compile-fail	mismatched_types/suggest-removing-tuple-struct-field.rs
+compile-fail	mismatched_types/trait-bounds-cant-coerce.rs
 compile-fail	mismatched_types/trait-impl-fn-incompatibility.rs
 compile-fail	mismatched_types/transforming-option-ref-issue-127545.rs
 compile-fail	missing/missing-block-hint.rs
@@ -7469,6 +7472,7 @@ compile-fail	statics/uninhabited-static.rs
 compile-fail	statics/unsized-static-without-body-index-141804.rs
 compile-fail	statics/unsizing-wfcheck-issue-127299.rs
 run-pass	std/issue-3563-3.rs
+run-pass	std/park-timeout-wakeup-59020.rs
 run-pass	std/thread-sleep-ms.rs
 run-pass	stdlib-unit-tests/matches2021.rs
 compile-fail	stdlib-unit-tests/not-sync.rs
@@ -7976,7 +7980,10 @@ run-pass	threads-sendsync/issue-4446.rs
 run-pass	threads-sendsync/issue-4448.rs
 run-pass	threads-sendsync/issue-8827.rs
 run-pass	threads-sendsync/issue-9396.rs
+run-pass	threads-sendsync/mpsc_stress.rs
 compile-fail	threads-sendsync/rc-is-not-send.rs
+check-pass	threads-sendsync/recursive-thread-spawn.rs
+run-pass	threads-sendsync/send-is-not-static-par-for.rs
 run-pass	threads-sendsync/send-resource.rs
 run-pass	threads-sendsync/send-type-inference.rs
 run-pass	threads-sendsync/sendable-class.rs
@@ -8011,6 +8018,8 @@ run-pass	threads-sendsync/thread-local-syntax.rs
 run-pass	threads-sendsync/threads.rs
 run-pass	threads-sendsync/tls-dont-move-after-init.rs
 run-pass	threads-sendsync/tls-dtors-are-run-in-a-static-binary.rs
+run-pass	threads-sendsync/tls-init-on-init.rs
+run-pass	threads-sendsync/tls-try-with.rs
 run-pass	threads-sendsync/trivial-message.rs
 run-pass	threads-sendsync/yield.rs
 run-pass	threads-sendsync/yield1.rs
@@ -8077,6 +8086,7 @@ compile-fail	traits/bound/on-structs-and-enums-static.rs
 compile-fail	traits/bound/on-structs-and-enums.rs
 check-pass	traits/bound/recursion.rs
 check-pass	traits/bound/recursive-trait-bound-on-type-param.rs
+compile-fail	traits/bound/sugar.rs
 compile-fail	traits/bound/unknown-assoc-with-const-arg.rs
 run-pass	traits/bug-7295.rs
 run-pass	traits/cache-issue-18209.rs
@@ -8223,6 +8233,7 @@ compile-fail	traits/issue-50480.rs
 build-pass	traits/issue-56202.rs
 run-pass	traits/issue-6128.rs
 run-pass	traits/issue-6334.rs
+compile-fail	traits/issue-7013.rs
 check-pass	traits/issue-70944.rs
 compile-fail	traits/issue-72410.rs
 check-pass	traits/issue-72455.rs

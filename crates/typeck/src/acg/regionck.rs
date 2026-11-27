@@ -2983,6 +2983,8 @@ impl Cx<'_> {
     /// A call through `dyn Fn(..)` whose bound writes lifetimes (s: the bound's text): the arguments flow into its
     /// parameters' types, with the regions written there (those it elides are its own)
     pub(crate) fn rg_dyn_fn_args(&mut self, s: &str, args: &[&Expr]) {
+        // (the object's trait: `+ Send` after it would read as an addition to the cast below)
+        let s = crate::types::dyn_autos(s).0;
         if !self.rg_on() || !s.contains('\'') {
             return;
         }
