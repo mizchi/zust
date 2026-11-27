@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795812076915,
+  "lastUpdate": 1795812079867,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -126408,6 +126408,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 95.173,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f63b1d3dec63943a884210c0bd11e85695a242c3",
+          "message": "perf: a bound's text is read once per thread, and an instance's bound asked of the solver once (traits check -8%) (#327)\n\nparse_fn_bound, bound_args and assoc_bindings parsed the bound as a file of its own on every call; each reading is a function of the text alone, so it is kept by its text in a thread-local map. Insts::request asked TraitDb::holds_in the same goal twice for a bound of the program's traits; the second check takes the first answer. KPI: traits check -8.25%, patterns check -2.47%, patterns edit -2.90%, LSP session -4.30%.\n\nAlso: the blanket-impl E0119 fixture goes through TraitDb::conflict (a bounded `impl<T: Marker> Tr for T`).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01DA4GokUemhzj5xUVkRtGGb",
+          "timestamp": "2026-11-28T05:36:54+09:00",
+          "tree_id": "50a63b1a957c6062d86a4dd7eeb26eaf0d28823d",
+          "url": "https://github.com/mizchi/zust/commit/f63b1d3dec63943a884210c0bd11e85695a242c3"
+        },
+        "date": 1795812079147,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 82.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 78.125,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.921,
             "unit": "%"
           }
         ]
