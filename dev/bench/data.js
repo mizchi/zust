@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795746605523,
+  "lastUpdate": 1795746608239,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -144450,6 +144450,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/edee429d5a416a428482749611deeac1a2e44505"
         },
         "date": 1795730284020,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.82,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1918,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.88,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1557,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 73.68,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5442,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ec48c43492d69bfdfa9f7683764d22658e6a8332",
+          "message": "Merge pull request #267 from mizchi/claude/lsp-edit-passes-2\n\nLSP edit: fewer whole-text passes per edit, part 2 (#188)",
+          "timestamp": "2026-11-27T11:24:24+09:00",
+          "tree_id": "e37a6b0a121ef34dbb6c696d69bebbd1f1dbec18",
+          "url": "https://github.com/mizchi/zust/commit/ec48c43492d69bfdfa9f7683764d22658e6a8332"
+        },
+        "date": 1795746607663,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
