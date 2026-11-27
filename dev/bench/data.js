@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795750525661,
+  "lastUpdate": 1795751106673,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -62486,6 +62486,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 62.847,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "62157772c4b6429303a222fd07f512a5d10b65d3",
+          "message": "prelude/acg: split_first / splitn, div_ceil, PoisonError, `x.fmt(f)`, `x.into()` targets and more std methods (#280)\n\nstd methods and lookups that the crate survey reported as missing (#256):\n\n- slice `split_first` / `splitn` and `to_owned`\n- `str::splitn` and ASCII checks\n- `div_ceil` / `wrapping_add_signed`\n- `Thread`-free std helpers: `MaybeUninit`, `PoisonError`, `Cow` From, `Waker`, `Mutex`\n- the `IoError` methods behind `io::Error::..` paths, applied only to std's io\n\nFormatting and conversion calls:\n\n- `x.fmt(f)` picks Display or Debug from the type parameter's bound first, then from the `fmt` imports, read per `use` tree, and then from the enclosing impl. When both traits are imported and nothing decides, it is an error, not a guess.\n- `x.into()` into its own type returns the value itself (std's `From<T> for T`). Otherwise the target comes from the fn's `T: Into<U>` bound, which covers foldhash's `x.into() << n`.\n- An inherent `into(&self)` reached through `&S` is called as in rustc.\n- The `fmt` import mask is part of the incremental cache key.\n\nDeferred:\n- #286: per-module fmt trait scope.\n- #289: two type parameters with the same instance, and the receiver mutability and generic instance of an inherent `into`.\n\nPart of #256.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T03:39:15Z",
+          "tree_id": "a432ab11366a08de00167bb791239bba58b2f1e3",
+          "url": "https://github.com/mizchi/zust/commit/62157772c4b6429303a222fd07f512a5d10b65d3"
+        },
+        "date": 1795751106377,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 126.52,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.674,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 18.497,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 40.857,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.594,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 130.052,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 798.232,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 584.621,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.681,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 68.746,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 189.572,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.586,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 607.699,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3927.298,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.729,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 91.943,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 42.797,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 52.934,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 93.274,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 159.858,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 38.386,
             "unit": "ms"
           }
         ]
