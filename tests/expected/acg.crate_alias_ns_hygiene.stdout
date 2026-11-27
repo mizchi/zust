@@ -1,0 +1,6 @@
+(InputEmpty, 1) (OutputFull, 10)
+Ok(()) Ok(2)
+Err(Error) Ok([3, 3]) Err(Error)
+3 2
+5
+11 28
