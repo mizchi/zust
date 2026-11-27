@@ -3202,6 +3202,11 @@ impl Cx<'_> {
 
     /// Makes a `&T` (address v) into a `&dyn tr` fat pointer
     pub(crate) fn to_dyn(&mut self, v: Value, t: Ty, tr: &str, span: Sp) -> R<Value> {
+        // (a `str` / `[T]` has no size for a vtable to give: `"test" as &dyn Any`, a `&[u8]` as a `&dyn Debug` (E0277,
+        // cast/trait-object-size-error-14366.rs); a `dyn` itself is an upcast)
+        if matches!(t, Ty::Str | Ty::Slice(_)) {
+            return err(span, format!("the size for values of type `{}` cannot be known at compilation time (E0277)", self.prog.tn(t)));
+        }
         let mut fns = vec![];
         if let (Some((_, bps, _)), Ty::Fn(f)) = (crate::ast_summary::parse_fn_bound(tr), t) {
             // Function pointer: a prelude shim that calls it from the data (the place holding the function pointer)
