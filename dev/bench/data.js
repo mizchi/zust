@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795765227366,
+  "lastUpdate": 1795767007952,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -63281,6 +63281,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 62.663,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fdbd9488a4a52bfca968efd854fe6a99655662fa",
+          "message": "prelude: std::fs::File / OpenOptions / Metadata, FpCategory; a number type's inherent method by path before a trait impl's (#250, part 2) (#291)\n\n* Prelude: std::fs::File, OpenOptions, Metadata; std::os::unix's fd traits and MetadataExt / OpenOptionsExt / PermissionsExt (#250)\n\nThe crate survey's largest #250 fix, `File` (cc, same-file, quick-xml, chrono, rustls-pki-types,\nis_terminal_polyfill, ...: 1.7% of the surveyed downloads, 18 crates).\n\n- File: open / create / create_new / options, metadata, sync_all / sync_data, set_len, try_clone; Read, Write,\n  Seek; closed when dropped; Debug. AsRawFd / FromRawFd / IntoRawFd (RawFd), `into_raw_fd` giving the fd away\n  unclosed.\n- OpenOptions: read / write / append / truncate / create / create_new, and OpenOptionsExt's mode / custom_flags.\n  std's checks, in its order and with its errors: no access mode, creating or truncating without write access,\n  append with truncate (`Custom { kind: InvalidInput, error: .. }`).\n- Metadata (fstat / stat; `fs::metadata`): len, file_type, is_file / is_dir / is_symlink, permissions;\n  MetadataExt's dev / ino / mode / nlink / uid / gid / rdev / size / blksize / blocks; FileType, Permissions\n  (readonly, set_readonly) and PermissionsExt.\n- Read: read_to_end and read_to_string as defaults, for a program's own Read impls too. tests/security's\n  cve_2021_28875_read_to_end now builds, so it is a test of the CVE's behavior: a reader that claims more than it\n  was given room for panics, before the Vec grows, as std does.\n- Selection: the new types' impls only with them, the ext and fd traits only with their names (`size()` /\n  `mode()` of a program's own are no reason for them); all of them renamed when a program defines the name. The\n  items are at the end of the prelude, so a program that uses none of them gets no lines of theirs (the budget's\n  cache sizes stay as they were).\n- SHADOWABLE is looked up in a hash set (is_shadowable): rename_shadowed asked it, by a linear search, for each\n  type a program defines.\n\nSurvey: same-file, is_terminal_polyfill, cc, quick-xml move past `File` (to `Handle` as a value, `Stderr`,\n`ChildStderr`, `[u8]::starts_with`); rustls-pki-types has no errors of its own; chrono stops only at\niana-time-zone's `IoError::fmt` (#256).\ntests/ui: 4 new passes (borrowck/issue-82032, diagnostic_namespace/on_move/std_impls,\nregions/relate-bound-region-in-method-return, tuple/missing-field-access), each checked against its annotation.\nTest: tests/acg/std_file.rs, against rustc's output.\n\nKPI (`check -j 1`, cachegrind instructions against main b18f94f3): pat +0.115%, g5k +0.092%, globs -0.072%;\nwithout glibc malloc's own (heap-layout noise, about a third of pat's): pat +0.065%, g5k +0.064%, globs -0.25%.\nThe cost is the prelude's size: its items built and its text tokenized once per process, and select_with's passes\nover every item; globs gains from is_shadowable.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* std::num::FpCategory and f32 / f64's classify / is_subnormal; a number's inherent method by path before a trait impl's (#250)\n\nThe crate survey's #250 `FpCategory` (num-traits, num-integer, num-bigint: 1.1% of the surveyed downloads).\n\n- `x.classify()` of an f32 / f64: codegen calls the prelude's __exr_fp_classify with the value's bits (an f32's\n  widened as bits: as an f64 its subnormals would be normal), which gives the prelude's FpCategory. The prelude has\n  them when the program says `classify`. `x.is_subnormal()` is built in, as is_normal is.\n- `Self::is_nan(self)` / `f64::is_nan(x)` / `<u32>::wrapping_add(*self, *v)` inside a trait impl for the number\n  type, with a method of the same name: std's inherent method, which a path reaches before the trait's (num-traits'\n  `forward!` and WrappingAdd). zustc called the impl's own method: a recursion that crashed (a segfault, on main\n  too) or a mismatch of `&u32` and `u32`. The rewrite of a number type's path call into a method call now goes past\n  a trait impl's method of a name codegen builds in (prim_builtin), and reads `Self` in an impl for a number type\n  (TyEnv::self_ty) for those names. int_method's and float_method's names are module constants (INT_BUILTINS,\n  FLOAT_BUILTINS, FLOAT_LIB1 / 2) for this.\n\nSurvey: num-traits, num-integer and num-bigint move past `FpCategory` (num-integer to a macro's `gcd__mh`,\nnum-bigint to `Binary`; num-traits now reports the 228 errors past it: std methods zustc does not have, such as\n`checked_div_euclid` and `to_int_unchecked`, and `<i32>::pow` as a value).\nTests: tests/acg/std_fp_category.rs and prim_inherent_by_path.rs, against rustc's output.\n\nKPI (`check -j 1`, cachegrind instructions against the commit before): pat -0.037%, g5k -0.049%, globs -0.135%;\nwithout glibc malloc's own: pat -0.016%, g5k +0.012%, globs -0.025%.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* KPI log: #250 part 2 (5212c1f3)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* Merge fix: the OpenOptions errors and read_to_string's are no os errors (IoError's `os`, #280)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* Review fixes: NUL in a path, try_clone's close-on-exec, FileType's bits, read_to_end / read_to_string as std's, `Self::m` in a trait's default method; fs::set_permissions\n\n- A NUL inside a path (`File::create(\"a\\0b\")`, OpenOptions::open, fs::metadata) is std's InvalidInput, \"file name\n  contained an unexpected NUL byte\": the path was cut at it, and `data\\0.tmp` truncated `data`.\n- File::try_clone duplicates with fcntl's F_DUPFD_CLOEXEC, as std's: dup's copy was not close-on-exec, so a child\n  process (Command) inherited it.\n- FileType keeps the type's bits (S_IFMT) only: two regular files of other permissions were different types to ==\n  and Hash.\n- Read::read_to_end reads again after Interrupted; read_to_string appends what it read before an error when it is\n  UTF-8, with the error, and leaves buf as it was when it is not (std's append_to_string).\n- `Self::count_ones(self)` in a trait's default method, for an impl of the trait for u32, is the trait's method, not\n  u32's inherent one: the rewrite to a number type's builtin applies to an impl's body only (by the fn being lowered,\n  `root`, which an inlined callee's is while it is expanded).\n- fs::set_permissions (chmod), which the test uses.\n- bench/rust_ui_ratchet.txt: the merge of main had left both this branch's `run-pass 1918` and main's 1919;\n  written again from the run (one line a kind, raised to the counts: check-pass 1559).\n- Test: tests/acg/std_file_edges.rs, against rustc's output (and with -O, opt_inline).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-27T17:04:32+09:00",
+          "tree_id": "485c1ba26bad670bcef4a8f04d887f8aed1a8c0d",
+          "url": "https://github.com/mizchi/zust/commit/fdbd9488a4a52bfca968efd854fe6a99655662fa"
+        },
+        "date": 1795767007684,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 125.485,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.664,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 17.708,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 40.234,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.727,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.548,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 130.501,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 798.257,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 576.694,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.654,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 67.61,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 187.859,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.398,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.548,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 611.972,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3927.041,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.161,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 89.975,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 42.542,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 52.308,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 91.768,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 130.384,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 38.194,
             "unit": "ms"
           }
         ]
