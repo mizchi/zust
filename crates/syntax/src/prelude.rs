@@ -41,7 +41,18 @@ fn items() -> &'static [(SrcItem, Option<String>, bool)] {
                 },
             })
             .map(|it| {
-                let name = defined_name(PRELUDE, &it);
+                let mut name = defined_name(PRELUDE, &it);
+                // (a member of an impl of a radix or exponent fmt trait (`impl LowerHex for u8`): looked up by the
+                // trait's name, which a program that uses the impls names, not by `fmt`, which every program that
+                // formats needs: the first lookup of each round then passes over them, not their gate)
+                if let ItemKind::ImplMember(h) = it.kind {
+                    let mut hw = PRELUDE_ITEMS[h as usize].5.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]);
+                    if let (Some("impl"), Some(t), Some("for")) = (hw.next(), hw.next(), hw.next()) {
+                        if matches!(t, "Binary" | "Octal" | "LowerHex" | "UpperHex" | "LowerExp" | "UpperExp") {
+                            name = Some(t.to_string());
+                        }
+                    }
+                }
                 let core_only = it
                     .idents
                     .iter()

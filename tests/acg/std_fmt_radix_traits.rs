@@ -80,6 +80,27 @@ fn main() {
     // (a Display impl's own write!: not padded by the outer spec)
     println!("[{:>5}] [{:>5}] [{:<4}]", S(3), 3, S(42));
     println!("{:x}", M(255));
+    nonzero_and_zero_pad();
+}
+
+// (std's NonZero types in a radix or an exponent, and `{:08e}`'s zeros after the sign, also
+// through a LowerExp impl (#296's review))
+fn nonzero_and_zero_pad() {
+    use std::num::{NonZeroI8, NonZeroU32, NonZeroU8};
+    println!("[{:08e}] [{:08e}] [{:08e}] [{:+09.2e}] [{:8e}] [{:<8e}]", -7i32, 1.5f64, E(-7), -1234.5f64, 42u8, 3u8);
+    let n = NonZeroU8::new(255).unwrap();
+    let m = NonZeroI8::new(-1).unwrap();
+    let k = NonZeroU32::new(1500).unwrap();
+    println!("{:x} {:#b} {:o} {:X} {} {:x?} {:?}", n, n, n, n, n, n, n);
+    println!("{:x} {:b} {} {:e} {:E}", m, m, m, k, k);
+    println!("{} {}", hex(255u8), hex(-1i8));
+}
+
+struct E(i32);
+impl fmt::LowerExp for E {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::LowerExp::fmt(&self.0, f)
+    }
 }
 
 struct S(u8);

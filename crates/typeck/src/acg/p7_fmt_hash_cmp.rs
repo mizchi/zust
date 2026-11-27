@@ -490,6 +490,19 @@ impl Cx<'_> {
                     while let Ty::Ref(_, i) = pt {
                         pt = *i;
                     }
+                    // (a radix or exponent spec of std's NonZero types: their number's, which is their one field, as
+                    // std's impls delegate to it: `{:x}` of `NonZeroU8::new(255)` is `ff`)
+                    let (v, t, pt) = match self.nonzero_inner(pt) {
+                        Some(it) if spec.radix != 0 => {
+                            let (mut pv, mut rt) = (v, t);
+                            while let Ty::Ref(_, i) = rt {
+                                pv = self.b.ins().load(PTR, mf(), pv, 0);
+                                rt = *i;
+                            }
+                            (pv, it, it)
+                        }
+                        _ => (v, t, pt),
+                    };
                     let ptr_debug = *debug && matches!(pt, Ty::Ptr(_, i) if !i.is_fat()) && self.prog.index.contains_key("__exr_fmt_ptr");
                     // (`{:x}` / `{:X}` / `{:b}` / `{:o}` / `{:e}` / `{:E}` of a value that is no number (a float's only in
                     // `{:e}` / `{:E}`): its fmt trait's impl, the prelude's LowerHex and so on (`__p_LowerHex` where the
@@ -1452,6 +1465,32 @@ impl Cx<'_> {
 
 
 /// The trait object type `s` (`Display`, `fmt::Debug + Send` ..) has the formatting trait's `fmt`
+impl Cx<'_> {
+    /// The number type of std's NonZero type t (a prelude struct whose one field is that number), if t is one
+    pub(crate) fn nonzero_inner(&self, t: Ty) -> Option<Ty> {
+        let Ty::Struct(sid) = t else { return None };
+        let b = self.prog.base_of(sid);
+        if !self.prog.struct_item.get(b as usize).is_some_and(|&i| i >= self.prog.prelude_from) {
+            return None;
+        }
+        Some(match self.prog.structs[b as usize].name.as_str() {
+            "NonZeroU8" => Ty::U8,
+            "NonZeroU16" => Ty::U16,
+            "NonZeroU32" => Ty::U32,
+            "NonZeroU64" => Ty::U64,
+            "NonZeroU128" => Ty::U128,
+            "NonZeroUsize" => Ty::Usize,
+            "NonZeroI8" => Ty::I8,
+            "NonZeroI16" => Ty::I16,
+            "NonZeroI32" => Ty::I32,
+            "NonZeroI64" => Ty::I64,
+            "NonZeroI128" => Ty::I128,
+            "NonZeroIsize" => Ty::Isize,
+            _ => return None,
+        })
+    }
+}
+
 fn dyn_has_fmt(s: &str, debug: bool) -> bool {
     let want = if debug { "Debug" } else { "Display" };
     s.split('+').any(|p| p.trim().rsplit("::").next() == Some(want))
