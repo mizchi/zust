@@ -101,9 +101,13 @@ OS threads since [report 2026-11-27-01](docs/reports/2026-11-27-01-native-thread
   threads that wait for it wait forever (std's is unlocked and poisoned; `lock` then gives `Err`). The other values of
   that thread are not dropped either. Both need unwinding (SUPPORT.md, "Large features"). (A Once or OnceLock the
   thread was running, and a StdoutLock it held, are let go: the thread's context keeps them.)
-- Not there: `thread::scope`, `thread::Builder` (names, stack sizes), `park_timeout`, `recv_timeout`,
-  `Condvar::wait_timeout`, `Mutex::try_lock`, `Receiver` as `IntoIterator`. `JoinHandle::join`'s Err is not a
-  `Box<dyn Any + Send>` (no downcast of the payload).
+- Not there: `thread::scope`, `Condvar::wait_timeout`, `Mutex::try_lock`, `sync::Weak`,
+  `std::time::Instant`. `JoinHandle::join`'s Err is not a `Box<dyn Any + Send>` (no downcast of the payload).
+  `Builder::spawn_scoped` needs `thread::scope`.
+- A closure's capture held by reference is known to be mutable only when the body assigns to it or takes a `&mut` of
+  it (ast_closure::mutates_capture). One it changes only through a `&mut self` method (`|| v.push(Cell::new(1))`)
+  may be either kind, so the auto traits ask both rules of it (Send needs the value to be Sync and Send): such a
+  closure of a `Vec<Cell<_>>` is not Send, where rustc's is.
 - The main thread's thread_local! values are not dropped at exit (glibc's std runs their drops).
 - The location of an `unwrap` that panics is kept in one static (`__EXR_CALLER`), which another thread may write
   meanwhile: the message can point at another thread's call. It needs a thread-local of its own (an ELF TLS slot).

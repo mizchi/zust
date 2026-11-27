@@ -2887,6 +2887,11 @@ impl Cx<'_> {
         if sol[ri].is_none() && diverging_tail(&c_body(c)) {
             sol[ri] = Some(Ty::Unit);
         }
+        // (a bare `|_| panic!()` that nothing else types: rustc's fallback, `!` (in every edition since 1.100), so
+        // a bound on the callee's R is checked against `!` where the call resolves (`R: Bar` fails))
+        if sol[ri].is_none() && panic_tail(&c_body(c)) {
+            sol[ri] = Some(Ty::Never);
+        }
         // (a parameter of a size not known: `|a0: [i32]| ..`, as the constructor of `struct Test([i32]);` used as a
         // value is written (E0277))
         if let Some(u) = pslots.iter().filter_map(|&(_, g)| sol[g]).find(|t| matches!(t, Ty::Slice(_) | Ty::Str | Ty::Dyn(_))) {
@@ -4929,6 +4934,22 @@ fn c_body(c: &Expr) -> Expr {
     match c {
         Expr::Closure(_, _, _, b, ..) => (**b).clone(),
         e => e.clone(),
+    }
+}
+
+/// whether a closure body is (or ends with) a `panic!`-like macro
+fn panic_tail(e: &Expr) -> bool {
+    let mut e = e;
+    loop {
+        match e {
+            Expr::Paren(x) => e = x,
+            Expr::Block(_, _, b) => match b.stmts.last() {
+                Some(Stmt::Expr(x, _)) => e = x,
+                _ => return false,
+            },
+            Expr::Macro(p, _, _) => return p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")),
+            _ => return false,
+        }
     }
 }
 

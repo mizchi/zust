@@ -7466,6 +7466,7 @@ compile-fail	statics/uninhabited-static.rs
 compile-fail	statics/unsized-static-without-body-index-141804.rs
 compile-fail	statics/unsizing-wfcheck-issue-127299.rs
 run-pass	std/issue-3563-3.rs
+run-pass	std/park-timeout-wakeup-59020.rs
 run-pass	std/thread-sleep-ms.rs
 run-pass	stdlib-unit-tests/matches2021.rs
 compile-fail	stdlib-unit-tests/not-sync.rs
@@ -7973,7 +7974,10 @@ run-pass	threads-sendsync/issue-4446.rs
 run-pass	threads-sendsync/issue-4448.rs
 run-pass	threads-sendsync/issue-8827.rs
 run-pass	threads-sendsync/issue-9396.rs
+run-pass	threads-sendsync/mpsc_stress.rs
 compile-fail	threads-sendsync/rc-is-not-send.rs
+check-pass	threads-sendsync/recursive-thread-spawn.rs
+run-pass	threads-sendsync/send-is-not-static-par-for.rs
 run-pass	threads-sendsync/send-resource.rs
 run-pass	threads-sendsync/send-type-inference.rs
 run-pass	threads-sendsync/sendable-class.rs
@@ -8008,6 +8012,8 @@ run-pass	threads-sendsync/thread-local-syntax.rs
 run-pass	threads-sendsync/threads.rs
 run-pass	threads-sendsync/tls-dont-move-after-init.rs
 run-pass	threads-sendsync/tls-dtors-are-run-in-a-static-binary.rs
+run-pass	threads-sendsync/tls-init-on-init.rs
+run-pass	threads-sendsync/tls-try-with.rs
 run-pass	threads-sendsync/trivial-message.rs
 run-pass	threads-sendsync/yield.rs
 run-pass	threads-sendsync/yield1.rs

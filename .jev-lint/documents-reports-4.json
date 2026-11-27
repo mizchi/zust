@@ -88,6 +88,14 @@
     "docs_reports_2026-11-27-01-native-threads.ja": {
       "path": "docs/ja/reports/2026-11-27-01-native-threads.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-27-02-threads-ui.en": {
+      "path": "docs/reports/2026-11-27-02-threads-ui.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-27-02-threads-ui.ja": {
+      "path": "docs/ja/reports/2026-11-27-02-threads-ui.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -210,6 +218,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-27-01-native-threads.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-27-02-threads-ui",
+      "topic": "The Japanese file docs/ja/reports/2026-11-27-02-threads-ui.md is a faithful translation of docs/reports/2026-11-27-02-threads-ui.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-27-02-threads-ui.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-27-02-threads-ui.ja"
       }
     }
   ]

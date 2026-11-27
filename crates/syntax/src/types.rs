@@ -560,6 +560,10 @@ pub struct ClosureSyn {
     /// Per capture: a parameter of the fn that is a shared reference (`h: &T`, `&self`), used in the body only through
     /// a deref of it (ast_closure::deref_uses_only). From edition 2021 it is held by value: the closure captures `*h`
     pub deref: Vec<bool>,
+    /// Per capture: the body assigns to it, through it or borrows it mutably (`x = ..`, `x.f += ..`, `*x = ..`,
+    /// `&mut x`; ast_closure::mutates_capture). Held by reference, it is then a `&mut T` (or a unique borrow): Send when
+    /// T is. The others held by reference may be either kind (a method's `&mut self` is not seen here)
+    pub mutated: Vec<bool>,
 }
 
 /// The owner of the members of an impl / trait

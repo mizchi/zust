@@ -2223,29 +2223,44 @@ impl Cx<'_> {
         }).collect())
     }
 
-    fn check_spawn_closure(&self, c: &Expr) -> R<()> {
-        let Expr::Closure(mv, _, _, _, cpos) = strip_paren(c) else {
-            // (a closure held in a local, `let f = move || ..; spawn(f)`: its captures, the fields of its type, run on
-            // the other thread just the same)
-            if let Some(t) = self.peek(c) {
-                // (a capture held by reference: the closure may outlive it (E0373), as for one written in the call)
-                if let Ty::Struct(sid) = t {
-                    let cd = self.prog.closure_of_struct.get(&self.prog.base_of(sid)).and_then(|f| self.prog.closures.get(f));
-                    if let Some(cd) = cd {
-                        if let Some(k) = cd.moved.iter().position(|m| !m) {
-                            let n = &cd.captures[k];
-                            return Err(self.at(value_pos(c), format!("closure may outlive the current function, but it borrows `{n}`, which is owned by the current function")));
-                        }
-                    }
-                }
-                if not_send(self.prog, t) {
-                    let bad = match t {
-                        Ty::Struct(sid) => self.prog.structs[sid as usize].fields.iter().map(|f| f.1).find(|&f| not_send(self.prog, f)),
-                        _ => None,
-                    };
-                    return Err(self.at(value_pos(c), format!("`{}` cannot be sent between threads safely", self.prog.tn(bad.unwrap_or(t)))));
+    /// `thread::spawn`, or the prelude's `Builder::spawn` (not a program's own `Builder`'s): the closure it is given
+    /// runs on another thread, so its captures must be Send and held by value, and its value Send
+    fn spawns(&self, id: u32) -> bool {
+        match self.prog.names.get(id as usize).map(|n| n.as_str()) {
+            Some("__core_spawn") => true,
+            Some("Builder::spawn" | "__p_Builder::spawn") => self.prog.item_of.get(id as usize).copied().flatten().is_some_and(|i| i >= self.prog.prelude_from),
+            _ => false,
+        }
+    }
+
+    /// A spawned closure given as a value, not written in the call (`spawn(f)`, `spawn({ move || .. })`,
+    /// `spawn(if c { f } else { g })`): checked by its type t once the call's arguments are evaluated. Its captures (the
+    /// fields of its type) run on the other thread just the same: one held by reference may be outlived (E0373), and
+    /// each must be Send (E0277)
+    fn check_spawn_value(&self, c: &Expr, t: Ty) -> R<()> {
+        if let Ty::Struct(sid) = t {
+            let cd = self.prog.closure_of_struct.get(&self.prog.base_of(sid)).and_then(|f| self.prog.closures.get(f));
+            if let Some(cd) = cd {
+                if let Some(k) = cd.moved.iter().position(|m| !m) {
+                    let n = &cd.captures[k];
+                    return Err(self.at(value_pos(c), format!("closure may outlive the current function, but it borrows `{n}`, which is owned by the current function")));
                 }
             }
+        }
+        if not_send(self.prog, t) {
+            let bad = match t {
+                Ty::Struct(sid) => self.prog.structs[sid as usize].fields.iter().map(|f| f.1).find(|&f| not_send(self.prog, f)),
+                _ => None,
+            };
+            return Err(self.at(value_pos(c), format!("`{}` cannot be sent between threads safely", self.prog.tn(bad.unwrap_or(t)))));
+        }
+        Ok(())
+    }
+
+    /// A closure written in a spawn call: its free variables, before the call is evaluated (one given as a value is
+    /// check_spawn_value's, after)
+    fn check_spawn_closure(&self, c: &Expr) -> R<()> {
+        let Expr::Closure(mv, _, _, _, cpos) = strip_paren(c) else {
             return Ok(());
         };
         for n in crate::ast_closure::free_vars(strip_paren(c)) {
@@ -3598,8 +3613,11 @@ impl Cx<'_> {
         // (the receiver's region tree is this call's: the calls in the arguments must not take it)
         let rg_recv = if recv.is_some() { self.rg.recv.take() } else { None };
         let rg_sp = std::mem::take(&mut self.rg.call_sp);
-        if self.prog.names.get(id as usize).is_some_and(|n| n == "__core_spawn") {
-            if let Some(c) = args.first() {
+        // (the closure: spawn's argument, or Builder::spawn's after its receiver, which a path call
+        // (`Builder::spawn(b, f)`) passes as the first argument)
+        if self.spawns(id) {
+            let at = usize::from(recv.is_none() && self.prog.names[id as usize] != "__core_spawn");
+            if let Some(c) = args.get(at) {
                 self.check_spawn_closure(c)?;
             }
         }
@@ -4193,9 +4211,29 @@ impl Cx<'_> {
         let r = self.resolve_call(id, &arg_tys, sol0, expected, span);
         crate::traits::EXPLICIT_ARGS.with(|e| e.set(prev));
         let (target, sig) = r?;
-        // (spawn's T goes to the thread that joins: it must be Send, as std's `T: Send`)
-        if self.prog.names[id as usize] == "__core_spawn" && self.user_code {
-            if let Ty::Struct(s) = sig.ret {
+        // (a closure given as a value: by its type, now evaluated (vals holds the receiver or the builder first))
+        if self.spawns(id) && self.user_code {
+            let (ai, vi) = match (self.prog.names[id as usize] == "__core_spawn", recv.is_some()) {
+                (true, _) => (0, 0),
+                (false, true) => (0, 1),
+                (false, false) => (1, 1),
+            };
+            if let (Some(c), Some(v)) = (args.get(ai), vals.get(vi)) {
+                if !matches!(strip_paren(c), Expr::Closure(..)) {
+                    self.check_spawn_value(c, v.1)?;
+                }
+            }
+        }
+        // (spawn's T goes to the thread that joins: it must be Send, as std's `T: Send`. Builder::spawn's comes in a
+        // Result)
+        if self.spawns(id) && self.user_code {
+            let mut ret = sig.ret;
+            if let Ty::Struct(s) = ret {
+                if self.prog.structs[self.prog.base_of(s) as usize].name == "Result" {
+                    ret = self.prog.structs[s as usize].args.first().copied().unwrap_or(ret);
+                }
+            }
+            if let Ty::Struct(s) = ret {
                 if let Some(&t) = self.prog.structs[s as usize].args.first() {
                     if not_send(self.prog, t) {
                         return Err(self.at(span, format!("`{}` cannot be sent between threads safely", self.prog.tn(t))));
@@ -4945,8 +4983,18 @@ fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool
                 return false;
             }
             seen.push((sid, sync));
-            sd.args.iter().any(|&a| auto_trait_fails(prog, a, sync, seen, d + 1))
-                || sd.fields.iter().any(|f| auto_trait_fails(prog, f.1, sync, seen, d + 1))
+            // (a closure's capture held by reference is a raw pointer: the reference it stands for. Sync needs
+            // `T: Sync`; Send of a `&mut T` (one the body mutates) `T: Send`, and of one that may be either kind both.
+            // A closure is judged by its captures alone: its type arguments are the parent's parameters and the
+            // captures' types, raw pointers among them)
+            let field = |i: usize, t: Ty, seen: &mut Vec<(u32, bool)>| match (t, prog.ref_capture(sid, i)) {
+                (Ty::Ptr(_, inner), Some(true)) => auto_trait_fails(prog, *inner, sync, seen, d + 1),
+                (Ty::Ptr(_, inner), Some(false)) => sync_(*inner, seen) || (!sync && send(*inner, seen)),
+                _ => auto_trait_fails(prog, t, sync, seen, d + 1),
+            };
+            let closure = prog.closure_of_struct.contains_key(&base);
+            (!closure && sd.args.iter().any(|&a| auto_trait_fails(prog, a, sync, seen, d + 1)))
+                || sd.fields.iter().enumerate().any(|(i, f)| field(i, f.1, seen))
                 || sd.variants.iter().any(|v| v.fields.iter().any(|f| auto_trait_fails(prog, f.1, sync, seen, d + 1)))
         }
         _ => false,

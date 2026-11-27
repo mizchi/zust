@@ -129,7 +129,8 @@ so their impls come only with them.
 In TODO.md, "Threads":
 
 - No poisoning of a Mutex or RwLock, and no drops of a panicking thread's values. Both need unwinding.
-- No `thread::scope`, `Builder`, timeouts (`park_timeout`, `recv_timeout`, `wait_timeout`), `Mutex::try_lock`.
+- No `thread::scope`, `Condvar::wait_timeout`, `Mutex::try_lock`. (`Builder`, `park_timeout`, `recv_timeout` and
+  `Barrier` came after, in [report 2026-11-27-02](2026-11-27-02-threads-ui.md).)
 - The main thread's thread-locals are not dropped at exit.
 - The location an `unwrap` reports is one static, which another thread may overwrite meanwhile.
 - wasm32 has no `spawn` (no pthreads in the host); the atomics and locks work there as plain accesses.
