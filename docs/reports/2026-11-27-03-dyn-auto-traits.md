@@ -44,7 +44,7 @@ keeps them, as rustc does.
   of auto traits alone has no methods, and `*const dyn Sync as *const (dyn Send + Sync)` is accepted
   (tests/security/send_dyn_ptr_cast_auto_only.rs; before, `dyn Send` to `dyn Send + Sync` was refused).
 - `&(dyn Tr + Send)` → `*const dyn Tr` (a reference coerced to a raw pointer) may drop auto traits too, by the same
-  `dyn_coerces` (tests/security/send_dyn_ref_to_ptr_drop_auto.rs).
+  `dyn_coerces`, as a coercion and as an `as` cast (tests/security/send_dyn_ref_to_ptr_drop_auto.rs).
 - The program's own structs with fields are judged by their fields, not their type arguments (a `Maker<Rc<u32>>` of
   a `fn() -> T` field is Send).
 - A `static`'s type must be Sync (E0277). That check now comes after the auto traits of the program's traits'

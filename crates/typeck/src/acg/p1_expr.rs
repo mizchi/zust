@@ -1929,7 +1929,7 @@ impl Cx<'_> {
                     }
                     // (`&[T]` as `*const [T]` / `&dyn Tr` as `*const dyn Tr`: the same fat pointer)
                     (Ty::Ref(_, Ty::Slice(e)), Ty::Ptr(_, Ty::Slice(e2))) if e == e2 => return Ok((v, to)),
-                    (Ty::Ref(m, Ty::Dyn(a)), Ty::Ptr(pm, Ty::Dyn(b))) if a == b && (m || !pm) => return Ok((v, to)),
+                    (Ty::Ref(m, Ty::Dyn(a)), Ty::Ptr(pm, Ty::Dyn(b))) if (a == b || self.dyn_coerces(a, b)) && (m || !pm) => return Ok((v, to)),
                     (Ty::Ref(_, a), Ty::Ptr(_, b)) if a == b || matches!(*a, Ty::Array(e, _) if e == b) => {
                         return Ok((v, to));
                     }
