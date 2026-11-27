@@ -1875,11 +1875,16 @@ impl Cx<'_> {
                         f.truncate(n);
                     }
                 }
-                // `x as _` (the expected type, else the same type) / `&x as *const _` (the pointee of the source)
+                // `x as _` (the expected type, else the same type) / `&x as *const _` (the pointee of the expected
+                // pointer, else the source's)
                 let to = match to {
                     Ty::Param(h) if h == crate::program::HOLE => expected.filter(|&e| !has_hole(self.prog, e)).unwrap_or(from),
-                    Ty::Ptr(m, i) if has_hole(self.prog, *i) => match from {
-                        Ty::Ref(_, a) | Ty::Ptr(_, a) if matches!(*i, Ty::Param(_)) => Ty::Ptr(m, a),
+                    Ty::Ptr(m, i) if has_hole(self.prog, *i) => match (expected, from) {
+                        // (`buf.as_mut_ptr() as *mut _` for a `*mut c_char` parameter: rustc unifies the cast's type
+                        // with the expected one, so `_` is `c_char`, not the source's `u8`; a `*mut _` where a
+                        // `*const T` is expected is the `*mut T` that coerces to it)
+                        (Some(Ty::Ptr(em, e)), _) if matches!(*i, Ty::Param(_)) && (m || !em) && !has_hole(self.prog, *e) => Ty::Ptr(m, e),
+                        (_, Ty::Ref(_, a) | Ty::Ptr(_, a)) if matches!(*i, Ty::Param(_)) => Ty::Ptr(m, a),
                         _ => match expected {
                             Some(e @ Ty::Ptr(..)) if !has_hole(self.prog, e) => e,
                             _ => to,
@@ -1941,6 +1946,11 @@ impl Cx<'_> {
                     // (a raw dyn pointer, the address of its (data, vtable) pair: likewise the data word)
                     (Ty::Ptr(_, a), Ty::Ptr(_, b)) if a.is_unsized() && !b.is_unsized() => {
                         return Ok((v.map(|a| self.b.ins().load(PTR, mf(), a, 0)), to));
+                    }
+                    // (a slice's or str's raw pointer as a `dyn` one, or back: their metadata differ, a length and a
+                    // vtable. `f_raw as *mut _` where a `*mut dyn Debug` is expected takes that pointee, E0606 as rustc)
+                    (Ty::Ptr(_, a), Ty::Ptr(_, b)) if matches!((*a, *b), (Ty::Slice(_) | Ty::Str, Ty::Dyn(_)) | (Ty::Dyn(_), Ty::Slice(_) | Ty::Str)) => {
+                        return err(SP, format!("casting `{}` as `{}` is invalid (E0606)", self.prog.tn(from), self.prog.tn(to)));
                     }
                     // (`p as usize` of a fat raw pointer: its address, the data word)
                     (Ty::Ptr(_, a), t) if a.is_unsized() && matches!(t, Ty::Usize | Ty::U64 | Ty::Isize | Ty::I64) => {
@@ -3455,6 +3465,12 @@ impl Cx<'_> {
                     Ty::Box(x) => Ty::Ref(m, x),
                     i => *i,
                 };
+            }
+            // (a `*mut T` for a `*const T` argument: the same pointer)
+            if let (Ty::Ptr(true, a), Ty::Ptr(false, b)) = (t, pt) {
+                if a == b {
+                    t = pt;
+                }
             }
             self.same(SP, t, pt)?;
             vals.push(v);

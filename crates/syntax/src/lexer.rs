@@ -1097,6 +1097,20 @@ mod tests {
         rename_module_collisions_in(src, &["d".to_string()]).unwrap_or_else(|| src.to_string())
     }
 
+    /// `use core::slice::from_ref;` (in a module, in a fn body) brings slice's `from_ref`, which ptr's shares the name
+    /// of: the name is its path (#259)
+    #[test]
+    fn slice_from_ref_import_is_its_path() {
+        let src = "mod n {\n    use std::slice::from_mut;\n    pub fn one(x: &mut u32) -> &mut [u32] {\n        from_mut(x)\n    }\n}\nstruct H(u8);\nimpl H {\n    fn subs(&self) -> &[u8] {\n        use core::slice::from_ref;\n        from_ref(&self.0)\n    }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &[]).unwrap_or_else(|| src.to_string());
+        assert!(out.contains("        std::slice::from_mut(x)"), "{out}");
+        assert!(out.contains("        core::slice::from_ref(&self.0)"), "{out}");
+        // (a source with no module too)
+        let src = "fn top(x: &u8) -> &[u8] {\n    use std::slice::from_ref;\n    from_ref(x)\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &[]).unwrap_or_else(|| src.to_string());
+        assert!(out.contains("    std::slice::from_ref(x)"), "{out}");
+    }
+
     /// Review of #147: many glob providers before the one with the name (no cut-off at 64 modules)
     #[test]
     fn glob_search_has_no_size_cutoff() {
@@ -3112,7 +3126,8 @@ pub fn rename_module_collisions_in(src: &str, crates: &[String]) -> Option<Strin
 
 /// fix: 名前を変えて桁がずれた所 (行, 新しいテキストでの桁, その行でそこから後ろのずれの合計)。
 /// 元の桁 = 桁 - ずれ (その行で桁が col 以上の最後の項)
-/// Whether a `use` renames an item of std (`use std::cell::LazyCell as Lazy;`): the name it brings in is that path
+/// Whether a `use` renames an item of std (`use std::cell::LazyCell as Lazy;`), or brings one whose name another std fn
+/// has too (`use core::slice::from_ref;`): the name it brings in is that path
 fn renames_std(src: &str) -> bool {
     // (the source can be large and most have none: `contains` first (it is much faster than `match_indices` over a
     // large text), then the lines that have a `use `)
@@ -3139,6 +3154,10 @@ fn renames_std(src: &str) -> bool {
             }
             let stmt = &r[..r.find(';').unwrap_or(r.len())];
             if stmt.match_indices(" as ").any(|(j, _)| stmt[j + 4..].trim_start().starts_with(|c: char| c.is_alphabetic())) {
+                return true;
+            }
+            // (or one under its own name that another std fn has too, `use core::slice::from_ref;`)
+            if stmt.contains("slice::from_ref") || stmt.contains("slice::from_mut") {
                 return true;
             }
         }
@@ -3359,8 +3378,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             renamed.push((d.1, d.0.clone(), nn));
         }
     }
-    // (ぶつかる名前も `use .. as X` の別名もなければ何もしない)
-    if renamed.is_empty() && !src.contains(" as ") {
+    // (ぶつかる名前も `use .. as X` の別名もなければ何もしない; nor a `use` of slice's `from_ref` / `from_mut`, whose name
+    // is its path)
+    if renamed.is_empty() && !src.contains(" as ") && !src.contains("slice::from_") {
         return None;
     }
     // (the definitions in the type namespace, a struct / enum / union / trait / type alias: (scope, name). A fn, const or
@@ -3761,7 +3781,10 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             // too, `pub use std::println as say;`: what `m::say!(..)` names, a macro only beside the module's own
             // `fn say`. Not in a block that way: there its bare `say()` would take the import)
             let own = def_set.contains(&(sc, local.clone()));
-            if matches!(mpath[0].as_slice(), b"std" | b"core" | b"alloc") && local != name[0] && local.as_slice() != b"_" && !(own && in_block.is_some()) {
+            // (and one under its own name that another std fn has too, `use core::slice::from_ref;`: the name is its
+            //  path, so a bare `from_ref(r)` is slice's, not ptr's)
+            let by_path = matches!((mpath.last().map(|m| m.as_slice()), name[0].as_slice()), (Some(b"slice"), b"from_ref" | b"from_mut"));
+            if matches!(mpath[0].as_slice(), b"std" | b"core" | b"alloc") && (local != name[0] || by_path) && local.as_slice() != b"_" && !(own && in_block.is_some()) {
                 let mut full = vec![];
                 for (i, seg) in path.iter().enumerate() {
                     if i > 0 {

@@ -15,6 +15,16 @@ core::arch::x86_64 intrinsics zustc supports|cannot find value `(_mm\w*|__cpuid\
 no method (named )?`[^`]*` (on type|on|found for) `	256	methods zustc does not find (std methods the prelude lacks; lookup)
 expected (an? [a-z ]+|`[^`]*`) \(found	257	parser: syntax zustc does not parse
 no rules expected|no rules of `[^`]*` matched this call	258	macro_rules: calls zustc's matcher rejects
+mismatched types: expected `&(mut )?(\[[\w#]+\]|T|str)`, found `&(mut )?\w+__[^`]+`	301	deref coercion through a program's own `Deref` impl
+mismatched types: expected `T0`, found `regex_syntax__(ast__Ast|ast__ClassSet|hir__Hir)`|found `&\[Box<[^`]*>\]`|found `&Box<\[	302	a generic's `&Box<T>` argument not deref-coerced to the `&T` the expected type fixes
+mismatched types: expected `String`, found `Cow`|mismatched types: expected `percent_encoding__PercentEncode`|mismatched types: expected `__CowStr`|mismatched types: expected `&str`, found `(C|__impl\d+)`	303	`Cow<str>` / `Cow<[u8]>`: `From` impls into them, `from_utf8_lossy`
+mismatched types: expected `&T0`, found `String`|mismatched types: expected `&str`, found `[^`]*\{closure#\d+\}[^`]*`|mismatched types: expected `usize`, found `Range<usize>`|mismatched types: expected `Saturating<\w+>`, found `i32`|mismatched types: expected `&T0`, found `&(\[u8\]|str)`	304	prelude: std signatures narrower than std's (`Command::new`, `splitn`, `get`, `Saturating`, `HashMap::get`)
+mismatched types: expected `&T0`, found `&usize`|mismatched types: expected `Option<i32>`, found `Option<usize>`	305	literals in `assert_eq!` / `debug_assert!` not typed by their use
+mismatched types: expected `&(u8|u16|u32|u64|u128|usize|i8|i16|i32|i64|i128|isize|f32|f64|\[u8; \d+\])`, found `(u8|u16|u32|u64|u128|usize|i8|i16|i32|i64|i128|isize|f32|f64|\[u8; \d+\])`|server_name\.rs:\d+:\d+: mismatched types: expected `u(8|16)`, found `u32`	306	a trait's methods named like a number's (`checked_mul`)
+src/pow\.rs:\d+:\d+: mismatched types: expected `(\w+)`, found `Option<\1>`	318	`<u32>::from(x)` takes a program's `NumCast::from` that is not in scope
+mismatched types: expected `usize`, found `\w+__\w+`	319	a program's `Index<Id>` impls for `[T]` / `Vec<T>`
+mismatched types: expected `T0`, found `f(32|64)`	320	float literals for a generic's parameter left unsolved (`T0`)
+mismatched types: expected `(\w+__\w+)<[A-Z][^`]*>`, found `\1<[^`]*>`	321	a generic type's default parameters taken where inference gives them
 mismatched types: expected	259	mismatched types (to sort by cause)
 missing generics for `	260	`missing generics for` a type used without its parameters
 the trait bound `[^`]*` is not satisfied \(E0277\)	261	false E0277: a bound zustc does not see

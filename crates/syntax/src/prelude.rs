@@ -577,10 +577,16 @@ fn owner(h: usize) -> Option<&'static str> {
                 // (`impl From<String> for PathBuf` belongs to PathBuf: with a `for`, look at the type after it)
                 let ws: Vec<&'static str> = it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).collect();
                 let from = ws.iter().position(|w| *w == "for").map(|i| i + 1).unwrap_or(0);
-                // (when the type after it is no owner, as in `impl __PathExt for str`, by the trait's name)
-                ws[from..]
+                // (when the type after it is no owner, as in `impl __PathExt for str`, by the trait's name. Nor is a
+                // number type when the trait's arguments name an owner: `impl From<Ipv6Addr> for u128` comes with
+                // Ipv6Addr, not with every program that names u128)
+                let number = |w: &&str| matches!(*w, "u128" | "i128" | "f64" | "f32");
+                let after: Vec<&str> = ws[from..].iter().copied().filter(|w| !(from > 0 && number(w))).collect();
+                let numbers: Vec<&str> = ws[from..].iter().copied().filter(|w| from > 0 && number(w)).collect();
+                after
                     .iter()
                     .chain(ws[..from].iter())
+                    .chain(numbers.iter())
                     .copied()
                     .find_map(|w| match w {
                         "Vec" | "String" | "HashMap" | "Reverse" | "AssertUnwindSafe" | "LocalKey" | "LazyCell" | "BinaryHeap" | "PeekMut" | "SplitStr" | "RSplitStr" | "FlattenRef" | "MatchIndices" | "CharIndices"
@@ -1520,6 +1526,12 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     // (`__core_ptr_swap`, whose definition is looked up as `ptr_swap`)
     if sc.has("ptr::swap") {
         need.insert("ptr_swap");
+    }
+    // (`__core_slice_from_ref` / `_mut`, looked up as `slice_from_ref` / `slice_from_mut`)
+    for (path, f) in [("slice::from_ref", "slice_from_ref"), ("slice::from_mut", "slice_from_mut")] {
+        if sc.has(path) {
+            need.insert(f);
+        }
     }
     for (path, f) in [("Ref::map", "__exr_ref_map"), ("RefMut::map", "__exr_refmut_map"), ("Ref::clone", "__exr_ref_clone")] {
         if sc.has(path) {
