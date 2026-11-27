@@ -402,6 +402,9 @@ impl Cx<'_> {
         let tr = match self.explicit_trait.as_ref().filter(|(m, _)| m == "fmt") {
             Some((_, tr)) if matches!(tr.as_str(), "Display" | "Debug") => tr.clone(),
             Some(_) => return Ok(None),
+            // (a value of a type parameter with a Display or Debug bound, `x: T` with `T: Debug`, in its instance: the
+            // bound's, as rustc's lookup takes it, whatever is imported (bound_method_call's choice for other methods))
+            None if self.param_fmt_bound(recv).is_some() => self.param_fmt_bound(recv).unwrap_or("Display").to_string(),
             None => {
                 let inside = self.prog.sigs.get(self.root as usize).and_then(|s| s.impl_trait.as_deref()).map(|t| t.split('<').next().unwrap_or(t).trim().rsplit("::").next().unwrap_or(t));
                 let (d, g) = (self.prog.implements(base, "Display"), self.prog.implements(base, "Debug"));
@@ -445,6 +448,28 @@ impl Cx<'_> {
         let call = Expr::Call(Box::new(path_expr(h)), vec![Expr::Ref(false, Box::new(paren(recv.clone()))), f.clone()]);
         let call: &Expr = self.keep_expr(call);
         self.expr(call, expected).map(Some)
+    }
+
+    /// The fmt trait a value of a type parameter takes from its bounds (`x: T` / `x: &T` with `T: Debug`), as
+    /// bound_method_call finds the parameter: a parameter of the fn itself, not a `let` shadowing it. None without one
+    /// such bound, or with both (rustc's E0034)
+    fn param_fmt_bound(&self, recv: &Expr) -> Option<&'static str> {
+        if self.env.params.is_empty() || self.generic_args.is_empty() {
+            return None;
+        }
+        let Expr::Path(None, rp) = strip_paren(recv) else { return None };
+        let rn = ident_of(rp)?;
+        let declared = self.generic_args.iter().find(|a| a.0 == rn).map(|a| a.1.clone())?;
+        if self.scopes.iter().rposition(|s| s.iter().any(|b| b.0 == rn)) != Some(0) {
+            return None;
+        }
+        let bounds = &self.prog.sigs.get(self.root as usize)?.generics.iter().find(|g| g.0 == declared)?.1;
+        let has = |n: &str| bounds.iter().any(|b| b.split('<').next().unwrap_or(b).rsplit("::").next().map(str::trim) == Some(n));
+        match (has("Display"), has("Debug")) {
+            (true, false) => Some("Display"),
+            (false, true) => Some("Debug"),
+            _ => None,
+        }
     }
 
     /// In a generic fn's instance, the U of its bound `T: Into<U>` whose T is t there (foldhash's `x.into() << n` with
@@ -1136,11 +1161,20 @@ impl Cx<'_> {
                 _ => false,
             };
             let target = expected.or_else(|| self.lets.get(&(e as *const Expr as usize)).copied());
-            // (nothing expected of it (`x.into() << n`), or nothing the type inference could tell: the U of the fn's
-            // bound `T: Into<U>` on x's type)
-            let target = match target {
-                Some(t) if t.is_int() || t.is_float() || matches!(t, Ty::Struct(_)) => Some(t),
-                _ => self.peek(recv).and_then(|t| self.into_bound_target(t)).or(target),
+            // (into its own type, std's `impl<T> From<T> for T`: the value itself. `true.into()` as the `bool` a
+            // `T: Into<u64>` fn returns stays a bool, which the bound below must not make a u64)
+            let rt = self.peek(recv);
+            if let (Some(t), Some(r), false) = (target, rt, recv_own) {
+                if t == r && !self.prog.has_param(t) {
+                    return self.expr(recv, Some(t));
+                }
+            }
+            // (else, with no number or struct expected of it, the U of the fn's bound `T: Into<U>` on x's type: in an
+            // instance the receiver is the parameter's type (u8), and foldhash's `x.into() << n` expects no useful type)
+            let target = match (target, rt) {
+                (Some(t), _) if t.is_int() || t.is_float() || matches!(t, Ty::Struct(_)) => Some(t),
+                (_, Some(r)) => self.into_bound_target(r).or(target),
+                _ => target,
             };
             if !recv_own {
                 match target {

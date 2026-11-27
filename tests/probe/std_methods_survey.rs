@@ -44,6 +44,11 @@ unsafe fn load(p: *const u32) -> u32 {
     unsafe { p.read_unaligned() }
 }
 
+// (`true.into()` into its own type in a fn with a `T: Into<u64>` bound: a bool, not the bound's u64 (#280's review))
+fn always<T: Into<u64>>(_: T) -> bool {
+    true.into()
+}
+
 fn first_word<L: Lut>() -> u32 {
     let lut = L::LUT;
     unsafe { load(lut.as_ptr().cast()) }
@@ -164,4 +169,5 @@ fn main() {
     h.write_num(1u64);
     println!("{} {}", h.sponge, h.len);
     println!("{}", first_word::<A>());
+    println!("{} {}", always(true), always(3u8));
 }

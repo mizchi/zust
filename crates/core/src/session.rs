@@ -255,40 +255,116 @@ fn use_end(sb: &[u8], b: usize, stop: usize) -> usize {
     stop
 }
 
-/// The fmt traits the items' `use` declarations import (fn bodies' too), by their identifier tokens (not a comment's
-/// words): 1 Display, 2 Debug; a glob of a `fmt` path both. Only from a declaration that names `fmt`: a trait of the
-/// program's named Debug is not std's (Program::fmt_imports)
+/// The fmt traits the items' `use` declarations import (fn bodies' too), by each declaration's use tree, its comments
+/// left out (use_tree_fmt): 1 Display, 2 Debug; a glob of a `fmt` path both. Only a name under a `fmt` path: a trait
+/// of the program's named Debug is not std's (Program::fmt_imports)
 fn fmt_imports(src: &str, items: &[SrcItem]) -> u8 {
     let sb = src.as_bytes();
     let mut mask = 0u8;
     for it in items {
-        let ids = &it.idents;
-        for (k, &(a, b)) in ids.iter().enumerate() {
+        for &(a, b) in &it.idents {
             if b - a != 3 || sb.get(a as usize..b as usize) != Some(b"use") {
                 continue;
             }
-            // (the declaration's identifier tokens, up to its `;`: not a comment's)
+            // (the declaration, up to its `;` (not one in a comment), without its comments)
             let end = use_end(sb, b as usize, it.end.min(sb.len()));
-            let words: Vec<&[u8]> = ids[k + 1..].iter().take_while(|&&(x, _)| (x as usize) < end).filter_map(|&(x, y)| sb.get(x as usize..y as usize)).collect();
-            if !words.contains(&&b"fmt"[..]) {
+            let text = blank_comments(src.get(b as usize..end).unwrap_or(""));
+            if !text.contains("fmt") {
                 continue;
             }
-            if words.contains(&&b"Display"[..]) {
-                mask |= 1;
-            }
-            if words.contains(&&b"Debug"[..]) {
-                mask |= 2;
-            }
-            // (`use std::fmt::*;` / `use core::fmt::{*, ..}`: by the text without its comments, `/* x */` is no glob)
-            let text = blank_comments(src.get(b as usize..end).unwrap_or(""));
-            let compact: Vec<u8> = text.bytes().filter(|c| !c.is_ascii_whitespace()).collect();
-            let glob = compact.windows(6).any(|w| w == b"fmt::*") || compact.windows(6).position(|w| w == b"fmt::{").is_some_and(|p| compact[p..].contains(&b'*'));
-            if glob {
-                mask |= 3;
-            }
+            let toks = use_tokens(&text);
+            let mut k = 0;
+            use_tree_fmt(&toks, &mut k, &mut vec![], &mut mask, 0);
         }
     }
     mask
+}
+
+/// A use declaration's tokens: names, `::`, `{`, `}`, `,`, `*` (the rest is left out)
+fn use_tokens(t: &str) -> Vec<&str> {
+    let b = t.as_bytes();
+    let mut out = vec![];
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c.is_ascii_alphanumeric() || c == b'_' {
+            let s = i;
+            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+                i += 1;
+            }
+            out.push(&t[s..i]);
+            continue;
+        }
+        if c == b':' && b.get(i + 1) == Some(&b':') {
+            out.push("::");
+            i += 2;
+            continue;
+        }
+        if matches!(c, b'{' | b'}' | b',' | b'*') {
+            out.push(&t[i..i + 1]);
+        }
+        i += 1;
+    }
+    out
+}
+
+/// One use tree at toks[*k] under the path `prefix`: a leaf `fmt::Display` / `fmt::Debug` (also aliased, `Debug as D`
+/// or `as _`: the trait is in scope under any name; an alias that is spelled `Debug`, `io::Error as Debug`, is no trait
+/// of fmt) sets its bit, and a glob whose path ends in `fmt` (`fmt::*`, `fmt::{*, ..}`) both. A glob elsewhere
+/// (`ops::*`) none
+fn use_tree_fmt(toks: &[&str], k: &mut usize, prefix: &mut Vec<String>, mask: &mut u8, depth: u32) {
+    let base = prefix.len();
+    if toks.get(*k) == Some(&"::") {
+        *k += 1;
+    }
+    while let Some(&t) = toks.get(*k) {
+        match t {
+            "{" if depth < 16 => {
+                *k += 1;
+                while toks.get(*k).is_some_and(|&t| t != "}") {
+                    use_tree_fmt(toks, k, prefix, mask, depth + 1);
+                    if toks.get(*k) == Some(&",") {
+                        *k += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if toks.get(*k) == Some(&"}") {
+                    *k += 1;
+                }
+                break;
+            }
+            "*" => {
+                *k += 1;
+                if prefix.last().is_some_and(|p| p == "fmt") {
+                    *mask |= 3;
+                }
+                break;
+            }
+            "::" | "," | "}" | "{" => break,
+            name => {
+                *k += 1;
+                if toks.get(*k) == Some(&"::") {
+                    prefix.push(name.to_string());
+                    *k += 1;
+                    continue;
+                }
+                // (a leaf, by its own name: what follows `as` is its alias)
+                if toks.get(*k) == Some(&"as") {
+                    *k += 2;
+                }
+                if prefix.last().is_some_and(|p| p == "fmt") {
+                    match name {
+                        "Display" => *mask |= 1,
+                        "Debug" => *mask |= 2,
+                        _ => {}
+                    }
+                }
+                break;
+            }
+        }
+    }
+    prefix.truncate(base);
 }
 
 /// Where the string or char literal at b[i] ends (past it): `"..."`, `b'{'`, `'\n'`; None for anything else (a

@@ -8124,7 +8124,14 @@ impl Program {
         let name = |k: usize| p.segs[k].name.as_str();
         // (`io::Error::from_raw_os_error(e)` / `std::io::Error::last_os_error()`: the prelude's IoError's, as the type
         // `io::Error` is IoError)
-        if n >= 3 && name(n - 3) == "io" && name(n - 2) == "Error" {
+        // (std's io only: `std::io::` / `core::io::`, or `io::` where the program has no `io::Error` of its own (a
+        // `mod io { pub struct Error; .. }` flattens to `io__Error`), which the ordinary lookup finds)
+        let std_io = match n {
+            3 => !self.struct_index.contains_key("io__Error"),
+            4 => matches!(name(0), "std" | "core"),
+            _ => false,
+        };
+        if std_io && name(n - 3) == "io" && name(n - 2) == "Error" {
             if let Some(&i) = self.index.get(&format!("IoError::{}", name(n - 1))) {
                 return Some(i);
             }
