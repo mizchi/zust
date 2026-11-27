@@ -3141,9 +3141,23 @@ fn renames_std(src: &str) -> bool {
             if stmt.match_indices(" as ").any(|(j, _)| stmt[j + 4..].trim_start().starts_with(|c: char| c.is_alphabetic())) {
                 return true;
             }
+            // (or brings in, under its own name, an item std_shadows names: by the words of its text, which the
+            // pass then reads exactly)
+            let words = || stmt.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'));
+            if words().any(|w| w == "Result" || w == "Error") && words().any(|w| matches!(w, "fmt" | "io" | "thread")) {
+                return true;
+            }
         }
     }
     false
+}
+
+/// Whether std's item `module::name`, brought in by a `use` under its own name, is another item than the one zustc
+/// reads that bare name as: fmt's and io's `Result` / `Error` and thread's `Result` (`use core::fmt::{Formatter,
+/// Result};` makes `Result` fmt's alias, which has no parameters, not the prelude's enum). The scope's bare name is
+/// then written as the item's path, as for a `use` that renames an item of std
+fn std_shadows(module: &[u8], name: &[u8]) -> bool {
+    matches!((module, name), (b"fmt" | b"io", b"Result" | b"Error") | (b"thread", b"Result"))
 }
 
 pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>) -> Option<String> {
@@ -3323,9 +3337,12 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         e.1 |= e.0 != d.1;
         e.2 |= d.1 != usize::MAX;
     }
-    // (a name two scopes define, or one a module defines that a `use` brings in from std too)
+    // (a name two scopes define, or one a module defines that a `use` brings in from std too, or that the prelude has:
+    // a module's own `type Result<T> = ..` is its and its importers', not the other modules' `Result<T, E>`)
     let colliding = |n: &[u8]| -> bool {
-        scopes_of.get(n).is_some_and(|&(_, multi, inner)| multi || inner && std_names.iter().any(|x| x.as_slice() == n))
+        scopes_of.get(n).is_some_and(|&(_, multi, inner)| {
+            multi || inner && (std_names.iter().any(|x| x.as_slice() == n) || matches!(n, b"Result" | b"Option" | b"Vec" | b"String" | b"Box"))
+        })
     };
     let new_name = |m: usize, n: &[u8]| -> Vec<u8> {
         let mut v = Vec::new();
@@ -3359,8 +3376,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             renamed.push((d.1, d.0.clone(), nn));
         }
     }
-    // (ぶつかる名前も `use .. as X` の別名もなければ何もしない)
-    if renamed.is_empty() && !src.contains(" as ") {
+    // (ぶつかる名前も `use .. as X` の別名もなければ何もしない) (nor a `use` of std's that std_shadows names:
+    // renames_std, asked only then)
+    if renamed.is_empty() && !src.contains(" as ") && !(std_renames || renames_std(src)) {
         return None;
     }
     // (the definitions in the type namespace, a struct / enum / union / trait / type alias: (scope, name). A fn, const or
@@ -3761,7 +3779,10 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             // too, `pub use std::println as say;`: what `m::say!(..)` names, a macro only beside the module's own
             // `fn say`. Not in a block that way: there its bare `say()` would take the import)
             let own = def_set.contains(&(sc, local.clone()));
-            if matches!(mpath[0].as_slice(), b"std" | b"core" | b"alloc") && local != name[0] && local.as_slice() != b"_" && !(own && in_block.is_some()) {
+            // (and one under its own name that std_shadows names: `use core::fmt::Result;`)
+            let std_item = matches!(mpath[0].as_slice(), b"std" | b"core" | b"alloc");
+            let shadows = || local == name[0] && mpath.len() >= 2 && std_shadows(&mpath[mpath.len() - 1], &name[0]) && !own;
+            if std_item && (local != name[0] || shadows()) && local.as_slice() != b"_" && !(own && in_block.is_some()) {
                 let mut full = vec![];
                 for (i, seg) in path.iter().enumerate() {
                     if i > 0 {

@@ -659,14 +659,20 @@ impl Cx<'_> {
                 [d, _] if d == "Default" => exp,
                 [x, _] => {
                     let ty = crate::parse::Ty::Path(None, path_of(&path.segs[0].name));
-                    match self.parse_ty(&ty) {
-                        Ok(t) => Some(t),
-                        // Just the name of a generic type (`Vec::default()`): from the expected type
-                        // (also generic aliases `FxMap::default()`)
-                        Err(_) => exp.filter(|&e| {
+                    // Just the name of a generic type (`Vec::default()`): from the expected type
+                    // (also generic aliases `FxMap::default()`)
+                    let from_exp = || {
+                        exp.filter(|&e| {
                             self.prog.aliases.contains_key(x.as_str())
                                 || matches!(e, Ty::Struct(sid) if self.prog.structs[self.prog.base_of(sid) as usize].name == *x)
-                        }),
+                        })
+                    };
+                    // (a struct generic with defaults too, before them: `let b: Buf<5> = Buf::default();`)
+                    let by_defaults = path.segs[0].args.is_empty() && self.prog.bare_by_defaults(x);
+                    match self.parse_ty(&ty) {
+                        Ok(t) if by_defaults => from_exp().or(Some(t)),
+                        Ok(t) => Some(t),
+                        Err(_) => from_exp(),
                     }
                 }
                 [_, _, ..] if segs.len() >= 3 && segs[segs.len() - 2] == "Default" => exp,

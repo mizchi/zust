@@ -246,10 +246,10 @@ fn collect_generics(g: &Generics, out: &mut Vec<(String, Vec<String>)>) -> R<()>
                 }
                 l.as_str()
             }
-            GParam::Ty(n, _, _) | GParam::Const(n, _) => {
+            GParam::Ty(n, _, _) | GParam::Const(n, ..) => {
                 after_ty = true;
                 // (the type of a const parameter: integers, bool, char)
-                if let GParam::Const(_, t) = p {
+                if let GParam::Const(_, t, _) = p {
                     let ok = matches!(t, PTy::Path(None, q) if q.segs.len() == 1 && matches!(q.segs[0].name.as_str(),
                         "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "bool" | "char"));
                     if !ok {
@@ -274,7 +274,7 @@ fn collect_generics(g: &Generics, out: &mut Vec<(String, Vec<String>)>) -> R<()>
             GParam::Lifetime(_) => {}
             GParam::Ty(n, bs, _) => out.push((n.clone(), bound_names(bs)?)),
             // (`const B: bool`: the parameter's type when it is not usize, as `__const:bool` after the mark)
-            GParam::Const(n, t) => out.push((n.clone(), match t {
+            GParam::Const(n, t, _) => out.push((n.clone(), match t {
                 PTy::Path(None, q) if q.segs.len() == 1 && q.segs[0].name != "usize" => vec![CONST_GENERIC.to_string(), format!("{CONST_GENERIC}:{}", q.segs[0].name)],
                 _ => vec![CONST_GENERIC.to_string()],
             })),
@@ -318,7 +318,7 @@ fn where_types(item: &Item, owner: Option<&Owner>, out: &mut Vec<String>) {
         if n.starts_with('\'') || n == "Self" || n == "str" || Ty::prim(n).is_some() || crate::ast_types::ffi_alias(n).is_some() {
             continue;
         }
-        let param = g.params.iter().any(|q| matches!(q, GParam::Ty(x, ..) | GParam::Const(x, _) if x == n));
+        let param = g.params.iter().any(|q| matches!(q, GParam::Ty(x, ..) | GParam::Const(x, ..) if x == n));
         if param || owner.is_some_and(|o| o.generics.iter().any(|x| x.0 == n)) || out.iter().any(|x| x == n) {
             continue;
         }
@@ -348,7 +348,7 @@ fn adt_bounds(g: &Generics) -> Vec<(String, Vec<String>)> {
     let mut v = Vec::new();
     for p in &g.params {
         // (`struct Flag<const B: bool>`: a const parameter's declared type when it is not usize, `__const:bool`)
-        if let GParam::Const(n, PTy::Path(None, q)) = p {
+        if let GParam::Const(n, PTy::Path(None, q), _) = p {
             if q.segs.len() == 1 && q.segs[0].name != "usize" {
                 v.push((n.clone(), vec![format!("{CONST_GENERIC}:{}", q.segs[0].name)]));
             }
@@ -394,17 +394,25 @@ fn adt_bounds(g: &Generics) -> Vec<(String, Vec<String>)> {
     v
 }
 
-/// The default of each parameter of adt_params (`F = fn() -> T`), by place; empty when none has one
+/// The default of each parameter of adt_params (`F = fn() -> T`; a const parameter's as its argument would be,
+/// `const N: usize = DEFAULT` as `[(); DEFAULT]`), by place; empty when none has one
 fn adt_defaults(g: &Generics, names: &[String]) -> R<Vec<Option<TySyn>>> {
-    if !g.params.iter().any(|p| matches!(p, GParam::Ty(_, _, Some(_)))) {
+    if !g.params.iter().any(|p| matches!(p, GParam::Ty(_, _, Some(_)) | GParam::Const(_, _, Some(_)))) {
         return Ok(vec![]);
     }
     let mut v = vec![None; names.len()];
     for p in &g.params {
-        if let GParam::Ty(n, _, Some(d)) = p {
-            if let Some(k) = names.iter().position(|x| x == n) {
-                v[k] = Some(tysyn(d, None)?);
-            }
+        let (n, d) = match p {
+            GParam::Ty(n, _, Some(d)) => (n, tysyn(d, None)?),
+            // (one zustc cannot read stays without a default: a use that leaves it out is an error, as before)
+            GParam::Const(n, _, Some(d)) => match crate::ast_types::const_arg_syn(d) {
+                Ok(t) => (n, t),
+                Err(_) => continue,
+            },
+            _ => continue,
+        };
+        if let Some(k) = names.iter().position(|x| x == n) {
+            v[k] = Some(d);
         }
     }
     Ok(v)
@@ -588,7 +596,7 @@ fn check_impl_ret(sig: &PSig, owner: Option<&Owner>) -> R<()> {
     for p in &sig.generics.params {
         match p {
             GParam::Lifetime(l) => lts.push(l),
-            GParam::Ty(n, _, _) | GParam::Const(n, _) => tys.push(n),
+            GParam::Ty(n, _, _) | GParam::Const(n, ..) => tys.push(n),
         }
     }
     for b in bs {
@@ -1213,7 +1221,7 @@ pub fn drop_impl_unmet(src: &str, imp: &SrcItem, adt: &SrcItem, supers: &crate::
     // (the definition's parameters: lifetimes, then the others in their order, as a path writes its arguments)
     let a_lts: Vec<&str> = ag.params.iter().filter_map(|p| if let GParam::Lifetime(l) = p { Some(l.as_str()) } else { None }).collect();
     let a_rest: Vec<&str> = ag.params.iter().filter_map(|p| match p {
-        GParam::Ty(n, ..) | GParam::Const(n, _) => Some(n.as_str()),
+        GParam::Ty(n, ..) | GParam::Const(n, ..) => Some(n.as_str()),
         GParam::Lifetime(_) => None,
     }).collect();
     let w_lts: Vec<&str> = seg.args.iter().filter_map(|a| if let GArg::Lifetime(l) = a { Some(l.as_str()) } else { None }).collect();
@@ -1224,7 +1232,7 @@ pub fn drop_impl_unmet(src: &str, imp: &SrcItem, adt: &SrcItem, supers: &crate::
     }
     let i_lts: Vec<&str> = ig.params.iter().filter_map(|p| if let GParam::Lifetime(l) = p { Some(l.as_str()) } else { None }).collect();
     let i_rest: Vec<&str> = ig.params.iter().filter_map(|p| match p {
-        GParam::Ty(n, ..) | GParam::Const(n, _) => Some(n.as_str()),
+        GParam::Ty(n, ..) | GParam::Const(n, ..) => Some(n.as_str()),
         GParam::Lifetime(_) => None,
     }).collect();
     // (E0366: each argument one of the impl's parameters, each once; `'_` is one of its own)
@@ -3076,7 +3084,7 @@ fn summarize_type_alias(sm: &mut Summary, n: &String, g: &Generics, t: &PTy) -> 
     let mut gs = Vec::new();
     collect_generics(g, &mut gs)?;
     let consts: Vec<&str> = g.params.iter().filter_map(|p| match p {
-        GParam::Const(n, _) => Some(n.as_str()),
+        GParam::Const(n, ..) => Some(n.as_str()),
         _ => None,
     }).collect();
     if !consts.is_empty() && const_param_in_op(t, &consts) {
@@ -3951,7 +3959,7 @@ fn forwards_to_referent(fs: &PSig, body: &Block, param: &str, tr: &str, mut_ref:
     };
     // (a turbofish passes the method's own type and const parameters, in their order, or there is none)
     let own: Vec<&str> = fs.generics.params.iter().filter_map(|g| match g {
-        GParam::Ty(n, ..) | GParam::Const(n, _) => Some(n.as_str()),
+        GParam::Ty(n, ..) | GParam::Const(n, ..) => Some(n.as_str()),
         GParam::Lifetime(_) => None,
     }).collect();
     let targs_ok = |targs: &[crate::parse::GArg]| {
