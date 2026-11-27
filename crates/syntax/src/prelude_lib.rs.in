@@ -9903,6 +9903,10 @@ impl<T> JoinHandle<T> {
 // (a handle dropped without join: the thread is detached, and runs on alone)
 impl<T> Drop for JoinHandle<T> {
     fn drop(&mut self) {
+        // (null: moved out of a closure's captures)
+        if self.pk.is_null() {
+            return;
+        }
         unsafe {
             __exr_pthread_detach(self.pt);
         }
@@ -9975,6 +9979,10 @@ impl Thread {
 
 impl Drop for Thread {
     fn drop(&mut self) {
+        // (null: moved out of a closure's captures)
+        if self.__th.is_null() {
+            return;
+        }
         __exr_thread_release(self.__th);
     }
 }
@@ -10525,6 +10533,10 @@ impl<T> __Sndr<T> {
 
 impl<T> Drop for __Sndr<T> {
     fn drop(&mut self) {
+        // (a null Arc: this end was moved out of a closure's captures, which codegen zeroes)
+        if self.c.p as usize == 0 {
+            return;
+        }
         __exr_chan_sender(&self.c, -1);
     }
 }
@@ -10541,6 +10553,9 @@ impl<T> __SyncSndr<T> {
 
 impl<T> Drop for __SyncSndr<T> {
     fn drop(&mut self) {
+        if self.c.p as usize == 0 {
+            return;
+        }
         __exr_chan_sender(&self.c, -1);
     }
 }
@@ -10569,6 +10584,9 @@ impl<T> __Rcvr__<T> {
 // (the receiver gone: a send fails, and a sender waiting on a full sync_channel wakes to fail)
 impl<T> Drop for __Rcvr__<T> {
     fn drop(&mut self) {
+        if self.c.p as usize == 0 {
+            return;
+        }
         let p = __exr_chan_p(&self.c);
         unsafe {
             let m = &mut (*p).m as *mut u32;
