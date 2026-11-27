@@ -405,7 +405,16 @@ impl Cx<'_> {
                     t = *i;
                 }
                 if t == fty {
-                    v
+                    // (a program's `write!(f, "{}", x)` into a Formatter formats its arguments with their own specs, as
+                    // std's `f.write_fmt(args)` does with a Formatter of its own: `{:>5}` of a type whose Display
+                    // writes `write!(f, "{}", self.0)` is not padded, nor is a LowerHex impl's `{}` in hex. A write! in
+                    // the prelude stands for std's `self.0.fmt(f)`, which passes f's spec on)
+                    let own = !self.prog.item_of.get(self.root as usize).copied().flatten().is_some_and(|i| i >= self.prog.prelude_from);
+                    if own && pieces.iter().any(|p| matches!(p, FmtPiece::Arg { .. })) && self.prog.index.contains_key("__exr_sub_formatter") {
+                        self.call_named("__exr_sub_formatter", vec![Ty::Unit], &[(v, fref)], span)?.0.unwrap()
+                    } else {
+                        v
+                    }
                 } else if t == sty {
                     self.call_named("__exr_formatter", vec![Ty::Unit], &[(v, sref)], span)?.0.unwrap()
                 } else if let Some(id) = match t {
@@ -481,8 +490,43 @@ impl Cx<'_> {
                     while let Ty::Ref(_, i) = pt {
                         pt = *i;
                     }
+                    // (a radix or exponent spec of std's NonZero types: their number's, which is their one field, as
+                    // std's impls delegate to it: `{:x}` of `NonZeroU8::new(255)` is `ff`)
+                    let (v, t, pt) = match self.nonzero_inner(pt) {
+                        Some(it) if spec.radix != 0 => {
+                            let (mut pv, mut rt) = (v, t);
+                            while let Ty::Ref(_, i) = rt {
+                                pv = self.b.ins().load(PTR, mf(), pv, 0);
+                                rt = *i;
+                            }
+                            (pv, it, it)
+                        }
+                        _ => (v, t, pt),
+                    };
                     let ptr_debug = *debug && matches!(pt, Ty::Ptr(_, i) if !i.is_fat()) && self.prog.index.contains_key("__exr_fmt_ptr");
-                    if !ptr_debug && !self.fmt_ok(t, *debug) {
+                    // (`{:x}` / `{:X}` / `{:b}` / `{:o}` / `{:e}` / `{:E}` of a value that is no number (a float's only in
+                    // `{:e}` / `{:E}`): its fmt trait's impl, the prelude's LowerHex and so on (`__p_LowerHex` where the
+                    // program defines a LowerHex of its own))
+                    let radix_tr = if !*debug && spec.radix != 0 && !(pt.is_int() || (pt.is_float() && spec.radix >= 5)) {
+                        let tr = match spec.radix {
+                            1 => "LowerHex",
+                            2 => "UpperHex",
+                            3 => "Binary",
+                            4 => "Octal",
+                            5 => "LowerExp",
+                            _ => "UpperExp",
+                        };
+                        let shadowed = format!("__p_{tr}");
+                        let tn = if self.prog.traits.contains_key(&shadowed) { shadowed } else { tr.to_string() };
+                        let h = format!("__exr_fmt_{}", tr.to_ascii_lowercase());
+                        if !self.prog.index.contains_key(&h) || !self.prog.implements(pt, &tn) {
+                            return err(asp, format!("the trait bound `{}: {tr}` is not satisfied (E0277)", self.prog.tn(pt)));
+                        }
+                        Some(h)
+                    } else {
+                        None
+                    };
+                    if radix_tr.is_none() && !ptr_debug && !self.fmt_ok(t, *debug) {
                         return err(
                             asp,
                             format!(
@@ -544,6 +588,35 @@ impl Cx<'_> {
                         }
                         let a = self.b.ins().load(PTR, mf(), pv, 0);
                         self.call_named("__exr_fmt_ptr", vec![Ty::Unit], &[(f, fref), (a, Ty::Usize)], span)?;
+                        continue;
+                    }
+                    // (`{:x}` / `{:X}` / `{:b}` / `{:o}` of a signed number, `{:x?}` too: its bits, written as the
+                    // unsigned type of its width, as std's: `{:x}` of `-1i8` is `ff`, not `-1`)
+                    if (1..=4).contains(&spec.radix) && pt.is_int() && pt.signed() {
+                        let ut = match pt {
+                            Ty::I8 => Ty::U8,
+                            Ty::I16 => Ty::U16,
+                            Ty::I32 => Ty::U32,
+                            Ty::I64 => Ty::U64,
+                            Ty::I128 => Ty::U128,
+                            _ => Ty::Usize,
+                        };
+                        let (mut pv, mut rt) = (v, t);
+                        while let Ty::Ref(_, i) = rt {
+                            pv = self.b.ins().load(PTR, mf(), pv, 0);
+                            rt = *i;
+                        }
+                        let g = if *debug { "__exr_debug" } else { "__exr_display" };
+                        self.call_named(g, vec![ut], &[(pv, Ty::Ref(false, intern(ut))), (f, fref)], span)?;
+                        continue;
+                    }
+                    if let Some(h) = &radix_tr {
+                        let (mut pv, mut rt) = (v, t);
+                        while let Ty::Ref(_, i) = rt {
+                            pv = self.b.ins().load(PTR, mf(), pv, 0);
+                            rt = *i;
+                        }
+                        self.call_named(h, vec![rt], &[(pv, Ty::Ref(false, intern(rt))), (f, fref)], span)?;
                         continue;
                     }
                     // `{:e}` / `{:E}`: a number in exponent notation (the prelude's __exr_fmt_exp)
@@ -1402,6 +1475,32 @@ impl Cx<'_> {
 
 
 /// The trait object type `s` (`Display`, `fmt::Debug + Send` ..) has the formatting trait's `fmt`
+impl Cx<'_> {
+    /// The number type of std's NonZero type t (a prelude struct whose one field is that number), if t is one
+    pub(crate) fn nonzero_inner(&self, t: Ty) -> Option<Ty> {
+        let Ty::Struct(sid) = t else { return None };
+        let b = self.prog.base_of(sid);
+        if !self.prog.struct_item.get(b as usize).is_some_and(|&i| i >= self.prog.prelude_from) {
+            return None;
+        }
+        Some(match self.prog.structs[b as usize].name.as_str() {
+            "NonZeroU8" => Ty::U8,
+            "NonZeroU16" => Ty::U16,
+            "NonZeroU32" => Ty::U32,
+            "NonZeroU64" => Ty::U64,
+            "NonZeroU128" => Ty::U128,
+            "NonZeroUsize" => Ty::Usize,
+            "NonZeroI8" => Ty::I8,
+            "NonZeroI16" => Ty::I16,
+            "NonZeroI32" => Ty::I32,
+            "NonZeroI64" => Ty::I64,
+            "NonZeroI128" => Ty::I128,
+            "NonZeroIsize" => Ty::Isize,
+            _ => return None,
+        })
+    }
+}
+
 fn dyn_has_fmt(s: &str, debug: bool) -> bool {
     let want = if debug { "Debug" } else { "Display" };
     s.split('+').any(|p| p.trim().rsplit("::").next() == Some(want))

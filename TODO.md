@@ -17,7 +17,7 @@ needs one filed first (then add it to [cratebench/survey/issues.tsv](cratebench/
 
 <!-- crate-priorities -->
 
-Survey of 2026-11-27 09:09 UTC on `531afef`: 45 of 273 crates build (16.4% of their downloads); 919 errors in 181 packages.
+Survey of 2026-11-27 12:56 UTC on `15a3cbd`: 45 of 273 crates build (16.4% of their downloads); 917 errors in 179 packages.
 
 | # | fix | issue | holds back | crates it alone unblocks |
 |---:|---|---|---:|---:|
@@ -28,8 +28,8 @@ Survey of 2026-11-27 09:09 UTC on `531afef`: 45 of 273 crates build (16.4% of th
 | 5 | duplicate definition of `…` | none yet | 4.2% | 6 |
 | 6 | false E0277: a bound zustc does not see | [#261](https://github.com/mizchi/zust/issues/261) | 2.7% | 2 |
 | 7 | `missing generics for` a type used without its parameters | [#260](https://github.com/mizchi/zust/issues/260) | 2.4% | 1 |
-| 8 | value paths zustc cannot resolve | [#265](https://github.com/mizchi/zust/issues/265) | 2.3% | 0 |
-| 9 | macro expansion too deep at a crate's first line | [#252](https://github.com/mizchi/zust/issues/252) | 2.2% | 5 |
+| 8 | macro expansion too deep at a crate's first line | [#252](https://github.com/mizchi/zust/issues/252) | 2.2% | 5 |
+| 9 | value paths zustc cannot resolve | [#265](https://github.com/mizchi/zust/issues/265) | 2.2% | 0 |
 | 10 | cannot infer an `impl Trait` return type | [#262](https://github.com/mizchi/zust/issues/262) | 2.0% | 5 |
 | 11 | prelude: `impl Error for fmt::Error` | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 2 |
 | 12 | cannot evaluate `…` in a constant | none yet | 1.8% | 3 |
@@ -38,19 +38,19 @@ By issue, with its tier (the issue's label: **T0** holds back 2% or more of the 
 
 | tier | issue | holds back | fixes | the largest |
 |---|---|---:|---:|---|
-| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 9.9% | 28 | prelude: type `Builder` |
+| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 9.4% | 27 | prelude: type `Builder` |
 | T0 | [#254](https://github.com/mizchi/zust/issues/254) | 7.5% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
 | T0 | [#144](https://github.com/mizchi/zust/issues/144) | 7.2% | 1 | `impl<T: Tr> Tr for &T` |
 | T0 | [#259](https://github.com/mizchi/zust/issues/259) | 5.3% | 1 | mismatched types (to sort by cause) |
 | T0 | [#257](https://github.com/mizchi/zust/issues/257) | 4.9% | 1 | parser: syntax zustc does not parse |
 | T0 | [#261](https://github.com/mizchi/zust/issues/261) | 2.7% | 1 | false E0277: a bound zustc does not see |
 | T0 | [#260](https://github.com/mizchi/zust/issues/260) | 2.4% | 1 | `missing generics for` a type used without its parameters |
-| T0 | [#265](https://github.com/mizchi/zust/issues/265) | 2.3% | 1 | value paths zustc cannot resolve |
 | T0 | [#252](https://github.com/mizchi/zust/issues/252) | 2.2% | 1 | macro expansion too deep at a crate's first line |
+| T0 | [#265](https://github.com/mizchi/zust/issues/265) | 2.2% | 1 | value paths zustc cannot resolve |
 | T0 | [#262](https://github.com/mizchi/zust/issues/262) | 2.0% | 1 | cannot infer an `impl Trait` return type |
 | T1 | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 1 | prelude: `impl Error for fmt::Error` |
 | T1 | [#256](https://github.com/mizchi/zust/issues/256) | 1.6% | 1 | methods zustc does not find (std methods the prelude lacks; lookup) |
-| T1 | [#264](https://github.com/mizchi/zust/issues/264) | 1.6% | 1 | false E0276 in bitflags' impls |
+| T1 | [#264](https://github.com/mizchi/zust/issues/264) | 1.5% | 1 | false E0276 in bitflags' impls |
 | T1 | [#266](https://github.com/mizchi/zust/issues/266) | 1.3% | 1 | std iterator adapters' arity (`Copied`, `Cloned`, `Map`) |
 | T2 | [#28](https://github.com/mizchi/zust/issues/28) | 0.7% | 1 | zurgo: two versions of one crate in a graph |
 | T2 | [#253](https://github.com/mizchi/zust/issues/253) | 0.7% | 1 | a fn pointer cast to `*mut ()` in a static |

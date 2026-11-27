@@ -41,7 +41,18 @@ fn items() -> &'static [(SrcItem, Option<String>, bool)] {
                 },
             })
             .map(|it| {
-                let name = defined_name(PRELUDE, &it);
+                let mut name = defined_name(PRELUDE, &it);
+                // (a member of an impl of a radix or exponent fmt trait (`impl LowerHex for u8`): looked up by the
+                // trait's name, which a program that uses the impls names, not by `fmt`, which every program that
+                // formats needs: the first lookup of each round then passes over them, not their gate)
+                if let ItemKind::ImplMember(h) = it.kind {
+                    let mut hw = PRELUDE_ITEMS[h as usize].5.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]);
+                    if let (Some("impl"), Some(t), Some("for")) = (hw.next(), hw.next(), hw.next()) {
+                        if matches!(t, "Binary" | "Octal" | "LowerHex" | "UpperHex" | "LowerExp" | "UpperExp") {
+                            name = Some(t.to_string());
+                        }
+                    }
+                }
                 let core_only = it
                     .idents
                     .iter()
@@ -269,6 +280,7 @@ fn gated_trait(h: usize) -> Option<&'static str> {
                     matches!(*w, "Hasher" | "Hash" | "__BoolThen" | "__AsBytes" | "__PathExt" | "__AsPathStr" | "BufRead" | "Read" | "Seek" | "Write" | "__FWr" | "ExactSizeIterator" | "BuildHasher"
                         // (std::os::unix's: `size()` / `mode()` / `as_raw_fd()` of a program's own are no reason for them)
                         | "MetadataExt" | "OpenOptionsExt" | "PermissionsExt" | "AsRawFd" | "FromRawFd" | "IntoRawFd")
+                        || matches!(*w, "Binary" | "Octal" | "LowerHex" | "UpperHex" | "LowerExp" | "UpperExp")
                 })
             })
             .collect()
@@ -289,6 +301,8 @@ fn gated_impl(h: usize) -> Option<&'static str> {
                 let ws: Vec<&'static str> = it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).collect();
                 match ws.as_slice() {
                     ["impl", t, "for", ..] if matches!(*t, "Read" | "BufRead" | "Seek" | "Write" | "__FWr") => Some(*t),
+                    // (the numbers' impls of the radix and exponent fmt traits, only with the trait)
+                    ["impl", t, "for", ..] if matches!(*t, "Binary" | "Octal" | "LowerHex" | "UpperHex" | "LowerExp" | "UpperExp") => Some(*t),
                     // (`{:?}` of a range: only for a program that formats with Debug)
                     ["impl", "T", "Debug", "for", r, ..] if matches!(*r, "Range" | "RangeInclusive") => Some("__range_debug"),
                     _ => None,
@@ -627,6 +641,7 @@ const SHADOWABLE: &[&str] = &[
     "File", "OpenOptions", "Metadata", "FileType", "Permissions", "RawFd", "AsRawFd", "FromRawFd", "IntoRawFd",
     "MetadataExt", "OpenOptionsExt", "PermissionsExt", "FpCategory",
     "Instant", "Any",
+    "Binary", "Octal", "LowerHex", "UpperHex", "LowerExp", "UpperExp",
 ];
 
 /// Whether the prelude's item of the name is renamed when the program defines one (SHADOWABLE, hashed: asked for each
@@ -1171,6 +1186,8 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             "split_first", "split_last", "splitn",
             // (the trait `Any`, a TraitHeader and so with no name of its own: `Box<dyn Any + Send>` alone needs it)
             "Any",
+            // (the fmt traits of `{:b}` / `{:x}` / `{:e}` .., TraitHeaders and so with no names of their own)
+            "Binary", "Octal", "LowerHex", "UpperHex", "LowerExp", "UpperExp",
         ]);
         // Candidates per (first byte, length): however many prelude names there are, 0 or 1 comparisons per identifier
         let mut t: Vec<Vec<&'static str>> = vec![vec![]; 256 * 32];
@@ -1238,6 +1255,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         cache.map.insert(it.hash, (names, c));
     }
     let mut sc = PreludeScan::new(user_src, user_items, &mut cache.scan);
+    // (a program's write! into a Formatter, which its impl of a fmt trait names: the Formatter of its own that codegen
+    // gives it. Asked of the program's names alone, before any rule adds the formatting names, Formatter among them)
+    if need.contains("Formatter") {
+        need.insert("__exr_sub_formatter");
+    }
     // (`c"..."`: codegen makes it a call of __exr_cstr_lit, a `&'static CStr`; before the `no_std` return, which a
     //  program needing nothing else takes)
     if has_cstr_literal(user_src) {
@@ -1951,6 +1973,8 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     let mut dur_ops = false;
     let mut fmt_write = false;
     let mut any_trait = false;
+    // (the fmt traits of `{:b}` / `{:x}` / `{:e}` .. that the program names: the helper codegen calls for each)
+    let mut fmt_radix = 0u8;
     let mut as_mut_gate = false;
     // (whether the program writes `thread` / `Layout`: asked once one of the functions below is wanted)
     let mut thread_text: Option<bool> = None;
@@ -1978,6 +2002,23 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             any_trait = true;
             changed = true;
             need.extend(["type_id", "TypeId"]);
+        }
+        if fmt_radix != 0x3f {
+            const RADIX: [(&str, &str); 6] = [
+                ("Binary", "__exr_fmt_binary"),
+                ("Octal", "__exr_fmt_octal"),
+                ("LowerHex", "__exr_fmt_lowerhex"),
+                ("UpperHex", "__exr_fmt_upperhex"),
+                ("LowerExp", "__exr_fmt_lowerexp"),
+                ("UpperExp", "__exr_fmt_upperexp"),
+            ];
+            for (k, (t, h)) in RADIX.into_iter().enumerate() {
+                if fmt_radix & (1 << k) == 0 && need.contains(t) {
+                    fmt_radix |= 1 << k;
+                    changed = true;
+                    need.insert(h);
+                }
+            }
         }
         if !fmt_write && need.contains("__FWr") {
             fmt_write = true;
