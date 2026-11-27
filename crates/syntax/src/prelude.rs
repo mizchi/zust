@@ -1134,32 +1134,35 @@ impl<'a> PreludeScan<'a> {
 
 /// Whether src writes a C string literal, `c"..."` / `cr"..."`: a `c` that starts a token (not the end of `"abc"` or of a
 /// name)
-/// Whether the source has a format spec ending in one of `ty` (`x` / `X` / `b` / `o`, or `p`): `:` with fill /
-/// flags / width / precision (`#`, `08`, `*>5`, `>w$`) between it and the letter, then `}` (`{:x}`, `{v:#010b}`,
-/// `{pointer:p}`), as a format string writes one
-fn has_fmt_spec(src: &str, ty: &[u8]) -> bool {
-    let b = src.as_bytes();
-    let mut i = 0;
-    while let Some(k) = memchr_byte(b'}', &b[i..]) {
-        let e = i + k;
-        if e >= 2 && ty.contains(&b[e - 1]) {
-            // (back to the spec's `:`, over what a spec may hold; a `{` / `}` / quote / line break first means it is not one)
-            let mut j = e - 2;
-            let lo = e.saturating_sub(40);
+/// The format specs the source has, as bits: 1 one ending in `x` / `X` / `b` / `o`, 2 one ending in `p`: `:` with
+/// fill / flags / width / precision (`#`, `08`, `*>5`, `>w$`) between it and the letter, then `}` (`{:x}`,
+/// `{v:#010b}`, `{pointer:p}`), as a format string writes one. Only at the source's `x}` / `p}` ..: each looked up first
+/// (the byte index of a large source), most sources have none
+fn fmt_specs(sc: &mut PreludeScan) -> u8 {
+    let mut out = 0u8;
+    for (pat, bit) in [("x}", 1u8), ("X}", 1), ("b}", 1), ("o}", 1), ("p}", 2)] {
+        if out & bit != 0 || !sc.has(pat) {
+            continue;
+        }
+        let b = sc.src.as_bytes();
+        for (at, _) in sc.src.match_indices(pat) {
+            if at == 0 {
+                continue;
+            }
+            // (back to the spec's `:`, over what a spec may hold; a `{` / `}` / quote / line break first means it is
+            // not one)
+            let mut j = at - 1;
+            let lo = at.saturating_sub(40);
             while j > lo && !matches!(b[j], b':' | b'{' | b'}' | b'\n' | b'"') {
                 j -= 1;
             }
             if b[j] == b':' && j > 0 && b[j - 1] != b':' {
-                return true;
+                out |= bit;
+                break;
             }
         }
-        i = e + 1;
     }
-    false
-}
-
-fn memchr_byte(c: u8, b: &[u8]) -> Option<usize> {
-    b.iter().position(|&x| x == c)
+    out
 }
 
 fn has_cstr_literal(src: &str) -> bool {
@@ -1297,6 +1300,8 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("into_iter") {
         need.insert("copied");
     }
+    // (the source's format specs `{:x}` / `{:p}` (fmt_specs), looked for once, where wanted)
+    let mut specs: Option<u8> = None;
     // Formatting macros: Formatter and the output functions (codegen calls them; the source never names them)
     if ["format", "print", "println", "eprint", "eprintln", "write", "writeln", "fmt", "Formatter"]
         .iter()
@@ -1315,7 +1320,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             need.insert("__exr_fmt_ptr");
         }
         // (`{:p}`, `{pointer:p}`: a thin pointer's address, a slice's `Pointer { addr, metadata }`)
-        if has_fmt_spec(sc.src, b"p") {
+        if *specs.get_or_insert_with(|| fmt_specs(&mut sc)) & 2 != 0 {
             need.extend(["__exr_fmt_ptr", "__exr_fmt_fat_ptr"]);
         }
     }
@@ -1655,16 +1660,22 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     // as a fmt::Result (#256)) (`.fmt` / `::fmt`, not `.fmt(`: `x.fmt (f)` too)
     // (the fmt traits other than Display / Debug, gated (gated_trait): wanted where the source names one, `impl
     // fmt::LowerHex for S`, `L: fmt::Binary`; trait names are not among the name candidates)
-    for t in ["Binary", "LowerHex", "UpperHex", "Octal", "LowerExp", "UpperExp", "Pointer"] {
-        if sc.has(t) {
+    // (each name looked for once: bit k for the k-th; the Lower / Upper pairs only where `Hex` / `Exp` is, one search
+    // of the source for two)
+    let mut fmt_trs = 0u8;
+    let (hex, exp) = (sc.has("Hex"), sc.has("Exp"));
+    for (k, t) in ["Binary", "LowerHex", "UpperHex", "Octal", "LowerExp", "UpperExp", "Pointer"].into_iter().enumerate() {
+        let skip = (k == 1 || k == 2) && !hex || (k == 4 || k == 5) && !exp;
+        if !skip && sc.has(t) {
             need.insert(t);
+            fmt_trs |= 1 << k;
         }
     }
     // (spaced as the tokens allow too, `core :: fmt :: LowerHex :: fmt(x, f)`)
     if need.contains("fmt") && (sc.has(".fmt") || sc.has("::fmt") || sc.has(":: fmt") || sc.has(". fmt")) {
         need.extend(["__exr_display_fmt", "__exr_debug_fmt"]);
         // (and the radix / exponent / pointer traits' `fmt::LowerHex::fmt(x, f)` of a number or a pointer)
-        if ["Binary", "LowerHex", "UpperHex", "Octal", "LowerExp", "UpperExp", "Pointer"].iter().any(|t| sc.has(t)) {
+        if fmt_trs != 0 {
             need.extend(["__exr_radix_fmt", "__exr_exp_fmt_float", "__exr_exp_fmt_int", "__exr_pointer_fmt", "__exr_fat_pointer_fmt", "__exr_fmt_exp", "__exr_fmt_exp_int", "__exr_fmt_ptr"]);
         }
     }
@@ -1723,7 +1734,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     let isqrt = sc.has("isqrt");
     // (a radix spec, `{:x}` / `{:#b}` / `{v:08o}` / `{:X}`, or a radix trait: a signed integer's two's-complement bits
     // (__exr_fmt_int_s); left out where nothing looks like one)
-    let radix_fmt = has_fmt_spec(sc.src, b"xXbo") || ["Binary", "LowerHex", "UpperHex", "Octal"].iter().any(|t| sc.has(t));
+    let radix_fmt = fmt_trs & 0b1111 != 0 || *specs.get_or_insert_with(|| fmt_specs(&mut sc)) & 1 != 0;
     if radix_fmt {
         need.insert("__exr_fmt_int_s");
     }
