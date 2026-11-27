@@ -79,6 +79,32 @@ fn alias_in_a_constant_invalidates() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `s.fmt(f)` of a str takes the fmt trait the program imports (#256): changing `use std::fmt::{self, Debug};` to
+/// Display, the fn that calls it the same, compiles it again (its cache key holds the program's fmt imports)
+#[test]
+fn fmt_import_invalidates() {
+    let dir = std::env::temp_dir().join(format!("d2cache_fmt_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("p");
+    let cp = dir.join("p.cache");
+    let run = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Default::default() });
+        s.load_cache(&cp);
+        s.build(src, &out).unwrap();
+        s.save_cache(&cp).unwrap();
+        String::from_utf8(std::process::Command::new(&out).output().unwrap().stdout).unwrap()
+    };
+    let src = |tr: &str| {
+        format!(
+            "use std::fmt::{{self, {tr}}};\nfn show(s: &str, f: &mut fmt::Formatter<'_>) -> fmt::Result {{ s.fmt(f) }}\nstruct W;\nimpl fmt::Display for W {{ fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {{ show(\"text\", f) }} }}\nfn main() {{ println!(\"{{}}\", W); }}\n"
+        )
+    };
+    assert_eq!(run(&src("Debug")), "\"text\"\n");
+    assert_eq!(run(&src("Display")), "text\n");
+    assert_eq!(run(&src("Debug")), "\"text\"\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// An associated type's value changed, the function that writes the projection the same: it is compiled and checked
 /// again (`type Out = u32;` to `u64` changes its size; `&'a u32` to `&'static u32` makes its `let` an error)
 #[test]

@@ -577,7 +577,8 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "Duration" | "AtomicPtr" | "RangeTo" | "RangeToInclusive" | "Fuse" | "Wrapping" | "Saturating"
                         | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList" | "Thread" | "Once" | "OnceState"
                         | "Layout" | "LayoutError" | "__LayoutAlign" | "Infallible" | "Condvar" | "ControlFlow"
-                        | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError" => Some(w),
+                        | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError"
+                        | "SplitNStr" | "SliceSplitN" | "PoisonError" => Some(w),
                         // (std::num's NonZero types: their impls only with them)
                         w if w.starts_with("NonZero") => Some(w),
                         // HashMap's iterators (HmIter and so on) only when HashMap is used
@@ -1198,6 +1199,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             "split", "split_whitespace", "lines", "trim", "starts_with", "ends_with", "contains",
             "clamp", "from_u32", "char", "join", "concat", "drain", "default", "f64", "f32", "i128", "u128", "Iterator", "into", "split_at_mut",
             "copy_from_slice", "clone_from_slice", "BufRead", "Read", "Seek", "SeekFrom", "Write", "__FWr", "Cursor", "ExactSizeIterator", "BuildHasher", "split_first_chunk", "first_chunk", "chunks_exact", "chunks_mut", "chunks_exact_mut", "is_sorted", "is_sorted_by", "is_sorted_by_key",
+            "split_first", "split_last", "splitn",
         ]);
         // Candidates per (first byte, length): however many prelude names there are, 0 or 1 comparisons per identifier
         let mut t: Vec<Vec<&'static str>> = vec![vec![]; 256 * 32];
@@ -1497,9 +1499,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if ["default", "Default", "unwrap_or_default", "take"].iter().any(|n| need.contains(n)) {
         need.insert("__exr_default");
     }
-    // Codegen turns `x.clone()` into __exr_clone::<T> (also inside the prelude's Vec::clone / cloned / to_vec)
+    // Codegen turns `x.clone()` into __exr_clone::<T> (also inside the prelude's Vec::clone / cloned / to_vec, and a
+    // slice's to_owned, which is its to_vec)
     // (not needed for types without drop, or for types with their own clone (String / Vec))
-    if ["clone", "cloned", "to_vec", "resize"].iter().any(|n| need.contains(n)) {
+    if ["clone", "cloned", "to_vec", "to_owned", "resize"].iter().any(|n| need.contains(n)) {
         need.insert("__exr_clone");
     }
     if need.contains("join") || need.contains("concat") {
@@ -1531,9 +1534,16 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         ("clone_from_slice", "__exr_slice_clone_from"),
         ("split_at", "__exr_slice_split_at"),
         ("split_at_mut", "__exr_slice_split_at_mut"),
+        ("splitn", "__exr_slice_splitn"),
     ] {
         if need.contains(m) {
             need.extend([f, "Iterator", "next"]);
+        }
+    }
+    // (`s.split_first()` / `s.split_last()`, and a slice's `to_owned()`, its to_vec: no iterator (#256))
+    for (m, f) in [("split_first", "__exr_slice_split_first"), ("split_last", "__exr_slice_split_last"), ("to_owned", "__exr_slice_to_vec")] {
+        if need.contains(m) {
+            need.insert(f);
         }
     }
     // checked_* return Option
@@ -1547,6 +1557,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     // (`&*s` / `&**s` / `&s[..]` with s a String / &String: acg rewrites it to `s.as_str()`)
     if need.contains("String") && (sc.has("&*") || sc.has("[..]")) {
+        need.insert("as_str");
+    }
+    // (a str trait's method called on a String, `s.custom_len()` with `impl Ext for str`, or an OsString's
+    // to_string_lossy: acg calls it on `s.as_str()` (#256))
+    if need.contains("String") && (need.contains("to_string_lossy") || sc.has("for str")) {
         need.insert("as_str");
     }
     // A collect into String uses push_str when the elements are &str / String
@@ -1647,6 +1662,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     if sc.has("dyn") && (sc.has("Display") || sc.has("Debug")) {
         need.extend(["__exr_dyn_display", "__exr_dyn_debug"]);
+    }
+    // (`x.fmt(f)` / `fmt::Debug::fmt(s, f)` of a value with no fmt of its own (a number, a str, a derive): `{}` / `{:?}`
+    // as a fmt::Result (#256)) (`.fmt` / `::fmt`, not `.fmt(`: `x.fmt (f)` too)
+    if need.contains("fmt") && (sc.has(".fmt") || sc.has("::fmt")) {
+        need.extend(["__exr_display_fmt", "__exr_debug_fmt"]);
     }
     // (ManuallyDrop is used through Deref: `m.0`, `*m`)
     // (`io::Error` / `io::Result<T>` are the prelude's IoError, whose name does not appear)
@@ -1857,6 +1877,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     if need.contains("Cow") || need.contains("Mutex") || need.contains("RwLock") {
         op_impls.push("Deref");
+    }
+    // (the prelude's Cow impls From: `"x".into()` as a `Cow<str>`)
+    if need.contains("Cow") {
+        op_impls.push("From");
     }
     if need.contains("Mutex") {
         need.extend(["MutexGuard", "Deref", "deref", "Result"]);

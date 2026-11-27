@@ -572,6 +572,10 @@ pub struct Program {
     /// the names the program's `use` declarations write (fn bodies' too): a value of one is imported, not undeclared,
     /// though zustc may not have it (`use std::convert::identity;`)
     pub use_names: FxSet<String>,
+    /// the fmt traits the program's `use` declarations import (fn bodies' too; of the whole program, not each
+    /// scope's): 1 Display, 2 Debug (`use std::fmt::Debug;`, `use core::fmt::{self, Display as _}`; a glob `fmt::*`
+    /// both). Which one `x.fmt(f)` calls where x's type has both (#256)
+    pub fmt_imports: u8,
     /// a constant with a lowercase name exists (`const or: usize`): an identifier pattern of any case may name one;
     /// without, only an uppercase one is looked up
     pub lower_consts: bool,
@@ -1584,6 +1588,7 @@ impl Program {
             ambiguous_methods: FxMap::default(),
             unbounded_blankets: FxSet::default(),
             use_names: FxSet::default(),
+            fmt_imports: 0,
             impl_selfs: FxMap::default(),
             user_traits: FxSet::default(),
             tdb: Default::default(),
@@ -8038,6 +8043,10 @@ impl Program {
             return None;
         }
         let tr = &p.segs[n - 2];
+        // (`std::io::Error::from_raw_os_error(e)` / `std::fmt::Error`: std's error types, not the Error trait (#256))
+        if tr.name == "Error" && matches!(p.segs[n - 3].name.as_str(), "io" | "fmt") {
+            return None;
+        }
         // (not a name the program declares a trait of: `Trait::m` would be the program's trait, where the std path names
         // std's (`std::string::ToString::to_string` beside a program's `trait ToString`). That call stays unread)
         let known = self.traits.contains_key(&tr.name) || STD_PATH_TRAITS.contains(&tr.name.as_str());
@@ -8228,6 +8237,20 @@ impl Program {
             return None;
         }
         let name = |k: usize| p.segs[k].name.as_str();
+        // (`io::Error::from_raw_os_error(e)` / `std::io::Error::last_os_error()`: the prelude's IoError's, as the type
+        // `io::Error` is IoError)
+        // (std's io only: `std::io::` / `core::io::`, or `io::` where the program has no `io::Error` of its own (a
+        // `mod io { pub struct Error; .. }` flattens to `io__Error`), which the ordinary lookup finds)
+        let std_io = match n {
+            3 => !self.struct_index.contains_key("io__Error"),
+            4 => matches!(name(0), "std" | "core"),
+            _ => false,
+        };
+        if std_io && name(n - 3) == "io" && name(n - 2) == "Error" {
+            if let Some(&i) = self.index.get(&format!("IoError::{}", name(n - 1))) {
+                return Some(i);
+            }
+        }
         // `std::collections::HashMap::new` and the like are `HashMap::new`
         if n >= 3 && matches!(name(0), "core" | "std" | "alloc") {
             let ty = name(n - 2);

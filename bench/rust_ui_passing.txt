@@ -6043,6 +6043,7 @@ compile-fail	parser/macro/macro-bad-delimiter-ident.rs
 check-pass	parser/macro/macro-bare-trait-object-maybe-trait-bound.rs
 compile-fail	parser/macro/macro-doc-comments-1.rs
 compile-fail	parser/macro/macro-doc-comments-2.rs
+check-pass	parser/macro/macro-dotdotdot-may-not-begin-a-type.rs
 compile-fail	parser/macro/macro-in-attribute.rs
 compile-fail	parser/macro/macro-incomplete-parse.rs
 compile-fail	parser/macro/macro-keyword.rs
@@ -7090,6 +7091,7 @@ check-pass	resolve/unused-macro-import.rs
 compile-fail	resolve/use-self-in-inner-fn.rs
 check-pass	resolve/use-shadowing-14082.rs
 compile-fail	resolve/use_suggestion.rs
+compile-fail	resolve/use_suggestion_placement.rs
 compile-fail	resolve/visibility-indeterminate.rs
 compile-fail	return/dont-suggest-through-inner-const.rs
 run-pass	return/early-return-with-unreachable-code-24353.rs
@@ -9004,6 +9006,7 @@ check-pass	variance/variance-use-covariant-struct-2.rs
 compile-fail	variance/variance-use-invariant-struct-1.rs
 compile-fail	variants/variant-result-noresult-used-as-type.rs
 compile-fail	variants/variant-used-as-type.rs
+run-pass	view-types/regression-156016.rs
 compile-fail	wf/conflicting-impls.rs
 compile-fail	wf/ice-hir-wf-check-anon-const-issue-122199.rs
 compile-fail	wf/ice-hir-wf-issue-135341.rs

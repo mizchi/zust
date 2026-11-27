@@ -2272,6 +2272,14 @@ impl Cx<'_> {
                 }
             }
         }
+        // (`&[][..]` where a `&[T]` is expected, form_urlencoded's `split.next().unwrap_or(&[][..])`: the empty array
+        // takes the slice's element type, as `&[]` there does)
+        if let (Expr::Index(b, ix, _), Some(Ty::Ref(_, Ty::Slice(_)))) = (&**rexpr, expected) {
+            if matches!(strip_paren(b), Expr::Array(xs) if xs.is_empty()) && matches!(&**ix, Expr::Range(None, None, false)) {
+                let ne: &Expr = self.keep_expr(Expr::Ref(m, b.clone()));
+                return self.expr(ne, expected);
+            }
+        }
         // `&a[lo..hi]` → slice (fat pointer)
         if let Expr::Index(b, ix, _) = &**rexpr {
             if let Expr::Range(..) = &**ix {

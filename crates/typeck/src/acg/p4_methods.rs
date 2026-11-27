@@ -11,6 +11,22 @@ impl Cx<'_> {
         self.prog.instantiate(r, vec![t, Ty::Struct(ei)]).ok().map(Ty::Struct)
     }
 
+    /// Whether `recv.splitn(n, p)` is a slice's (`__exr_slice_splitn`), not a str's: the receiver is known to be a slice
+    /// or an array, or p is a closure and the receiver (or the base of its range, `s[..]`) is not known to be text
+    fn slice_splitn(&self, recv: &Expr, args: &[Expr]) -> bool {
+        let text = |t: Option<Ty>| match t.map(|t| self.strip_refs(t)) {
+            Some(Ty::Str) => true,
+            Some(Ty::Struct(sid)) => self.prog.structs[self.prog.base_of(sid) as usize].name == "String",
+            _ => false,
+        };
+        let t = self.peek(recv);
+        if matches!(t.map(|t| self.strip_refs(t)), Some(Ty::Slice(_) | Ty::Array(..))) {
+            return true;
+        }
+        let base_text = matches!(strip_paren(recv), Expr::Index(b, ix, _) if matches!(&**ix, Expr::Range(..)) && text(self.peek(b)));
+        matches!(args.get(1).map(strip_paren), Some(Expr::Closure(..))) && !text(t) && !base_text
+    }
+
     pub(crate) fn builtin_method(&mut self, mc: &Expr) -> R<Option<V>> {
         let Expr::MethodCall(mc_recv, mc_name, mc_tf, mc_args, _) = mc else { unreachable!() };
         let mc_recv: &Expr = mc_recv;
@@ -40,6 +56,14 @@ impl Cx<'_> {
             "clone_from_slice" => Some(("__exr_slice_clone_from", true)),
             "split_at" => Some(("__exr_slice_split_at", false)),
             "split_at_mut" => Some(("__exr_slice_split_at_mut", true)),
+            "split_first" => Some(("__exr_slice_split_first", false)),
+            "split_last" => Some(("__exr_slice_split_last", false)),
+            // (a slice's splitn takes a predicate; a str's (`"a,b"[..].splitn(2, ',')`) is the str helper's, also where
+            // the type of the range's receiver is not known here)
+            "splitn" if self.slice_splitn(mc_recv, mc_args) => Some(("__exr_slice_splitn", false)),
+            // (a slice's to_owned is its to_vec: only a receiver known to be one. An array's is a clone of it, a
+            // `[T; N]`, and a str's a String, also of a `s[..n]` whose type is not known here)
+            "to_owned" if matches!(self.peek(mc_recv).map(|t| self.strip_refs(t)), Some(Ty::Slice(_))) => Some(("__exr_slice_to_vec", false)),
             "reverse" => Some(("__exr_slice_reverse", true)),
             "fill" => Some(("__exr_slice_fill", true)),
             "rotate_left" => Some(("__exr_slice_rotate_left", true)),
@@ -154,7 +178,10 @@ impl Cx<'_> {
                     name.as_str(),
                     "split" | "split_whitespace" | "lines" | "trim" | "starts_with" | "ends_with" | "contains"
                         | "find" | "chars"
-                ) || self.prog.index.contains_key(&format!("__exr_str_{name}")))
+                ) || self.prog.index.contains_key(&format!("__exr_str_{name}"))
+                    // (a trait's method for str, the program's or the prelude's (`__PathExt`'s `to_string_lossy` of an
+                    // OsString, which is a String here): through the deref, as rustc's probe reaches it (#256))
+                    || self.prog.prim_method(Ty::Str, &name).is_some_and(|id| self.prog.sigs[id as usize].has_self))
             {
                 let r = &*mc_recv;
                 let e: Expr = Expr::MethodCall(
@@ -806,6 +833,8 @@ impl Cx<'_> {
             "overflowing_div_euclid",
             "overflowing_rem_euclid",
             "next_multiple_of",
+            "div_ceil",
+            "wrapping_add_signed",
             "next_power_of_two",
             "isqrt",
             "ilog2",
@@ -870,7 +899,12 @@ impl Cx<'_> {
         }
         // (the names that exist only for signed or only for unsigned types: on the others they are no built-in
         // method, checked before the receiver is lowered, so the lookup that follows sees it unlowered)
-        if matches!((name.as_str(), t.signed()), ("saturating_abs" | "saturating_neg", false) | ("next_multiple_of", true)) {
+        // (and `div_ceil` / `wrapping_add_signed` of a signed type (the one unstable in std, the other unsigned-only), of
+        // a char or bool; `div_ceil` of a 128-bit one, which Cranelift cannot divide)
+        let unsigned_only = matches!(name.as_str(), "div_ceil" | "wrapping_add_signed");
+        if matches!((name.as_str(), t.signed()), ("saturating_abs" | "saturating_neg", false) | ("next_multiple_of", true))
+            || (unsigned_only && (t.signed() || !t.is_int() || (name == "div_ceil" && t.bits() == 128)))
+        {
             return Ok(None);
         }
         // if the receiver is `&u64` / `&mut u64`, the pointee's value (auto-deref)
@@ -907,6 +941,19 @@ impl Cx<'_> {
         let r: V = match name.as_str() {
             "wrapping_add" => {
                 let b = arg(self, 0, t)?;
+                (Some(self.b.ins().iadd(a, b)), t)
+            }
+            // (unsigned: `sum.wrapping_add_signed(isize::from(d))`, unicode-width's; the bits of the signed one added)
+            "wrapping_add_signed" => {
+                let st = match t {
+                    Ty::U8 => Ty::I8,
+                    Ty::U16 => Ty::I16,
+                    Ty::U32 => Ty::I32,
+                    Ty::U64 => Ty::I64,
+                    Ty::U128 => Ty::I128,
+                    _ => Ty::Isize,
+                };
+                let b = arg(self, 0, st)?;
                 (Some(self.b.ins().iadd(a, b)), t)
             }
             "wrapping_sub" => {
@@ -1312,6 +1359,19 @@ impl Cx<'_> {
                 let up = self.b.ins().iadd(a, d);
                 let z = self.b.ins().icmp_imm_u(IntCC::Equal, r, 0);
                 (Some(self.b.ins().select(z, a, up)), t)
+            }
+            // `a.div_ceil(b)` (unsigned): a / b, one more when a % b is not 0. A b of 0 panics as `a / b` does
+            "div_ceil" => {
+                let b = arg(self, 0, t)?;
+                if self.user_code && self.iconst_of(b).is_none_or(|c| c == 0) {
+                    let zero = self.b.ins().icmp_imm_u(IntCC::Equal, b, 0);
+                    self.ovf_panic(zero, 3, expr_start(mc));
+                }
+                let q = self.b.ins().udiv(a, b);
+                let r = self.b.ins().urem(a, b);
+                let nz = self.b.ins().icmp_imm_u(IntCC::NotEqual, r, 0);
+                let one = self.b.ins().uextend(ct, nz);
+                (Some(self.b.ins().iadd(q, one)), t)
             }
             "rem_euclid" | "div_euclid" => {
                 let b = arg(self, 0, t)?;

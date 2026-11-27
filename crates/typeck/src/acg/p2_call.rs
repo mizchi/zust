@@ -379,6 +379,142 @@ impl Cx<'_> {
         }
     }
 
+    /// `x.fmt(f)` (#256): Display's or Debug's fmt, which the impls keep as `S::<Display>::fmt`, not under `S::fmt`,
+    /// so the ordinary lookup does not find it. The trait is the one the call names (`fmt::Debug::fmt(x, f)`), else
+    /// the one of x's type's that is in scope (imported, or the trait of the impl the call is in, which rustc takes to
+    /// be in scope there); of both, the impl's, else Display. A type with its own impl of it calls that (the lookup
+    /// goes on with the trait named); the others (numbers, str, a derive) are written as `{}` / `{:?}` writes them.
+    /// None: the ordinary lookup (a fmt of the type's own, a trait object, a type parameter)
+    #[cold]
+    #[inline(never)]
+    fn fmt_method(&mut self, recv: &Expr, f: &Expr, expected: Option<Ty>) -> R<Option<V>> {
+        let Some(t) = self.peek(recv) else { return Ok(None) };
+        let base = self.strip_refs(t);
+        if matches!(base, Ty::Dyn(_) | Ty::Param(_) | Ty::Box(_)) || self.prog.has_param(base) {
+            return Ok(None);
+        }
+        if let Ty::Struct(sid) = base {
+            if self.prog.structs[sid as usize].placeholder.is_some() || self.prog.self_method(sid, "fmt").is_some() || self.prog.self_default_method(sid, "fmt").is_some() {
+                return Ok(None);
+            }
+        }
+        // (a `fmt` of a trait of the program's that the type implements, `impl Unsigned for u32 { fn fmt(self, buf) }`)
+        let user_fmt = |tr: &String| {
+            self.prog.traits.get(tr).is_some_and(|ds| ds.iter().any(|&d| self.prog.names[d as usize].rsplit("::").next() == Some("fmt"))) && self.prog.implements(base, tr)
+        };
+        if self.prog.prim_method(base, "fmt").is_some() || self.prog.blanket.contains_key("fmt") || self.prog.user_traits.iter().any(user_fmt) {
+            return Ok(None);
+        }
+        let tr = match self.explicit_trait.as_ref().filter(|(m, _)| m == "fmt") {
+            Some((_, tr)) if matches!(tr.as_str(), "Display" | "Debug") => tr.clone(),
+            Some(_) => return Ok(None),
+            // (a value of a type parameter with a Display or Debug bound, `x: T` with `T: Debug`, in its instance: the
+            // bound's, as rustc's lookup takes it, whatever is imported (bound_method_call's choice for other methods))
+            None if self.param_fmt_bound(recv).is_some() => self.param_fmt_bound(recv).unwrap_or("Display").to_string(),
+            None => {
+                let inside = self.prog.sigs.get(self.root as usize).and_then(|s| s.impl_trait.as_deref()).map(|t| t.split('<').next().unwrap_or(t).trim().rsplit("::").next().unwrap_or(t));
+                let (d, g) = (self.prog.implements(base, "Display"), self.prog.implements(base, "Debug"));
+                // (the fmt traits in scope at the call, as rustc's lookup sees them: the impl's own, and those the
+                // program imports (`use std::fmt::Debug;`). Of the program, not of this scope: one imported in another
+                // module counts too, so where both are, the impl's trait decides, which is in scope here for sure;
+                // with both in scope rustc's is E0034 (multiple applicable items), with neither E0599)
+                let imp = self.prog.fmt_imports;
+                let vd = d && (imp & 1 != 0 || inside == Some("Display"));
+                let vg = g && (imp & 2 != 0 || inside == Some("Debug"));
+                // (both imported and no impl to decide: which one this module sees is not known here (one module may
+                // import Debug, another Display), so no pick, which could be the wrong one: the ordinary lookup, which
+                // finds no method. Both in this one module is rustc's E0034 anyway)
+                if vd && vg && !matches!(inside, Some("Display" | "Debug")) {
+                    return Ok(None);
+                }
+                let pick = |d: bool, g: bool| match (d, g) {
+                    (true, false) => Some("Display"),
+                    (false, true) => Some("Debug"),
+                    (true, true) if inside == Some("Debug") => Some("Debug"),
+                    (true, true) => Some("Display"),
+                    _ => None,
+                };
+                match pick(vd, vg).or_else(|| pick(d, g)) {
+                    Some(t) => t.to_string(),
+                    None => return Ok(None),
+                }
+            }
+        };
+        if let Ty::Struct(sid) = base {
+            let own = |s: u32| format!("{}::<{tr}>::fmt", self.prog.structs[s as usize].name);
+            if self.prog.index.contains_key(&own(sid)) || self.prog.index.contains_key(&own(self.prog.base_of(sid))) {
+                self.explicit_trait = Some(("fmt".to_string(), tr));
+                return Ok(None);
+            }
+        }
+        let h = if tr == "Display" { "__exr_display_fmt" } else { "__exr_debug_fmt" };
+        if !self.prog.index.contains_key(h) {
+            return Ok(None);
+        }
+        let call = Expr::Call(Box::new(path_expr(h)), vec![Expr::Ref(false, Box::new(paren(recv.clone()))), f.clone()]);
+        let call: &Expr = self.keep_expr(call);
+        self.expr(call, expected).map(Some)
+    }
+
+    /// The fmt trait a value of a type parameter takes from its bounds (`x: T` / `x: &T` with `T: Debug`), as
+    /// bound_method_call finds the parameter: a parameter of the fn itself, not a `let` shadowing it. None without one
+    /// such bound, or with both (rustc's E0034)
+    fn param_fmt_bound(&self, recv: &Expr) -> Option<&'static str> {
+        if self.env.params.is_empty() || self.generic_args.is_empty() {
+            return None;
+        }
+        let Expr::Path(None, rp) = strip_paren(recv) else { return None };
+        let rn = ident_of(rp)?;
+        let declared = self.generic_args.iter().find(|a| a.0 == rn).map(|a| a.1.clone())?;
+        if self.scopes.iter().rposition(|s| s.iter().any(|b| b.0 == rn)) != Some(0) {
+            return None;
+        }
+        let bounds = &self.prog.sigs.get(self.root as usize)?.generics.iter().find(|g| g.0 == declared)?.1;
+        let has = |n: &str| bounds.iter().any(|b| b.split('<').next().unwrap_or(b).rsplit("::").next().map(str::trim) == Some(n));
+        match (has("Display"), has("Debug")) {
+            (true, false) => Some("Display"),
+            (false, true) => Some("Debug"),
+            _ => None,
+        }
+    }
+
+    /// In a generic fn's instance, the U of its bound `T: Into<U>` whose T is t there (foldhash's `x.into() << n` with
+    /// `T: Into<u128>`): what `x.into()` of a `x: T` converts to when nothing is expected of it (#256). None without
+    /// such a bound, or with two that disagree
+    fn into_bound_target(&self, t: Ty) -> Option<Ty> {
+        if self.env.params.is_empty() {
+            return None;
+        }
+        let sig = self.prog.sigs.get(self.root as usize)?;
+        let mut found = None;
+        for (i, (g, bs)) in sig.generics.iter().enumerate() {
+            // (x's type as the type inference left it, the parameter (by its index alone), or as the instance makes it)
+            let hit = match t {
+                Ty::Param(k) => k as usize == i,
+                _ => self.env.params.iter().any(|(n, it)| n == g && *it == t),
+            };
+            if !hit {
+                continue;
+            }
+            for b in bs {
+                let n = b.split('<').next().unwrap_or(b).trim();
+                if n.rsplit("::").next() != Some("Into") || !b.contains('<') {
+                    continue;
+                }
+                let f = crate::parse::parse_file(&format!("type __B = dyn {b};")).ok()?;
+                let Some(crate::parse::ItemKind::Type(_, _, _, Some(crate::parse::Ty::Dyn(dbs)))) = f.items.first().map(|i| &i.kind) else { return None };
+                let Some(crate::parse::Bound::Trait(_, p)) = dbs.first() else { return None };
+                let Some(crate::parse::GArg::Ty(a)) = p.segs.last()?.args.first() else { return None };
+                let u = self.parse_ty(a).ok()?;
+                if found.is_some_and(|x| x != u) {
+                    return None;
+                }
+                found = Some(u);
+            }
+        }
+        found
+    }
+
     fn method_call_inner(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::MethodCall(recv, method, gargs, margs, msp) = e else { unreachable!() };
         let msp = *msp;
@@ -386,6 +522,11 @@ impl Cx<'_> {
         if self.prog.field_priv.as_deref().is_some_and(|fp| !fp.methods.is_empty()) {
             if let Some(Ty::Struct(sid)) = self.peek(recv).map(|t| self.strip_refs(t)) {
                 self.method_privacy(sid, method, msp.at)?;
+            }
+        }
+        if method == "fmt" && margs.len() == 1 && gargs.is_empty() {
+            if let Some(r) = self.fmt_method(recv, &margs[0], expected)? {
+                return Ok(r);
             }
         }
         // (`0.0.cmp()` with `impl MyCmp for f32` only: an unsuffixed literal takes the one numeric type whose impl has
@@ -1032,9 +1173,30 @@ impl Cx<'_> {
         if method == "into" && margs.is_empty() {
             let recv_own = match self.peek(recv) {
                 Some(Ty::Struct(sid)) => self.prog.method(sid, "into").is_some(),
+                // (a `&S` whose S has an inherent `into(&self)`: rustc's probe takes it at the reference itself, before
+                // the blanket `Into` of `&S`, so the ordinary lookup calls it (its side effects too). Not one taking
+                // `self`, which is no candidate there, nor through two references)
+                Some(Ty::Ref(_, Ty::Struct(sid))) => {
+                    self.prog.method(*sid, "into").is_some_and(|id| self.prog.sigs[id as usize].has_self && matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(..))))
+                }
                 _ => false,
             };
             let target = expected.or_else(|| self.lets.get(&(e as *const Expr as usize)).copied());
+            // (into its own type, std's `impl<T> From<T> for T`: the value itself. `true.into()` as the `bool` a
+            // `T: Into<u64>` fn returns stays a bool, which the bound below must not make a u64)
+            let rt = self.peek(recv);
+            if let (Some(t), Some(r), false) = (target, rt, recv_own) {
+                if t == r && !self.prog.has_param(t) {
+                    return self.expr(recv, Some(t));
+                }
+            }
+            // (else, with no number or struct expected of it, the U of the fn's bound `T: Into<U>` on x's type: in an
+            // instance the receiver is the parameter's type (u8), and foldhash's `x.into() << n` expects no useful type)
+            let target = match (target, rt) {
+                (Some(t), _) if t.is_int() || t.is_float() || matches!(t, Ty::Struct(_)) => Some(t),
+                (_, Some(r)) => self.into_bound_target(r).or(target),
+                _ => target,
+            };
             if !recv_own {
                 match target {
                     // `"msg".into()` / `e.into()` → Box<dyn Error>
@@ -1045,6 +1207,9 @@ impl Cx<'_> {
                     }
                     Some(Ty::Struct(sid)) => {
                         if let Some(id) = self.prog.method(sid, "from") {
+                            // (an unsized receiver, `b"ab"[..].into()` as a `Cow<[u8]>`: by reference, as the method
+                            // probe takes it (`From<&[T]>`))
+                            let recv: &Expr = if matches!(self.peek(recv), Some(Ty::Slice(_) | Ty::Str)) { self.keep_expr(Expr::Ref(false, Box::new(paren(recv.clone())))) } else { recv };
                             let args: [&Expr; 1] = [recv];
                             return self.call_fn(id, None, &args, None, Some(Ty::Struct(sid)), SP);
                         }
@@ -1345,7 +1510,9 @@ impl Cx<'_> {
                 // (a vector value whose type inference left open (`eq1.and(eq2).movemask()`, `and` of two traits): bound to
                 // a local of its type, and the method called on that, as on any vector local (its receiver's borrow and
                 // regions checked as theirs: a `&self` result does not outlive the statement)
-                (Some(v), t @ Ty::Vec(_)) => {
+                // (and a raw pointer's, `L::LUT.as_ptr().cast()` of an associated const of a type parameter: its builtin
+                // methods (#256))
+                (Some(v), t @ (Ty::Vec(_) | Ty::Ptr(..))) => {
                     // (the temporary's loan, as prim_trait_method records it: a `&self` result does not outlive it)
                     if let Some(id) = self.prog.prim_self_method(t, method) {
                         if let (Some(Ty::Ref(m, _)), true) = (self.prog.sigs[id as usize].params.first().copied(), self.bk_on()) {
@@ -1358,6 +1525,13 @@ impl Cx<'_> {
                     self.scopes.push(vec![]);
                     self.bind(n.clone(), t, Some(v));
                     let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(path_expr(&n)), method.to_string(), gargs.clone(), margs.clone(), msp));
+                    // (a pointer's `cast()` with no turbofish is to what the type inference gave the call, or to what is
+                    // expected of it, `_mm_loadu_si128(p.cast())`)
+                    if let Ty::Ptr(..) = t {
+                        if let Some(rt) = self.lets.get(&(e as *const Expr as usize)).copied().filter(|x| matches!(x, Ty::Ptr(..))).or(expected.filter(|x| matches!(x, Ty::Ptr(..)))) {
+                            self.lets.insert(ne as *const Expr as usize, rt);
+                        }
+                    }
                     let r = self.expr(ne, expected);
                     self.scopes.pop();
                     return r;
