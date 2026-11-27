@@ -451,8 +451,12 @@ impl Cx<'_> {
         let sig = self.prog.sigs.get(self.root as usize)?;
         let mut found = None;
         for (i, (g, bs)) in sig.generics.iter().enumerate() {
-            // (x's type as the type inference left it, the parameter, or as the instance makes it)
-            if !matches!(t, Ty::Param(k) if k as usize == i) && !self.env.params.iter().any(|(n, it)| n == g && *it == t) {
+            // (x's type as the type inference left it, the parameter (by its index alone), or as the instance makes it)
+            let hit = match t {
+                Ty::Param(k) => k as usize == i,
+                _ => self.env.params.iter().any(|(n, it)| n == g && *it == t),
+            };
+            if !hit {
                 continue;
             }
             for b in bs {

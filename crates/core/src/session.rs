@@ -224,6 +224,37 @@ fn blank_comments(s: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| s.to_string())
 }
 
+/// The end of the `use` declaration whose keyword ends at sb[b]: its `;`, not one in a comment (`use a::{ /* ; */ b };`),
+/// else stop
+fn use_end(sb: &[u8], b: usize, stop: usize) -> usize {
+    let mut i = b;
+    while i < stop {
+        if sb[i] == b'/' && sb.get(i + 1) == Some(&b'/') {
+            i = sb[i..stop].iter().position(|&c| c == b'\n').map_or(stop, |k| i + k);
+        } else if sb[i] == b'/' && sb.get(i + 1) == Some(&b'*') {
+            // (block comments nest: `/* a /* b */ ; */`)
+            let mut depth = 1;
+            i += 2;
+            while i < stop && depth > 0 {
+                if sb[i] == b'/' && sb.get(i + 1) == Some(&b'*') {
+                    depth += 1;
+                    i += 2;
+                } else if sb[i] == b'*' && sb.get(i + 1) == Some(&b'/') {
+                    depth -= 1;
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+        } else if sb[i] == b';' {
+            return i;
+        } else {
+            i += 1;
+        }
+    }
+    stop
+}
+
 /// The fmt traits the items' `use` declarations import (fn bodies' too), by their identifier tokens (not a comment's
 /// words): 1 Display, 2 Debug; a glob of a `fmt` path both. Only from a declaration that names `fmt`: a trait of the
 /// program's named Debug is not std's (Program::fmt_imports)
@@ -236,10 +267,8 @@ fn fmt_imports(src: &str, items: &[SrcItem]) -> u8 {
             if b - a != 3 || sb.get(a as usize..b as usize) != Some(b"use") {
                 continue;
             }
-            // (the declaration's identifiers, up to the first `;` after the keyword: one in a comment inside a `use` is
-            // rare)
-            let stop = it.end.min(sb.len());
-            let end = sb[b as usize..stop].iter().position(|&c| c == b';').map_or(stop, |p| b as usize + p);
+            // (the declaration's identifier tokens, up to its `;`: not a comment's)
+            let end = use_end(sb, b as usize, it.end.min(sb.len()));
             let words: Vec<&[u8]> = ids[k + 1..].iter().take_while(|&&(x, _)| (x as usize) < end).filter_map(|&(x, y)| sb.get(x as usize..y as usize)).collect();
             if !words.contains(&&b"fmt"[..]) {
                 continue;
@@ -250,8 +279,9 @@ fn fmt_imports(src: &str, items: &[SrcItem]) -> u8 {
             if words.contains(&&b"Debug"[..]) {
                 mask |= 2;
             }
-            // (`use std::fmt::*;` / `use core::fmt::{*, ..}`)
-            let compact: Vec<u8> = sb[b as usize..end].iter().copied().filter(|c| !c.is_ascii_whitespace()).collect();
+            // (`use std::fmt::*;` / `use core::fmt::{*, ..}`: by the text without its comments, `/* x */` is no glob)
+            let text = blank_comments(src.get(b as usize..end).unwrap_or(""));
+            let compact: Vec<u8> = text.bytes().filter(|c| !c.is_ascii_whitespace()).collect();
             let glob = compact.windows(6).any(|w| w == b"fmt::*") || compact.windows(6).position(|w| w == b"fmt::{").is_some_and(|p| compact[p..].contains(&b'*'));
             if glob {
                 mask |= 3;
@@ -2204,35 +2234,7 @@ impl Session {
                 if b - a != 3 || sb.get(a..b) != Some(b"use") {
                     continue;
                 }
-                // (the declaration's `;`: not one in a comment, `use a::{ /* ; */ b };`)
-                let stop = it.end.min(sb.len());
-                let mut end = stop;
-                let mut i = b;
-                while i < stop {
-                    if sb[i] == b'/' && sb.get(i + 1) == Some(&b'/') {
-                        i = sb[i..stop].iter().position(|&c| c == b'\n').map_or(stop, |k| i + k);
-                    } else if sb[i] == b'/' && sb.get(i + 1) == Some(&b'*') {
-                        // (block comments nest: `/* a /* b */ ; */`)
-                        let mut depth = 1;
-                        i += 2;
-                        while i < stop && depth > 0 {
-                            if sb[i] == b'/' && sb.get(i + 1) == Some(&b'*') {
-                                depth += 1;
-                                i += 2;
-                            } else if sb[i] == b'*' && sb.get(i + 1) == Some(&b'/') {
-                                depth -= 1;
-                                i += 2;
-                            } else {
-                                i += 1;
-                            }
-                        }
-                    } else if sb[i] == b';' {
-                        end = i;
-                        break;
-                    } else {
-                        i += 1;
-                    }
-                }
+                let end = use_end(sb, b, it.end.min(sb.len()));
                 // (its identifier tokens: not the words of a comment in it)
                 prog.use_names.extend(it.idents.iter().map(|&(x, y)| (x as usize, y as usize)).filter(|&(x, y)| x > b && y <= end).filter_map(|(x, y)| src.get(x..y)).map(str::to_string));
             }
@@ -9775,6 +9777,9 @@ impl Session {
         };
         let ii = a.prog.item_of[id].unwrap() as usize;
         let pf = a.prog.prelude_from as usize;
+        // (a closed fn's key holds the program's fmt imports only when its body calls a `fmt` method (#256): the mask
+        // is the whole program's, which a crate's keys would otherwise take from its consumer)
+        let fmt_mask = || a.src.get(a.items[ii].start..a.items[ii].end).is_some_and(|t| t.contains(".fmt")).then_some(a.prog.fmt_imports);
         // 閉じた依存するクレートの関数 (と、型引数に依存するクレートの型を持つ prelude の関数): 本体・自分のシグネチャと、
         // 見えるクレートの中の参照先だけ (prelude はコンパイラで決まる、ほかのクレートのものは呼べない)
         if let Some(u) = closed.filter(|u| ii < pf || u.iter().any(|&x| x)) {
@@ -9837,6 +9842,9 @@ impl Session {
                 }
             }
             h.add(&ak);
+            if let Some(m) = fmt_mask() {
+                h.add(&m);
+            }
             match a.prog.panic_handler {
                 Some(p) => h.add(&a.prog.names[p as usize]),
                 None => h.add(&0u8),
@@ -9856,6 +9864,9 @@ impl Session {
             h.add(&(self.opts.backend_id()));
             h.add(&a.items[ii].hash);
             h.add(&a.sig_key(id as u32));
+            if let Some(m) = fmt_mask() {
+                h.add(&m);
+            }
             match a.prog.panic_handler {
                 Some(p) => h.add(&a.prog.names[p as usize]),
                 None => h.add(&0u8),
@@ -9874,6 +9885,9 @@ impl Session {
         if let Some(vis) = a.prog.traits_at_item(ii as u32) {
             h.add(&vis.join(","));
         }
+        // (and the fmt traits the program imports, which `x.fmt(f)` takes its trait from (#256): a `use std::fmt::Debug;`
+        // changed elsewhere changes the call, the body the same; also an inlined body's)
+        h.add(&a.prog.fmt_imports);
         if a.prog.closures.contains_key(&(id as u32)) {
             h.add(&a.prog.names[id]);
         }

@@ -113,4 +113,11 @@ fn main() {
     let e4: Vec<&str> = "".splitn(3, "").collect();
     let e5: Vec<&str> = "ab".split("").collect();
     println!("{:?} {:?} {:?} {:?} {:?}", e1, e2, e3, e4, e5);
+
+    // (a str range's splitn is str's; a closure's `&u8` makes an array literal's elements u8)
+    let r1: Vec<&str> = "a,b"[..].splitn(2, ',').collect();
+    let line = "k:v:w";
+    let r2: Vec<&str> = line[2..].splitn(2, ':').collect();
+    let firsts: Vec<u8> = [255, 0, 1].splitn(2, |x: &u8| *x == 0).map(|s| s[0].wrapping_add(1)).collect();
+    println!("{:?} {:?} {:?}", r1, r2, firsts);
 }

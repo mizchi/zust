@@ -523,6 +523,10 @@ impl Inf<'_> {
             let k = self.known_g(p, &mut pv);
             self.unify(a, k);
         }
+        // (a closure's parameter type through the bound, `F: FnMut(&T) -> bool`: `[1, 0, 2].splitn(2, |x: &u8| ..)`
+        // makes the elements u8, as apply_recv does)
+        let prog = self.prog;
+        self.unify_fn_bounds(&prog.sigs[id as usize].generics, &mut pv);
         self.known_g(ret, &mut pv)
     }
 

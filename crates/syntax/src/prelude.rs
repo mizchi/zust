@@ -1501,6 +1501,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("String") && (sc.has("&*") || sc.has("[..]")) {
         need.insert("as_str");
     }
+    // (a str trait's method called on a String, `s.custom_len()` with `impl Ext for str`, or an OsString's
+    // to_string_lossy: acg calls it on `s.as_str()` (#256))
+    if need.contains("String") && (need.contains("to_string_lossy") || sc.has("for str")) {
+        need.insert("as_str");
+    }
     // A collect into String uses push_str when the elements are &str / String
     if need.contains("collect") && need.contains("String") {
         need.extend(["push_str", "as_str"]);

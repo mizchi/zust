@@ -11,6 +11,22 @@ impl Cx<'_> {
         self.prog.instantiate(r, vec![t, Ty::Struct(ei)]).ok().map(Ty::Struct)
     }
 
+    /// Whether `recv.splitn(n, p)` is a slice's (`__exr_slice_splitn`), not a str's: the receiver is known to be a slice
+    /// or an array, or p is a closure and the receiver (or the base of its range, `s[..]`) is not known to be text
+    fn slice_splitn(&self, recv: &Expr, args: &[Expr]) -> bool {
+        let text = |t: Option<Ty>| match t.map(|t| self.strip_refs(t)) {
+            Some(Ty::Str) => true,
+            Some(Ty::Struct(sid)) => self.prog.structs[self.prog.base_of(sid) as usize].name == "String",
+            _ => false,
+        };
+        let t = self.peek(recv);
+        if matches!(t.map(|t| self.strip_refs(t)), Some(Ty::Slice(_) | Ty::Array(..))) {
+            return true;
+        }
+        let base_text = matches!(strip_paren(recv), Expr::Index(b, ix, _) if matches!(&**ix, Expr::Range(..)) && text(self.peek(b)));
+        matches!(args.get(1).map(strip_paren), Some(Expr::Closure(..))) && !text(t) && !base_text
+    }
+
     pub(crate) fn builtin_method(&mut self, mc: &Expr) -> R<Option<V>> {
         let Expr::MethodCall(mc_recv, mc_name, mc_tf, mc_args, _) = mc else { unreachable!() };
         let mc_recv: &Expr = mc_recv;
@@ -42,7 +58,9 @@ impl Cx<'_> {
             "split_at_mut" => Some(("__exr_slice_split_at_mut", true)),
             "split_first" => Some(("__exr_slice_split_first", false)),
             "split_last" => Some(("__exr_slice_split_last", false)),
-            "splitn" => Some(("__exr_slice_splitn", false)),
+            // (a slice's splitn takes a predicate; a str's (`"a,b"[..].splitn(2, ',')`) is the str helper's, also where
+            // the type of the range's receiver is not known here)
+            "splitn" if self.slice_splitn(mc_recv, mc_args) => Some(("__exr_slice_splitn", false)),
             // (a slice's to_owned is its to_vec: only a receiver known to be one. An array's is a clone of it, a
             // `[T; N]`, and a str's a String, also of a `s[..n]` whose type is not known here)
             "to_owned" if matches!(self.peek(mc_recv).map(|t| self.strip_refs(t)), Some(Ty::Slice(_))) => Some(("__exr_slice_to_vec", false)),

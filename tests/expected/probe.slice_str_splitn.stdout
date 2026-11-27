@@ -19,3 +19,4 @@ true false true
 [Named { name: "a", n: 1 }, Named { name: "b", n: 2 }] [Named { name: "a", n: 1 }] 3
 hello world yz
 ["", "ab"] ["", "a", "b", ""] ["", "h", "éy"] ["", ""] ["", "a", "b", ""]
+["a", "b"] ["v", "w"] [0, 2]

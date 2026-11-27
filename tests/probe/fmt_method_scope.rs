@@ -1,7 +1,8 @@
 // `x.fmt(f)` takes the fmt trait in scope at the call (#256, review of #280): with only `use std::fmt::Debug;`
 // imported, a str's, a number's and an Option's fmt outside an impl of Display / Debug is Debug's (`"text"` quoted),
-// not Display's. (With both traits in scope rustc rejects the call, E0034: no program to compare)
-use std::fmt::{self, Debug};
+// not Display's. (With both traits in scope rustc rejects the call, E0034: no program to compare.) The import's `;` in
+// a comment is not its end
+use std::fmt::{self, /* ; */ Debug};
 
 fn show(s: &str, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     s.fmt(f)
