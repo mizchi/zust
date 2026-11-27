@@ -14,6 +14,10 @@ where
     }
 }
 
+fn need_send<F: FnOnce() + Send>(f: F) {
+    f()
+}
+
 fn main() {
     // (a name the thread sees; a small stack, rounded up)
     let h = thread::Builder::new()
@@ -113,4 +117,15 @@ fn main() {
     let xs = [1, 2, 3, 4, 5, 6, 7];
     par_for(xs.windows(3), |w| *sum.lock().unwrap() += w.len());
     println!("{}", *sum.lock().unwrap());
+
+    // (a closure that assigns a borrowed Cell, or borrows it mutably, holds a `&mut Cell`: Send, as Cell is)
+    let mut c = std::cell::Cell::new(0);
+    need_send(|| c = std::cell::Cell::new(4));
+    need_send(|| {
+        let r = &mut c;
+        r.set(r.get() + 1);
+    });
+    let mut cells = vec![std::cell::Cell::new(1)];
+    need_send(|| cells[0] = std::cell::Cell::new(7));
+    println!("{} {}", c.get(), cells[0].get());
 }

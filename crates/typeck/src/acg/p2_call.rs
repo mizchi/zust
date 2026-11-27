@@ -4962,12 +4962,13 @@ fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool
                 return false;
             }
             seen.push((sid, sync));
-            // (a closure's capture held by reference is a raw pointer: the reference it stands for, `&T` or `&mut T`
-            // (which is not kept): Sync needs `T: Sync`, Send `T: Sync` and `T: Send`. A closure is judged by its
-            // captures alone: its type arguments are the parent's parameters and the captures' types, raw pointers
-            // among them)
-            let field = |i: usize, t: Ty, seen: &mut Vec<(u32, bool)>| match t {
-                Ty::Ptr(_, inner) if prog.ref_capture(sid, i) => sync_(*inner, seen) || (!sync && send(*inner, seen)),
+            // (a closure's capture held by reference is a raw pointer: the reference it stands for. Sync needs
+            // `T: Sync`; Send of a `&mut T` (one the body mutates) `T: Send`, and of one that may be either kind both.
+            // A closure is judged by its captures alone: its type arguments are the parent's parameters and the
+            // captures' types, raw pointers among them)
+            let field = |i: usize, t: Ty, seen: &mut Vec<(u32, bool)>| match (t, prog.ref_capture(sid, i)) {
+                (Ty::Ptr(_, inner), Some(true)) => auto_trait_fails(prog, *inner, sync, seen, d + 1),
+                (Ty::Ptr(_, inner), Some(false)) => sync_(*inner, seen) || (!sync && send(*inner, seen)),
                 _ => auto_trait_fails(prog, t, sync, seen, d + 1),
             };
             let closure = prog.closure_of_struct.contains_key(&base);

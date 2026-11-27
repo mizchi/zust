@@ -1035,6 +1035,33 @@ fn assigns_in(e: &Expr, caps: &[String]) -> bool {
     found
 }
 
+// (an assignment to a place rooted at one of caps, or a `&mut` / `&raw mut` of one)
+fn mutates_in(e: &Expr, caps: &[String]) -> bool {
+    match e {
+        Expr::Closure(..) => return false,
+        Expr::Ref(true, x) | Expr::RawRef(true, x) if assign_base(x).is_some_and(|n| caps.iter().any(|c| *c == n)) => return true,
+        _ => {}
+    }
+    if assigns_in(e, caps) {
+        return true;
+    }
+    let mut found = false;
+    each_child(e, &mut |c| {
+        if !found && mutates_in(c, caps) {
+            found = true;
+        }
+    });
+    found
+}
+
+/// Whether the closure body assigns to the captured variable n or borrows it mutably, at its top level (`n = ..`,
+/// `n.f += 1`, `*n = ..`, `&mut n`; not in a nested closure): a closure that holds n by reference holds a `&mut` of
+/// it (or a unique borrow). A call of a `&mut self` method on it is not seen (it needs the type)
+pub fn mutates_capture(c: &Expr, n: &str) -> bool {
+    let Expr::Closure(_, _, _, body, _) = c else { return false };
+    mutates_in(body, &[n.to_string()])
+}
+
 /// Whether the closure body assigns to a captured variable (`r = ..` / `n += 1` / `v.x = ..`)
 pub fn assigns_capture(c: &Expr, caps: &[String]) -> bool {
     let Expr::Closure(_, _, _, body, _) = c else { return false };

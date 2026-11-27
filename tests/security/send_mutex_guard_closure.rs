@@ -1,6 +1,6 @@
 //! A closure that borrows a `MutexGuard` is not `Send` (E0277): the guard must be let go on the thread that locked
-//! the Mutex. zustc takes a capture held by reference as `&T` or `&mut T` (which one is not kept), so it asks the
-//! captured value to be Sync and Send; a `MutexGuard` is Sync but not Send.
+//! the Mutex. `*g += 1` borrows it mutably, and a `&mut MutexGuard` is Send only if the guard is; it is Sync, not
+//! Send (before, zustc took every capture held by reference as a `&T`, which is Send when the guard is Sync).
 //@ rule: Send / Sync
 //@ expect: reject
 use std::sync::Mutex;

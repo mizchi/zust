@@ -10,3 +10,4 @@ timed out waiting on channel / channel is empty and sending half is closed
 79800
 50 0 BarrierWaitResult { is_leader: true }
 15
+5 7

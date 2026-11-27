@@ -927,6 +927,8 @@ pub struct ClosureDef {
     pub by_move: bool,
     /// For each capture, whether it is held by value (the rest are held by reference)
     pub moved: Vec<bool>,
+    /// For each capture, whether the body assigns to it or borrows it mutably (ClosureSyn::mutated)
+    pub mutated: Vec<bool>,
     /// The number of the parent's type parameters (they lead the type arguments)
     pub n_parent: usize,
     /// The annotated return type (may contain the parent's type parameters as Param)
@@ -2456,6 +2458,7 @@ impl Program {
                         n_parent: c.n_parent as usize,
                         ret_ann,
                         fake_reads: c.fake_reads.clone(),
+                        mutated: c.mutated.clone(),
                     },
                 );
                 p.closure_by.insert((first, k as u32), fid);
@@ -3990,11 +3993,12 @@ impl Program {
                 if prelude {
                     return sd.args.iter().all(|&a| self.auto_trait(a, sync, d + 1));
                 }
-                // (a closure's capture held by reference is a raw pointer: the reference it stands for. Which kind is not
-                // kept, so both rules hold: Sync needs `T: Sync` (as `&T` and `&mut T`), Send needs `T: Sync` (`&T`) and
-                // `T: Send` (`&mut T`))
-                sd.fields.iter().enumerate().all(|(i, f)| match f.1 {
-                    Ty::Ptr(_, inner) if self.ref_capture(sid, i) => self.auto_trait(*inner, true, d + 1) && (sync || self.auto_trait(*inner, false, d + 1)),
+                // (a closure's capture held by reference is a raw pointer: the reference it stands for. Sync needs
+                // `T: Sync` (as `&T` and `&mut T`); Send needs `T: Send` of a `&mut T`, and of one that may be either
+                // kind `T: Sync` (`&T`) too)
+                sd.fields.iter().enumerate().all(|(i, f)| match (f.1, self.ref_capture(sid, i)) {
+                    (Ty::Ptr(_, inner), Some(true)) => self.auto_trait(*inner, sync, d + 1),
+                    (Ty::Ptr(_, inner), Some(false)) => self.auto_trait(*inner, true, d + 1) && (sync || self.auto_trait(*inner, false, d + 1)),
                     _ => self.auto_trait(f.1, sync, d + 1),
                 }) && sd.variants.iter().all(|v| v.fields.iter().all(|f| self.auto_trait(f.1, sync, d + 1)))
             }
@@ -5504,11 +5508,13 @@ impl Program {
     }
 
     /// Field i of the struct sid is a closure's capture held by reference: its type is a raw pointer, which the auto
-    /// traits take as the reference it stands for (Sync when T is Sync; Send when T is Sync and Send, as whether it
-    /// is a `&T` or a `&mut T` is not kept)
-    pub fn ref_capture(&self, sid: u32, i: usize) -> bool {
+    /// traits take as the reference it stands for. Some(true): a `&mut T` (the body assigns to it or borrows it
+    /// mutably), Send when T is Send; Some(false): either kind (a `&mut self` method may be called on it), so Send when
+    /// T is Sync and Send. Sync when T is Sync either way
+    pub fn ref_capture(&self, sid: u32, i: usize) -> Option<bool> {
         let b = self.base_of(sid);
-        self.closure_of_struct.get(&b).and_then(|f| self.closures.get(f)).is_some_and(|cd| !cd.by_move && cd.moved.get(i) == Some(&false))
+        let cd = self.closure_of_struct.get(&b).and_then(|f| self.closures.get(f))?;
+        (!cd.by_move && cd.moved.get(i) == Some(&false)).then(|| cd.mutated.get(i) == Some(&true))
     }
 
     /// The base b is a closure's struct (`f::{closure#0}`)
