@@ -260,7 +260,7 @@ impl Cx<'_> {
             Ty::Unit => debug,
             Ty::Ref(_, i) | Ty::Box(i) => self.fmt_ok(*i, debug),
             Ty::Array(e, _) | Ty::Slice(e) => debug && self.fmt_ok(*e, debug),
-            Ty::Dyn(s) => dyn_has_fmt(s, debug),
+            Ty::Dyn(s) => dyn_has_fmt(s, debug) || (debug && dyn_any_debug(self.prog, s)),
             Ty::Struct(sid) => {
                 let b = self.prog.base_of(sid);
                 let tr = if debug { "Debug" } else { "Display" };
@@ -581,6 +581,11 @@ impl Cx<'_> {
                         dt = *i;
                     }
                     if let Ty::Ref(_, Ty::Dyn(s)) | Ty::Box(Ty::Dyn(s)) = dt {
+                        if *debug && dyn_any_debug(self.prog, s) {
+                            let l = self.str_const("Any { .. }");
+                            self.call_named("__exr_fmt_lit", vec![Ty::Unit], &[(f, fref), (l, str_ref)], span)?;
+                            continue;
+                        }
                         if dyn_has_fmt(s, *debug) {
                             self.scopes.push(vec![]);
                             // (seen as `&dyn ..`: a Box is not dropped here)
@@ -757,6 +762,11 @@ impl Cx<'_> {
             Ty::Ref(_, i) | Ty::Box(i) if !t.is_fat() => {
                 let p = self.b.ins().load(PTR, mf(), x, 0);
                 self.call_named(me, vec![*i], &[(p, Ty::Ref(false, intern(*i))), (f, fref)], span)?;
+            }
+            // (a `dyn Any` inside a value: `Err(Box<dyn Any + Send>)`, std's `Any { .. }`)
+            Ty::Ref(_, Ty::Dyn(s)) | Ty::Box(Ty::Dyn(s)) if debug && dyn_any_debug(self.prog, s) => {
+                let l = self.str_const("Any { .. }");
+                self.call_named("__exr_fmt_lit", vec![Ty::Unit], &[(f, fref), (l, str_ref)], span)?;
             }
             // &[T] / &mut [T]: the sequence of elements
             Ty::Ref(_, Ty::Slice(e)) | Ty::Box(Ty::Slice(e)) => {
@@ -1395,6 +1405,21 @@ impl Cx<'_> {
 fn dyn_has_fmt(s: &str, debug: bool) -> bool {
     let want = if debug { "Debug" } else { "Display" };
     s.split('+').any(|p| p.trim().rsplit("::").next() == Some(want))
+}
+
+/// A `dyn Any` (+ Send / Sync) with no Debug of its own: std's own Debug impl for it writes `Any { .. }` (a thread's
+/// join error, a panic's payload). Only std's Any, the prelude's trait (`__p_Any` where a program defines an `Any` of
+/// its own): a program's `trait Any` has no Debug (E0277)
+fn dyn_any_debug(prog: &crate::program::Program, s: &str) -> bool {
+    !dyn_has_fmt(s, true)
+        && s.split('+').any(|p| {
+            let n = p.trim();
+            let last = n.rsplit("::").next().unwrap_or(n);
+            matches!(last, "Any" | "__p_Any")
+                && prog.traits.get(n).or_else(|| prog.traits.get(last)).is_some_and(|fs| {
+                    !fs.is_empty() && fs.iter().all(|&f| prog.item_of.get(f as usize).copied().flatten().is_some_and(|i| i >= prog.prelude_from))
+                })
+        })
 }
 
 /// Where the k-th char of a string literal's value is in its source text `t` (which starts at `start`): escapes,

@@ -1,0 +1,6 @@
+true false true
+Any { .. } true
+Err(Any { .. })
+true false
+true Some(true)
+true
