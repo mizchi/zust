@@ -111,7 +111,9 @@ zustc build workspace.txt -o target
   - `features=a,b`: its features;
   - `cfg=name` / `cfg=name=value`: other cfgs (what a build script's `rustc-cfg` gives);
   - `env=KEY=VALUE`: the values `env!` / `option_env!` see (`CARGO_PKG_*`, `OUT_DIR`);
-  - `exe=NAME`: a bin's executable name.
+  - `exe=NAME`: a bin's executable name;
+  - `extern=ALIAS=NAME`: the dependency NAME under the name ALIAS in this crate (a renamed dependency, rustc's
+    `--extern ALIAS=..`). Every module of the crate sees it; NAME keeps its own name everywhere else.
 
   In a value, `%`, `#` and white space are written `%XX`. A name `env!` does not find there is looked up in zustc's
   own environment, as rustc does.
@@ -140,7 +142,9 @@ zurgo run
 - Build scripts run as under cargo (compiled by zustc, or by rustc when zustc cannot), and their cfgs, `rustc-env` and
   `OUT_DIR` reach the crates. A proc-macro dependency is built by rustc and run by the toolchain's proc-macro server
   (`rust-analyzer-proc-macro-srv`): its attributes, derives and function-like macros expand (mizchi/zust#29).
-- Not yet: two versions of one crate, renamed dependencies, git dependencies, its own resolver (mizchi/zust#28).
+- A renamed dependency (`common = { package = "crypto-common" }`) is the library under that name in its dependent
+  only, as rustc's `--extern common=..`.
+- Not yet: two versions of one crate, git dependencies, its own resolver (mizchi/zust#28).
 
 ### Options
 
@@ -220,7 +224,7 @@ Known differences from rust-analyzer are listed in [CONTRIBUTING.md](CONTRIBUTIN
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-26, 5b67f5e<!-- /measured --> by CI on each push to main. Details:
+Numbers measured <!-- measured -->2026-11-27, 9e737c4<!-- /measured --> by CI on each push to main. Details:
 [SUPPORT.md](SUPPORT.md) (what is supported) and [PERFORMANCE.md](PERFORMANCE.md) (speed, size, memory, and
 comparisons with rustc and others).
 
@@ -232,10 +236,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2403 | 1918 (79.8%) |
-| check-pass (accepted by `zustc check`) | 1813 | 1557 (85.9%) |
+| run-pass (builds, runs, same output) | 2403 | 1933 (80.4%) |
+| check-pass (accepted by `zustc check`) | 1813 | 1561 (86.1%) |
 | build-pass | 135 | 104 (77.0%) |
-| compile-fail (rejected at an annotated line) | 7386 | 5439 (73.6%) |
+| compile-fail (rejected at an annotated line) | 7386 | 5453 (73.8%) |
 <!-- /auto:ui -->
 
 [SUPPORT.md](SUPPORT.md) breaks this down by area: the language, the checks, the runtime and std, and what is left.
@@ -248,10 +252,10 @@ table, with instruction counts, cache and binary sizes and memory, is in [PERFOR
 <!-- auto:kpi-summary -->
 | | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 128 ms | 573 ms |
-| no-op build | 0.6 ms | 0.7 ms |
-| build after editing one function | 16.5 ms | 62.7 ms |
-| `check` | 40 ms | 183 ms |
+| cold build | 164 ms | 720 ms |
+| no-op build | 1.0 ms | 1.0 ms |
+| build after editing one function | 25.7 ms | 87.3 ms |
+| `check` | 68 ms | 313 ms |
 <!-- /auto:kpi-summary -->
 
 Against `rustc -C incremental` on gen1000 (a snapshot measured by hand): about 6x faster cold, 15x faster after an

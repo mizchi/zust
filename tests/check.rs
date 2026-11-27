@@ -65,6 +65,17 @@ fn closure_and_dyn_errors() {
 /// Keeps adding and removing statements that do / do not cause type errors in the bodies of the examples' fns (generic fns too)
 #[test]
 fn check_memo_matches_fresh_check() {
+    edits_match_fresh_check(false);
+}
+
+/// And so does a session kept for edits (zust-analyzer's: the summaries, the items' refs and the program built are
+/// kept from one analysis to the next, the program while no edit changes what its build reads)
+#[test]
+fn kept_session_matches_fresh_check() {
+    edits_match_fresh_check(true);
+}
+
+fn edits_match_fresh_check(keep: bool) {
     let root = env!("CARGO_MANIFEST_DIR");
     let mut ps: Vec<_> = std::fs::read_dir(format!("{root}/examples")).unwrap().map(|e| e.unwrap().path()).collect();
     ps.sort();
@@ -80,6 +91,9 @@ fn check_memo_matches_fresh_check() {
     for p in ps.iter().filter(|p| p.extension().is_some_and(|e| e == "rs")).take(20) {
         let src = std::fs::read_to_string(p).unwrap();
         let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        if keep {
+            s.keep_for_edits();
+        }
         let mut cur = src.clone();
         for _ in 0..8 {
             let d1 = s.check(&cur);
@@ -101,6 +115,25 @@ fn check_memo_matches_fresh_check() {
         }
     }
     assert!(compared > 50, "{compared}");
+}
+
+/// A kept program is built again when an impl moves to the line of another: the build reports an unbounded blanket
+/// impl and another impl of its trait (E0119) unless they are on one line (a macro's expansion; a later check finds
+/// that one)
+#[test]
+fn kept_program_follows_the_lines_of_impls() {
+    let one = "trait Tr {}\nimpl<T> Tr for T {} impl Tr for u8 {}\nfn main() {\n    let _a = 1;\n}\n";
+    let two = one.replace("{} impl", "{}\nimpl");
+    let f = |d: Vec<zustc::Diagnostic>| d.into_iter().map(|x| (x.line, x.col, x.msg)).collect::<Vec<_>>();
+    let fresh = |src: &str| f(Session::new(Options { jobs: 1, ..Options::default() }).check(src));
+    assert_eq!(fresh(&two).iter().map(|d| (d.0, d.2.as_str())).collect::<Vec<_>>(), [(3, "conflicting implementations of trait `Tr` (E0119)")]);
+    assert_ne!(fresh(one), fresh(&two));
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+    s.keep_for_edits();
+    // (the second and third analyses read what the first built: the program is kept, then used)
+    for src in [one.to_string(), one.replace("_a = 1", "_a = 2"), one.replace("_a = 1", "_a = 3"), two.clone(), one.to_string(), two] {
+        assert_eq!(f(s.check(&src)), fresh(&src), "{src}");
+    }
 }
 
 /// Each constant and static is checked against its type where it is defined, used or not (as rustc does), with the
@@ -2566,6 +2599,34 @@ fn macro_fragments_and_unit_patterns() {
         "known fragments, and the transcriber's text"
     );
     assert_eq!(first("fn main() {\n    macro_rules! m {\n        ($x:guard) => {};\n    }\n}\n"), e(3, "`guard` fragments in macro are unstable (E0658)"), "a gated fragment");
+    // (a `ty` fragment whose tokens begin a type that does not parse is an error of the call, as rustc's: no later
+    // rule is tried. `?Sized` is a type, a bare trait object)
+    assert_eq!(
+        first("macro_rules! m {\n    ($ty:ty) => { compile_error!(\"whoops\"); };\n    (impl async) => {};\n}\nm!(impl async);\nfn main() {}\n"),
+        e(5, "the tokens of `m!`'s `ty` fragment do not parse as a type"),
+        "a `ty` that does not parse"
+    );
+    assert_eq!(first("macro_rules! m {\n    ($ty:ty) => {};\n    (?$t:path) => { compile_error!(\"no\"); };\n}\nm!(?Sized);\nfn main() {}\n"), None, "`?Sized` for a `ty`");
+    // (also an item after a repetition's separator, and an array type with no length, as rustc rejects both)
+    assert_eq!(
+        first("macro_rules! m {\n    ($($t:ty),*) => {};\n    (u8, impl async) => {};\n}\nm!(u8, impl async);\nfn main() {}\n"),
+        e(5, "the tokens of `m!`'s `ty` fragment do not parse as a type"),
+        "a `ty` after a separator"
+    );
+    assert_eq!(
+        first("macro_rules! m {\n    ($t:ty) => {};\n}\nm!([u8;]);\nfn main() {}\n"),
+        e(4, "the tokens of `m!`'s `ty` fragment do not parse as a type"),
+        "`[u8;]` for a `ty`"
+    );
+    assert_eq!(first("macro_rules! m {\n    ($t:ty) => {};\n}\nm!([u8; 2]);\nfn main() {}\n"), None, "`[u8; 2]` for a `ty`");
+    // (a parenthesized bound and more: one `ty`, as rustc reads `(Debug) + Send`)
+    assert_eq!(
+        first("macro_rules! m {\n    ($t:ty) => {};\n    (($t:ty) + $u:ident) => { compile_error!(\"no\"); };\n}\nm!((std::fmt::Debug) + Send);\nfn main() {}\n"),
+        None,
+        "`(Debug) + Send` for a `ty`"
+    );
+    // (`<=` begins no type: the call takes the literal rule, as rustc's)
+    assert_eq!(first("macro_rules! m {\n    ($t:ty ,) => { compile_error!(\"no\"); };\n    (<=) => {};\n}\nm!(<=);\nfn main() {}\n"), None, "`<=` for a `ty`");
     assert_eq!(first("pub mod break {\n}\nfn main() {}\n"), e(1, "expected identifier, found keyword `break`"), "a keyword for a module's name");
     assert_eq!(first("mod breaks {\n    pub fn f() {}\n}\nfn main() { breaks::f(); }\n"), None, "a name a keyword starts");
     assert_eq!(first("#![some_nonexistent_attribute]\nfn main() {}\n"), e(1, "cannot find attribute `some_nonexistent_attribute` in this scope"), "an unknown inner attribute");

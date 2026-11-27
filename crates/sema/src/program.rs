@@ -62,6 +62,7 @@ pub struct TyEnv {
     pub self_ty: Option<Ty>,
 }
 
+#[derive(Clone)]
 pub struct VariantDef {
     pub name: String,
     pub kind: VariantKind,
@@ -72,7 +73,7 @@ pub struct VariantDef {
 
 /// The fields a module of the program may not read (E0616): the inline modules by their lines, and of each struct or
 /// union of a module whose name is the program's only item of that name, its fields that are not `pub`
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct FieldPriv {
     /// (the line of a module's `{`, of its `}`, its parent); the crate root is module 0, of every line
     pub mods: Vec<(u32, u32, u32)>,
@@ -112,6 +113,7 @@ impl FieldPriv {
 
 /// Definitions of structs and enums (named aggregate types). Keeping enums in the same table lets them share
 /// copying, argument passing, impls, deep hashing and so on with structs.
+#[derive(Clone)]
 pub struct StructDef {
     pub name: String,
     /// (name, type, offset)
@@ -188,6 +190,19 @@ pub struct AdtTable {
     any_placeholder: std::sync::atomic::AtomicBool,
 }
 
+impl Clone for AdtTable {
+    fn clone(&self) -> Self {
+        AdtTable {
+            v: Mutex::new(self.v.lock().unwrap().iter().map(|b| Box::new((**b).clone())).collect()),
+            inst: Mutex::new(self.inst.lock().unwrap().clone()),
+            tuples: Mutex::new(self.tuples.lock().unwrap().clone()),
+            placeholders: Mutex::new(self.placeholders.lock().unwrap().clone()),
+            assoc_placeholders: Mutex::new(self.assoc_placeholders.lock().unwrap().clone()),
+            any_placeholder: std::sync::atomic::AtomicBool::new(self.any_placeholder.load(std::sync::atomic::Ordering::Relaxed)),
+        }
+    }
+}
+
 impl AdtTable {
     fn new() -> Self {
         AdtTable {
@@ -254,6 +269,7 @@ impl ConstDef {
     }
 }
 
+#[derive(Clone)]
 pub struct ConstDef {
     pub name: String,
     pub ty: Ty,
@@ -503,6 +519,22 @@ pub fn prim_assoc_const(t: Ty, name: &str) -> Option<i128> {
     })
 }
 
+/// A Mutex that clones its content (Program's caches)
+#[derive(Default)]
+pub struct CloneMutex<T>(pub Mutex<T>);
+impl<T: Clone> Clone for CloneMutex<T> {
+    fn clone(&self) -> Self {
+        CloneMutex(Mutex::new(self.0.lock().unwrap().clone()))
+    }
+}
+impl<T> std::ops::Deref for CloneMutex<T> {
+    type Target = Mutex<T>;
+    fn deref(&self) -> &Mutex<T> {
+        &self.0
+    }
+}
+
+#[derive(Clone)]
 pub struct Program {
     /// All fns (user-defined + extern). The index is the u32 fn ID
     pub names: Vec<String>,
@@ -514,13 +546,16 @@ pub struct Program {
     /// looked for again by each instance's goals
     pub assoc_index: std::sync::OnceLock<FxMap<(String, u32), Vec<u32>>>,
     /// normalize's answers so far, by (type, trait, associated type)
-    pub normalized: std::sync::Mutex<FxMap<(Ty, String, String), Option<Ty>>>,
+    pub normalized: CloneMutex<FxMap<(Ty, String, String), Option<Ty>>>,
     /// A fn's where clauses on other than a parameter (SigSyn::preds), by fn id: goals of each instance (issue #2)
     pub fn_preds: FxMap<u32, Vec<(crate::types::TySyn, String, Vec<String>)>>,
     pub structs: AdtTable,
     pub struct_index: FxMap<String, u32>,
     /// Variant name → (enum, index): finds variants from `use E::*;` by short name (not when several share it)
     pub variant_names: FxMap<String, Option<(u32, usize)>>,
+    /// The prelude enums' variants a variant of the program's own enum took the short name from, (name, (enum,
+    /// index)): the session gives the name back to the prelude's where the program imports that and not its own
+    pub variant_shadowed: Vec<(String, (u32, usize))>,
     /// The fns whose `impl Trait` return type their body determines
     pub opaque: Vec<u32>,
     /// The items from here on are the prelude's (no overflow checks)
@@ -569,6 +604,10 @@ pub struct Program {
     /// the names the program's `use` declarations write (fn bodies' too): a value of one is imported, not undeclared,
     /// though zustc may not have it (`use std::convert::identity;`)
     pub use_names: FxSet<String>,
+    /// the fmt traits the program's `use` declarations import (fn bodies' too; of the whole program, not each
+    /// scope's): 1 Display, 2 Debug (`use std::fmt::Debug;`, `use core::fmt::{self, Display as _}`; a glob `fmt::*`
+    /// both). Which one `x.fmt(f)` calls where x's type has both (#256)
+    pub fmt_imports: u8,
     /// a constant with a lowercase name exists (`const or: usize`): an identifier pattern of any case may name one;
     /// without, only an uppercase one is looked up
     pub lower_consts: bool,
@@ -736,7 +775,7 @@ pub struct Program {
     /// A closure's (generic) struct id → fn id
     pub closure_of_struct: FxMap<u32, u32>,
     /// hash_ty's memo per instance (nested closure types share parts, so walking them again is exponential)
-    pub inst_keys: std::sync::Mutex<FxMap<u32, Key>>,
+    pub inst_keys: CloneMutex<FxMap<u32, Key>>,
     /// The structs / enums with an `impl Drop for S` (the base definition when generic)
     pub drop_impls: crate::fxhash::FxSet<u32>,
     /// The structs (base ids) whose `deref` returns a reference to an array, slice or str: `t.len()` on one of them is
@@ -757,6 +796,8 @@ pub struct Program {
     pub peq: Vec<u32>,
     /// Type aliases: name → (type parameters, body)
     pub aliases: FxMap<String, (Vec<String>, TySyn)>,
+    /// The defaults of an alias's type parameters, by place (`type Result<T, E = Error>`: [None, Some(Error)])
+    pub alias_defaults: FxMap<String, Vec<Option<TySyn>>>,
     /// Likewise `S::<PartialOrd<R>>::partial_cmp`, looked up when the types of `a < b` differ
     pub pord: Vec<u32>,
     /// The number of the item that writes each struct / enum definition (the low ids)
@@ -769,6 +810,7 @@ pub struct Program {
 pub type AssocRegions = (Vec<u8>, Vec<u8>, Vec<(u8, u8)>, Vec<u8>);
 
 /// `impl<..> Trait for S<..> { type Name = Value; }`
+#[derive(Clone)]
 pub struct AssocDef {
     pub name: String,
     /// The impl's self type and value (with the impl's type parameters as Param)
@@ -873,6 +915,7 @@ pub const HOLE: u8 = 250;
 pub const FNPTR_MARK: u8 = 251;
 
 /// A lifted closure ([`crate::closure`])
+#[derive(Clone)]
 pub struct ClosureDef {
     /// The id of the parent (the fn the closure is written in), and the closure's preorder index in its body
     pub parent: u32,
@@ -884,6 +927,8 @@ pub struct ClosureDef {
     pub by_move: bool,
     /// For each capture, whether it is held by value (the rest are held by reference)
     pub moved: Vec<bool>,
+    /// For each capture, whether the body assigns to it or borrows it mutably (ClosureSyn::mutated)
+    pub mutated: Vec<bool>,
     /// The number of the parent's type parameters (they lead the type arguments)
     pub n_parent: usize,
     /// The annotated return type (may contain the parent's type parameters as Param)
@@ -1524,11 +1569,12 @@ impl Program {
             structs: AdtTable::new(),
             struct_index: FxMap::default(),
             variant_names: FxMap::default(),
+            variant_shadowed: vec![],
             opaque: vec![],
             prelude_from: u32::MAX,
             fn_preds: FxMap::default(),
             assoc_index: std::sync::OnceLock::new(),
-            normalized: std::sync::Mutex::new(FxMap::default()),
+            normalized: Default::default(),
             overflow_checks: false,
             trait_supers: FxMap::default(),
             trait_marker_supers: FxMap::default(),
@@ -1591,6 +1637,7 @@ impl Program {
             derived: FxMap::default(),
             const_param_tys: FxMap::default(),
             struct_defaults: FxMap::default(),
+            alias_defaults: FxMap::default(),
             copy_params: FxMap::default(),
             unsized_params: FxMap::default(),
             fn_sized_gens: FxMap::default(),
@@ -1603,6 +1650,7 @@ impl Program {
             ambiguous_methods: FxMap::default(),
             unbounded_blankets: FxSet::default(),
             use_names: FxSet::default(),
+            fmt_imports: 0,
             impl_selfs: FxMap::default(),
             user_traits: FxSet::default(),
             tdb: Default::default(),
@@ -1664,6 +1712,9 @@ impl Program {
             for (n, g, t) in &sm.aliases {
                 if !adt_names.contains(n.as_str()) {
                     p.aliases.insert(n.clone(), (g.clone(), t.clone()));
+                    if !sm.adt_defaults.is_empty() {
+                        p.add_alias_defaults(n, &sm.adt_defaults);
+                    }
                 }
             }
         }
@@ -1990,12 +2041,28 @@ impl Program {
         // Instances made midway through layout (`RefCell<Node>` in `Node`) were computed with types whose size was
         // not settled yet, so they are redone once everything is settled
         p.relayout_instances();
+        // (a variant of the program's own enum wins over a prelude enum's of the same name: `use ControlFlow::*;` of its
+        // own `enum ControlFlow { Break, .. }`, beside the prelude's that the name brings in. The prelude's it took the
+        // name from are kept in variant_shadowed, for the imports to decide (session). When two of one side share the
+        // name, neither is found)
+        let mut own_names: FxSet<&str> = FxSet::default();
         for sid in 0..p.structs.len() {
             let sd = &p.structs[sid];
             if !sd.is_enum || sd.base.is_some() || sd.name.starts_with('#') {
                 continue;
             }
+            let own = p.struct_item.get(sid).is_some_and(|&i| (i as usize) < user);
             for (vi, v) in sd.variants.iter().enumerate() {
+                if own && own_names.insert(v.name.as_str()) {
+                    if let Some(Some(prev)) = p.variant_names.insert(v.name.clone(), Some((sid as u32, vi))) {
+                        p.variant_shadowed.push((v.name.clone(), prev));
+                    }
+                    continue;
+                }
+                if !own && own_names.contains(v.name.as_str()) {
+                    p.variant_shadowed.push((v.name.clone(), (sid as u32, vi)));
+                    continue;
+                }
                 p.variant_names
                     .entry(v.name.clone())
                     .and_modify(|e| *e = None)
@@ -2391,6 +2458,7 @@ impl Program {
                         n_parent: c.n_parent as usize,
                         ret_ann,
                         fake_reads: c.fake_reads.clone(),
+                        mutated: c.mutated.clone(),
                     },
                 );
                 p.closure_by.insert((first, k as u32), fid);
@@ -3518,6 +3586,12 @@ impl Program {
                 return matches!(tr, "Sized" | "Send" | "Sync" | "Unpin") || bs.iter().any(|b| b == tr || name(b) == name(tr));
             }
         }
+        // (std's Pointer of references, raw pointers and Box, whose address the compiler writes itself; `__p_Pointer`
+        // where the program has a Pointer of its own, which this is not)
+        let std_pointer = if self.traits.contains_key("__p_Pointer") { tr == "__p_Pointer" } else { tr == "Pointer" };
+        if std_pointer && matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_)) {
+            return true;
+        }
         if matches!(t, Ty::Ref(..)) && !self.ref_impls.is_empty() && self.ref_impls.contains(&(t, tr.to_string())) {
             return true;
         }
@@ -3582,6 +3656,72 @@ impl Program {
                 return self.impls.contains(&(self.base_of(sid), "AsRef".to_string()));
             }
             return false;
+        }
+        // The built-in AsMut<[T]> of arrays, slices and Vec, AsMut<str> of str and String, and std's `impl AsMut<U>
+        // for &mut T` (through `&mut` only, not `&`). A program's own impls are asked below, by the trait's name
+        if tr.starts_with("AsMut") && tr.contains('<') {
+            let squeeze = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+            let inner = squeeze(&tr["AsMut".len()..]);
+            let mut b = t;
+            while let Ty::Ref(true, i) = b {
+                b = *i;
+            }
+            // (std's String / Vec, not a program's type of the name)
+            let name = match b {
+                Ty::Struct(sid) if self.struct_item.get(self.base_of(sid) as usize).is_some_and(|&i| i >= self.prelude_from) => {
+                    self.structs[self.base_of(sid) as usize].name.as_str()
+                }
+                _ => "",
+            };
+            let elem = match b {
+                Ty::Array(e, _) | Ty::Slice(e) => Some(*e),
+                Ty::Struct(sid) if name == "Vec" => self.structs[sid as usize].args.first().copied(),
+                _ => None,
+            };
+            // (and a Vec's AsMut<Vec<T>>)
+            if elem.is_some_and(|e| inner == squeeze(&format!("<[{}]>", self.tn(e))))
+                || ((b == Ty::Str || name == "String") && inner == "<str>")
+                || (name == "Vec" && inner == squeeze(&format!("<{}>", self.tn(b))))
+            {
+                return true;
+            }
+        }
+        // std's Extend of Vec<T> (`Extend<T>`, and `Extend<&T>` of a Copy T) and of String (`char`, `&char`, `&str`,
+        // `String`), whose own `extend` takes any of them; a program's own impls by their argument (a type with none is
+        // asked below, by the trait's name)
+        if let Some(x) = tr.strip_prefix("Extend").map(str::trim).and_then(|r| r.strip_prefix('<')).and_then(|r| r.strip_suffix('>')) {
+            if let Ty::Struct(sid) = t {
+                // (the argument's text without lifetimes or white space: `&'a bool` is `&bool`)
+                let mut x2 = String::new();
+                let mut cs = x.chars().peekable();
+                while let Some(c) = cs.next() {
+                    if c == '\'' {
+                        while cs.next_if(|c| c.is_alphanumeric() || *c == '_').is_some() {}
+                    } else if !c.is_whitespace() {
+                        x2.push(c);
+                    }
+                }
+                match self.structs[self.base_of(sid) as usize].name.as_str() {
+                    "Vec" => {
+                        if let Some(&e) = self.structs[sid as usize].args.first() {
+                            let en: String = self.tn(e).chars().filter(|c| !c.is_whitespace()).collect();
+                            if x2 == en || (x2 == format!("&{en}") && self.implements(e, "Copy")) {
+                                return true;
+                            }
+                        }
+                    }
+                    "String" if matches!(x2.as_str(), "char" | "&char" | "&str" | "String") => return true,
+                    _ => {}
+                }
+                // (a program's own impls for the type: one whose argument is the bound's (`impl Extend<u8> for Bits`
+                // is no `Extend<bool>`), or one with the impl's parameters in it, which is taken to fit)
+                let own: Vec<&(Ty, Vec<Ty>, usize)> =
+                    self.impl_targs.get("Extend").map_or(vec![], |v| v.iter().filter(|(s, _, n)| self.match_ty(*s, t, &mut vec![None; *n])).collect());
+                if !own.is_empty() {
+                    let squeeze = |s: String| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+                    return own.iter().any(|(_, a, _)| a.len() != 1 || self.has_param(a[0]) || squeeze(self.tn(a[0])) == x2);
+                }
+            }
         }
         // The targets of collect (built-in): String / Vec / HashMap and so on
         if tr.starts_with("FromIterator") {
@@ -3830,7 +3970,15 @@ impl Program {
         }
         match t {
             Ty::Ptr(..) => false,
-            Ty::Ref(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => self.auto_trait(*i, sync, d + 1),
+            // (a trait object has an auto trait it is written with (`dyn Tr + Send`), or one its trait has as a
+            // supertrait: it may hold any type of its trait, one without it too)
+            Ty::Dyn(d) => {
+                let (core, send, sync_) = crate::types::dyn_autos(d);
+                (if sync { sync_ } else { send }) || self.tdb.gives_auto(self, core, if sync { "Sync" } else { "Send" }) == Some(true)
+            }
+            // (`&T` is Send and Sync when T is Sync; `&mut T` is Send when T is Send, Sync when T is Sync)
+            Ty::Ref(m, i) => self.auto_trait(*i, sync || !m, d + 1),
+            Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => self.auto_trait(*i, sync, d + 1),
             Ty::Struct(sid) => {
                 let b = self.base_of(sid);
                 let name = self.structs[b as usize].name.as_str();
@@ -3840,9 +3988,17 @@ impl Program {
                 }
                 // (the prelude's, not a program's own type of the name)
                 let ours = self.struct_item.get(b as usize).is_some_and(|&i| i >= self.prelude_from);
+                // (as acg's auto_trait_fails: a lock's guard is not Send, a RefCell's guards neither Send nor Sync, a
+                // Mutex is Sync when T is Send, an Arc or RwLock when T is Send and Sync)
+                let args = &self.structs[sid as usize].args;
                 match name {
-                    "Rc" if ours => return false,
-                    "Cell" | "RefCell" | "LazyCell" | "OnceCell" if sync && ours => return false,
+                    "Rc" | "Ref" | "RefMut" if ours => return false,
+                    "MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard" | "StdoutLock" if !sync && ours => return false,
+                    "Cell" | "RefCell" | "LazyCell" | "OnceCell" | "UnsafeCell" | "__Rcvr__" if sync && ours => return false,
+                    "Mutex" if sync && ours => return args.iter().all(|&a| self.auto_trait(a, false, d + 1)),
+                    "Arc" | "RwLock" | "OnceLock" if ours && (sync || name == "Arc") => {
+                        return args.iter().all(|&a| self.auto_trait(a, false, d + 1) && self.auto_trait(a, true, d + 1));
+                    }
                     // (the prelude's own types hold raw pointers: what they hold decides)
                     _ => {}
                 }
@@ -3851,11 +4007,44 @@ impl Program {
                 if prelude {
                     return sd.args.iter().all(|&a| self.auto_trait(a, sync, d + 1));
                 }
-                sd.fields.iter().all(|f| self.auto_trait(f.1, sync, d + 1))
-                    && sd.variants.iter().all(|v| v.fields.iter().all(|f| self.auto_trait(f.1, sync, d + 1)))
+                // (a closure's capture held by reference is a raw pointer: the reference it stands for. Sync needs
+                // `T: Sync` (as `&T` and `&mut T`); Send needs `T: Send` of a `&mut T`, and of one that may be either
+                // kind `T: Sync` (`&T`) too)
+                sd.fields.iter().enumerate().all(|(i, f)| match (f.1, self.ref_capture(sid, i)) {
+                    (Ty::Ptr(_, inner), Some(true)) => self.auto_trait(*inner, sync, d + 1),
+                    (Ty::Ptr(_, inner), Some(false)) => self.auto_trait(*inner, true, d + 1) && (sync || self.auto_trait(*inner, false, d + 1)),
+                    _ => self.auto_trait(f.1, sync, d + 1),
+                }) && sd.variants.iter().all(|v| v.fields.iter().all(|f| self.auto_trait(f.1, sync, d + 1)))
             }
             _ => true,
         }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn add_alias_defaults(&mut self, n: &str, ds: &[Option<TySyn>]) {
+        self.alias_defaults.insert(n.to_string(), ds.to_vec());
+    }
+
+    /// The types of alias n's parameters a use leaves out (after vals), from their defaults, which may name the
+    /// parameters before them. Any other name in a default is the type where the alias is declared, never a generic
+    /// parameter of the user's (`type Pair<T, E = Error>` used as `Pair<u8>` in `fn make<Error>()` is the struct)
+    #[cold]
+    #[inline(never)]
+    fn fill_alias_defaults(&self, n: &str, g: &[String], vals: &mut Vec<Ty>) -> R<()> {
+        let ds = self.alias_defaults[n].clone();
+        for d in &ds[vals.len()..] {
+            let d = d.as_ref().ok_or("an alias parameter without a default")?;
+            let k = vals.len();
+            let v = self.resolve_with(d, &|x| g.iter().position(|y| y == x).filter(|&i| i < k).map(|i| vals[i]))?;
+            vals.push(v);
+        }
+        Ok(())
+    }
+
+    /// Whether alias n's type parameters from the k-th on all have defaults (a use may give only the first k)
+    pub fn alias_fills(&self, n: &str, k: usize) -> bool {
+        self.alias_defaults.get(n).is_some_and(|ds| k < ds.len() && ds[k..].iter().all(Option::is_some))
     }
 
     /// A method of primitive type t (from a trait impl, or else the trait's default method)
@@ -4153,6 +4342,10 @@ impl Program {
                     if g.is_empty() {
                         return self.resolve_with(t, names);
                     }
+                    // (every parameter with a default: `Bytes` for `type Bytes<T = u8>`, as `Bytes<>`)
+                    if self.alias_fills(n, 0) {
+                        return self.resolve_with(&TySyn::App(n.clone(), vec![]), names);
+                    }
                 }
                 match self.struct_index.get(n) {
                     Some(&id) if self.structs[id as usize].generics.is_empty() => Ty::Struct(id),
@@ -4170,10 +4363,11 @@ impl Program {
                     },
                 }
             }
-            // `Box<dyn Error>`: the prelude's __DynError (holds the Display and Debug strings)
+            // `Box<dyn Error>`: the prelude's __DynError (holds the Display and Debug strings). Also `+ Send + Sync`: it
+            // holds two Strings, Send and Sync whatever the error was
             TySyn::App(n, args)
                 if n == "Box"
-                    && matches!(args.as_slice(), [TySyn::Dyn(d)] if d == "Error")
+                    && matches!(args.as_slice(), [TySyn::Dyn(d)] if crate::types::dyn_autos(d).0 == "Error")
                     && self.struct_index.contains_key("__DynError") =>
             {
                 Ty::Struct(self.struct_index["__DynError"])
@@ -4197,10 +4391,14 @@ impl Program {
             TySyn::App(n, args) if n == "Box" && args.len() == 1 && !self.struct_index.contains_key(n) => {
                 Ty::Box(intern(self.bare_dyn(&args[0], names).unwrap_or_else(|| r(&args[0]))?))
             }
-            // An alias with type parameters (`type R<T> = Result<T, String>;`)
-            TySyn::App(n, args) if self.aliases.get(n).is_some_and(|a| a.0.len() == args.len()) => {
+            // An alias with type parameters (`type R<T> = Result<T, String>;`), those left out taking their defaults
+            // (`type Result<T, E = Error>` used as `Result<()>`)
+            TySyn::App(n, args) if self.aliases.get(n).is_some_and(|a| a.0.len() == args.len() || self.alias_fills(n, args.len())) => {
                 let (g, t) = self.aliases[n].clone();
-                let vals = args.iter().map(r).collect::<R<Vec<Ty>>>()?;
+                let mut vals = args.iter().map(r).collect::<R<Vec<Ty>>>()?;
+                if vals.len() < g.len() {
+                    self.fill_alias_defaults(n, &g, &mut vals)?;
+                }
                 return self.resolve_with(&t, &|x| match g.iter().position(|y| y == x) {
                     Some(i) => Some(vals[i]),
                     None => names(x),
@@ -5322,6 +5520,16 @@ impl Program {
             }
         }
         false
+    }
+
+    /// Field i of the struct sid is a closure's capture held by reference: its type is a raw pointer, which the auto
+    /// traits take as the reference it stands for. Some(true): a `&mut T` (the body assigns to it or borrows it
+    /// mutably), Send when T is Send; Some(false): either kind (a `&mut self` method may be called on it), so Send when
+    /// T is Sync and Send. Sync when T is Sync either way
+    pub fn ref_capture(&self, sid: u32, i: usize) -> Option<bool> {
+        let b = self.base_of(sid);
+        let cd = self.closure_of_struct.get(&b).and_then(|f| self.closures.get(f))?;
+        (!cd.by_move && cd.moved.get(i) == Some(&false)).then(|| cd.mutated.get(i) == Some(&true))
     }
 
     /// The base b is a closure's struct (`f::{closure#0}`)
@@ -7203,7 +7411,8 @@ impl Program {
             // The vtable order (the trait's method order) is embedded in the code too
             Ty::Dyn(s) => {
                 h.add(&(108u8, s));
-                for &f in self.traits.get(s).map(|v| &v[..]).unwrap_or(&[]) {
+                // (the trait's methods: of `Tr` for a `dyn Tr + Send`)
+                for &f in self.traits.get(crate::types::dyn_autos(s).0).map(|v| &v[..]).unwrap_or(&[]) {
                     h.add(&self.names[f as usize]);
                 }
             }
@@ -7284,6 +7493,35 @@ impl Program {
     }
 
     /// The set of names refs looks up (names in any table). Most identifiers (variables, keywords) need one lookup
+    /// A fingerprint of what refs_in reads of the program: the names of its fns (with their groups), structs / enums,
+    /// consts and aliases, and what each leads to. Two programs of one fingerprint give an item the same refs. Each
+    /// entry is hashed on its own and the hashes are added, so no map's order matters
+    pub fn ref_tables_fp(&self) -> Key {
+        fn sum<'a, K: std::hash::Hash + ?Sized + 'a, V: std::hash::Hash + 'a>(tag: u8, it: impl Iterator<Item = (&'a K, &'a V)>) -> Key {
+            let (mut s, mut n): (Key, u64) = (0, 0);
+            for (k, v) in it {
+                let mut h = KeyHasher::new();
+                h.add(&tag);
+                h.add(k);
+                h.add(v);
+                s = s.wrapping_add(h.finish());
+                n += 1;
+            }
+            let mut h = KeyHasher::new();
+            h.add(&tag);
+            h.add(&n);
+            h.add(&s);
+            h.finish()
+        }
+        let mut h = KeyHasher::new();
+        h.add(&sum(0, self.by_last.iter()));
+        h.add(&sum(1, self.struct_index.iter()));
+        h.add(&sum(2, self.const_index.iter()));
+        h.add(&sum(3, self.const_by_last.iter()));
+        h.add(&sum(4, self.aliases.iter()));
+        h.finish()
+    }
+
     pub fn ref_names(&self) -> FxSet<&str> {
         let mut s: FxSet<&str> = FxSet::default();
         s.extend(self.by_last.keys().map(|k| k.as_str()));
@@ -7584,7 +7822,13 @@ fn syn_unify(a: &TySyn, ga: &[String], b: &TySyn, gb: &[String], sub: &mut Vec<(
         };
         if let Some(n) = var(a, sa) {
             let sized = !g[sa as usize].iter().any(|x| x.strip_prefix('?') == Some(n.as_str()));
-            if sized && matches!(b, TySyn::Slice(_) | TySyn::Str | TySyn::Dyn(_)) {
+            // (and std's unsized types, `impl<T> AsMut<T>` beside `impl AsMut<::std::path::Path>`: `Path`, `OsStr`,
+            // `CStr`, by their last segment)
+            let std_unsized = |t: &TySyn| {
+                matches!(t, TySyn::Named(m) if matches!(m.rsplit("::").next().unwrap_or(m), "Path" | "OsStr" | "CStr"))
+            };
+            // (not the other impl's own parameter of the name, `impl<Path> Pick<Path> for S`)
+            if sized && (matches!(b, TySyn::Slice(_) | TySyn::Str | TySyn::Dyn(_)) || (var(b, sb).is_none() && std_unsized(b))) {
                 return false;
             }
             if let Some((_, (s2, t2))) = sub.iter().find(|x| x.0 == (sa, n.clone())).cloned() {
@@ -7851,6 +8095,10 @@ impl Program {
             return None;
         }
         let tr = &p.segs[n - 2];
+        // (`std::io::Error::from_raw_os_error(e)` / `std::fmt::Error`: std's error types, not the Error trait (#256))
+        if tr.name == "Error" && matches!(p.segs[n - 3].name.as_str(), "io" | "fmt") {
+            return None;
+        }
         // (not a name the program declares a trait of: `Trait::m` would be the program's trait, where the std path names
         // std's (`std::string::ToString::to_string` beside a program's `trait ToString`). That call stays unread)
         let known = self.traits.contains_key(&tr.name) || STD_PATH_TRAITS.contains(&tr.name.as_str());
@@ -7975,6 +8223,7 @@ impl Program {
 
     /// The methods a `dyn tr` vtable holds, in order: the trait's own, then those of its supertraits (each name once)
     pub fn dyn_methods(&self, tr: &str) -> Vec<u32> {
+        let tr = crate::types::dyn_autos(tr).0;
         let mut out: Vec<u32> = self.traits.get(tr).cloned().unwrap_or_default();
         let mut todo: Vec<String> = self.trait_supers.get(tr).cloned().unwrap_or_default();
         let mut seen = vec![tr.to_string()];
@@ -8030,6 +8279,20 @@ impl Program {
             return None;
         }
         let name = |k: usize| p.segs[k].name.as_str();
+        // (`io::Error::from_raw_os_error(e)` / `std::io::Error::last_os_error()`: the prelude's IoError's, as the type
+        // `io::Error` is IoError)
+        // (std's io only: `std::io::` / `core::io::`, or `io::` where the program has no `io::Error` of its own (a
+        // `mod io { pub struct Error; .. }` flattens to `io__Error`), which the ordinary lookup finds)
+        let std_io = match n {
+            3 => !self.struct_index.contains_key("io__Error"),
+            4 => matches!(name(0), "std" | "core"),
+            _ => false,
+        };
+        if std_io && name(n - 3) == "io" && name(n - 2) == "Error" {
+            if let Some(&i) = self.index.get(&format!("IoError::{}", name(n - 1))) {
+                return Some(i);
+            }
+        }
         // `std::collections::HashMap::new` and the like are `HashMap::new`
         if n >= 3 && matches!(name(0), "core" | "std" | "alloc") {
             let ty = name(n - 2);
@@ -8071,6 +8334,17 @@ impl Program {
         }
         if n >= 2 && name(n - 2) == "process" && name(n - 1) == "exit" {
             return self.index.get("__core_process_exit").copied();
+        }
+        // (`alloc::alloc(layout)` after `use std::alloc;`, and the crate's `alloc::alloc::alloc(layout)`: std::alloc's
+        // functions, the prelude's `__core_*`. `alloc` is kept as a path's head above, as it names the crate too; not
+        // a program's own `alloc::f`)
+        if n >= 2
+            && name(0) == "alloc"
+            && (n == 2 || (n == 3 && name(1) == "alloc"))
+            && matches!(name(n - 1), "alloc" | "alloc_zeroed" | "dealloc" | "realloc" | "handle_alloc_error")
+            && !self.index.contains_key(&format!("alloc::{}", name(n - 1)))
+        {
+            return self.index.get(&format!("__core_{}", name(n - 1))).copied();
         }
         // `core::cmp::max` / `core::mem::swap` and the like go to the prelude's `__core_*`
         if n >= 2 && matches!(name(0), "core" | "std") {

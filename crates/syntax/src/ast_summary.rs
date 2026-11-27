@@ -2489,6 +2489,7 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
         let assigns = ast_closure::assigns_capture(c, &caps);
         let mut moved: Vec<bool> = Vec::new();
         let mut deref: Vec<bool> = Vec::new();
+        let mutated: Vec<bool> = caps.iter().map(|n| ast_closure::mutates_capture(c, n)).collect();
         for n in &caps {
             moved.push(*mv || (ast_closure::moves_capture(c, &[n.clone()]) && !assigns));
             // (a parameter that is a shared reference (`h: &T`, `&self`), used only through a deref of it: edition 2021
@@ -2515,6 +2516,7 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
             n_parent: n_parent,
             fake_reads: ast_closure::fake_reads(c).into_iter().filter(|n| bound.contains(n)).collect(),
             deref,
+            mutated,
         });
     }
     // `-> impl Fn(A) -> B { move |x| .. }`: the type is the struct of the trailing closure
@@ -3029,7 +3031,11 @@ fn summarize_type_alias(sm: &mut Summary, n: &String, g: &Generics, t: &PTy) -> 
     if !consts.is_empty() && const_param_in_op(t, &consts) {
         return err("generic parameters may not be used in const operations");
     }
-    sm.aliases.push((n.clone(), gs.into_iter().map(|x| x.0).collect(), tysyn(t, None)?));
+    let names: Vec<String> = gs.into_iter().map(|x| x.0).collect();
+    // (the defaults of its parameters, `type Result<T, E = Error>`, in adt_defaults, which an alias's summary does not
+    // use otherwise: a use may leave them out, `Result<()>`)
+    sm.adt_defaults = adt_defaults(g, &names)?;
+    sm.aliases.push((n.clone(), names, tysyn(t, None)?));
     let own: Vec<&str> = g.params.iter().filter_map(|p| if let GParam::Lifetime(l) = p { Some(l.as_str()) } else { None }).collect();
     let mut named = vec![];
     crate::regions::lifetimes_in(t, &mut named);

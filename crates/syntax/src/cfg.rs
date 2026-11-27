@@ -435,6 +435,11 @@ pub fn strip_noting(src: &str, c: &CfgSet, env: &mut Option<bool>, externs: &mut
     if !src.contains("cfg") && !src.contains("extern crate") {
         return None;
     }
+    // (nothing the tokens below rewrite, and no `env` for the question of `env!`: its answer is no)
+    if !may_configure(src) && !src.contains("env") {
+        *env = Some(false);
+        return None;
+    }
     // (a `cfg_select!` call the tokens below pass: its chosen arm in place, then that arm's own cfgs)
     let mut select = false;
     let mut seen = false;
@@ -454,6 +459,37 @@ pub fn strip_noting(src: &str, c: &CfgSet, env: &mut Option<bool>, externs: &mut
         }
     }
     r
+}
+
+/// [`strip_noting`] for a caller that does not ask whether the source may call `env!`: nothing to read where
+/// may_configure says so (a program whose `cfg` is a variable's name, and the tokens of its whole text read on
+/// every edit)
+pub fn strip_configured(src: &str, c: &CfgSet, externs: &mut Vec<(usize, usize)>) -> Option<String> {
+    if !may_configure(src) {
+        return None;
+    }
+    strip_noting(src, c, &mut None, externs)
+}
+
+/// Whether src may have what strip_toks rewrites: a `cfg` that a `(` or `!` follows (`#[cfg(..)]`, `cfg!(..)`, or
+/// a comment between them), a word that starts with `cfg_` (`cfg_attr`, `cfg_select`), or an `extern` (`extern
+/// crate`). Read in the text, so a comment or a string may say yes; never no where the tokens find one
+fn may_configure(src: &str) -> bool {
+    if src.contains("extern") {
+        return true;
+    }
+    let b = src.as_bytes();
+    let id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    src.match_indices("cfg").any(|(i, _)| {
+        if i > 0 && id(b[i - 1]) {
+            return false;
+        }
+        let rest = &b[i + 3..];
+        if rest.first().is_some_and(|&c| id(c)) {
+            return rest.first() == Some(&b'_');
+        }
+        matches!(rest.iter().find(|c| !c.is_ascii_whitespace()), Some(b'(' | b'!' | b'/') | None)
+    })
 }
 
 /// The first outer attribute of the attributes just before the one at i (`#[a] #[b] #[cfg(x)]`: `#[a]`'s byte offset)
@@ -561,7 +597,9 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool, externs:
             *env |= matches!(t(i), b"env" | b"option_env");
             let g = if t(i + 2) == b"(" || t(i + 2) == b"[" || t(i + 2) == b"{" {
                 Some(i + 2)
-            } else if toks.get(i + 2).is_some_and(|x| x.0 == 0) && t(i + 3) == b"{" {
+            // (`macro_rules! name { .. }`; not `if !done { .. }`, whose block is code: aho-corasick's `if !cfg!(..) {
+            // debug!(..); }` keeps a `#[cfg(feature = "logging")]` from its expansion until it is stripped)
+            } else if t(i) == b"macro_rules" && toks.get(i + 2).is_some_and(|x| x.0 == 0) && t(i + 3) == b"{" {
                 Some(i + 3)
             } else {
                 None

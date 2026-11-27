@@ -1,0 +1,16 @@
+0 2 8
+1 1 (1, Some(-10))
+1 1
+(true, 2) (false, 4) 9
+1 1 16
+(1, 1000, 1000, 1000, 1000.0, 1000.0) (1, 1000000, 1000000, 1000000.0)
+[3, 4]
+list extra |slot future |collected body |inner 
+8
+[1, 16, 8, 16, 2, 8, 12, 8, 16, 24, 16, 8, 8, 48]
+[1, 2, 24, 24, 8, 8, 2]
+Ok(7) Err(2) Err(2)
+_ Underscore wildcard patterns|+= PlusEq compound assignment
+h5 try_mut_from_bytes See the other one.
+bench
+7

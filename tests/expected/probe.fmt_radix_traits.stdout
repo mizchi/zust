@@ -1,0 +1,19 @@
+1100000011011110 49374 4.9374e4 c0de 140336 4.9374E4 C0DE
+-3 fffffffd 0xfffffffd 11111111111111111111111111111101 -3e0
+1.5e3 1.5E3
+0x0
+true true true
+two hex:ff [      ff]
+[ff 11111111 377 FF 1.2345e3 -4.2E1]
+[   a]
+named true
+rr true true
+fat true true true
+fat alt true
+fat path true
+zero 20 true alt 18 true
+[0x0000000000000000000000] [        0x10] [0x20        ]
+[00001.2345e3] [+0001.2345e3] [-0001.2345e3] [0000000007E0] [-00004.2e1]
+[       1.5e0] [***2.5e0****]
+[H000a] [H000b    1] H0003-9
+[    ff] [_____101] [    10]

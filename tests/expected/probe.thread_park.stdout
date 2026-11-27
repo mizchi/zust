@@ -1,0 +1,20 @@
+Some("main") ThreadId(1)
+Thread { id: ThreadId(1), name: Some("main"), .. }
+true
+parked and woken
+child None ThreadId(2) true
+ready seen
+ThreadId(2)
+joined 7
+ThreadId(3) woke
+[ThreadId(4), ThreadId(5), ThreadId(6)]
+Thread {
+    id: ThreadId(
+        1,
+    ),
+    name: Some(
+        "main",
+    ),
+    ..
+}
+5

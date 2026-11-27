@@ -616,6 +616,150 @@ pub unsafe fn __core_write_bytes<T>(dst: *mut T, val: u8, count: usize) {
     unsafe { __exr_memset(dst as *mut u8, val as i32, count * core::mem::size_of::<T>()) };
 }
 
+// `core::alloc::Layout`: a size and a power-of-two alignment, the size rounded up to the alignment at most isize::MAX
+// (what std's constructors check). (`\x4c` in the texts: a program's own `Layout` renames this one's, word by word)
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Layout {
+    __l_size: usize,
+    __l_align: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LayoutError;
+
+pub type LayoutErr = LayoutError;
+
+impl Layout {
+    pub const fn from_size_align(size: usize, align: usize) -> Result<Layout, LayoutError> {
+        if align == 0 || align & (align - 1) != 0 || size > isize::MAX as usize - (align - 1) {
+            return Err(LayoutError);
+        }
+        Ok(Layout { __l_size: size, __l_align: align })
+    }
+    pub const unsafe fn from_size_align_unchecked(size: usize, align: usize) -> Layout {
+        Layout { __l_size: size, __l_align: align }
+    }
+    pub const fn new<T>() -> Layout {
+        Layout { __l_size: core::mem::size_of::<T>(), __l_align: core::mem::align_of::<T>() }
+    }
+    pub fn for_value<T>(t: &T) -> Layout {
+        Layout { __l_size: core::mem::size_of_val(t), __l_align: core::mem::align_of_val(t) }
+    }
+    pub fn array<T>(n: usize) -> Result<Layout, LayoutError> {
+        match core::mem::size_of::<T>().checked_mul(n) {
+            Some(size) => Layout::from_size_align(size, core::mem::align_of::<T>()),
+            None => Err(LayoutError),
+        }
+    }
+    pub const fn size(&self) -> usize {
+        self.__l_size
+    }
+    pub const fn align(&self) -> usize {
+        self.__l_align
+    }
+    pub const fn pad_to_align(&self) -> Layout {
+        let m = self.__l_align - 1;
+        Layout { __l_size: (self.__l_size + m) & !m, __l_align: self.__l_align }
+    }
+    pub fn align_to(&self, align: usize) -> Result<Layout, LayoutError> {
+        if align == 0 || align & (align - 1) != 0 {
+            return Err(LayoutError);
+        }
+        Layout::from_size_align(self.__l_size, if align > self.__l_align { align } else { self.__l_align })
+    }
+    pub fn extend(&self, next: Layout) -> Result<(Layout, usize), LayoutError> {
+        let m = next.__l_align - 1;
+        let offset = (self.__l_size + m) & !m;
+        let align = if next.__l_align > self.__l_align { next.__l_align } else { self.__l_align };
+        match offset.checked_add(next.__l_size) {
+            Some(size) => match Layout::from_size_align(size, align) {
+                Ok(l) => Ok((l, offset)),
+                Err(e) => Err(e),
+            },
+            None => Err(LayoutError),
+        }
+    }
+}
+
+// (std's Debug of the alignment: `8 (1 << 3)`)
+struct __LayoutAlign(usize);
+
+impl Debug for __LayoutAlign {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{} (1 << {})", self.0, self.0.trailing_zeros())
+    }
+}
+
+impl Debug for Layout {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.debug_struct("\x4cayout").field("size", &self.__l_size).field("align", &__LayoutAlign(self.__l_align)).finish()
+    }
+}
+
+impl Display for LayoutError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.pad("invalid parameters to \x4cayout::from_size_align")
+    }
+}
+
+unsafe extern "C" {
+    #[link_name = "aligned_alloc"]
+    fn __exr_aligned_alloc(align: usize, size: usize) -> *mut u8;
+}
+
+unsafe extern "C" {
+    #[link_name = "calloc"]
+    fn __exr_calloc(n: usize, size: usize) -> *mut u8;
+}
+
+// `std::alloc::alloc` / `alloc_zeroed` / `realloc` / `dealloc`: libc's allocator, which Box and Vec use too (malloc's
+// blocks are aligned to 16; aligned_alloc for a larger alignment). A failure is a null pointer, as std's
+pub unsafe fn __core_alloc(layout: Layout) -> *mut u8 {
+    let a = layout.__l_align;
+    unsafe {
+        if a <= 16 {
+            __exr_malloc(layout.__l_size)
+        } else {
+            __exr_aligned_alloc(a, (layout.__l_size + a - 1) & !(a - 1))
+        }
+    }
+}
+pub unsafe fn __core_alloc_zeroed(layout: Layout) -> *mut u8 {
+    if layout.__l_align <= 16 {
+        return unsafe { __exr_calloc(1, layout.__l_size) };
+    }
+    let p = unsafe { __core_alloc(layout) };
+    if !p.is_null() {
+        unsafe { __exr_memset(p, 0, layout.__l_size) };
+    }
+    p
+}
+pub unsafe fn __core_realloc(ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+    if layout.__l_align <= 16 {
+        return unsafe { __exr_realloc(ptr, new_size) };
+    }
+    let q = unsafe { __core_alloc(Layout { __l_size: new_size, __l_align: layout.__l_align }) };
+    if !q.is_null() {
+        let n = if new_size < layout.__l_size { new_size } else { layout.__l_size };
+        unsafe {
+            __exr_memcpy(q, ptr as *const u8, n);
+            __exr_free(ptr);
+        }
+    }
+    q
+}
+pub unsafe fn __core_dealloc(ptr: *mut u8, _layout: Layout) {
+    unsafe { __exr_free(ptr) };
+}
+// (std's message, then abort)
+pub fn __core_handle_alloc_error(layout: Layout) -> ! {
+    __exr_err_str::<()>("memory allocation of ");
+    __exr_err_num::<()>(layout.__l_size as u64);
+    __exr_err_str::<()>(" bytes failed\n");
+    unsafe { __exr_abort() };
+    loop {}
+}
+
 // The capacity `Vec::reserve` grows to (twice the old one, or what is needed), or a panic when it does not fit:
 // len + extra past usize, or a block past isize::MAX bytes (as std). (Not generic: checked and compiled once,
 // not per element type)
@@ -1287,6 +1431,58 @@ fn __exr_slice_split_at_mut<T>(s: &mut [T], mid: usize) -> (&mut [T], &mut [T]) 
     unsafe { (core::slice::from_raw_parts_mut(p, mid), core::slice::from_raw_parts_mut(p.add(mid), n - mid)) }
 }
 
+// `s.split_first()` / `s.split_last()`: the end element and the rest, None when s is empty
+fn __exr_slice_split_first<T>(s: &[T]) -> Option<(&T, &[T])> {
+    if s.len() == 0 {
+        return None;
+    }
+    unsafe { Some((&*s.as_ptr(), core::slice::from_raw_parts(s.as_ptr().add(1), s.len() - 1))) }
+}
+
+fn __exr_slice_split_last<T>(s: &[T]) -> Option<(&T, &[T])> {
+    let n = s.len();
+    if n == 0 {
+        return None;
+    }
+    unsafe { Some((&*s.as_ptr().add(n - 1), core::slice::from_raw_parts(s.as_ptr(), n - 1))) }
+}
+
+// `s.splitn(n, |x| ..)`: at most n pieces between the elements pred takes, the last one the rest
+pub struct SliceSplitN<T, F> {
+    ptr: *const T,
+    len: usize,
+    n: usize,
+    pred: F,
+}
+
+impl<T, F: FnMut(&T) -> bool> Iterator for SliceSplitN<T, F> {
+    type Item = &[T];
+    fn next(&mut self) -> Option<&[T]> {
+        if self.n == 0 {
+            return None;
+        }
+        self.n -= 1;
+        if self.n > 0 {
+            let mut i = 0;
+            while i < self.len {
+                if (self.pred)(unsafe { &*self.ptr.add(i) }) {
+                    let piece = unsafe { core::slice::from_raw_parts(self.ptr, i) };
+                    self.ptr = unsafe { self.ptr.add(i + 1) };
+                    self.len -= i + 1;
+                    return Some(piece);
+                }
+                i += 1;
+            }
+            self.n = 0;
+        }
+        Some(unsafe { core::slice::from_raw_parts(self.ptr, self.len) })
+    }
+}
+
+fn __exr_slice_splitn<T, F: FnMut(&T) -> bool>(s: &[T], n: usize, pred: F) -> SliceSplitN<T, F> {
+    SliceSplitN { ptr: s.as_ptr(), len: s.len(), n: n, pred: pred }
+}
+
 fn __exr_slice_windows<T>(s: &[T], n: usize) -> Windows<T> {
     if n == 0 {
         panic!("window size must be non-zero");
@@ -1305,6 +1501,10 @@ impl<T> ChunksExact<T> {
     pub fn remainder(&self) -> &[T] {
         let k = self.len - self.len % self.n;
         unsafe { core::slice::from_raw_parts(self.ptr.add(k), self.len - k) }
+    }
+    // (ExactSizeIterator's: the whole chunks still to come)
+    pub fn len(&self) -> usize {
+        (self.len - self.i) / self.n
     }
 }
 
@@ -2457,6 +2657,9 @@ impl String {
     pub fn as_str(&self) -> &str {
         unsafe { core::str::from_utf8_unchecked(self.vec.as_slice()) }
     }
+    pub fn as_mut_str(&mut self) -> &mut str {
+        unsafe { &mut *(self.vec.as_mut_slice() as *mut [u8] as *mut str) }
+    }
     pub fn clone(&self) -> String {
         String {
             vec: self.vec.clone(),
@@ -2470,9 +2673,18 @@ impl String {
 // (このファイルは zustc だけがコンパイルする。アダプタの struct には、関連型を決めるための
 //  使わない型パラメータを持たせている: `Map<I, F, B>` の B など)
 
-// (len は実装する側が書く。std の既定の実装 (size_hint から) はない)
-pub trait ExactSizeIterator {
-    fn len(&self) -> usize;
+// (std's default len, for `impl ExactSizeIterator for X {}`: size_hint's lower bound, which std asserts is also the
+// upper one, in every build. Each impl gets its own instance, so `self.size_hint()` is the type's)
+pub trait ExactSizeIterator: Iterator {
+    fn len(&self) -> usize {
+        let (lower, upper) = self.size_hint();
+        match upper {
+            Some(u) if u == lower => {}
+            Some(u) => panic!("assertion `left == right` failed\n  left: Some({})\n right: Some({})", u, lower),
+            None => panic!("assertion `left == right` failed\n  left: None\n right: Some({})", lower),
+        }
+        lower
+    }
 }
 
 // (the trait, for a program's `impl DoubleEndedIterator for X`: the prelude's own iterators keep next_back as a method of
@@ -2999,6 +3211,7 @@ impl<T> Iterator for __IterRepeat<T> {
 pub fn __core_repeat<T: Clone>(v: T) -> __IterRepeat<T> {
     __IterRepeat { v: v }
 }
+pub type Repeat<T> = __IterRepeat<T>;
 pub struct __IterOnce<T> {
     v: Option<T>,
 }
@@ -3624,6 +3837,10 @@ impl<T> Iter<T> {
     pub fn len(&self) -> usize {
         self.len - self.i
     }
+    // (Iterator's, exact as std's for a slice)
+    pub fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len - self.i, Some(self.len - self.i))
+    }
     pub fn as_slice(&self) -> &[T] {
         unsafe { core::slice::from_raw_parts(self.ptr.add(self.i), self.len - self.i) }
     }
@@ -3822,6 +4039,16 @@ impl Chars {
         self.len = j;
         Some(c)
     }
+    // (DoubleEndedIterator's: the characters from the back)
+    pub fn rfold<B, F: FnMut(B, char) -> B>(self, init: B, f: F) -> B {
+        let mut it = self;
+        let mut f = f;
+        let mut acc = init;
+        while let Some(c) = it.next_back() {
+            acc = f(acc, c);
+        }
+        acc
+    }
 }
 
 fn __exr_str_chars<G>(s: &str) -> Chars {
@@ -3873,8 +4100,8 @@ pub trait Debug {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
 }
 
-// (`fmt::Pointer` and the radix traits: zustc formats `{:p}` / `{:x}` itself; the traits are here for code that
-// implements or names them)
+// (`fmt::Pointer`: zustc formats `{:p}` of a reference / pointer itself; `{:p}` of a type of the program's calls its
+// impl)
 pub trait Pointer {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
 }
@@ -3901,11 +4128,22 @@ impl DebugStruct {
     }
     pub fn finish_non_exhaustive(&mut self) -> Result<(), __FmtError> {
         let f = unsafe { &mut *self.f };
+        // (std's: `Name { .. }` with no fields, in `{:#?}` too; a pretty one's `..` has no comma after it)
+        if self.n == 0 {
+            if f.alt {
+                f.indent -= 1;
+                f.buf.pop_byte();
+                f.buf.push(' ');
+            }
+            f.buf.push_str(".. }");
+            return Ok(());
+        }
         __exr_dbg_item::<()>(f, self.n, "");
         f.buf.push_str("..");
-        __exr_dbg_item_end::<()>(f);
-        self.n += 1;
-        __exr_dbg_end::<()>(f, self.n, self.kind, false);
+        if f.alt {
+            f.buf.push('\n');
+        }
+        __exr_dbg_end::<()>(f, self.n + 1, self.kind, false);
         Ok(())
     }
 }
@@ -4064,6 +4302,14 @@ fn __exr_fmt_spec<G>(
     f.radix = radix;
 }
 
+// (a program's `write!(f, ..)` into a Formatter: a Formatter of its own over the same String, with no spec of its own,
+// as std's `f.write_fmt(args)`; the indent of `{:#?}` is kept)
+fn __exr_sub_formatter<G>(f: &mut Formatter) -> Formatter {
+    let mut g = __exr_formatter::<()>(&mut *f.buf);
+    g.indent = f.indent;
+    g
+}
+
 fn __exr_fmt_lit<G>(f: &mut Formatter, s: &str) {
     f.buf.push_str(s);
 }
@@ -4080,13 +4326,111 @@ fn __exr_fmt_ptr<G>(f: &mut Formatter, a: usize) {
             break;
         }
     }
-    let mut s = String::from("0x");
+    let mut s = String::from(if f.plus { "+0x" } else { "0x" });
+    let lead = s.len();
     let mut i = d.len();
     while i > 0 {
         i -= 1;
         s.push(d[i] as char);
     }
-    __exr_pad::<()>(f, &s, 2);
+    // (`{:#p}` / `{:#?}`: zero-extended to the pointer's width, as std writes it; `{:010p}`: the zeros after `0x` (and
+    // `+`))
+    if f.alt {
+        let (w, z) = (f.width, f.zero);
+        if w == 0 {
+            f.width = 2 + 2 * core::mem::size_of::<usize>();
+        }
+        f.zero = true;
+        __exr_pad_lead::<()>(f, &s, lead);
+        f.width = w;
+        f.zero = z;
+        return;
+    }
+    __exr_pad_lead::<()>(f, &s, lead);
+}
+
+// a number's text with `{:0w}`: the zeros after its first `lead` bytes (`0x`), as std pads a pointer; without the 0
+// flag, __exr_pad's fill and alignment
+fn __exr_pad_lead<G>(f: &mut Formatter, s: &str, lead: usize) {
+    let sb = s.as_bytes();
+    if !f.zero || f.width <= sb.len() {
+        __exr_pad::<()>(f, s, 2);
+        return;
+    }
+    f.buf.push_str(&s[..lead]);
+    let mut z = f.width - sb.len();
+    while z > 0 {
+        f.buf.push('0');
+        z -= 1;
+    }
+    f.buf.push_str(&s[lead..]);
+}
+
+// `{:p}` of a pointer to a `dyn`: `Pointer { addr: 0x.., metadata: DynMetadata(0x..) }`, the address and the vtable's
+// each with the spec's width and flags, as std writes it (`{:#p}`: on lines)
+fn __exr_fmt_dyn_ptr<G>(f: &mut Formatter, a: usize, vt: usize) {
+    if f.alt {
+        f.buf.push_str("Pointer {\n");
+        f.indent += 1;
+        __exr_indent::<()>(f);
+        f.buf.push_str("addr: ");
+        __exr_fmt_ptr::<()>(f, a);
+        f.buf.push_str(",\n");
+        __exr_indent::<()>(f);
+        f.buf.push_str("metadata: DynMetadata(\n");
+        f.indent += 1;
+        __exr_indent::<()>(f);
+        __exr_fmt_ptr::<()>(f, vt);
+        f.buf.push_str(",\n");
+        f.indent -= 1;
+        __exr_indent::<()>(f);
+        f.buf.push_str("),\n");
+        f.indent -= 1;
+        __exr_indent::<()>(f);
+        f.buf.push('}');
+    } else {
+        f.buf.push_str("Pointer { addr: ");
+        __exr_fmt_ptr::<()>(f, a);
+        f.buf.push_str(", metadata: DynMetadata(");
+        __exr_fmt_ptr::<()>(f, vt);
+        f.buf.push_str(") }");
+    }
+}
+
+// `{:p}` of a pointer to a slice / str: `Pointer { addr: 0x.., metadata: 5 }`, its address and length each with the
+// spec's width and flags, as std writes it (`{:#p}`: on lines, the address zero-extended)
+fn __exr_fmt_fat_ptr<G>(f: &mut Formatter, a: usize, n: usize) {
+    let r = f.radix;
+    let alt = f.alt;
+    if alt {
+        f.buf.push_str("Pointer {\n");
+        f.indent += 1;
+        __exr_indent::<()>(f);
+        f.buf.push_str("addr: ");
+    } else {
+        f.buf.push_str("Pointer { addr: ");
+    }
+    __exr_fmt_ptr::<()>(f, a);
+    if alt {
+        f.buf.push_str(",\n");
+        __exr_indent::<()>(f);
+        f.buf.push_str("metadata: ");
+    } else {
+        f.buf.push_str(", metadata: ");
+    }
+    f.radix = 0;
+    f.alt = false;
+    __exr_fmt_int::<()>(f, n as u64, false);
+    f.radix = r;
+    f.alt = alt;
+    if alt {
+        f.buf.push_str(",\n");
+        f.indent -= 1;
+        __exr_indent::<()>(f);
+        f.buf.push('}');
+    } else {
+        f.buf.push_str(" }");
+    }
 }
 
 // 幅に足りない分を fill で埋める (既定の寄せは def_align)
@@ -4877,9 +5221,28 @@ fn __exr_float_digits<G>(x: f64, is32: bool, out: &mut Vec<u8>) -> i32 {
 
 // `{}` / `{:?}` / `{:.N}` (Rust と同じ: Display は指数を使わず、Debug は 1e16 以上と 1e-5 未満を指数にし、整数なら `.0` を付ける)
 // `{:e}` / `{:E}`: 仮数の桁 (最短か、精度があれば prec + 1 桁に偶数丸め) と指数
+// (a number written whole: `{:08e}` pads with zeros after its sign, as std's; otherwise as a string, right-aligned)
+fn __exr_pad_num<G>(f: &mut Formatter, s: &str) {
+    if !f.zero || f.width <= s.len() {
+        __exr_pad::<()>(f, s, 2);
+        return;
+    }
+    let sb = s.as_bytes();
+    let signed = sb[0] == b'-' || sb[0] == b'+';
+    if signed {
+        f.buf.push(sb[0] as char);
+    }
+    let mut z = f.width - s.len();
+    while z > 0 {
+        f.buf.push('0');
+        z -= 1;
+    }
+    f.buf.push_str(if signed { &s[1..] } else { s });
+}
+
 fn __exr_fmt_exp<G>(f: &mut Formatter, x: f64, is32: bool, upper: bool) {
     if x != x {
-        __exr_pad::<()>(f, "NaN", 2);
+        __exr_pad_num::<()>(f, "NaN");
         return;
     }
     let neg = x.is_sign_negative();
@@ -4892,7 +5255,7 @@ fn __exr_fmt_exp<G>(f: &mut Formatter, x: f64, is32: bool, upper: bool) {
     }
     if a == 1.0 / 0.0 {
         s.push_str("inf");
-        __exr_pad::<()>(f, s.as_str(), 2);
+        __exr_pad_num::<()>(f, s.as_str());
         return;
     }
     let mut d: Vec<u8> = Vec::new();
@@ -4912,7 +5275,7 @@ fn __exr_fmt_exp<G>(f: &mut Formatter, x: f64, is32: bool, upper: bool) {
         }
     }
     __exr_exp_tail::<()>(&mut s, &d, dp - 1, if f.has_prec { f.prec + 1 } else { d.len }, upper);
-    __exr_pad::<()>(f, s.as_str(), 2);
+    __exr_pad_num::<()>(f, s.as_str());
 }
 
 fn __exr_fmt_exp_int<G>(f: &mut Formatter, mag: u128, neg: bool, upper: bool) {
@@ -4944,7 +5307,7 @@ fn __exr_fmt_exp_int<G>(f: &mut Formatter, mag: u128, neg: bool, upper: bool) {
     }
     let _ = e;
     __exr_exp_tail::<()>(&mut s, &d, dp - 1, if f.has_prec { f.prec + 1 } else { d.len }, upper);
-    __exr_pad::<()>(f, s.as_str(), 2);
+    __exr_pad_num::<()>(f, s.as_str());
 }
 
 // 仮数 d (n 桁まで 0 で埋める) と指数 e を `d.ddde-5` の形で書く
@@ -5500,10 +5863,17 @@ fn __exr_dbg_value_begin(f: &mut Formatter) -> usize {
 }
 
 fn __exr_print<G>(s: &String) {
+    let h = unsafe { __EXR_THREAD_HOOK };
+    if let Some(f) = h {
+        f(2);
+    }
     for &b in s.as_bytes() {
         unsafe {
             __exr_putchar(b as i32);
         }
+    }
+    if let Some(f) = h {
+        f(3);
     }
 }
 
@@ -5555,6 +5925,13 @@ impl<T> MaybeUninit<T> {
     pub unsafe fn assume_init_ref(&self) -> &T {
         &self.value
     }
+    // (a bitwise copy of the value, which stays where it is: the caller must not use both, as std's)
+    pub unsafe fn assume_init_read(&self) -> T {
+        unsafe { (&self.value as *const T).read() }
+    }
+    pub unsafe fn assume_init_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
 }
 
 pub unsafe fn __core_unreachable_unchecked() -> ! {
@@ -5590,12 +5967,14 @@ pub trait Read {
         while at < buf.len() {
             let n = self.read(&mut buf[at..])?;
             if n == 0 {
-                return Err(IoError { code: -3 });
+                return Err(IoError { code: -3, os: false });
             }
             at += n;
         }
         Ok(())
     }
+    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Result<usize, IoError> { __exr_read_to_end(self, buf) }
+    fn read_to_string(&mut self, buf: &mut String) -> Result<usize, IoError> { __exr_read_to_string(self, buf) }
 }
 
 // std::io::Write (bytes; Stdout and the others have methods of their own)
@@ -5609,7 +5988,7 @@ pub trait Write {
         while at < buf.len() {
             let n = self.write(&buf[at..])?;
             if n == 0 {
-                return Err(IoError { code: -4 });
+                return Err(IoError { code: -4, os: false });
             }
             at += n;
         }
@@ -5712,7 +6091,7 @@ fn __exr_cursor_seek(len: usize, pos: &mut u64, to: SeekFrom) -> Result<u64, IoE
             *pos = n;
             Ok(n)
         }
-        None => Err(IoError { code: 22 }),
+        None => Err(IoError { code: 22, os: true }),
     }
 }
 
@@ -5861,9 +6240,11 @@ impl<R: Read> Read for BufReader<R> {
 }
 
 // std::io::Error: OS のエラー (errno) か、種類とメッセージ (code < 0: InvalidData など)
+// (os: whether code is an errno, apart from the kinds' codes: `from_raw_os_error(0)` and `(-1)` are OS errors too (#256))
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct IoError {
     code: i32,
+    os: bool,
 }
 
 unsafe extern "C" {
@@ -5887,7 +6268,9 @@ fn __exr_cstr<G>(p: *const u8) -> &str {
 
 // (std の ErrorKind の名前: errno から)
 fn __exr_io_kind<G>(code: i32) -> &str {
-    if code == -1 {
+    if code <= -5 && code >= -8 {
+        "InvalidInput"
+    } else if code == -1 {
         "InvalidData"
     } else if code == -3 {
         "UnexpectedEof"
@@ -5916,18 +6299,31 @@ fn __exr_io_kind<G>(code: i32) -> &str {
 
 impl IoError {
     pub fn last_os_error() -> IoError {
-        IoError { code: unsafe { *__exr_errno_location() } }
+        IoError { code: unsafe { *__exr_errno_location() }, os: true }
+    }
+    pub fn from_raw_os_error(code: i32) -> IoError {
+        IoError { code: code, os: true }
     }
     pub fn raw_os_error(&self) -> Option<i32> {
-        if self.code > 0 { Some(self.code) } else { None }
+        if self.os { Some(self.code) } else { None }
     }
     fn __message(&self) -> &str {
-        if self.code == -1 {
+        if self.os {
+            __exr_cstr::<()>(unsafe { __exr_strerror(self.code) })
+        } else if self.code == -1 {
             "stream did not contain valid UTF-8"
         } else if self.code == -3 {
             "failed to fill whole buffer"
         } else if self.code == -4 {
             "failed to write whole buffer"
+        } else if self.code == -5 {
+            "must specify at least one of read, write, or append access"
+        } else if self.code == -6 {
+            "creating or truncating a file requires write or append access"
+        } else if self.code == -7 {
+            "append and truncate cannot both be enabled"
+        } else if self.code == -8 {
+            "file name contained an unexpected NUL byte"
         } else {
             __exr_cstr::<()>(unsafe { __exr_strerror(self.code) })
         }
@@ -5937,9 +6333,9 @@ impl IoError {
 impl Display for IoError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
         __exr_fmt_str::<()>(f, self.__message());
-        if self.code > 0 {
+        if self.os {
             __exr_fmt_str::<()>(f, " (os error ");
-            __exr_fmt_int::<()>(f, self.code as u64, false);
+            __exr_fmt_int::<()>(f, (self.code as i64).unsigned_abs(), self.code < 0);
             __exr_fmt_str::<()>(f, ")");
         }
         Ok(())
@@ -5948,18 +6344,21 @@ impl Display for IoError {
 
 impl Debug for IoError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
-        if self.code > 0 {
+        if self.os {
             __exr_fmt_str::<()>(f, "Os { code: ");
-            __exr_fmt_int::<()>(f, self.code as u64, false);
+            __exr_fmt_int::<()>(f, (self.code as i64).unsigned_abs(), self.code < 0);
             __exr_fmt_str::<()>(f, ", kind: ");
-            __exr_fmt_str::<()>(f, __exr_io_kind::<()>(self.code));
+            // (an errno's kind; the kinds' own codes are below 0, which no errno names)
+            __exr_fmt_str::<()>(f, __exr_io_kind::<()>(if self.code > 0 { self.code } else { 0 }));
             __exr_fmt_str::<()>(f, ", message: ");
             __exr_fmt_str_debug::<()>(f, self.__message());
             __exr_fmt_str::<()>(f, " }");
         } else {
-            __exr_fmt_str::<()>(f, "Error { kind: ");
+            // (OpenOptions' errors, -5 .. -7, are std's io::Error::new ones: `Custom { kind, error }`)
+            let c = self.code <= -5 && self.code >= -7;
+            __exr_fmt_str::<()>(f, if c { "Custom { kind: " } else { "Error { kind: " });
             __exr_fmt_str::<()>(f, __exr_io_kind::<()>(self.code));
-            __exr_fmt_str::<()>(f, ", message: ");
+            __exr_fmt_str::<()>(f, if c { ", error: " } else { ", message: " });
             __exr_fmt_str_debug::<()>(f, self.__message());
             __exr_fmt_str::<()>(f, " }");
         }
@@ -6060,7 +6459,7 @@ pub fn __exr_fs_read_to_string<P>(path: P) -> Result<String, IoError> {
     let v = __exr_fs_read(path)?;
     match String::from_utf8(v) {
         Ok(s) => Ok(s),
-        Err(_) => Err(IoError { code: -1 }),
+        Err(_) => Err(IoError { code: -1, os: false }),
     }
 }
 
@@ -6134,6 +6533,12 @@ pub fn __exr_env_args() -> Args {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Infallible {}
 
+impl Display for Infallible {
+    fn fmt(&self, _f: &mut Formatter) -> Result<(), __FmtError> {
+        match *self {}
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VarError {
     NotPresent,
@@ -6188,6 +6593,32 @@ impl<T> Deref for Cow<T> {
             Cow::Borrowed(s) => *s,
             Cow::Owned(v) => v.as_slice(),
         }
+    }
+}
+
+// (`s.into()` / `Cow::from(v)`: std's `From<&[T]>` / `From<Vec<T>>`, and `From<&str>` / `From<String>` for
+// `Cow<str>` (#256))
+impl<T> From<&[T]> for Cow<T> {
+    fn from(s: &[T]) -> Cow<T> {
+        Cow::Borrowed(s)
+    }
+}
+
+impl<T> From<Vec<T>> for Cow<T> {
+    fn from(v: Vec<T>) -> Cow<T> {
+        Cow::Owned(v)
+    }
+}
+
+impl From<&str> for __CowStr {
+    fn from(s: &str) -> __CowStr {
+        __CowStr::Borrowed(s)
+    }
+}
+
+impl From<String> for __CowStr {
+    fn from(s: String) -> __CowStr {
+        __CowStr::Owned(s)
     }
 }
 
@@ -7405,7 +7836,7 @@ impl Command {
                     __exr_close(out[0]);
                     __exr_close(err[0]);
                 }
-                return Err(IoError { code: e });
+                return Err(IoError { code: e, os: true });
             }
             Ok((pid, out[0], err[0]))
         }
@@ -7557,17 +7988,77 @@ pub fn __core_stdout() -> Stdout {
     Stdout { _x: 0 }
 }
 
+// (the threads' hook, set by the first thread spawned (__exr_thread_hook; a program with no threads has none, and
+// does what it did before there were threads): 0 a panic's "thread '..' panicked", 2 / 3 take / let go the lock of
+// stdout (so that another thread's output does not cut into a print, as std's stdout lock), 4 the end of a panic)
+static mut __EXR_THREAD_HOOK: Option<fn(u32) -> bool> = None;
+
+// The stdout lock, reentrant as std's: a StdoutLock's thread prints through it. The owner is the thread's context, 1 for
+// the main thread (also before any spawn: a StdoutLock taken then keeps stdout through a spawn in its life)
+static mut __EXR_OUT_LOCK: u32 = 0;
+static mut __EXR_OUT_OWNER: usize = 0;
+static mut __EXR_OUT_DEPTH: u32 = 0;
+
+fn __exr_out_me() -> usize {
+    unsafe {
+        if __exr_atomic_load(&mut __EXR_TLS_READY as *mut u32) == 0 {
+            return 1;
+        }
+        let c = __exr_pthread_getspecific(__EXR_TLS_KEY) as usize;
+        if c == 0 { 1 } else { c }
+    }
+}
+
+fn __exr_out_take() {
+    let me = __exr_out_me();
+    unsafe {
+        let owner = &mut __EXR_OUT_OWNER as *mut usize;
+        if __exr_atomic_load(owner) == me {
+            __EXR_OUT_DEPTH += 1;
+        } else {
+            __exr_lock(&mut __EXR_OUT_LOCK as *mut u32);
+            __exr_atomic_store(owner, me);
+            __EXR_OUT_DEPTH = 1;
+        }
+    }
+}
+
+// (only by the thread that holds it: another one's release changes nothing)
+fn __exr_out_give() {
+    let me = __exr_out_me();
+    unsafe {
+        let owner = &mut __EXR_OUT_OWNER as *mut usize;
+        if __exr_atomic_load(owner) != me || __EXR_OUT_DEPTH == 0 {
+            return;
+        }
+        __EXR_OUT_DEPTH -= 1;
+        if __EXR_OUT_DEPTH == 0 {
+            __exr_atomic_store(owner, 0);
+            __exr_unlock(&mut __EXR_OUT_LOCK as *mut u32);
+        }
+    }
+}
+
 fn __exr_out_str<G>(s: &str) {
+    let h = unsafe { __EXR_THREAD_HOOK };
+    if let Some(f) = h {
+        f(2);
+    }
     for &b in s.as_bytes() {
         unsafe {
             __exr_putchar(b as i32);
         }
     }
+    if let Some(f) = h {
+        f(3);
+    }
 }
 
 impl Stdout {
+    // (the stdout lock for the guard's life (reentrant: its thread prints through it); _x: 1 when taken)
     pub fn lock(&self) -> StdoutLock {
-        StdoutLock { _x: 0 }
+        __exr_out_take();
+        StdoutLock { _x: 1 }
     }
     pub fn write_str(&mut self, s: &str) -> Result<(), IoError> {
         __exr_out_str::<()>(s);
@@ -7578,6 +8069,14 @@ impl Stdout {
             __exr_fflush(core::ptr::null_mut());
         }
         Ok(())
+    }
+}
+
+impl Drop for StdoutLock {
+    fn drop(&mut self) {
+        if self._x == 1 {
+            __exr_out_give();
+        }
     }
 }
 
@@ -7727,7 +8226,12 @@ fn __exr_panic_head_at<G>(f: *const u8, n: usize, line: u64, col: u64) {
     unsafe {
         __exr_fflush(core::ptr::null_mut());
     }
-    __exr_err_str::<()>("\nthread 'main' panicked at ");
+    if let Some(h) = unsafe { __EXR_THREAD_HOOK } {
+        h(0);
+    } else {
+        __exr_err_str::<()>("\nthread 'main' panicked");
+    }
+    __exr_err_str::<()>(" at ");
     unsafe {
         __exr_write(2, f, n);
     }
@@ -7739,7 +8243,12 @@ fn __exr_panic_head_at<G>(f: *const u8, n: usize, line: u64, col: u64) {
 }
 
 fn __exr_panic_tail<G>() {
-    __exr_err_str::<()>("\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n");
+    // (with threads, the hook: the note, then a spawned thread ends alone)
+    if let Some(h) = unsafe { __EXR_THREAD_HOOK } {
+        h(4);
+    } else {
+        __exr_err_str::<()>("\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n");
+    }
     unsafe {
         __exr_exit(101);
     }
@@ -7846,7 +8355,11 @@ fn __exr_on_trap(sig: i32, info: *const u64, ctx: *const u8) {
         unsafe {
             __exr_fflush(core::ptr::null_mut());
         }
-        __exr_err_str::<()>("\nthread 'main' panicked");
+        if let Some(h) = unsafe { __EXR_THREAD_HOOK } {
+            h(0);
+        } else {
+            __exr_err_str::<()>("\nthread 'main' panicked");
+        }
         __exr_panic_tail::<()>();
     }
     // (行 0: 呼んだ側の場所 (unwrap など))
@@ -7942,6 +8455,16 @@ fn __exr_fmt_ok<G>() -> Result<(), __FmtError> {
     Ok(())
 }
 fn __exr_debug<T>(x: &T, f: &mut Formatter) {}
+// (`x.fmt(f)` / `Display::fmt(&x, f)` of a value with no fmt of its own to call (a number, a str, a derive): what `{}`
+// / `{:?}` writes, with f's flags)
+fn __exr_display_fmt<T>(x: &T, f: &mut Formatter) -> Result<(), __FmtError> {
+    __exr_display(x, f);
+    Ok(())
+}
+fn __exr_debug_fmt<T>(x: &T, f: &mut Formatter) -> Result<(), __FmtError> {
+    __exr_debug(x, f);
+    Ok(())
+}
 
 impl Display for String {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
@@ -8089,7 +8612,9 @@ impl<T> Display for Rc<T> {
 }
 
 
-// `std::sync::Arc` (one thread: the same as Rc)
+// `std::sync::Arc`: an Rc whose count is changed by atomic instructions, as std's (formal/tla/ArcDrop.tla): a clone adds
+// one, a drop takes one away and the one that takes the last frees the value. (Sequentially consistent, which is
+// stronger than std's Relaxed / Release + an Acquire fence)
 // (ポインタは型を消して持つ: `Arc<RefCell<Node>>` を Node が持つとき、レイアウトが中身を辿らないように)
 pub struct Arc<T> {
     p: *mut u8,
@@ -8106,14 +8631,18 @@ impl<T> Arc<T> {
     fn __bx(&self) -> *mut __RcBox<T> {
         self.p as *mut __RcBox<T>
     }
+    fn __strong(&self) -> *mut usize {
+        unsafe { &mut (*self.__bx()).strong as *mut usize }
+    }
     pub fn clone(&self) -> Arc<T> {
-        unsafe {
-            (*self.__bx()).strong += 1;
+        // (past isize::MAX clones std aborts: the count must not wrap to a value that frees the box)
+        if __exr_atomic_xadd(self.__strong(), 1) > 9223372036854775807 {
+            unsafe { __exr_abort() };
         }
         Arc { p: self.p }
     }
     pub fn strong_count(this: &Arc<T>) -> usize {
-        unsafe { (*this.__bx()).strong }
+        __exr_atomic_load(this.__strong())
     }
     pub fn ptr_eq(a: &Arc<T>, b: &Arc<T>) -> bool {
         a.p == b.p
@@ -8121,7 +8650,8 @@ impl<T> Arc<T> {
     // (the value, when this is the one Arc: the box is freed without dropping the value)
     pub fn try_unwrap(this: Arc<T>) -> Result<T, Arc<T>> {
         let b = this.__bx();
-        if unsafe { (*b).strong } != 1 {
+        // (1 -> 0 at once: no other thread can clone from this one meanwhile)
+        if __exr_atomic_cas(this.__strong(), 1, 0) != 1 {
             return Err(this);
         }
         let v = unsafe { (&(*b).val as *const T).read() };
@@ -8131,16 +8661,25 @@ impl<T> Arc<T> {
         __core_forget(this);
         Ok(v)
     }
+    // (as std's: this Arc's count is given up either way, and of two threads that each give up one of the last two,
+    // one gets the value)
     pub fn into_inner(this: Arc<T>) -> Option<T> {
-        match Arc::try_unwrap(this) {
-            Ok(v) => Some(v),
-            Err(_) => None,
+        let last = __exr_atomic_xadd(this.__strong(), 18446744073709551615) == 1;
+        let p = this.p;
+        __core_forget(this);
+        if !last {
+            return None;
         }
+        let v = unsafe { (&(*(p as *mut __RcBox<T>)).val as *const T).read() };
+        unsafe {
+            __exr_free(p);
+        }
+        Some(v)
     }
-    // `&mut T` only while this is the one Arc (CVE-2018-25008 was this check, too weakly synchronized: zustc's
-    // threads are green threads on one OS thread, so the count cannot change under it)
+    // `&mut T` only while this is the one Arc (CVE-2018-25008 was this check, too weakly synchronized: the load is
+    // sequentially consistent, so the other Arcs' drops, and what their threads wrote before them, are seen)
     pub fn get_mut(this: &mut Arc<T>) -> Option<&mut T> {
-        if unsafe { (*this.__bx()).strong } == 1 { Some(unsafe { &mut (*this.__bx()).val }) } else { None }
+        if __exr_atomic_load(this.__strong()) == 1 { Some(unsafe { &mut (*this.__bx()).val }) } else { None }
     }
     pub fn as_ref(&self) -> &T {
         unsafe { &(*self.__bx()).val }
@@ -8160,10 +8699,10 @@ impl<T> Drop for Arc<T> {
         if self.p as usize == 0 {
             return;
         }
-        unsafe {
-            let b = self.__bx();
-            (*b).strong -= 1;
-            if (*b).strong == 0 {
+        // (the thread that takes the count from 1 to 0 is the last: it drops the value)
+        if __exr_atomic_xadd(self.__strong(), 18446744073709551615) == 1 {
+            unsafe {
+                let b = self.__bx();
                 __exr_drop_in_place(&mut (*b).val as *mut T);
                 __exr_free(self.p);
             }
@@ -8186,8 +8725,74 @@ impl<T> Display for Arc<T> {
 }
 
 
-// `std::sync::atomic` (one thread: a cell; the orderings are accepted and ignored).
-// The front end renames `Ordering` imported from `std::sync::atomic` to `__AtOrd_` (same length: no column shift)
+// `std::sync::atomic`: each operation is one atomic instruction, sequentially consistent whatever ordering is asked
+// for (std's are all as strong or weaker). The front end renames `Ordering` imported from `std::sync::atomic` to
+// `__AtOrd_` (same length: no column shift)
+//
+// The intrinsics: acg lowers a call of each, on an integer, bool, char or pointer of 1, 2, 4 or 8 bytes, to the
+// instruction (Op::AtomicLoad / AtomicStore / AtomicRmw / AtomicCas / Fence), not a call. The bodies are never run for
+// those types; xadd and cas have no meaning for others
+fn __exr_atomic_load<T>(p: *mut T) -> T {
+    unsafe { p.read() }
+}
+fn __exr_atomic_store<T>(p: *mut T, v: T) {
+    unsafe { p.write(v) }
+}
+fn __exr_atomic_xchg<T>(p: *mut T, v: T) -> T {
+    let old = unsafe { p.read() };
+    unsafe { p.write(v) };
+    old
+}
+fn __exr_atomic_xadd<T>(p: *mut T, v: T) -> T {
+    let _ = v;
+    unsafe { __exr_abort() };
+    unsafe { p.read() }
+}
+// (the old value; *p is new when it was cur)
+fn __exr_atomic_cas<T>(p: *mut T, cur: T, new: T) -> T {
+    let _ = (cur, new);
+    unsafe { __exr_abort() };
+    unsafe { p.read() }
+}
+fn __exr_atomic_fence() {}
+
+// (a read-modify-write as a compare-and-swap loop: the old value)
+fn __exr_atomic_rmw<T: Copy + PartialEq, F: FnMut(T) -> T>(p: *mut T, mut f: F) -> T {
+    let mut old = __exr_atomic_load(p);
+    loop {
+        let seen = __exr_atomic_cas(p, old, f(old));
+        if seen == old {
+            return old;
+        }
+        old = seen;
+    }
+}
+
+// (fetch_update: Err(the value) when f gives None)
+fn __exr_atomic_try_rmw<T: Copy + PartialEq, F: FnMut(T) -> Option<T>>(p: *mut T, mut f: F) -> Result<T, T> {
+    let mut old = __exr_atomic_load(p);
+    loop {
+        match f(old) {
+            Some(x) => {
+                let seen = __exr_atomic_cas(p, old, x);
+                if seen == old {
+                    return Ok(old);
+                }
+                old = seen;
+            }
+            None => return Err(old),
+        }
+    }
+}
+
+// `std::sync::atomic::fence` / `compiler_fence` (a full fence: as strong as any ordering)
+pub fn __core_fence(_o: __AtOrd_) {
+    __exr_atomic_fence();
+}
+pub fn __core_compiler_fence(_o: __AtOrd_) {
+    __exr_atomic_fence();
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum __AtOrd_ {
     Relaxed,
@@ -8209,25 +8814,17 @@ impl AtomicUsize {
         &self.v as *const usize as *mut usize
     }
     pub fn load(&self, _o: __AtOrd_) -> usize {
-        __exr_green_spin();
-        self.v
+        __exr_atomic_load(self.__p())
     }
     pub fn store(&self, x: usize, _o: __AtOrd_) {
-        unsafe { self.__p().write(x) }
+        __exr_atomic_store(self.__p(), x)
     }
     pub fn swap(&self, x: usize, _o: __AtOrd_) -> usize {
-        let old = self.v;
-        unsafe { self.__p().write(x) }
-        old
+        __exr_atomic_xchg(self.__p(), x)
     }
     pub fn compare_exchange(&self, cur: usize, new: usize, _s: __AtOrd_, _f: __AtOrd_) -> Result<usize, usize> {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-            Ok(old)
-        } else {
-            Err(old)
-        }
+        let old = __exr_atomic_cas(self.__p(), cur, new);
+        if old == cur { Ok(old) } else { Err(old) }
     }
     pub fn compare_exchange_weak(&self, cur: usize, new: usize, s: __AtOrd_, f: __AtOrd_) -> Result<usize, usize> {
         self.compare_exchange(cur, new, s, f)
@@ -8239,79 +8836,46 @@ impl AtomicUsize {
         self.v
     }
     pub fn fetch_add(&self, x: usize, _o: __AtOrd_) -> usize {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_add(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), x)
     }
     pub fn fetch_sub(&self, x: usize, _o: __AtOrd_) -> usize {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_sub(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), (0 as usize).wrapping_sub(x))
     }
     pub fn fetch_max(&self, x: usize, _o: __AtOrd_) -> usize {
-        let old = self.v;
-        if x > old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: usize| if x > old { x } else { old })
     }
     pub fn fetch_min(&self, x: usize, _o: __AtOrd_) -> usize {
-        let old = self.v;
-        if x < old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: usize| if x < old { x } else { old })
     }
     pub fn fetch_and(&self, x: usize, _o: __AtOrd_) -> usize {
-        let old = self.v;
-        unsafe { self.__p().write(old & x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: usize| old & x)
     }
     pub fn fetch_or(&self, x: usize, _o: __AtOrd_) -> usize {
-        let old = self.v;
-        unsafe { self.__p().write(old | x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: usize| old | x)
     }
     pub fn fetch_xor(&self, x: usize, _o: __AtOrd_) -> usize {
-        let old = self.v;
-        unsafe { self.__p().write(old ^ x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: usize| old ^ x)
     }
     pub fn fetch_nand(&self, x: usize, _o: __AtOrd_) -> usize {
-        let old = self.v;
-        unsafe { self.__p().write(!(old & x)) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: usize| !(old & x))
     }
     pub fn compare_and_swap(&self, cur: usize, new: usize, _o: __AtOrd_) -> usize {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-        }
-        old
+        __exr_atomic_cas(self.__p(), cur, new)
     }
-    pub fn fetch_update<F: FnMut(usize) -> Option<usize>>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> Result<usize, usize> {
-        let old = self.v;
-        match f(old) {
-            Some(x) => {
-                unsafe { self.__p().write(x) }
-                Ok(old)
-            }
-            None => Err(old),
-        }
+    pub fn fetch_update<F: FnMut(usize) -> Option<usize>>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> Result<usize, usize> {
+        __exr_atomic_try_rmw(self.__p(), f)
     }
     pub fn try_update<F: FnMut(usize) -> Option<usize>>(&self, s: __AtOrd_, f: __AtOrd_, g: F) -> Result<usize, usize> {
         self.fetch_update(s, f, g)
     }
-    pub fn update<F: FnMut(usize) -> usize>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> usize {
-        let old = self.v;
-        unsafe { self.__p().write(f(old)) }
-        old
+    pub fn update<F: FnMut(usize) -> usize>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> usize {
+        __exr_atomic_rmw(self.__p(), f)
     }
 }
 
 impl Debug for AtomicUsize {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
-        __exr_debug(&self.v, f);
+        __exr_debug(&self.load(__AtOrd_::Relaxed), f);
         Ok(())
     }
 }
@@ -8328,25 +8892,17 @@ impl AtomicIsize {
         &self.v as *const isize as *mut isize
     }
     pub fn load(&self, _o: __AtOrd_) -> isize {
-        __exr_green_spin();
-        self.v
+        __exr_atomic_load(self.__p())
     }
     pub fn store(&self, x: isize, _o: __AtOrd_) {
-        unsafe { self.__p().write(x) }
+        __exr_atomic_store(self.__p(), x)
     }
     pub fn swap(&self, x: isize, _o: __AtOrd_) -> isize {
-        let old = self.v;
-        unsafe { self.__p().write(x) }
-        old
+        __exr_atomic_xchg(self.__p(), x)
     }
     pub fn compare_exchange(&self, cur: isize, new: isize, _s: __AtOrd_, _f: __AtOrd_) -> Result<isize, isize> {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-            Ok(old)
-        } else {
-            Err(old)
-        }
+        let old = __exr_atomic_cas(self.__p(), cur, new);
+        if old == cur { Ok(old) } else { Err(old) }
     }
     pub fn compare_exchange_weak(&self, cur: isize, new: isize, s: __AtOrd_, f: __AtOrd_) -> Result<isize, isize> {
         self.compare_exchange(cur, new, s, f)
@@ -8358,79 +8914,46 @@ impl AtomicIsize {
         self.v
     }
     pub fn fetch_add(&self, x: isize, _o: __AtOrd_) -> isize {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_add(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), x)
     }
     pub fn fetch_sub(&self, x: isize, _o: __AtOrd_) -> isize {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_sub(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), (0 as isize).wrapping_sub(x))
     }
     pub fn fetch_max(&self, x: isize, _o: __AtOrd_) -> isize {
-        let old = self.v;
-        if x > old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: isize| if x > old { x } else { old })
     }
     pub fn fetch_min(&self, x: isize, _o: __AtOrd_) -> isize {
-        let old = self.v;
-        if x < old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: isize| if x < old { x } else { old })
     }
     pub fn fetch_and(&self, x: isize, _o: __AtOrd_) -> isize {
-        let old = self.v;
-        unsafe { self.__p().write(old & x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: isize| old & x)
     }
     pub fn fetch_or(&self, x: isize, _o: __AtOrd_) -> isize {
-        let old = self.v;
-        unsafe { self.__p().write(old | x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: isize| old | x)
     }
     pub fn fetch_xor(&self, x: isize, _o: __AtOrd_) -> isize {
-        let old = self.v;
-        unsafe { self.__p().write(old ^ x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: isize| old ^ x)
     }
     pub fn fetch_nand(&self, x: isize, _o: __AtOrd_) -> isize {
-        let old = self.v;
-        unsafe { self.__p().write(!(old & x)) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: isize| !(old & x))
     }
     pub fn compare_and_swap(&self, cur: isize, new: isize, _o: __AtOrd_) -> isize {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-        }
-        old
+        __exr_atomic_cas(self.__p(), cur, new)
     }
-    pub fn fetch_update<F: FnMut(isize) -> Option<isize>>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> Result<isize, isize> {
-        let old = self.v;
-        match f(old) {
-            Some(x) => {
-                unsafe { self.__p().write(x) }
-                Ok(old)
-            }
-            None => Err(old),
-        }
+    pub fn fetch_update<F: FnMut(isize) -> Option<isize>>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> Result<isize, isize> {
+        __exr_atomic_try_rmw(self.__p(), f)
     }
     pub fn try_update<F: FnMut(isize) -> Option<isize>>(&self, s: __AtOrd_, f: __AtOrd_, g: F) -> Result<isize, isize> {
         self.fetch_update(s, f, g)
     }
-    pub fn update<F: FnMut(isize) -> isize>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> isize {
-        let old = self.v;
-        unsafe { self.__p().write(f(old)) }
-        old
+    pub fn update<F: FnMut(isize) -> isize>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> isize {
+        __exr_atomic_rmw(self.__p(), f)
     }
 }
 
 impl Debug for AtomicIsize {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
-        __exr_debug(&self.v, f);
+        __exr_debug(&self.load(__AtOrd_::Relaxed), f);
         Ok(())
     }
 }
@@ -8447,25 +8970,17 @@ impl AtomicU8 {
         &self.v as *const u8 as *mut u8
     }
     pub fn load(&self, _o: __AtOrd_) -> u8 {
-        __exr_green_spin();
-        self.v
+        __exr_atomic_load(self.__p())
     }
     pub fn store(&self, x: u8, _o: __AtOrd_) {
-        unsafe { self.__p().write(x) }
+        __exr_atomic_store(self.__p(), x)
     }
     pub fn swap(&self, x: u8, _o: __AtOrd_) -> u8 {
-        let old = self.v;
-        unsafe { self.__p().write(x) }
-        old
+        __exr_atomic_xchg(self.__p(), x)
     }
     pub fn compare_exchange(&self, cur: u8, new: u8, _s: __AtOrd_, _f: __AtOrd_) -> Result<u8, u8> {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-            Ok(old)
-        } else {
-            Err(old)
-        }
+        let old = __exr_atomic_cas(self.__p(), cur, new);
+        if old == cur { Ok(old) } else { Err(old) }
     }
     pub fn compare_exchange_weak(&self, cur: u8, new: u8, s: __AtOrd_, f: __AtOrd_) -> Result<u8, u8> {
         self.compare_exchange(cur, new, s, f)
@@ -8477,79 +8992,46 @@ impl AtomicU8 {
         self.v
     }
     pub fn fetch_add(&self, x: u8, _o: __AtOrd_) -> u8 {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_add(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), x)
     }
     pub fn fetch_sub(&self, x: u8, _o: __AtOrd_) -> u8 {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_sub(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), (0 as u8).wrapping_sub(x))
     }
     pub fn fetch_max(&self, x: u8, _o: __AtOrd_) -> u8 {
-        let old = self.v;
-        if x > old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u8| if x > old { x } else { old })
     }
     pub fn fetch_min(&self, x: u8, _o: __AtOrd_) -> u8 {
-        let old = self.v;
-        if x < old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u8| if x < old { x } else { old })
     }
     pub fn fetch_and(&self, x: u8, _o: __AtOrd_) -> u8 {
-        let old = self.v;
-        unsafe { self.__p().write(old & x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u8| old & x)
     }
     pub fn fetch_or(&self, x: u8, _o: __AtOrd_) -> u8 {
-        let old = self.v;
-        unsafe { self.__p().write(old | x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u8| old | x)
     }
     pub fn fetch_xor(&self, x: u8, _o: __AtOrd_) -> u8 {
-        let old = self.v;
-        unsafe { self.__p().write(old ^ x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u8| old ^ x)
     }
     pub fn fetch_nand(&self, x: u8, _o: __AtOrd_) -> u8 {
-        let old = self.v;
-        unsafe { self.__p().write(!(old & x)) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u8| !(old & x))
     }
     pub fn compare_and_swap(&self, cur: u8, new: u8, _o: __AtOrd_) -> u8 {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-        }
-        old
+        __exr_atomic_cas(self.__p(), cur, new)
     }
-    pub fn fetch_update<F: FnMut(u8) -> Option<u8>>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> Result<u8, u8> {
-        let old = self.v;
-        match f(old) {
-            Some(x) => {
-                unsafe { self.__p().write(x) }
-                Ok(old)
-            }
-            None => Err(old),
-        }
+    pub fn fetch_update<F: FnMut(u8) -> Option<u8>>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> Result<u8, u8> {
+        __exr_atomic_try_rmw(self.__p(), f)
     }
     pub fn try_update<F: FnMut(u8) -> Option<u8>>(&self, s: __AtOrd_, f: __AtOrd_, g: F) -> Result<u8, u8> {
         self.fetch_update(s, f, g)
     }
-    pub fn update<F: FnMut(u8) -> u8>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> u8 {
-        let old = self.v;
-        unsafe { self.__p().write(f(old)) }
-        old
+    pub fn update<F: FnMut(u8) -> u8>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> u8 {
+        __exr_atomic_rmw(self.__p(), f)
     }
 }
 
 impl Debug for AtomicU8 {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
-        __exr_debug(&self.v, f);
+        __exr_debug(&self.load(__AtOrd_::Relaxed), f);
         Ok(())
     }
 }
@@ -8566,25 +9048,17 @@ impl AtomicU16 {
         &self.v as *const u16 as *mut u16
     }
     pub fn load(&self, _o: __AtOrd_) -> u16 {
-        __exr_green_spin();
-        self.v
+        __exr_atomic_load(self.__p())
     }
     pub fn store(&self, x: u16, _o: __AtOrd_) {
-        unsafe { self.__p().write(x) }
+        __exr_atomic_store(self.__p(), x)
     }
     pub fn swap(&self, x: u16, _o: __AtOrd_) -> u16 {
-        let old = self.v;
-        unsafe { self.__p().write(x) }
-        old
+        __exr_atomic_xchg(self.__p(), x)
     }
     pub fn compare_exchange(&self, cur: u16, new: u16, _s: __AtOrd_, _f: __AtOrd_) -> Result<u16, u16> {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-            Ok(old)
-        } else {
-            Err(old)
-        }
+        let old = __exr_atomic_cas(self.__p(), cur, new);
+        if old == cur { Ok(old) } else { Err(old) }
     }
     pub fn compare_exchange_weak(&self, cur: u16, new: u16, s: __AtOrd_, f: __AtOrd_) -> Result<u16, u16> {
         self.compare_exchange(cur, new, s, f)
@@ -8596,79 +9070,46 @@ impl AtomicU16 {
         self.v
     }
     pub fn fetch_add(&self, x: u16, _o: __AtOrd_) -> u16 {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_add(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), x)
     }
     pub fn fetch_sub(&self, x: u16, _o: __AtOrd_) -> u16 {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_sub(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), (0 as u16).wrapping_sub(x))
     }
     pub fn fetch_max(&self, x: u16, _o: __AtOrd_) -> u16 {
-        let old = self.v;
-        if x > old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u16| if x > old { x } else { old })
     }
     pub fn fetch_min(&self, x: u16, _o: __AtOrd_) -> u16 {
-        let old = self.v;
-        if x < old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u16| if x < old { x } else { old })
     }
     pub fn fetch_and(&self, x: u16, _o: __AtOrd_) -> u16 {
-        let old = self.v;
-        unsafe { self.__p().write(old & x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u16| old & x)
     }
     pub fn fetch_or(&self, x: u16, _o: __AtOrd_) -> u16 {
-        let old = self.v;
-        unsafe { self.__p().write(old | x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u16| old | x)
     }
     pub fn fetch_xor(&self, x: u16, _o: __AtOrd_) -> u16 {
-        let old = self.v;
-        unsafe { self.__p().write(old ^ x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u16| old ^ x)
     }
     pub fn fetch_nand(&self, x: u16, _o: __AtOrd_) -> u16 {
-        let old = self.v;
-        unsafe { self.__p().write(!(old & x)) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u16| !(old & x))
     }
     pub fn compare_and_swap(&self, cur: u16, new: u16, _o: __AtOrd_) -> u16 {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-        }
-        old
+        __exr_atomic_cas(self.__p(), cur, new)
     }
-    pub fn fetch_update<F: FnMut(u16) -> Option<u16>>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> Result<u16, u16> {
-        let old = self.v;
-        match f(old) {
-            Some(x) => {
-                unsafe { self.__p().write(x) }
-                Ok(old)
-            }
-            None => Err(old),
-        }
+    pub fn fetch_update<F: FnMut(u16) -> Option<u16>>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> Result<u16, u16> {
+        __exr_atomic_try_rmw(self.__p(), f)
     }
     pub fn try_update<F: FnMut(u16) -> Option<u16>>(&self, s: __AtOrd_, f: __AtOrd_, g: F) -> Result<u16, u16> {
         self.fetch_update(s, f, g)
     }
-    pub fn update<F: FnMut(u16) -> u16>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> u16 {
-        let old = self.v;
-        unsafe { self.__p().write(f(old)) }
-        old
+    pub fn update<F: FnMut(u16) -> u16>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> u16 {
+        __exr_atomic_rmw(self.__p(), f)
     }
 }
 
 impl Debug for AtomicU16 {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
-        __exr_debug(&self.v, f);
+        __exr_debug(&self.load(__AtOrd_::Relaxed), f);
         Ok(())
     }
 }
@@ -8685,25 +9126,17 @@ impl AtomicU32 {
         &self.v as *const u32 as *mut u32
     }
     pub fn load(&self, _o: __AtOrd_) -> u32 {
-        __exr_green_spin();
-        self.v
+        __exr_atomic_load(self.__p())
     }
     pub fn store(&self, x: u32, _o: __AtOrd_) {
-        unsafe { self.__p().write(x) }
+        __exr_atomic_store(self.__p(), x)
     }
     pub fn swap(&self, x: u32, _o: __AtOrd_) -> u32 {
-        let old = self.v;
-        unsafe { self.__p().write(x) }
-        old
+        __exr_atomic_xchg(self.__p(), x)
     }
     pub fn compare_exchange(&self, cur: u32, new: u32, _s: __AtOrd_, _f: __AtOrd_) -> Result<u32, u32> {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-            Ok(old)
-        } else {
-            Err(old)
-        }
+        let old = __exr_atomic_cas(self.__p(), cur, new);
+        if old == cur { Ok(old) } else { Err(old) }
     }
     pub fn compare_exchange_weak(&self, cur: u32, new: u32, s: __AtOrd_, f: __AtOrd_) -> Result<u32, u32> {
         self.compare_exchange(cur, new, s, f)
@@ -8715,79 +9148,46 @@ impl AtomicU32 {
         self.v
     }
     pub fn fetch_add(&self, x: u32, _o: __AtOrd_) -> u32 {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_add(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), x)
     }
     pub fn fetch_sub(&self, x: u32, _o: __AtOrd_) -> u32 {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_sub(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), (0 as u32).wrapping_sub(x))
     }
     pub fn fetch_max(&self, x: u32, _o: __AtOrd_) -> u32 {
-        let old = self.v;
-        if x > old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u32| if x > old { x } else { old })
     }
     pub fn fetch_min(&self, x: u32, _o: __AtOrd_) -> u32 {
-        let old = self.v;
-        if x < old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u32| if x < old { x } else { old })
     }
     pub fn fetch_and(&self, x: u32, _o: __AtOrd_) -> u32 {
-        let old = self.v;
-        unsafe { self.__p().write(old & x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u32| old & x)
     }
     pub fn fetch_or(&self, x: u32, _o: __AtOrd_) -> u32 {
-        let old = self.v;
-        unsafe { self.__p().write(old | x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u32| old | x)
     }
     pub fn fetch_xor(&self, x: u32, _o: __AtOrd_) -> u32 {
-        let old = self.v;
-        unsafe { self.__p().write(old ^ x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u32| old ^ x)
     }
     pub fn fetch_nand(&self, x: u32, _o: __AtOrd_) -> u32 {
-        let old = self.v;
-        unsafe { self.__p().write(!(old & x)) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u32| !(old & x))
     }
     pub fn compare_and_swap(&self, cur: u32, new: u32, _o: __AtOrd_) -> u32 {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-        }
-        old
+        __exr_atomic_cas(self.__p(), cur, new)
     }
-    pub fn fetch_update<F: FnMut(u32) -> Option<u32>>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> Result<u32, u32> {
-        let old = self.v;
-        match f(old) {
-            Some(x) => {
-                unsafe { self.__p().write(x) }
-                Ok(old)
-            }
-            None => Err(old),
-        }
+    pub fn fetch_update<F: FnMut(u32) -> Option<u32>>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> Result<u32, u32> {
+        __exr_atomic_try_rmw(self.__p(), f)
     }
     pub fn try_update<F: FnMut(u32) -> Option<u32>>(&self, s: __AtOrd_, f: __AtOrd_, g: F) -> Result<u32, u32> {
         self.fetch_update(s, f, g)
     }
-    pub fn update<F: FnMut(u32) -> u32>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> u32 {
-        let old = self.v;
-        unsafe { self.__p().write(f(old)) }
-        old
+    pub fn update<F: FnMut(u32) -> u32>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> u32 {
+        __exr_atomic_rmw(self.__p(), f)
     }
 }
 
 impl Debug for AtomicU32 {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
-        __exr_debug(&self.v, f);
+        __exr_debug(&self.load(__AtOrd_::Relaxed), f);
         Ok(())
     }
 }
@@ -8804,25 +9204,17 @@ impl AtomicU64 {
         &self.v as *const u64 as *mut u64
     }
     pub fn load(&self, _o: __AtOrd_) -> u64 {
-        __exr_green_spin();
-        self.v
+        __exr_atomic_load(self.__p())
     }
     pub fn store(&self, x: u64, _o: __AtOrd_) {
-        unsafe { self.__p().write(x) }
+        __exr_atomic_store(self.__p(), x)
     }
     pub fn swap(&self, x: u64, _o: __AtOrd_) -> u64 {
-        let old = self.v;
-        unsafe { self.__p().write(x) }
-        old
+        __exr_atomic_xchg(self.__p(), x)
     }
     pub fn compare_exchange(&self, cur: u64, new: u64, _s: __AtOrd_, _f: __AtOrd_) -> Result<u64, u64> {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-            Ok(old)
-        } else {
-            Err(old)
-        }
+        let old = __exr_atomic_cas(self.__p(), cur, new);
+        if old == cur { Ok(old) } else { Err(old) }
     }
     pub fn compare_exchange_weak(&self, cur: u64, new: u64, s: __AtOrd_, f: __AtOrd_) -> Result<u64, u64> {
         self.compare_exchange(cur, new, s, f)
@@ -8834,79 +9226,46 @@ impl AtomicU64 {
         self.v
     }
     pub fn fetch_add(&self, x: u64, _o: __AtOrd_) -> u64 {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_add(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), x)
     }
     pub fn fetch_sub(&self, x: u64, _o: __AtOrd_) -> u64 {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_sub(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), (0 as u64).wrapping_sub(x))
     }
     pub fn fetch_max(&self, x: u64, _o: __AtOrd_) -> u64 {
-        let old = self.v;
-        if x > old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u64| if x > old { x } else { old })
     }
     pub fn fetch_min(&self, x: u64, _o: __AtOrd_) -> u64 {
-        let old = self.v;
-        if x < old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u64| if x < old { x } else { old })
     }
     pub fn fetch_and(&self, x: u64, _o: __AtOrd_) -> u64 {
-        let old = self.v;
-        unsafe { self.__p().write(old & x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u64| old & x)
     }
     pub fn fetch_or(&self, x: u64, _o: __AtOrd_) -> u64 {
-        let old = self.v;
-        unsafe { self.__p().write(old | x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u64| old | x)
     }
     pub fn fetch_xor(&self, x: u64, _o: __AtOrd_) -> u64 {
-        let old = self.v;
-        unsafe { self.__p().write(old ^ x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u64| old ^ x)
     }
     pub fn fetch_nand(&self, x: u64, _o: __AtOrd_) -> u64 {
-        let old = self.v;
-        unsafe { self.__p().write(!(old & x)) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: u64| !(old & x))
     }
     pub fn compare_and_swap(&self, cur: u64, new: u64, _o: __AtOrd_) -> u64 {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-        }
-        old
+        __exr_atomic_cas(self.__p(), cur, new)
     }
-    pub fn fetch_update<F: FnMut(u64) -> Option<u64>>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> Result<u64, u64> {
-        let old = self.v;
-        match f(old) {
-            Some(x) => {
-                unsafe { self.__p().write(x) }
-                Ok(old)
-            }
-            None => Err(old),
-        }
+    pub fn fetch_update<F: FnMut(u64) -> Option<u64>>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> Result<u64, u64> {
+        __exr_atomic_try_rmw(self.__p(), f)
     }
     pub fn try_update<F: FnMut(u64) -> Option<u64>>(&self, s: __AtOrd_, f: __AtOrd_, g: F) -> Result<u64, u64> {
         self.fetch_update(s, f, g)
     }
-    pub fn update<F: FnMut(u64) -> u64>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> u64 {
-        let old = self.v;
-        unsafe { self.__p().write(f(old)) }
-        old
+    pub fn update<F: FnMut(u64) -> u64>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> u64 {
+        __exr_atomic_rmw(self.__p(), f)
     }
 }
 
 impl Debug for AtomicU64 {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
-        __exr_debug(&self.v, f);
+        __exr_debug(&self.load(__AtOrd_::Relaxed), f);
         Ok(())
     }
 }
@@ -8923,25 +9282,17 @@ impl AtomicI8 {
         &self.v as *const i8 as *mut i8
     }
     pub fn load(&self, _o: __AtOrd_) -> i8 {
-        __exr_green_spin();
-        self.v
+        __exr_atomic_load(self.__p())
     }
     pub fn store(&self, x: i8, _o: __AtOrd_) {
-        unsafe { self.__p().write(x) }
+        __exr_atomic_store(self.__p(), x)
     }
     pub fn swap(&self, x: i8, _o: __AtOrd_) -> i8 {
-        let old = self.v;
-        unsafe { self.__p().write(x) }
-        old
+        __exr_atomic_xchg(self.__p(), x)
     }
     pub fn compare_exchange(&self, cur: i8, new: i8, _s: __AtOrd_, _f: __AtOrd_) -> Result<i8, i8> {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-            Ok(old)
-        } else {
-            Err(old)
-        }
+        let old = __exr_atomic_cas(self.__p(), cur, new);
+        if old == cur { Ok(old) } else { Err(old) }
     }
     pub fn compare_exchange_weak(&self, cur: i8, new: i8, s: __AtOrd_, f: __AtOrd_) -> Result<i8, i8> {
         self.compare_exchange(cur, new, s, f)
@@ -8953,79 +9304,46 @@ impl AtomicI8 {
         self.v
     }
     pub fn fetch_add(&self, x: i8, _o: __AtOrd_) -> i8 {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_add(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), x)
     }
     pub fn fetch_sub(&self, x: i8, _o: __AtOrd_) -> i8 {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_sub(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), (0 as i8).wrapping_sub(x))
     }
     pub fn fetch_max(&self, x: i8, _o: __AtOrd_) -> i8 {
-        let old = self.v;
-        if x > old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i8| if x > old { x } else { old })
     }
     pub fn fetch_min(&self, x: i8, _o: __AtOrd_) -> i8 {
-        let old = self.v;
-        if x < old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i8| if x < old { x } else { old })
     }
     pub fn fetch_and(&self, x: i8, _o: __AtOrd_) -> i8 {
-        let old = self.v;
-        unsafe { self.__p().write(old & x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i8| old & x)
     }
     pub fn fetch_or(&self, x: i8, _o: __AtOrd_) -> i8 {
-        let old = self.v;
-        unsafe { self.__p().write(old | x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i8| old | x)
     }
     pub fn fetch_xor(&self, x: i8, _o: __AtOrd_) -> i8 {
-        let old = self.v;
-        unsafe { self.__p().write(old ^ x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i8| old ^ x)
     }
     pub fn fetch_nand(&self, x: i8, _o: __AtOrd_) -> i8 {
-        let old = self.v;
-        unsafe { self.__p().write(!(old & x)) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i8| !(old & x))
     }
     pub fn compare_and_swap(&self, cur: i8, new: i8, _o: __AtOrd_) -> i8 {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-        }
-        old
+        __exr_atomic_cas(self.__p(), cur, new)
     }
-    pub fn fetch_update<F: FnMut(i8) -> Option<i8>>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> Result<i8, i8> {
-        let old = self.v;
-        match f(old) {
-            Some(x) => {
-                unsafe { self.__p().write(x) }
-                Ok(old)
-            }
-            None => Err(old),
-        }
+    pub fn fetch_update<F: FnMut(i8) -> Option<i8>>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> Result<i8, i8> {
+        __exr_atomic_try_rmw(self.__p(), f)
     }
     pub fn try_update<F: FnMut(i8) -> Option<i8>>(&self, s: __AtOrd_, f: __AtOrd_, g: F) -> Result<i8, i8> {
         self.fetch_update(s, f, g)
     }
-    pub fn update<F: FnMut(i8) -> i8>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> i8 {
-        let old = self.v;
-        unsafe { self.__p().write(f(old)) }
-        old
+    pub fn update<F: FnMut(i8) -> i8>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> i8 {
+        __exr_atomic_rmw(self.__p(), f)
     }
 }
 
 impl Debug for AtomicI8 {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
-        __exr_debug(&self.v, f);
+        __exr_debug(&self.load(__AtOrd_::Relaxed), f);
         Ok(())
     }
 }
@@ -9042,25 +9360,17 @@ impl AtomicI16 {
         &self.v as *const i16 as *mut i16
     }
     pub fn load(&self, _o: __AtOrd_) -> i16 {
-        __exr_green_spin();
-        self.v
+        __exr_atomic_load(self.__p())
     }
     pub fn store(&self, x: i16, _o: __AtOrd_) {
-        unsafe { self.__p().write(x) }
+        __exr_atomic_store(self.__p(), x)
     }
     pub fn swap(&self, x: i16, _o: __AtOrd_) -> i16 {
-        let old = self.v;
-        unsafe { self.__p().write(x) }
-        old
+        __exr_atomic_xchg(self.__p(), x)
     }
     pub fn compare_exchange(&self, cur: i16, new: i16, _s: __AtOrd_, _f: __AtOrd_) -> Result<i16, i16> {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-            Ok(old)
-        } else {
-            Err(old)
-        }
+        let old = __exr_atomic_cas(self.__p(), cur, new);
+        if old == cur { Ok(old) } else { Err(old) }
     }
     pub fn compare_exchange_weak(&self, cur: i16, new: i16, s: __AtOrd_, f: __AtOrd_) -> Result<i16, i16> {
         self.compare_exchange(cur, new, s, f)
@@ -9072,79 +9382,46 @@ impl AtomicI16 {
         self.v
     }
     pub fn fetch_add(&self, x: i16, _o: __AtOrd_) -> i16 {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_add(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), x)
     }
     pub fn fetch_sub(&self, x: i16, _o: __AtOrd_) -> i16 {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_sub(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), (0 as i16).wrapping_sub(x))
     }
     pub fn fetch_max(&self, x: i16, _o: __AtOrd_) -> i16 {
-        let old = self.v;
-        if x > old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i16| if x > old { x } else { old })
     }
     pub fn fetch_min(&self, x: i16, _o: __AtOrd_) -> i16 {
-        let old = self.v;
-        if x < old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i16| if x < old { x } else { old })
     }
     pub fn fetch_and(&self, x: i16, _o: __AtOrd_) -> i16 {
-        let old = self.v;
-        unsafe { self.__p().write(old & x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i16| old & x)
     }
     pub fn fetch_or(&self, x: i16, _o: __AtOrd_) -> i16 {
-        let old = self.v;
-        unsafe { self.__p().write(old | x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i16| old | x)
     }
     pub fn fetch_xor(&self, x: i16, _o: __AtOrd_) -> i16 {
-        let old = self.v;
-        unsafe { self.__p().write(old ^ x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i16| old ^ x)
     }
     pub fn fetch_nand(&self, x: i16, _o: __AtOrd_) -> i16 {
-        let old = self.v;
-        unsafe { self.__p().write(!(old & x)) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i16| !(old & x))
     }
     pub fn compare_and_swap(&self, cur: i16, new: i16, _o: __AtOrd_) -> i16 {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-        }
-        old
+        __exr_atomic_cas(self.__p(), cur, new)
     }
-    pub fn fetch_update<F: FnMut(i16) -> Option<i16>>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> Result<i16, i16> {
-        let old = self.v;
-        match f(old) {
-            Some(x) => {
-                unsafe { self.__p().write(x) }
-                Ok(old)
-            }
-            None => Err(old),
-        }
+    pub fn fetch_update<F: FnMut(i16) -> Option<i16>>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> Result<i16, i16> {
+        __exr_atomic_try_rmw(self.__p(), f)
     }
     pub fn try_update<F: FnMut(i16) -> Option<i16>>(&self, s: __AtOrd_, f: __AtOrd_, g: F) -> Result<i16, i16> {
         self.fetch_update(s, f, g)
     }
-    pub fn update<F: FnMut(i16) -> i16>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> i16 {
-        let old = self.v;
-        unsafe { self.__p().write(f(old)) }
-        old
+    pub fn update<F: FnMut(i16) -> i16>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> i16 {
+        __exr_atomic_rmw(self.__p(), f)
     }
 }
 
 impl Debug for AtomicI16 {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
-        __exr_debug(&self.v, f);
+        __exr_debug(&self.load(__AtOrd_::Relaxed), f);
         Ok(())
     }
 }
@@ -9161,25 +9438,17 @@ impl AtomicI32 {
         &self.v as *const i32 as *mut i32
     }
     pub fn load(&self, _o: __AtOrd_) -> i32 {
-        __exr_green_spin();
-        self.v
+        __exr_atomic_load(self.__p())
     }
     pub fn store(&self, x: i32, _o: __AtOrd_) {
-        unsafe { self.__p().write(x) }
+        __exr_atomic_store(self.__p(), x)
     }
     pub fn swap(&self, x: i32, _o: __AtOrd_) -> i32 {
-        let old = self.v;
-        unsafe { self.__p().write(x) }
-        old
+        __exr_atomic_xchg(self.__p(), x)
     }
     pub fn compare_exchange(&self, cur: i32, new: i32, _s: __AtOrd_, _f: __AtOrd_) -> Result<i32, i32> {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-            Ok(old)
-        } else {
-            Err(old)
-        }
+        let old = __exr_atomic_cas(self.__p(), cur, new);
+        if old == cur { Ok(old) } else { Err(old) }
     }
     pub fn compare_exchange_weak(&self, cur: i32, new: i32, s: __AtOrd_, f: __AtOrd_) -> Result<i32, i32> {
         self.compare_exchange(cur, new, s, f)
@@ -9191,79 +9460,46 @@ impl AtomicI32 {
         self.v
     }
     pub fn fetch_add(&self, x: i32, _o: __AtOrd_) -> i32 {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_add(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), x)
     }
     pub fn fetch_sub(&self, x: i32, _o: __AtOrd_) -> i32 {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_sub(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), (0 as i32).wrapping_sub(x))
     }
     pub fn fetch_max(&self, x: i32, _o: __AtOrd_) -> i32 {
-        let old = self.v;
-        if x > old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i32| if x > old { x } else { old })
     }
     pub fn fetch_min(&self, x: i32, _o: __AtOrd_) -> i32 {
-        let old = self.v;
-        if x < old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i32| if x < old { x } else { old })
     }
     pub fn fetch_and(&self, x: i32, _o: __AtOrd_) -> i32 {
-        let old = self.v;
-        unsafe { self.__p().write(old & x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i32| old & x)
     }
     pub fn fetch_or(&self, x: i32, _o: __AtOrd_) -> i32 {
-        let old = self.v;
-        unsafe { self.__p().write(old | x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i32| old | x)
     }
     pub fn fetch_xor(&self, x: i32, _o: __AtOrd_) -> i32 {
-        let old = self.v;
-        unsafe { self.__p().write(old ^ x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i32| old ^ x)
     }
     pub fn fetch_nand(&self, x: i32, _o: __AtOrd_) -> i32 {
-        let old = self.v;
-        unsafe { self.__p().write(!(old & x)) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i32| !(old & x))
     }
     pub fn compare_and_swap(&self, cur: i32, new: i32, _o: __AtOrd_) -> i32 {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-        }
-        old
+        __exr_atomic_cas(self.__p(), cur, new)
     }
-    pub fn fetch_update<F: FnMut(i32) -> Option<i32>>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> Result<i32, i32> {
-        let old = self.v;
-        match f(old) {
-            Some(x) => {
-                unsafe { self.__p().write(x) }
-                Ok(old)
-            }
-            None => Err(old),
-        }
+    pub fn fetch_update<F: FnMut(i32) -> Option<i32>>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> Result<i32, i32> {
+        __exr_atomic_try_rmw(self.__p(), f)
     }
     pub fn try_update<F: FnMut(i32) -> Option<i32>>(&self, s: __AtOrd_, f: __AtOrd_, g: F) -> Result<i32, i32> {
         self.fetch_update(s, f, g)
     }
-    pub fn update<F: FnMut(i32) -> i32>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> i32 {
-        let old = self.v;
-        unsafe { self.__p().write(f(old)) }
-        old
+    pub fn update<F: FnMut(i32) -> i32>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> i32 {
+        __exr_atomic_rmw(self.__p(), f)
     }
 }
 
 impl Debug for AtomicI32 {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
-        __exr_debug(&self.v, f);
+        __exr_debug(&self.load(__AtOrd_::Relaxed), f);
         Ok(())
     }
 }
@@ -9280,25 +9516,17 @@ impl AtomicI64 {
         &self.v as *const i64 as *mut i64
     }
     pub fn load(&self, _o: __AtOrd_) -> i64 {
-        __exr_green_spin();
-        self.v
+        __exr_atomic_load(self.__p())
     }
     pub fn store(&self, x: i64, _o: __AtOrd_) {
-        unsafe { self.__p().write(x) }
+        __exr_atomic_store(self.__p(), x)
     }
     pub fn swap(&self, x: i64, _o: __AtOrd_) -> i64 {
-        let old = self.v;
-        unsafe { self.__p().write(x) }
-        old
+        __exr_atomic_xchg(self.__p(), x)
     }
     pub fn compare_exchange(&self, cur: i64, new: i64, _s: __AtOrd_, _f: __AtOrd_) -> Result<i64, i64> {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-            Ok(old)
-        } else {
-            Err(old)
-        }
+        let old = __exr_atomic_cas(self.__p(), cur, new);
+        if old == cur { Ok(old) } else { Err(old) }
     }
     pub fn compare_exchange_weak(&self, cur: i64, new: i64, s: __AtOrd_, f: __AtOrd_) -> Result<i64, i64> {
         self.compare_exchange(cur, new, s, f)
@@ -9310,79 +9538,46 @@ impl AtomicI64 {
         self.v
     }
     pub fn fetch_add(&self, x: i64, _o: __AtOrd_) -> i64 {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_add(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), x)
     }
     pub fn fetch_sub(&self, x: i64, _o: __AtOrd_) -> i64 {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_sub(x)) }
-        old
+        __exr_atomic_xadd(self.__p(), (0 as i64).wrapping_sub(x))
     }
     pub fn fetch_max(&self, x: i64, _o: __AtOrd_) -> i64 {
-        let old = self.v;
-        if x > old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i64| if x > old { x } else { old })
     }
     pub fn fetch_min(&self, x: i64, _o: __AtOrd_) -> i64 {
-        let old = self.v;
-        if x < old {
-            unsafe { self.__p().write(x) }
-        }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i64| if x < old { x } else { old })
     }
     pub fn fetch_and(&self, x: i64, _o: __AtOrd_) -> i64 {
-        let old = self.v;
-        unsafe { self.__p().write(old & x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i64| old & x)
     }
     pub fn fetch_or(&self, x: i64, _o: __AtOrd_) -> i64 {
-        let old = self.v;
-        unsafe { self.__p().write(old | x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i64| old | x)
     }
     pub fn fetch_xor(&self, x: i64, _o: __AtOrd_) -> i64 {
-        let old = self.v;
-        unsafe { self.__p().write(old ^ x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i64| old ^ x)
     }
     pub fn fetch_nand(&self, x: i64, _o: __AtOrd_) -> i64 {
-        let old = self.v;
-        unsafe { self.__p().write(!(old & x)) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: i64| !(old & x))
     }
     pub fn compare_and_swap(&self, cur: i64, new: i64, _o: __AtOrd_) -> i64 {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-        }
-        old
+        __exr_atomic_cas(self.__p(), cur, new)
     }
-    pub fn fetch_update<F: FnMut(i64) -> Option<i64>>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> Result<i64, i64> {
-        let old = self.v;
-        match f(old) {
-            Some(x) => {
-                unsafe { self.__p().write(x) }
-                Ok(old)
-            }
-            None => Err(old),
-        }
+    pub fn fetch_update<F: FnMut(i64) -> Option<i64>>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> Result<i64, i64> {
+        __exr_atomic_try_rmw(self.__p(), f)
     }
     pub fn try_update<F: FnMut(i64) -> Option<i64>>(&self, s: __AtOrd_, f: __AtOrd_, g: F) -> Result<i64, i64> {
         self.fetch_update(s, f, g)
     }
-    pub fn update<F: FnMut(i64) -> i64>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> i64 {
-        let old = self.v;
-        unsafe { self.__p().write(f(old)) }
-        old
+    pub fn update<F: FnMut(i64) -> i64>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> i64 {
+        __exr_atomic_rmw(self.__p(), f)
     }
 }
 
 impl Debug for AtomicI64 {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
-        __exr_debug(&self.v, f);
+        __exr_debug(&self.load(__AtOrd_::Relaxed), f);
         Ok(())
     }
 }
@@ -9399,25 +9594,17 @@ impl AtomicBool {
         &self.v as *const bool as *mut bool
     }
     pub fn load(&self, _o: __AtOrd_) -> bool {
-        __exr_green_spin();
-        self.v
+        __exr_atomic_load(self.__p())
     }
     pub fn store(&self, x: bool, _o: __AtOrd_) {
-        unsafe { self.__p().write(x) }
+        __exr_atomic_store(self.__p(), x)
     }
     pub fn swap(&self, x: bool, _o: __AtOrd_) -> bool {
-        let old = self.v;
-        unsafe { self.__p().write(x) }
-        old
+        __exr_atomic_xchg(self.__p(), x)
     }
     pub fn compare_exchange(&self, cur: bool, new: bool, _s: __AtOrd_, _f: __AtOrd_) -> Result<bool, bool> {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-            Ok(old)
-        } else {
-            Err(old)
-        }
+        let old = __exr_atomic_cas(self.__p(), cur, new);
+        if old == cur { Ok(old) } else { Err(old) }
     }
     pub fn compare_exchange_weak(&self, cur: bool, new: bool, s: __AtOrd_, f: __AtOrd_) -> Result<bool, bool> {
         self.compare_exchange(cur, new, s, f)
@@ -9429,60 +9616,37 @@ impl AtomicBool {
         self.v
     }
     pub fn fetch_or(&self, x: bool, _o: __AtOrd_) -> bool {
-        let old = self.v;
-        unsafe { self.__p().write(old || x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: bool| old || x)
     }
     pub fn fetch_and(&self, x: bool, _o: __AtOrd_) -> bool {
-        let old = self.v;
-        unsafe { self.__p().write(old && x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: bool| old && x)
     }
     pub fn fetch_xor(&self, x: bool, _o: __AtOrd_) -> bool {
-        let old = self.v;
-        unsafe { self.__p().write(old != x) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: bool| old != x)
     }
     pub fn fetch_nand(&self, x: bool, _o: __AtOrd_) -> bool {
-        let old = self.v;
-        unsafe { self.__p().write(!(old && x)) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: bool| !(old && x))
     }
     pub fn compare_and_swap(&self, cur: bool, new: bool, _o: __AtOrd_) -> bool {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-        }
-        old
+        __exr_atomic_cas(self.__p(), cur, new)
     }
-    pub fn fetch_update<F: FnMut(bool) -> Option<bool>>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> Result<bool, bool> {
-        let old = self.v;
-        match f(old) {
-            Some(x) => {
-                unsafe { self.__p().write(x) }
-                Ok(old)
-            }
-            None => Err(old),
-        }
+    pub fn fetch_update<F: FnMut(bool) -> Option<bool>>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> Result<bool, bool> {
+        __exr_atomic_try_rmw(self.__p(), f)
     }
     pub fn try_update<F: FnMut(bool) -> Option<bool>>(&self, s: __AtOrd_, f: __AtOrd_, g: F) -> Result<bool, bool> {
         self.fetch_update(s, f, g)
     }
-    pub fn update<F: FnMut(bool) -> bool>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> bool {
-        let old = self.v;
-        unsafe { self.__p().write(f(old)) }
-        old
+    pub fn update<F: FnMut(bool) -> bool>(&self, _s: __AtOrd_, _f: __AtOrd_, f: F) -> bool {
+        __exr_atomic_rmw(self.__p(), f)
     }
     pub fn fetch_not(&self, _o: __AtOrd_) -> bool {
-        let old = self.v;
-        unsafe { self.__p().write(!old) }
-        old
+        __exr_atomic_rmw(self.__p(), |old: bool| !old)
     }
 }
 
 impl Debug for AtomicBool {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
-        __exr_debug(&self.v, f);
+        __exr_debug(&self.load(__AtOrd_::Relaxed), f);
         Ok(())
     }
 }
@@ -9498,26 +9662,22 @@ impl<T> AtomicPtr<T> {
     fn __p(&self) -> *mut *mut T {
         &self.v as *const *mut T as *mut *mut T
     }
+    // (as an address: the intrinsics take integers and pointers alike, and a usize needs no PartialEq of `*mut T`)
+    fn __pu(&self) -> *mut usize {
+        &self.v as *const *mut T as *mut usize
+    }
     pub fn load(&self, _o: __AtOrd_) -> *mut T {
-        __exr_green_spin();
-        self.v
+        __exr_atomic_load(self.__p())
     }
     pub fn store(&self, x: *mut T, _o: __AtOrd_) {
-        unsafe { self.__p().write(x) }
+        __exr_atomic_store(self.__p(), x)
     }
     pub fn swap(&self, x: *mut T, _o: __AtOrd_) -> *mut T {
-        let old = self.v;
-        unsafe { self.__p().write(x) }
-        old
+        __exr_atomic_xchg(self.__p(), x)
     }
     pub fn compare_exchange(&self, cur: *mut T, new: *mut T, _s: __AtOrd_, _f: __AtOrd_) -> Result<*mut T, *mut T> {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-            Ok(old)
-        } else {
-            Err(old)
-        }
+        let old = __exr_atomic_cas(self.__pu(), cur as usize, new as usize) as *mut T;
+        if old == cur { Ok(old) } else { Err(old) }
     }
     pub fn compare_exchange_weak(&self, cur: *mut T, new: *mut T, s: __AtOrd_, f: __AtOrd_) -> Result<*mut T, *mut T> {
         self.compare_exchange(cur, new, s, f)
@@ -9529,110 +9689,173 @@ impl<T> AtomicPtr<T> {
         self.v
     }
     pub fn compare_and_swap(&self, cur: *mut T, new: *mut T, _o: __AtOrd_) -> *mut T {
-        let old = self.v;
-        if old == cur {
-            unsafe { self.__p().write(new) }
-        }
-        old
+        __exr_atomic_cas(self.__pu(), cur as usize, new as usize) as *mut T
     }
     pub fn fetch_update<F: FnMut(*mut T) -> Option<*mut T>>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> Result<*mut T, *mut T> {
-        let old = self.v;
-        match f(old) {
-            Some(x) => {
-                unsafe { self.__p().write(x) }
-                Ok(old)
-            }
-            None => Err(old),
+        match __exr_atomic_try_rmw(self.__pu(), |old: usize| match f(old as *mut T) {
+            Some(x) => Some(x as usize),
+            None => None,
+        }) {
+            Ok(x) => Ok(x as *mut T),
+            Err(x) => Err(x as *mut T),
         }
     }
     pub fn try_update<F: FnMut(*mut T) -> Option<*mut T>>(&self, s: __AtOrd_, f: __AtOrd_, g: F) -> Result<*mut T, *mut T> {
         self.fetch_update(s, f, g)
     }
     pub fn update<F: FnMut(*mut T) -> *mut T>(&self, _s: __AtOrd_, _f: __AtOrd_, mut f: F) -> *mut T {
-        let old = self.v;
-        unsafe { self.__p().write(f(old)) }
-        old
+        __exr_atomic_rmw(self.__pu(), |old: usize| f(old as *mut T) as usize) as *mut T
     }
     pub fn fetch_ptr_add(&self, n: usize, _o: __AtOrd_) -> *mut T {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_add(n)) }
-        old
+        __exr_atomic_xadd(self.__pu(), n.wrapping_mul(core::mem::size_of::<T>())) as *mut T
     }
     pub fn fetch_ptr_sub(&self, n: usize, _o: __AtOrd_) -> *mut T {
-        let old = self.v;
-        unsafe { self.__p().write(old.wrapping_sub(n)) }
-        old
+        __exr_atomic_xadd(self.__pu(), (0usize).wrapping_sub(n.wrapping_mul(core::mem::size_of::<T>()))) as *mut T
     }
     pub fn fetch_byte_add(&self, n: usize, _o: __AtOrd_) -> *mut T {
-        let old = self.v;
-        unsafe { self.__p().write((old as usize + n) as *mut T) }
-        old
+        __exr_atomic_xadd(self.__pu(), n) as *mut T
     }
     pub fn fetch_byte_sub(&self, n: usize, _o: __AtOrd_) -> *mut T {
-        let old = self.v;
-        unsafe { self.__p().write((old as usize - n) as *mut T) }
-        old
+        __exr_atomic_xadd(self.__pu(), (0usize).wrapping_sub(n)) as *mut T
     }
     pub fn fetch_or(&self, n: usize, _o: __AtOrd_) -> *mut T {
-        let old = self.v;
-        unsafe { self.__p().write((old as usize | n) as *mut T) }
-        old
+        __exr_atomic_rmw(self.__pu(), |old: usize| old | n) as *mut T
     }
     pub fn fetch_and(&self, n: usize, _o: __AtOrd_) -> *mut T {
-        let old = self.v;
-        unsafe { self.__p().write((old as usize & n) as *mut T) }
-        old
+        __exr_atomic_rmw(self.__pu(), |old: usize| old & n) as *mut T
     }
     pub fn fetch_xor(&self, n: usize, _o: __AtOrd_) -> *mut T {
-        let old = self.v;
-        unsafe { self.__p().write((old as usize ^ n) as *mut T) }
-        old
+        __exr_atomic_rmw(self.__pu(), |old: usize| old ^ n) as *mut T
     }
 }
 
-// `std::thread`: green threads. There is one OS thread; a spawned thread has a stack of its own (libc makecontext /
-// swapcontext) and runs from `spawn` until it waits: `join`, `recv` on an empty channel, a Mutex another thread
-// holds, `sleep`, `yield_now`, an atomic `load` while other threads are alive. Then the next thread that is not done
-// runs (round robin). Nothing runs between two of those points, so Arc (an Rc) and the atomics (plain cells) stay
-// sound. When every thread waits and nothing changes, that is a deadlock: `join` panics, `recv` gives Err (as if
-// every sender had hung up), `lock` goes on. There is no parallelism, and a thread that never waits keeps the others
-// from running. (formal/tla/ArcDrop.tla is the check to pass before threads become real OS threads)
+// `std::thread`: OS threads, as std's on Linux. `spawn` starts a pthread with a 2 MiB stack, which runs the closure
+// and leaves its value in a packet that it and the JoinHandle share; `join` waits for the thread (pthread_join) and
+// takes the value. A thread is never switched by the runtime: the kernel runs them in parallel, so everything they
+// share goes through atomic instructions and futexes (Arc, the atomics, park, Mutex, Condvar, RwLock, Once, OnceLock,
+// the channels), with std's state machines. A panic in a spawned thread prints its message (as thread '<unnamed>'),
+// runs the thread's thread_local! drops and ends the thread, whose `join` gives Err. There is no unwinding: the
+// thread's other values are not dropped, and a Mutex it holds stays locked (std's is unlocked, poisoned).
+// (formal/tla/ArcDrop.tla is the check Arc's count follows)
 // (one function per extern block: the prelude is cut down to what a program uses, block by block)
 unsafe extern "C" {
-    #[link_name = "getcontext"]
-    fn __exr_getcontext(u: *mut u8) -> i32;
+    #[link_name = "pthread_create"]
+    fn __exr_pthread_create(t: *mut u64, attr: *const u8, f: extern "C" fn(*mut u8) -> *mut u8, arg: *mut u8) -> i32;
 }
 unsafe extern "C" {
-    #[link_name = "makecontext"]
-    fn __exr_makecontext(u: *mut u8, f: extern "C" fn(), argc: i32);
+    #[link_name = "pthread_join"]
+    fn __exr_pthread_join(t: u64, ret: *mut *mut u8) -> i32;
 }
 unsafe extern "C" {
-    #[link_name = "swapcontext"]
-    fn __exr_swapcontext(from: *mut u8, to: *mut u8) -> i32;
+    #[link_name = "pthread_detach"]
+    fn __exr_pthread_detach(t: u64) -> i32;
+}
+unsafe extern "C" {
+    #[link_name = "pthread_exit"]
+    fn __exr_pthread_exit(r: *mut u8);
+}
+unsafe extern "C" {
+    #[link_name = "pthread_attr_init"]
+    fn __exr_pthread_attr_init(a: *mut u8) -> i32;
+}
+unsafe extern "C" {
+    #[link_name = "pthread_attr_setstacksize"]
+    fn __exr_pthread_attr_setstacksize(a: *mut u8, n: usize) -> i32;
+}
+unsafe extern "C" {
+    #[link_name = "pthread_key_create"]
+    fn __exr_pthread_key_create(k: *mut u32, dtor: *const u8) -> i32;
+}
+unsafe extern "C" {
+    #[link_name = "pthread_getspecific"]
+    fn __exr_pthread_getspecific(k: u32) -> *mut u8;
+}
+unsafe extern "C" {
+    #[link_name = "pthread_setspecific"]
+    fn __exr_pthread_setspecific(k: u32, v: *mut u8) -> i32;
+}
+unsafe extern "C" {
+    #[link_name = "sched_yield"]
+    fn __exr_sched_yield() -> i32;
+}
+unsafe extern "C" {
+    #[link_name = "syscall"]
+    fn __exr_syscall(n: i64, a: *mut u32, op: i32, v: u32, t: usize, b: usize, c: u32) -> i64;
 }
 
-struct __GreenTh {
-    // (a ucontext_t: 968 bytes in glibc on x86-64)
-    ctx: *mut u8,
-    stack: *mut u8,
+// futex(2) on a u32 (the private ops: no other process shares it): wait while *p is v (a wakeup may be spurious, so
+// the caller checks again), and wake up to n waiters
+fn __exr_futex_wait(p: *mut u32, v: u32) {
+    unsafe {
+        __exr_syscall(202, p, 128, v, 0, 0, 0);
+    }
+}
+fn __exr_futex_wake(p: *mut u32, n: u32) {
+    unsafe {
+        __exr_syscall(202, p, 129, n, 0, 0, 0);
+    }
+}
+// (as __exr_futex_wait, for at most ts (seconds, nanoseconds))
+fn __exr_futex_wait_for(p: *mut u32, v: u32, ts: &[i64; 2]) {
+    unsafe {
+        __exr_syscall(202, p, 128, v, ts as *const [i64; 2] as usize, 0, 0);
+    }
+}
+fn __exr_futex_wake_all(p: *mut u32) {
+    __exr_futex_wake(p, 2147483647);
+}
+
+// A thread's shared part: each Thread points to it, and so does the thread itself while it runs (the last of them
+// frees it; the main thread's is a static)
+struct __ThreadInner {
+    refs: usize,
+    id: u64,
+    // (a Builder's name)
+    name: Option<String>,
+    // (the parker, std's futex one: 0 empty, 1 notified, u32::MAX parked)
+    park: u32,
+}
+
+// The head of the packet a spawned thread leaves its value in (`__Packet<T>` starts with it)
+struct __PacketHead {
+    // (the JoinHandle and the thread: the last of the two to let go frees it)
+    refs: usize,
+    // (0 running, 1 done, 2 panicked)
+    state: u32,
+}
+
+struct __Packet<T> {
+    h: __PacketHead,
+    val: Option<T>,
+}
+
+// What a thread keeps for itself (pthread_getspecific of __EXR_TLS_KEY in a spawned thread; the main thread's is
+// __EXR_MAIN_CTX)
+struct __ThreadCtx {
+    th: *mut __ThreadInner,
+    // (the packet while the thread still holds it: a panic marks it and lets it go)
+    packet: *mut __PacketHead,
     run: Option<Box<dyn FnMut()>>,
-    done: bool,
-    waiting: bool,
+    // (the thread_local! values made on this thread, by key (1 once destroyed), their drops, and the keys in the order
+    // the values were made: they are dropped newest first)
+    tls: Vec<*mut u8>,
+    tls_drop: Vec<Option<fn(*mut u8)>>,
+    tls_order: Vec<usize>,
+    // (the thread_local! values are being dropped: a panic now aborts, as std's)
+    ending: bool,
+    // (the states of the Onces whose closures this thread runs: a panic poisons them, so the threads that wait wake)
+    onces: Vec<*mut u32>,
 }
 
-struct __GreenSched {
-    ths: Vec<__GreenTh>,
-    cur: usize,
-    live: usize,
-    // (grows whenever something another thread may wait for happens: a send, an unlock, a thread ending)
-    epoch: u64,
-}
+static mut __EXR_MAIN_THREAD: __ThreadInner = __ThreadInner { refs: 1, id: 1, name: None, park: 0 };
+static mut __EXR_MAIN_CTX: *mut __ThreadCtx = 0usize as *mut __ThreadCtx;
+// (the key of the spawned threads' contexts, made by the first spawn: before it there is only the main thread)
+static mut __EXR_TLS_KEY: u32 = 0;
+static mut __EXR_TLS_READY: u32 = 0;
+// (std numbers its ThreadIds from 1 in the order the threads are made: the main thread is 1)
+static mut __EXR_NEXT_TID: u64 = 2;
 
-static mut __EXR_GREEN: *mut __GreenSched = 0usize as *mut __GreenSched;
-
-const __EXR_GREEN_STACK: usize = 1048576;
-
-fn __exr_green_alloc(n: usize) -> *mut u8 {
+fn __exr_alloc_ok(n: usize) -> *mut u8 {
     let p = unsafe { __exr_malloc(n) };
     if p.is_null() {
         __exr_err_str::<()>("memory allocation failed\n");
@@ -9641,215 +9864,553 @@ fn __exr_green_alloc(n: usize) -> *mut u8 {
     p
 }
 
-// (the scheduler, made with the main thread as thread 0 when the first thread is spawned)
-fn __exr_green() -> *mut __GreenSched {
+fn __exr_new_ctx(th: *mut __ThreadInner) -> *mut __ThreadCtx {
+    let c = __exr_alloc_ok(core::mem::size_of::<__ThreadCtx>()) as *mut __ThreadCtx;
     unsafe {
-        if __EXR_GREEN.is_null() {
-            let mut ths: Vec<__GreenTh> = Vec::new();
-            ths.push(__GreenTh { ctx: __exr_green_alloc(1024), stack: 0usize as *mut u8, run: None, done: false, waiting: false });
-            let s = __exr_green_alloc(core::mem::size_of::<__GreenSched>()) as *mut __GreenSched;
-            s.write(__GreenSched { ths: ths, cur: 0, live: 1, epoch: 0 });
-            __EXR_GREEN = s;
-        }
-        __EXR_GREEN
+        c.write(__ThreadCtx {
+            th: th,
+            packet: 0usize as *mut __PacketHead,
+            run: None,
+            tls: Vec::new(),
+            tls_drop: Vec::new(),
+            tls_order: Vec::new(),
+            ending: false,
+            onces: Vec::new(),
+        });
     }
+    c
 }
 
-fn __exr_green_progress() {
+// (this thread's context; the main thread's is made at its first use)
+fn __exr_thread_ctx() -> *mut __ThreadCtx {
     unsafe {
-        if !__EXR_GREEN.is_null() {
-            (*__EXR_GREEN).epoch += 1;
-        }
-    }
-}
-
-fn __exr_green_switch(s: *mut __GreenSched, to: usize) {
-    unsafe {
-        let from = (*s).cur;
-        if from == to {
-            return;
-        }
-        let a = (*s).ths[from].ctx;
-        let b = (*s).ths[to].ctx;
-        (*s).cur = to;
-        __exr_swapcontext(a, b);
-    }
-}
-
-// (run the next thread that is not done; false: there is none)
-fn __exr_green_yield() -> bool {
-    unsafe {
-        if __EXR_GREEN.is_null() {
-            return false;
-        }
-        let s = __EXR_GREEN;
-        let n = (*s).ths.len();
-        let cur = (*s).cur;
-        let mut k = 1;
-        while k < n {
-            let j = (cur + k) % n;
-            if !(*s).ths[j].done {
-                __exr_green_switch(s, j);
-                return true;
+        if __exr_atomic_load(&mut __EXR_TLS_READY as *mut u32) != 0 {
+            let c = __exr_pthread_getspecific(__EXR_TLS_KEY) as *mut __ThreadCtx;
+            if !c.is_null() {
+                return c;
             }
-            k += 1;
         }
-        false
+        // (only the main thread gets here: a spawned thread sets its context before it runs anything)
+        if __EXR_MAIN_CTX.is_null() {
+            __EXR_MAIN_CTX = __exr_new_ctx(&mut __EXR_MAIN_THREAD as *mut __ThreadInner);
+        }
+        __EXR_MAIN_CTX
     }
 }
 
-// (an atomic load: other threads may be waiting for what this thread spins on)
-fn __exr_green_spin() {
+// (runs the thread_local! drops of a thread that ends, newest first, and frees its context. As std's: a value whose
+// drop has begun cannot be reached again (its `with` panics, its `try_with` gives Err), one first made by a drop is
+// dropped too, and a drop that panics aborts the program)
+fn __exr_thread_end(c: *mut __ThreadCtx) {
     unsafe {
-        if !__EXR_GREEN.is_null() && (*__EXR_GREEN).live > 1 {
-            __exr_green_yield();
-        }
-    }
-}
-
-fn __exr_green_all_wait(s: *mut __GreenSched, me: usize) -> bool {
-    unsafe {
-        let n = (*s).ths.len();
-        let mut j = 0;
-        while j < n {
-            if j != me && !(*s).ths[j].done && !(*s).ths[j].waiting {
-                return false;
+        (*c).ending = true;
+        loop {
+            let k = match (*c).tls_order.pop() {
+                Some(k) => k,
+                None => break,
+            };
+            let p = (*c).tls[k];
+            (*c).tls[k] = 1usize as *mut u8;
+            if let Some(d) = (*c).tls_drop[k] {
+                d(p);
             }
-            j += 1;
+            __exr_free(p);
         }
-        true
+        __exr_thread_release((*c).th);
+        __exr_drop_in_place(c);
+        __exr_free(c as *mut u8);
+        __exr_pthread_setspecific(__EXR_TLS_KEY, 0usize as *mut u8);
     }
 }
 
-// (wait until ready() holds, running the other threads meanwhile; false: it cannot come (no other thread, or every
-// other one waits and a whole round changed nothing))
-fn __exr_green_wait<F: Fn() -> bool>(ready: F) -> bool {
-    loop {
-        if ready() {
+// A thread_local!'s key (lexer::expand_thread_local): its number among the program's thread_local! values, given at
+// its first use on any thread (0: none yet). Each thread keeps its own value of each, made at its first use there
+pub struct __TlsKey {
+    __tk: usize,
+}
+
+impl __TlsKey {
+    pub const fn new() -> __TlsKey {
+        __TlsKey { __tk: 0 }
+    }
+}
+
+static mut __EXR_TLS_NEXT: usize = 1;
+
+fn __exr_tls_drop<T>(p: *mut u8) {
+    __exr_drop_in_place(p as *mut Option<T>);
+}
+
+// `std::thread::AccessError`: the Err of a thread_local!'s `try_with` once the thread's value is being dropped
+pub struct AccessError {
+    __ae: u8,
+}
+
+impl Debug for AccessError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.buf.push_str("AccessError");
+        Ok(())
+    }
+}
+
+impl Display for AccessError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.pad("already destroyed")
+    }
+}
+
+// (the name thread_local!'s expansion uses: a program's own `AccessError` renames the prelude's, not this)
+pub type __TlsAccessError = AccessError;
+
+pub fn __exr_access_error() -> AccessError {
+    AccessError { __ae: 0 }
+}
+
+// (`with` on a thread_local! whose value is being dropped or was)
+pub fn __exr_tls_destroyed() -> ! {
+    panic!("cannot access a Thread Local Storage value during or after destruction: AccessError");
+}
+
+// (this thread's value of the key: None until the thread_local!'s `with` sets it; null once its drop has begun. A
+// spawned thread drops its values when it ends; the main thread's live to the end of the program)
+pub fn __exr_tls_slot<T>(k: &__TlsKey) -> *mut Option<T> {
+    let kp = &k.__tk as *const usize as *mut usize;
+    let mut i = __exr_atomic_load(kp);
+    if i == 0 {
+        let n = __exr_atomic_xadd(unsafe { &mut __EXR_TLS_NEXT as *mut usize }, 1);
+        let seen = __exr_atomic_cas(kp, 0, n);
+        i = if seen == 0 { n } else { seen };
+    }
+    let c = __exr_thread_ctx();
+    unsafe {
+        while (*c).tls.len() < i {
+            (*c).tls.push(0usize as *mut u8);
+            (*c).tls_drop.push(None);
+        }
+        let mut p = (*c).tls[i - 1];
+        // (destroyed: none)
+        if p as usize == 1 {
+            return 0usize as *mut Option<T>;
+        }
+        if p.is_null() {
+            p = __exr_alloc_ok(core::mem::size_of::<Option<T>>());
+            (p as *mut Option<T>).write(None);
+            (*c).tls[i - 1] = p;
+        }
+        p as *mut Option<T>
+    }
+}
+
+// (the value of the key has been made on this thread: its drop is registered now, after its initializer, as std's
+// lazy thread-locals do, so a value another one's initializer made first is dropped after it)
+pub fn __exr_tls_made<T>(k: &__TlsKey) {
+    let i = __exr_atomic_load(&k.__tk as *const usize as *mut usize);
+    let c = __exr_thread_ctx();
+    unsafe {
+        if (*c).tls_drop[i - 1].is_none() {
+            (*c).tls_drop[i - 1] = Some(__exr_tls_drop::<T>);
+            (*c).tls_order.push(i - 1);
+        }
+    }
+}
+
+// (whether a panic has been reported)
+static mut __EXR_PANICKED: u32 = 0;
+
+// __EXR_THREAD_HOOK (set by the first spawn). 0: "thread '<unnamed>' panicked" in a spawned thread ('main' in the
+// main one); 2 / 3: the lock of stdout; 4: std's note on RUST_BACKTRACE, with the first panic only, then a spawned
+// thread's panic marks its packet, runs its thread_local! drops and ends the thread (pthread_exit, which does not
+// return); the main thread's goes on to exit(101)
+fn __exr_thread_hook(q: u32) -> bool {
+    unsafe {
+        let c = __exr_pthread_getspecific(__EXR_TLS_KEY) as *mut __ThreadCtx;
+        if q == 2 {
+            __exr_out_take();
             return true;
         }
-        unsafe {
-            if __EXR_GREEN.is_null() {
-                return false;
+        if q == 3 {
+            __exr_out_give();
+            return true;
+        }
+        if q == 0 {
+            if c.is_null() {
+                __exr_err_str::<()>("\nthread 'main' panicked");
+            } else {
+                __exr_err_str::<()>("\nthread '");
+                match &(*(*c).th).name {
+                    Some(n) => __exr_err_str::<()>(n.as_str()),
+                    None => __exr_err_str::<()>("<unnamed>"),
+                }
+                __exr_err_str::<()>("' panicked");
             }
-            let s = __EXR_GREEN;
-            let me = (*s).cur;
-            let e = (*s).epoch;
-            (*s).ths[me].waiting = true;
-            let moved = __exr_green_yield();
-            (*s).ths[me].waiting = false;
-            if !moved {
-                return false;
+            return true;
+        }
+        if __exr_atomic_xchg(&mut __EXR_PANICKED as *mut u32, 1) == 0 {
+            __exr_err_str::<()>("\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n");
+        } else {
+            __exr_err_str::<()>("\n");
+        }
+        if c.is_null() {
+            return false;
+        }
+        if (*c).ending {
+            __exr_err_str::<()>("fatal runtime error: thread local panicked on drop, aborting\n");
+            __exr_abort();
+        }
+        // (a StdoutLock it holds is let go, as std's guard would be on unwinding)
+        if __exr_atomic_load(&mut __EXR_OUT_OWNER as *mut usize) == c as usize {
+            __EXR_OUT_DEPTH = 0;
+            __exr_atomic_store(&mut __EXR_OUT_OWNER as *mut usize, 0);
+            __exr_unlock(&mut __EXR_OUT_LOCK as *mut u32);
+        }
+        // (the Onces this thread was running: poisoned, and their waiters woken)
+        while let Some(o) = (*c).onces.pop() {
+            __exr_atomic_store(o, 4);
+            __exr_futex_wake_all(o);
+        }
+        let pk = (*c).packet;
+        if !pk.is_null() {
+            (*c).packet = 0usize as *mut __PacketHead;
+            __exr_atomic_store(&mut (*pk).state as *mut u32, 2);
+            // (a panic comes before the value is written: the packet holds None, which needs no drop)
+            if __exr_atomic_xadd(&mut (*pk).refs as *mut usize, 18446744073709551615) == 1 {
+                __exr_free(pk as *mut u8);
             }
-            if ready() {
-                return true;
-            }
-            if (*s).epoch == e && __exr_green_all_wait(s, me) {
-                return false;
+        }
+        __exr_thread_end(c);
+        __exr_pthread_exit(0usize as *mut u8);
+    }
+    true
+}
+
+// (__EXR_ONCE_HOOK: a spawned thread's Once begun (true) or done (false), for its panic to poison)
+fn __exr_once_track(o: *mut u32, begin: bool) {
+    unsafe {
+        let c = __exr_pthread_getspecific(__EXR_TLS_KEY) as *mut __ThreadCtx;
+        if c.is_null() {
+            return;
+        }
+        if begin {
+            (*c).onces.push(o);
+        } else {
+            let mut k = (*c).onces.len();
+            while k > 0 {
+                k -= 1;
+                if (*c).onces[k] == o {
+                    (*c).onces.remove(k);
+                    break;
+                }
             }
         }
     }
 }
 
-extern "C" fn __exr_green_entry() {
+// (the first spawn, on the only thread there is: no other one can race it)
+// (0, or what pthread_key_create failed with (EAGAIN: no key is left): the spawn fails with it)
+fn __exr_threads_init() -> i32 {
     unsafe {
-        let s = __EXR_GREEN;
-        let me = (*s).cur;
+        if __EXR_TLS_READY == 0 {
+            let e = __exr_pthread_key_create(&mut __EXR_TLS_KEY as *mut u32, 0usize as *const u8);
+            if e != 0 {
+                return e;
+            }
+            __EXR_THREAD_HOOK = Some(__exr_thread_hook);
+            __EXR_ONCE_HOOK = Some(__exr_once_track);
+            __exr_atomic_store(&mut __EXR_TLS_READY as *mut u32, 1);
+        }
+    }
+    0
+}
+
+extern "C" fn __exr_thread_start(arg: *mut u8) -> *mut u8 {
+    unsafe {
+        let c = arg as *mut __ThreadCtx;
+        // (without its context the thread could not tell itself from the main thread: std aborts on such a failure)
+        if __exr_pthread_setspecific(__EXR_TLS_KEY, arg) != 0 {
+            __exr_err_str::<()>("fatal runtime error: failed to set a thread's context, aborting\n");
+            __exr_abort();
+        }
         {
-            let mut f = (*s).ths[me].run.take().unwrap();
+            let mut f = (*c).run.take().unwrap();
             f();
         }
-        (*s).ths[me].done = true;
-        (*s).live -= 1;
-        (*s).epoch += 1;
-        // (never comes back here: a done thread is not run again. The main thread is never done)
-        loop {
-            __exr_green_yield();
+        __exr_thread_end(c);
+    }
+    0usize as *mut u8
+}
+
+fn __exr_thread_retain(th: *mut __ThreadInner) -> Thread {
+    unsafe {
+        __exr_atomic_xadd(&mut (*th).refs as *mut usize, 1);
+    }
+    Thread { __th: th }
+}
+
+fn __exr_thread_release(th: *mut __ThreadInner) {
+    unsafe {
+        if __exr_atomic_xadd(&mut (*th).refs as *mut usize, 18446744073709551615) == 1 && (*th).id != 1 {
+            __exr_drop_in_place(th);
+            __exr_free(th as *mut u8);
         }
     }
 }
 
-fn __exr_green_start(run: Box<dyn FnMut()>) -> usize {
+// (the packet's drop, by the last of the thread and the JoinHandle)
+fn __exr_packet_release<T>(pk: *mut __Packet<T>) {
     unsafe {
-        let s = __exr_green();
-        let ctx = __exr_green_alloc(1024);
-        let stack = __exr_green_alloc(__EXR_GREEN_STACK);
-        __exr_getcontext(ctx);
-        // (uc_link, uc_stack.ss_sp, ss_flags, ss_size)
-        *(ctx.add(8) as *mut usize) = 0;
-        *(ctx.add(16) as *mut *mut u8) = stack;
-        *(ctx.add(24) as *mut i32) = 0;
-        *(ctx.add(32) as *mut usize) = __EXR_GREEN_STACK;
-        __exr_makecontext(ctx, __exr_green_entry, 0);
-        let id = (*s).ths.len();
-        (*s).ths.push(__GreenTh { ctx: ctx, stack: stack, run: Some(run), done: false, waiting: false });
-        (*s).live += 1;
-        // (the new thread runs at once, until it waits or ends: a thread that never waits runs as it did before
-        // there were green threads)
-        __exr_green_switch(s, id);
-        id
+        if __exr_atomic_xadd(&mut (*pk).h.refs as *mut usize, 18446744073709551615) == 1 {
+            __exr_drop_in_place(&mut (*pk).val as *mut Option<T>);
+            __exr_free(pk as *mut u8);
+        }
     }
-}
-
-fn __exr_green_done(id: usize) -> bool {
-    unsafe { (*__EXR_GREEN).ths[id].done }
 }
 
 pub struct JoinHandle<T> {
-    // (where the thread leaves its value: a block of its own, read and freed by join)
-    slot: *mut Option<T>,
-    id: usize,
+    pk: *mut __Packet<T>,
+    // (the pthread_t)
+    pt: u64,
+    th: Thread,
+}
+
+// The Err of a join whose thread panicked (std's is the panic's payload, a `Box<dyn Any + Send>`, which prints so)
+pub struct __ThreadPanic {
+    __tp_n: u8,
+}
+
+impl Debug for __ThreadPanic {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.buf.push_str("Any { .. }");
+        Ok(())
+    }
 }
 
 impl<T> JoinHandle<T> {
-    pub fn join(self) -> Result<T, ()> {
-        let id = self.id;
-        if !__exr_green_wait(|| __exr_green_done(id)) {
-            panic!("deadlock: every thread is waiting");
-        }
+    pub fn join(self) -> Result<T, __ThreadPanic> {
+        let pk = self.pk;
+        let th = self.th.__th;
         unsafe {
-            let s = __EXR_GREEN;
-            if !(*s).ths[id].stack.is_null() {
-                __exr_free((*s).ths[id].stack);
-                __exr_free((*s).ths[id].ctx);
-                (*s).ths[id].stack = 0usize as *mut u8;
-            }
+            __exr_pthread_join(self.pt, 0usize as *mut *mut u8);
         }
-        let v = unsafe { self.slot.read() };
-        unsafe { __exr_free(self.slot as *mut u8) };
+        __core_forget(self);
+        __exr_thread_release(th);
+        let vp = unsafe { &mut (*pk).val as *mut Option<T> };
+        let v = unsafe { vp.read() };
+        unsafe { vp.write(None) };
+        __exr_packet_release(pk);
         match v {
             Some(x) => Ok(x),
-            None => Err(()),
+            None => Err(__ThreadPanic { __tp_n: 0 }),
         }
     }
     pub fn is_finished(&self) -> bool {
-        __exr_green_done(self.id)
+        unsafe { __exr_atomic_load(&mut (*self.pk).h.state as *mut u32) != 0 }
+    }
+    pub fn thread(&self) -> &Thread {
+        &self.th
+    }
+}
+
+// (a handle dropped without join: the thread is detached, and runs on alone)
+impl<T> Drop for JoinHandle<T> {
+    fn drop(&mut self) {
+        // (null: moved out of a closure's captures)
+        if self.pk.is_null() {
+            return;
+        }
+        unsafe {
+            __exr_pthread_detach(self.pt);
+        }
+        __exr_packet_release(self.pk);
     }
 }
 
 pub fn __core_spawn<T, F: FnOnce() -> T>(f: F) -> JoinHandle<T> {
-    let slot = __exr_green_alloc(core::mem::size_of::<Option<T>>()) as *mut Option<T>;
+    match __exr_spawn(f, None, 2097152) {
+        Ok(h) => h,
+        Err(r) => panic!("failed to spawn thread: Os {{ code: {}, kind: WouldBlock, message: \"Resource temporarily unavailable\" }}", r),
+    }
+}
+
+// (a thread with a name and a stack of `stack` bytes (in whole pages, as std rounds it, and at least 64 KiB: above
+// glibc's minimum, as a margin); Err: what pthread_create gave)
+fn __exr_spawn<T, F: FnOnce() -> T>(f: F, name: Option<String>, stack: usize) -> Result<JoinHandle<T>, i32> {
+    let e = __exr_threads_init();
+    if e != 0 {
+        return Err(e);
+    }
+    let pk = __exr_alloc_ok(core::mem::size_of::<__Packet<T>>()) as *mut __Packet<T>;
     unsafe {
-        slot.write(None);
+        pk.write(__Packet { h: __PacketHead { refs: 2, state: 0 }, val: None });
+    }
+    let th = __exr_alloc_ok(core::mem::size_of::<__ThreadInner>()) as *mut __ThreadInner;
+    unsafe {
+        th.write(__ThreadInner { refs: 2, id: __exr_atomic_xadd(&mut __EXR_NEXT_TID as *mut u64, 1), name: name, park: 0 });
     }
     let mut f = Some(f);
     let run: Box<dyn FnMut()> = Box::new(move || {
         if let Some(g) = f.take() {
             let v = g();
             unsafe {
-                slot.write(Some(v));
+                (&mut (*pk).val as *mut Option<T>).write(Some(v));
+                __exr_atomic_store(&mut (*pk).h.state as *mut u32, 1);
+                (*__exr_thread_ctx()).packet = 0usize as *mut __PacketHead;
             }
+            __exr_packet_release(pk);
         }
     });
-    let id = __exr_green_start(run);
-    JoinHandle { slot: slot, id: id }
+    let c = __exr_new_ctx(th);
+    unsafe {
+        (*c).packet = pk as *mut __PacketHead;
+        (*c).run = Some(run);
+    }
+    let mut pt: u64 = 0;
+    // (a pthread_attr_t: 56 bytes in glibc on x86-64. 2 MiB of stack by default, as std's)
+    let mut attr = [0u64; 8];
+    // (a size whose rounding would overflow is the largest whole number of pages: pthread_create fails on it then)
+    let size = if stack < 65536 {
+        65536
+    } else if stack > 18446744073709551615 - 4095 {
+        18446744073709551615 / 4096 * 4096
+    } else {
+        (stack + 4095) / 4096 * 4096
+    };
+    // (a size the attribute refuses fails the spawn, as pthread_create's error would)
+    let r = unsafe {
+        __exr_pthread_attr_init(attr.as_mut_ptr() as *mut u8);
+        let e = __exr_pthread_attr_setstacksize(attr.as_mut_ptr() as *mut u8, size);
+        if e != 0 { e } else { __exr_pthread_create(&mut pt, attr.as_ptr() as *const u8, __exr_thread_start, c as *mut u8) }
+    };
+    if r != 0 {
+        // (no thread holds them: the closure (and its captures), the context, the packet and the Thread go now)
+        unsafe {
+            __exr_drop_in_place(c);
+            __exr_free(c as *mut u8);
+            __exr_free(pk as *mut u8);
+            __exr_drop_in_place(th);
+            __exr_free(th as *mut u8);
+        }
+        return Err(r);
+    }
+    Ok(JoinHandle { pk: pk, pt: pt, th: Thread { __th: th } })
+}
+
+// `std::thread::Builder`: a thread's name and stack size before it is spawned
+pub struct Builder {
+    __b_name: Option<String>,
+    __b_stack: usize,
+}
+
+impl Builder {
+    pub fn new() -> Builder {
+        Builder { __b_name: None, __b_stack: 2097152 }
+    }
+    pub fn name(self, name: String) -> Builder {
+        Builder { __b_name: Some(name), __b_stack: self.__b_stack }
+    }
+    pub fn stack_size(self, size: usize) -> Builder {
+        Builder { __b_name: self.__b_name, __b_stack: size }
+    }
+    pub fn spawn<T, F: FnOnce() -> T>(self, f: F) -> Result<JoinHandle<T>, IoError> {
+        match __exr_spawn(f, self.__b_name, self.__b_stack) {
+            Ok(h) => Ok(h),
+            Err(r) => Err(IoError::from_raw_os_error(r)),
+        }
+    }
 }
 
 pub fn __core_yield_now() {
-    __exr_green_yield();
+    unsafe {
+        __exr_sched_yield();
+    }
 }
-// (`thread::panicking()`: a panic stops the process without unwinding, so no drop ever runs while panicking)
+// (`thread::panicking()`: a panic does not unwind, so no drop ever runs while panicking)
 pub fn __core_panicking() -> bool { false }
+
+// `std::thread::Thread`: a handle to a thread, a pointer to its shared part. `park` waits on the thread's futex for
+// a token that `unpark` leaves (std's parker). (`\x54` in the Debug name, as `\x4c` in Layout's: a program's own
+// `Thread` renames this one, word by word)
+pub struct Thread {
+    __th: *mut __ThreadInner,
+}
+
+// (an inherent clone, as Rc's: one more reference to the shared part)
+impl Thread {
+    pub fn clone(&self) -> Thread {
+        __exr_thread_retain(self.__th)
+    }
+}
+
+impl Drop for Thread {
+    fn drop(&mut self) {
+        // (null: moved out of a closure's captures)
+        if self.__th.is_null() {
+            return;
+        }
+        __exr_thread_release(self.__th);
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ThreadId(u64);
+
+impl Thread {
+    pub fn id(&self) -> ThreadId {
+        ThreadId(unsafe { (*self.__th).id })
+    }
+    // (the main thread's, or a Builder's)
+    pub fn name(&self) -> Option<&str> {
+        if unsafe { (*self.__th).id } == 1 {
+            return Some("main");
+        }
+        match unsafe { &(*self.__th).name } {
+            Some(n) => Some(n.as_str()),
+            None => None,
+        }
+    }
+    pub fn unpark(&self) {
+        let p = unsafe { &mut (*self.__th).park as *mut u32 };
+        if __exr_atomic_xchg(p, 1) == 4294967295 {
+            __exr_futex_wake(p, 1);
+        }
+    }
+}
+
+impl Debug for Thread {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.debug_struct("\x54hread").field("id", &self.id()).field("name", &self.name()).finish_non_exhaustive()
+    }
+}
+
+pub fn __core_current() -> Thread {
+    __exr_thread_retain(unsafe { (*__exr_thread_ctx()).th })
+}
+
+// (std's: the token, if unpark left one, else wait for it. A park nothing unparks waits forever, as std's)
+pub fn __core_park() {
+    let p = unsafe { &mut (*(*__exr_thread_ctx()).th).park as *mut u32 };
+    // (notified -> empty: the token taken; empty -> parked)
+    if __exr_atomic_xadd(p, 4294967295) == 1 {
+        return;
+    }
+    loop {
+        __exr_futex_wait(p, 4294967295);
+        if __exr_atomic_cas(p, 1, 0) == 1 {
+            return;
+        }
+    }
+}
+
+// (as park, waiting at most d: one wait, as std's, so it may return early; a token is taken either way)
+pub fn __core_park_timeout(d: Duration) {
+    let p = unsafe { &mut (*(*__exr_thread_ctx()).th).park as *mut u32 };
+    if __exr_atomic_xadd(p, 4294967295) == 1 {
+        return;
+    }
+    // (seconds past i64's range are its largest, as in recv_timeout)
+    let ts = [if d.secs > 9223372036854775807 { 9223372036854775807 } else { d.secs as i64 }, d.nanos as i64];
+    __exr_futex_wait_for(p, 4294967295, &ts);
+    __exr_atomic_xchg(p, 0);
+}
 
 /// `std::fmt::Arguments`: a formatted text (`format_args!` makes a String here, so this holds one)
 #[derive(Clone)]
@@ -9875,6 +10436,49 @@ impl<'a> Debug for Arguments<'a> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
         f.buf.push_str(&self.__args_s);
         Ok(())
+    }
+}
+
+/// `std::ops::ControlFlow`: go on with a C, or stop early with a B
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ControlFlow<B, C = ()> {
+    Continue(C),
+    Break(B),
+}
+
+impl<B, C> ControlFlow<B, C> {
+    pub fn is_break(&self) -> bool {
+        match self {
+            ControlFlow::Break(_) => true,
+            ControlFlow::Continue(_) => false,
+        }
+    }
+    pub fn is_continue(&self) -> bool {
+        !self.is_break()
+    }
+    pub fn break_value(self) -> Option<B> {
+        match self {
+            ControlFlow::Break(b) => Some(b),
+            ControlFlow::Continue(_) => None,
+        }
+    }
+    pub fn continue_value(self) -> Option<C> {
+        match self {
+            ControlFlow::Continue(c) => Some(c),
+            ControlFlow::Break(_) => None,
+        }
+    }
+    pub fn map_break<T, F: FnOnce(B) -> T>(self, f: F) -> ControlFlow<T, C> {
+        match self {
+            ControlFlow::Break(b) => ControlFlow::Break(f(b)),
+            ControlFlow::Continue(c) => ControlFlow::Continue(c),
+        }
+    }
+    pub fn map_continue<T, F: FnOnce(C) -> T>(self, f: F) -> ControlFlow<B, T> {
+        match self {
+            ControlFlow::Continue(c) => ControlFlow::Continue(f(c)),
+            ControlFlow::Break(b) => ControlFlow::Break(b),
+        }
     }
 }
 
@@ -10153,8 +10757,6 @@ unsafe extern "C" {
 }
 
 pub fn __core_sleep(d: Duration) {
-    // (the other threads run first: a thread that sleeps to wait for another one lets it run)
-    __exr_green_yield();
     let req = [d.secs as i64, d.nanos as i64];
     let mut rem = [0i64, 0i64];
     unsafe {
@@ -10162,75 +10764,387 @@ pub fn __core_sleep(d: Duration) {
     }
 }
 
-// `std::sync::mpsc` (a shared queue: the green threads are one OS thread. `recv` on an empty queue waits for the
-// other threads; when none of them can send any more (every one waits or is done), it is an error, as if every
-// sender had hung up)
+// `std::sync::mpsc`: a queue under a futex Mutex, with a Condvar that both ends wait on. `recv` waits for a value
+// while a sender is left (with none, Err: every sender hung up); `send` fails once the receiver is gone, and a
+// sync_channel's waits while the queue is full (with bound 0, until its value is received)
+struct __Chan<T> {
+    m: u32,
+    cv: u32,
+    // (how many threads wait on cv: a send or a receive wakes them only when there are some)
+    nw: u32,
+    q: VecDeque<T>,
+    senders: usize,
+    rx: bool,
+    // (a sync_channel's bound; usize::MAX for a channel)
+    cap: usize,
+    sent: u64,
+    recvd: u64,
+}
+
 pub struct __Sndr<T> {
-    q: Rc<RefCell<VecDeque<T>>>,
+    c: Arc<__Chan<T>>,
+}
+
+// std's errors of the channels: a send's to a receiver that is gone (the value comes back; its Debug does not need
+// T's), a recv's when every sender is gone, a try_recv's
+pub struct SendError<T>(pub T);
+
+impl<T> Debug for SendError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.buf.push_str("SendError { .. }");
+        Ok(())
+    }
+}
+
+impl<T> Display for SendError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.pad("sending on a closed channel")
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecvError;
+
+impl Display for RecvError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.pad("receiving on a closed channel")
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TryRecvError {
+    Empty,
+    Disconnected,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecvTimeoutError {
+    Timeout,
+    Disconnected,
+}
+
+impl Display for RecvTimeoutError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        match self {
+            RecvTimeoutError::Timeout => f.pad("timed out waiting on channel"),
+            RecvTimeoutError::Disconnected => f.pad("channel is empty and sending half is closed"),
+        }
+    }
+}
+
+impl Display for TryRecvError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        match self {
+            TryRecvError::Empty => f.pad("receiving on an empty channel"),
+            TryRecvError::Disconnected => f.pad("receiving on an empty and disconnected channel"),
+        }
+    }
 }
 
 pub struct __SyncSndr<T> {
-    q: Rc<RefCell<VecDeque<T>>>,
+    c: Arc<__Chan<T>>,
 }
 
 pub struct __Rcvr__<T> {
-    q: Rc<RefCell<VecDeque<T>>>,
+    c: Arc<__Chan<T>>,
+}
+
+fn __exr_chan<T>(cap: usize) -> Arc<__Chan<T>> {
+    Arc::new(__Chan { m: 0, cv: 0, nw: 0, q: VecDeque::new(), senders: 1, rx: true, cap: cap, sent: 0, recvd: 0 })
+}
+
+fn __exr_chan_p<T>(c: &Arc<__Chan<T>>) -> *mut __Chan<T> {
+    c.as_ref() as *const __Chan<T> as *mut __Chan<T>
+}
+
+// (with the channel's lock held: wait for a change, the lock let go meanwhile)
+fn __exr_chan_wait<T>(c: *mut __Chan<T>) {
+    unsafe {
+        let cv = &mut (*c).cv as *mut u32;
+        let m = &mut (*c).m as *mut u32;
+        (*c).nw += 1;
+        let n = __exr_atomic_load(cv);
+        __exr_unlock(m);
+        __exr_futex_wait(cv, n);
+        __exr_lock(m);
+        (*c).nw -= 1;
+    }
+}
+
+unsafe extern "C" {
+    #[link_name = "clock_gettime"]
+    fn __exr_clock_gettime(clk: i32, ts: *mut [i64; 2]) -> i32;
+}
+
+// (CLOCK_MONOTONIC, in nanoseconds; u128::MAX when the read fails: under a lock, taken as the deadline reached, so the
+// wait ends and the lock is let go)
+fn __exr_mono_ns_or_max() -> u128 {
+    let mut ts = [0i64, 0i64];
+    if unsafe { __exr_clock_gettime(1, &mut ts) } != 0 {
+        return 340282366920938463463374607431768211455;
+    }
+    ts[0] as u128 * 1000000000 + ts[1] as u128
+}
+
+// (the first read, before any lock: one that fails panics, as std's `Instant::now`, as no deadline could be set)
+fn __exr_mono_ns() -> u128 {
+    let t = __exr_mono_ns_or_max();
+    if t == 340282366920938463463374607431768211455 {
+        panic!("clock_gettime(CLOCK_MONOTONIC) failed");
+    }
+    t
+}
+
+// (as __exr_chan_wait, until the monotonic clock reads `end` at the latest)
+fn __exr_chan_wait_until<T>(c: *mut __Chan<T>, end: u128) {
+    let now = __exr_mono_ns_or_max();
+    if now >= end {
+        return;
+    }
+    let left = end - now;
+    // (seconds past i64's range (`Duration::MAX`) are its largest: a negative timespec would make the wait fail at once)
+    let secs = left / 1000000000;
+    let ts = [if secs > 9223372036854775807 { 9223372036854775807 } else { secs as i64 }, (left % 1000000000) as i64];
+    unsafe {
+        let cv = &mut (*c).cv as *mut u32;
+        let m = &mut (*c).m as *mut u32;
+        (*c).nw += 1;
+        let n = __exr_atomic_load(cv);
+        __exr_unlock(m);
+        __exr_futex_wait_for(cv, n, &ts);
+        __exr_lock(m);
+        (*c).nw -= 1;
+    }
+}
+
+fn __exr_chan_notify<T>(c: *mut __Chan<T>) {
+    unsafe {
+        if (*c).nw != 0 {
+            let cv = &mut (*c).cv as *mut u32;
+            __exr_atomic_xadd(cv, 1);
+            __exr_futex_wake_all(cv);
+        }
+    }
+}
+
+fn __exr_chan_send<T>(c: *mut __Chan<T>, v: T) -> Result<(), T> {
+    unsafe {
+        let m = &mut (*c).m as *mut u32;
+        __exr_lock(m);
+        if (*c).cap != 18446744073709551615 {
+            let room = if (*c).cap == 0 { 1 } else { (*c).cap };
+            while (*c).rx && (*c).q.len() >= room {
+                __exr_chan_wait(c);
+            }
+        }
+        if !(*c).rx {
+            __exr_unlock(m);
+            return Err(v);
+        }
+        (*c).q.push_back(v);
+        (*c).sent += 1;
+        let ticket = (*c).sent;
+        __exr_chan_notify(c);
+        if (*c).cap == 0 {
+            while (*c).rx && (*c).recvd < ticket {
+                __exr_chan_wait(c);
+            }
+            // (the receiver went before it took this one: it is still the queue's one value, and the send fails with it)
+            if (*c).recvd < ticket {
+                if let Some(v) = (*c).q.pop_back() {
+                    __exr_unlock(m);
+                    return Err(v);
+                }
+            }
+        }
+        __exr_unlock(m);
+        Ok(())
+    }
+}
+
+// (the next value; Err when there is none (wait: and no sender is left): Err(true) when no sender is left, decided
+// under the same lock as the queue was found empty)
+fn __exr_chan_recv<T>(c: *mut __Chan<T>, wait: bool) -> Result<T, bool> {
+    unsafe {
+        let m = &mut (*c).m as *mut u32;
+        __exr_lock(m);
+        loop {
+            if let Some(v) = (*c).q.pop_front() {
+                (*c).recvd += 1;
+                __exr_chan_notify(c);
+                __exr_unlock(m);
+                return Ok(v);
+            }
+            let gone = (*c).senders == 0;
+            if !wait || gone {
+                __exr_unlock(m);
+                return Err(gone);
+            }
+            __exr_chan_wait(c);
+        }
+    }
+}
+
+fn __exr_chan_sender<T>(c: &Arc<__Chan<T>>, delta: isize) {
+    let p = __exr_chan_p(c);
+    unsafe {
+        let m = &mut (*p).m as *mut u32;
+        __exr_lock(m);
+        if delta > 0 {
+            (*p).senders += 1;
+        } else {
+            (*p).senders -= 1;
+            // (the last sender: a receiver that waits gets Err)
+            if (*p).senders == 0 {
+                __exr_chan_notify(p);
+            }
+        }
+        __exr_unlock(m);
+    }
 }
 
 pub fn __core_channel<T>() -> (__Sndr<T>, __Rcvr__<T>) {
-    let q = Rc::new(RefCell::new(VecDeque::new()));
-    (__Sndr { q: q.clone() }, __Rcvr__ { q })
+    let c = __exr_chan(18446744073709551615);
+    (__Sndr { c: c.clone() }, __Rcvr__ { c })
 }
 
-pub fn __core_sync_channel<T>(_n: usize) -> (__SyncSndr<T>, __Rcvr__<T>) {
-    let q = Rc::new(RefCell::new(VecDeque::new()));
-    (__SyncSndr { q: q.clone() }, __Rcvr__ { q })
+pub fn __core_sync_channel<T>(n: usize) -> (__SyncSndr<T>, __Rcvr__<T>) {
+    let c = __exr_chan(n);
+    (__SyncSndr { c: c.clone() }, __Rcvr__ { c })
 }
 
 impl<T> __Sndr<T> {
-    pub fn send(&self, v: T) -> Result<(), T> {
-        self.q.borrow_mut().push_back(v);
-        __exr_green_progress();
-        Ok(())
+    pub fn send(&self, v: T) -> Result<(), SendError<T>> {
+        match __exr_chan_send(__exr_chan_p(&self.c), v) {
+            Ok(()) => Ok(()),
+            Err(v) => Err(SendError(v)),
+        }
     }
     pub fn clone(&self) -> __Sndr<T> {
-        __Sndr { q: self.q.clone() }
+        __exr_chan_sender(&self.c, 1);
+        __Sndr { c: self.c.clone() }
+    }
+}
+
+impl<T> Drop for __Sndr<T> {
+    fn drop(&mut self) {
+        // (a null Arc: this end was moved out of a closure's captures, which codegen zeroes)
+        if self.c.p as usize == 0 {
+            return;
+        }
+        __exr_chan_sender(&self.c, -1);
     }
 }
 
 impl<T> __SyncSndr<T> {
-    pub fn send(&self, v: T) -> Result<(), T> {
-        self.q.borrow_mut().push_back(v);
-        __exr_green_progress();
-        Ok(())
+    pub fn send(&self, v: T) -> Result<(), SendError<T>> {
+        match __exr_chan_send(__exr_chan_p(&self.c), v) {
+            Ok(()) => Ok(()),
+            Err(v) => Err(SendError(v)),
+        }
     }
     pub fn clone(&self) -> __SyncSndr<T> {
-        __SyncSndr { q: self.q.clone() }
+        __exr_chan_sender(&self.c, 1);
+        __SyncSndr { c: self.c.clone() }
+    }
+}
+
+impl<T> Drop for __SyncSndr<T> {
+    fn drop(&mut self) {
+        if self.c.p as usize == 0 {
+            return;
+        }
+        __exr_chan_sender(&self.c, -1);
     }
 }
 
 impl<T> __Rcvr__<T> {
-    pub fn recv(&self) -> Result<T, ()> {
-        let q = self.q.clone();
-        __exr_green_wait(|| !q.borrow().is_empty());
-        self.try_recv()
+    pub fn recv(&self) -> Result<T, RecvError> {
+        match __exr_chan_recv(__exr_chan_p(&self.c), true) {
+            Ok(v) => Ok(v),
+            Err(_) => Err(RecvError),
+        }
     }
-    pub fn try_recv(&self) -> Result<T, ()> {
-        match self.q.borrow_mut().pop_front() {
-            Some(v) => Ok(v),
-            None => Err(()),
+    // (Empty while a sender is left, else Disconnected)
+    pub fn try_recv(&self) -> Result<T, TryRecvError> {
+        match __exr_chan_recv(__exr_chan_p(&self.c), false) {
+            Ok(v) => Ok(v),
+            Err(gone) => Err(if gone { TryRecvError::Disconnected } else { TryRecvError::Empty }),
+        }
+    }
+    // (Timeout when no value comes within d while a sender is left)
+    // (recv's loop with a deadline on the monotonic clock: here, so that a program that never calls it needs no clock)
+    pub fn recv_timeout(&self, d: Duration) -> Result<T, RecvTimeoutError> {
+        let end = __exr_mono_ns() + d.secs as u128 * 1000000000 + d.nanos as u128;
+        let c = __exr_chan_p(&self.c);
+        unsafe {
+            let m = &mut (*c).m as *mut u32;
+            __exr_lock(m);
+            loop {
+                if let Some(v) = (*c).q.pop_front() {
+                    (*c).recvd += 1;
+                    __exr_chan_notify(c);
+                    __exr_unlock(m);
+                    return Ok(v);
+                }
+                if (*c).senders == 0 {
+                    __exr_unlock(m);
+                    return Err(RecvTimeoutError::Disconnected);
+                }
+                if __exr_mono_ns_or_max() >= end {
+                    __exr_unlock(m);
+                    return Err(RecvTimeoutError::Timeout);
+                }
+                __exr_chan_wait_until(c, end);
+            }
         }
     }
     pub fn iter(&self) -> __RecvIter<T> {
-        __RecvIter { q: self.q.clone(), wait: true }
+        __RecvIter { c: self.c.clone(), wait: true }
     }
     pub fn try_iter(&self) -> __RecvIter<T> {
-        __RecvIter { q: self.q.clone(), wait: false }
+        __RecvIter { c: self.c.clone(), wait: false }
+    }
+    // (the receiver itself: it stays while the iterator does)
+    pub fn into_iter(self) -> __RecvIntoIter<T> {
+        __RecvIntoIter { r: self }
+    }
+}
+
+pub struct __RecvIntoIter<T> {
+    r: __Rcvr__<T>,
+}
+
+impl<T> Iterator for __RecvIntoIter<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        self.r.recv().ok()
+    }
+}
+
+// (the receiver gone: a send fails, and a sender waiting on a full sync_channel wakes to fail)
+impl<T> Drop for __Rcvr__<T> {
+    fn drop(&mut self) {
+        if self.c.p as usize == 0 {
+            return;
+        }
+        let p = __exr_chan_p(&self.c);
+        unsafe {
+            let m = &mut (*p).m as *mut u32;
+            __exr_lock(m);
+            (*p).rx = false;
+            // (the values no one can receive now go, after the lock is let go: their drops may use the channel. A
+            // rendezvous's value stays, for its sender to get back)
+            let rest = if (*p).cap == 0 { VecDeque::new() } else { core::mem::replace(&mut (*p).q, VecDeque::new()) };
+            __exr_chan_notify(p);
+            __exr_unlock(m);
+            drop(rest);
+        }
     }
 }
 
 pub struct __RecvIter<T> {
-    q: Rc<RefCell<VecDeque<T>>>,
+    c: Arc<__Chan<T>>,
     // (iter: wait for the next value as recv; try_iter: only what is there)
     wait: bool,
 }
@@ -10238,11 +11152,10 @@ pub struct __RecvIter<T> {
 impl<T> Iterator for __RecvIter<T> {
     type Item = T;
     fn next(&mut self) -> Option<T> {
-        if self.wait {
-            let q = self.q.clone();
-            __exr_green_wait(|| !q.borrow().is_empty());
+        match __exr_chan_recv(__exr_chan_p(&self.c), self.wait) {
+            Ok(v) => Some(v),
+            Err(_) => None,
         }
-        self.q.borrow_mut().pop_front()
     }
 }
 
@@ -10326,6 +11239,10 @@ impl Waker {
     }
     pub fn wake(self) {}
     pub fn wake_by_ref(&self) {}
+    // (every Waker here is the no-op one, which std's will_wake also finds the same: its data and vtable)
+    pub fn will_wake(&self, _other: &Waker) -> bool {
+        true
+    }
 }
 
 pub struct Context<'a> {
@@ -10658,36 +11575,101 @@ pub fn __exr_ptr_eq<T>(a: &T, b: &T) -> bool {
     a as *const T == b as *const T
 }
 
-// `std::sync::Mutex` (green threads: `lock` waits while another thread holds it; the guard's drop lets it go.
-// When it cannot be had (the thread itself holds it, or every other thread waits), `lock` goes on, as it did when
-// there was one thread)
+// `std::sync::Mutex`: std's futex mutex. The state is 0 unlocked, 1 locked, 2 locked with waiters: `lock` takes it
+// 0 -> 1, or else spins a little and then marks it 2 and waits on the futex; the guard's drop sets 0 and wakes one
+// waiter when it was 2. A lock by the thread that holds it waits forever, as std's
 pub struct Mutex<T> {
     val: T,
-    locked: bool,
+    locked: u32,
 }
 
 pub struct MutexGuard<T> {
     p: *mut T,
-    m: *mut bool,
+    m: *mut u32,
+}
+
+fn __exr_lock(m: *mut u32) {
+    if __exr_atomic_cas(m, 0, 1) != 0 {
+        __exr_lock_contended(m);
+    }
+}
+
+fn __exr_lock_contended(m: *mut u32) {
+    // (a short spin first: a lock held briefly is often free again before a futex call could return)
+    let mut k = 0;
+    while k < 100 {
+        let s = __exr_atomic_load(m);
+        if s == 0 && __exr_atomic_cas(m, 0, 1) == 0 {
+            return;
+        }
+        if s == 2 {
+            break;
+        }
+        k += 1;
+    }
+    while __exr_atomic_xchg(m, 2) != 0 {
+        __exr_futex_wait(m, 2);
+    }
+}
+
+fn __exr_unlock(m: *mut u32) {
+    if __exr_atomic_xchg(m, 0) == 2 {
+        __exr_futex_wake(m, 1);
+    }
 }
 
 impl<T> Mutex<T> {
     pub const fn new(v: T) -> Mutex<T> {
-        Mutex { val: v, locked: false }
+        Mutex { val: v, locked: 0 }
     }
-    pub fn lock(&self) -> Result<MutexGuard<T>, ()> {
-        let m = &self.locked as *const bool as *mut bool;
-        __exr_green_wait(|| unsafe { !*m });
-        unsafe {
-            *m = true;
-        }
+    fn __m(&self) -> *mut u32 {
+        &self.locked as *const u32 as *mut u32
+    }
+    pub fn lock(&self) -> Result<MutexGuard<T>, PoisonError<MutexGuard<T>>> {
+        let m = self.__m();
+        __exr_lock(m);
         Ok(MutexGuard { p: &self.val as *const T as *mut T, m: m })
     }
-    pub fn into_inner(self) -> Result<T, ()> {
+    pub fn into_inner(self) -> Result<T, PoisonError<T>> {
         Ok(self.val)
     }
-    pub fn get_mut(&mut self) -> Result<&mut T, ()> {
+    pub fn get_mut(&mut self) -> Result<&mut T, PoisonError<&mut T>> {
         Ok(&mut self.val)
+    }
+}
+
+// `std::sync::PoisonError`, the Err of a Mutex's lock: none comes here (a panic does not unwind, so no lock is
+// poisoned), but a program handles it, `Err(e) => e.into_inner()` (#256)
+pub struct PoisonError<T> {
+    guard: T,
+}
+
+impl<T> PoisonError<T> {
+    pub fn new(guard: T) -> PoisonError<T> {
+        PoisonError { guard: guard }
+    }
+    pub fn into_inner(self) -> T {
+        self.guard
+    }
+    pub fn get_ref(&self) -> &T {
+        &self.guard
+    }
+    pub fn get_mut(&mut self) -> &mut T {
+        &mut self.guard
+    }
+}
+
+impl<T> Debug for PoisonError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_str::<()>(f, "PoisonError { .. }");
+        Ok(())
+    }
+}
+
+impl<T> Display for PoisonError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_str::<()>(f, "poisoned lock: another task failed inside");
+        Ok(())
     }
 }
 
@@ -10714,57 +11696,194 @@ impl<T: Display> Display for MutexGuard<T> {
 
 impl<T> Drop for MutexGuard<T> {
     fn drop(&mut self) {
-        unsafe {
-            *self.m = false;
-        }
-        __exr_green_progress();
+        __exr_unlock(self.m);
     }
 }
 
-// `std::sync::RwLock` (green threads, as Mutex: `read` waits while a writer holds it, `write` while anyone does; a
-// guard's drop lets it go)
+// `std::sync::Condvar`: std's futex condvar, a counter each notify bumps. `wait` reads it, lets the Mutex go, waits
+// on the futex while the counter is still what it read (so a notify between the two is not lost), and takes the
+// Mutex again. A wakeup may be spurious, which std allows. A wait nothing notifies waits forever, as std's
+pub struct Condvar {
+    __cv_n: u32,
+}
+
+impl Condvar {
+    pub const fn new() -> Condvar {
+        Condvar { __cv_n: 0 }
+    }
+    fn __p(&self) -> *mut u32 {
+        &self.__cv_n as *const u32 as *mut u32
+    }
+    pub fn wait<T>(&self, guard: MutexGuard<T>) -> Result<MutexGuard<T>, ()> {
+        let n = __exr_atomic_load(self.__p());
+        __exr_unlock(guard.m);
+        __exr_futex_wait(self.__p(), n);
+        __exr_lock(guard.m);
+        Ok(guard)
+    }
+    pub fn wait_while<T, F: FnMut(&mut T) -> bool>(&self, guard: MutexGuard<T>, condition: F) -> Result<MutexGuard<T>, ()> {
+        let mut g = guard;
+        let mut condition = condition;
+        while condition(unsafe { &mut *g.p }) {
+            g = self.wait(g).unwrap();
+        }
+        Ok(g)
+    }
+    pub fn notify_one(&self) {
+        __exr_atomic_xadd(self.__p(), 1);
+        __exr_futex_wake(self.__p(), 1);
+    }
+    pub fn notify_all(&self) {
+        __exr_atomic_xadd(self.__p(), 1);
+        __exr_futex_wake_all(self.__p());
+    }
+}
+
+impl Debug for Condvar {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.debug_struct("\x43ondvar").finish_non_exhaustive()
+    }
+}
+
+// `std::sync::Barrier`: as std's, a count under a lock and a generation. The thread that makes the count n is the
+// leader: it starts the next generation and wakes the others (a futex word that each new generation bumps)
+pub struct Barrier {
+    __b_m: u32,
+    __b_cv: u32,
+    __b_count: usize,
+    __b_gen: usize,
+    __b_n: usize,
+}
+
+pub struct BarrierWaitResult(bool);
+
+impl BarrierWaitResult {
+    pub fn is_leader(&self) -> bool {
+        self.0
+    }
+}
+
+impl Barrier {
+    pub const fn new(n: usize) -> Barrier {
+        Barrier { __b_m: 0, __b_cv: 0, __b_count: 0, __b_gen: 0, __b_n: n }
+    }
+    pub fn wait(&self) -> BarrierWaitResult {
+        let p = self as *const Barrier as *mut Barrier;
+        unsafe {
+            let m = &mut (*p).__b_m as *mut u32;
+            let cv = &mut (*p).__b_cv as *mut u32;
+            __exr_lock(m);
+            let g = (*p).__b_gen;
+            (*p).__b_count += 1;
+            if (*p).__b_count < (*p).__b_n {
+                while g == (*p).__b_gen {
+                    let n = __exr_atomic_load(cv);
+                    __exr_unlock(m);
+                    __exr_futex_wait(cv, n);
+                    __exr_lock(m);
+                }
+                __exr_unlock(m);
+                return BarrierWaitResult(false);
+            }
+            (*p).__b_count = 0;
+            (*p).__b_gen += 1;
+            __exr_atomic_xadd(cv, 1);
+            __exr_futex_wake_all(cv);
+            __exr_unlock(m);
+            BarrierWaitResult(true)
+        }
+    }
+}
+
+impl Debug for Barrier {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.debug_struct("\x42arrier").finish_non_exhaustive()
+    }
+}
+
+impl Debug for BarrierWaitResult {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.debug_struct("\x42arrierWaitResult").field("is_leader", &self.0).finish()
+    }
+}
+
+// `std::sync::RwLock`: the state is the number of readers, or u32::MAX while a writer holds it. A thread that cannot
+// have it waits on a second futex word, which every unlock bumps (and wakes all on, when anyone waits)
+struct __RwState {
+    st: u32,
+    seq: u32,
+    waiting: u32,
+}
+
 pub struct RwLock<T> {
     val: T,
-    readers: usize,
-    writer: bool,
+    __rw: __RwState,
 }
 
 pub struct RwLockReadGuard<T> {
     p: *const T,
-    l: *mut usize,
+    l: *mut __RwState,
 }
 
 pub struct RwLockWriteGuard<T> {
     p: *mut T,
-    w: *mut bool,
+    l: *mut __RwState,
+}
+
+// (wait for the lock to be free for a reader (or a writer) once; the caller tries again)
+fn __exr_rw_wait(l: *mut __RwState, write: bool) {
+    unsafe {
+        let seq = &mut (*l).seq as *mut u32;
+        let waiting = &mut (*l).waiting as *mut u32;
+        let q = __exr_atomic_load(seq);
+        __exr_atomic_xadd(waiting, 1);
+        let s = __exr_atomic_load(&mut (*l).st as *mut u32);
+        if (write && s != 0) || (!write && s >= 4294967294) {
+            __exr_futex_wait(seq, q);
+        }
+        __exr_atomic_xadd(waiting, 4294967295);
+    }
+}
+
+fn __exr_rw_wake(l: *mut __RwState) {
+    unsafe {
+        let seq = &mut (*l).seq as *mut u32;
+        __exr_atomic_xadd(seq, 1);
+        if __exr_atomic_load(&mut (*l).waiting as *mut u32) != 0 {
+            __exr_futex_wake_all(seq);
+        }
+    }
 }
 
 impl<T> RwLock<T> {
     pub const fn new(v: T) -> RwLock<T> {
-        RwLock { val: v, readers: 0, writer: false }
+        RwLock { val: v, __rw: __RwState { st: 0, seq: 0, waiting: 0 } }
+    }
+    fn __l(&self) -> *mut __RwState {
+        &self.__rw as *const __RwState as *mut __RwState
     }
     pub fn read(&self) -> Result<RwLockReadGuard<T>, ()> {
-        let w = &self.writer as *const bool;
-        // (no other thread to wait for, and a writer holds it: std's would deadlock)
-        if !__exr_green_wait(|| unsafe { !*w }) {
-            panic!("rwlock read lock would result in deadlock");
+        let l = self.__l();
+        let st = unsafe { &mut (*l).st as *mut u32 };
+        loop {
+            let s = __exr_atomic_load(st);
+            if s < 4294967294 {
+                if __exr_atomic_cas(st, s, s + 1) == s {
+                    break;
+                }
+                continue;
+            }
+            __exr_rw_wait(l, false);
         }
-        let r = &self.readers as *const usize as *mut usize;
-        unsafe {
-            *r += 1;
-        }
-        Ok(RwLockReadGuard { p: &self.val as *const T, l: r })
+        Ok(RwLockReadGuard { p: &self.val as *const T, l: l })
     }
     pub fn write(&self) -> Result<RwLockWriteGuard<T>, ()> {
-        let w = &self.writer as *const bool as *mut bool;
-        let r = &self.readers as *const usize;
-        if !__exr_green_wait(|| unsafe { !*w && *r == 0 }) {
-            panic!("rwlock write lock would result in deadlock");
+        let l = self.__l();
+        let st = unsafe { &mut (*l).st as *mut u32 };
+        while __exr_atomic_cas(st, 0, 4294967295) != 0 {
+            __exr_rw_wait(l, true);
         }
-        unsafe {
-            *w = true;
-        }
-        Ok(RwLockWriteGuard { p: &self.val as *const T as *mut T, w: w })
+        Ok(RwLockWriteGuard { p: &self.val as *const T as *mut T, l: l })
     }
     pub fn into_inner(self) -> Result<T, ()> {
         Ok(self.val)
@@ -10784,9 +11903,9 @@ impl<T> Deref for RwLockReadGuard<T> {
 impl<T> Drop for RwLockReadGuard<T> {
     fn drop(&mut self) {
         unsafe {
-            *self.l -= 1;
+            __exr_atomic_xadd(&mut (*self.l).st as *mut u32, 4294967295);
         }
-        __exr_green_progress();
+        __exr_rw_wake(self.l);
     }
 }
 
@@ -10806,24 +11925,126 @@ impl<T> RwLockWriteGuard<T> {
 impl<T> Drop for RwLockWriteGuard<T> {
     fn drop(&mut self) {
         unsafe {
-            *self.w = false;
+            __exr_atomic_store(&mut (*self.l).st as *mut u32, 0);
         }
-        __exr_green_progress();
+        __exr_rw_wake(self.l);
     }
 }
 
+// (as std's: the data under a read lock taken without waiting, or `<locked>` while a writer holds it)
 impl<T: Debug> Debug for RwLock<T> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let l = self.__l();
+        let st = unsafe { &mut (*l).st as *mut u32 };
+        let s = __exr_atomic_load(st);
         f.buf.push_str("RwLock { data: ");
-        __exr_debug(&self.val, f);
+        if s < 4294967294 && __exr_atomic_cas(st, s, s + 1) == s {
+            __exr_debug(&self.val, f);
+            __exr_atomic_xadd(st, 4294967295);
+            __exr_rw_wake(l);
+        } else {
+            f.buf.push_str("<locked>");
+        }
         f.buf.push_str(", poisoned: false, .. }");
         Ok(())
     }
 }
 
-// `std::sync::OnceLock` (スレッドは 1 本なので、初期化済みかどうかと値だけ)
+// `std::sync::OnceLock`: a Once, and the value it sets
 pub struct OnceLock<T> {
     val: Option<T>,
+    __ol_once: Once,
+}
+
+// `std::sync::Once`: std's futex Once. The state is 0 not run, 1 running, 3 running with waiters, 2 done, 4 poisoned:
+// the thread that takes it 0 -> 1 runs the closure, the others wait on the futex until it is done. A panic does not
+// unwind, but a spawned thread that panics in the closure poisons it (its waiters wake): `call_once` then panics, as
+// std's, and `call_once_force` and OnceLock run their closure again
+pub struct Once {
+    __once_st: u32,
+}
+
+pub struct OnceState {
+    __os_poisoned: bool,
+}
+
+pub const ONCE_INIT: Once = Once { __once_st: 0 };
+
+// (set by the first thread spawned: a Once begun (true) or done (false) on a spawned thread, which its panic poisons)
+static mut __EXR_ONCE_HOOK: Option<fn(*mut u32, bool)> = None;
+
+impl Once {
+    pub const fn new() -> Once {
+        Once { __once_st: 0 }
+    }
+    fn __p(&self) -> *mut u32 {
+        &self.__once_st as *const u32 as *mut u32
+    }
+    pub fn is_completed(&self) -> bool {
+        __exr_atomic_load(self.__p()) == 2
+    }
+    pub fn call_once<F: FnOnce()>(&self, f: F) {
+        if !self.is_completed() && self.__once_begin(false) != 0 {
+            f();
+            self.__once_end();
+        }
+    }
+    pub fn call_once_force<F: FnOnce(&OnceState)>(&self, f: F) {
+        if !self.is_completed() {
+            let b = self.__once_begin(true);
+            if b != 0 {
+                f(&OnceState { __os_poisoned: b == 2 });
+                self.__once_end();
+            }
+        }
+    }
+    // (1: this thread is to run the closure; 2: so, after a poisoning (force only); 0: another one ran it meanwhile. A
+    // call_once inside its own closure waits forever, as std's)
+    fn __once_begin(&self, force: bool) -> u8 {
+        let p = self.__p();
+        loop {
+            let s = __exr_atomic_load(p);
+            if s == 2 {
+                return 0;
+            }
+            if s == 0 || s == 4 {
+                if s == 4 && !force {
+                    panic!("Once instance has previously been poisoned");
+                }
+                if __exr_atomic_cas(p, s, 1) == s {
+                    if let Some(h) = unsafe { __EXR_ONCE_HOOK } {
+                        h(p, true);
+                    }
+                    return if s == 4 { 2 } else { 1 };
+                }
+                continue;
+            }
+            if s == 1 && __exr_atomic_cas(p, 1, 3) != 1 {
+                continue;
+            }
+            __exr_futex_wait(p, 3);
+        }
+    }
+    fn __once_end(&self) {
+        if let Some(h) = unsafe { __EXR_ONCE_HOOK } {
+            h(self.__p(), false);
+        }
+        if __exr_atomic_xchg(self.__p(), 2) == 3 {
+            __exr_futex_wake_all(self.__p());
+        }
+    }
+}
+
+impl OnceState {
+    pub fn is_poisoned(&self) -> bool {
+        self.__os_poisoned
+    }
+}
+
+impl Debug for Once {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.debug_struct("\x4fnce").finish_non_exhaustive()
+    }
 }
 
 // `std::cell::OnceCell`: whether it is set, and the value (OnceLock's, for one thread)
@@ -10902,30 +12123,32 @@ impl<T, F: FnOnce() -> T> LazyCell<T, F> {
 
 impl<T> OnceLock<T> {
     pub const fn new() -> OnceLock<T> {
-        OnceLock { val: None }
+        OnceLock { val: None, __ol_once: Once { __once_st: 0 } }
     }
     pub fn get(&self) -> Option<&T> {
-        self.val.as_ref()
+        if self.__ol_once.is_completed() { self.val.as_ref() } else { None }
     }
+    // (the closure runs on one thread; the others wait for its value. One that panicked on a spawned thread leaves the
+    // cell empty, and the next caller runs its own, as std's)
     pub fn get_or_init<F: FnOnce() -> T>(&self, f: F) -> &T {
-        if self.val.is_none() {
+        if !self.__ol_once.is_completed() && self.__ol_once.__once_begin(true) != 0 {
             let v = f();
-            let p = &self.val as *const Option<T> as *mut Option<T>;
             unsafe {
-                p.write(Some(v));
+                (&self.val as *const Option<T> as *mut Option<T>).write(Some(v));
             }
+            self.__ol_once.__once_end();
         }
         self.val.as_ref().unwrap()
     }
     pub fn set(&self, v: T) -> Result<(), T> {
-        if self.val.is_some() {
-            return Err(v);
+        if !self.__ol_once.is_completed() && self.__ol_once.__once_begin(true) != 0 {
+            unsafe {
+                (&self.val as *const Option<T> as *mut Option<T>).write(Some(v));
+            }
+            self.__ol_once.__once_end();
+            return Ok(());
         }
-        let p = &self.val as *const Option<T> as *mut Option<T>;
-        unsafe {
-            p.write(Some(v));
-        }
-        Ok(())
+        Err(v)
     }
 }
 
@@ -11001,6 +12224,10 @@ impl String {
     fn pop_byte(&mut self) {
         self.vec.len -= 1;
     }
+    // (unsafe as in std: the caller keeps the bytes UTF-8)
+    pub unsafe fn as_mut_vec(&mut self) -> &mut Vec<u8> {
+        &mut self.vec
+    }
 }
 // --- 順序 (Ordering / 大小比較の glue。型ごとの比較の本体は codegen が作る __exr_cmp) ---
 
@@ -11056,6 +12283,12 @@ impl Error for ParseFloatError {
     fn __err_mark(&self) {}
 }
 impl Error for TryFromIntError {
+    fn __err_mark(&self) {}
+}
+impl Error for LayoutError {
+    fn __err_mark(&self) {}
+}
+impl Error for Infallible {
     fn __err_mark(&self) {}
 }
 
@@ -11121,6 +12354,10 @@ pub trait BorrowMut {
 }
 pub trait FromIterator {
     fn from_iter<I>(iter: I) -> Self;
+}
+// (`impl Extend<bool> for BitVec`: a program's own; Vec's, String's and the collections' `extend` are their own methods)
+pub trait Extend {
+    fn extend<I>(&mut self, iter: I);
 }
 
 pub trait From {
@@ -13809,6 +15046,18 @@ fn __exr_str_eq_ignore_ascii_case<G>(s: &str, t: &str) -> bool {
     true
 }
 
+fn __exr_str_is_ascii<G>(s: &str) -> bool {
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] >= 0x80 {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
 fn __exr_str_replace<G>(s: &str, from: &str, to: &str) -> String {
     __exr_str_replacen::<()>(s, from, to, !0usize)
 }
@@ -14090,6 +15339,8 @@ fn __exr_str_is_char_boundary<G>(s: &str, i: usize) -> bool {
 }
 
 // `s.split("ab")` (区切りが &str)
+// (an empty separator matches at every char boundary, the start and the end too, as std's: `"ab".split("")` is
+// `["", "a", "b", ""]`; emp: its match at i is still to come (#256))
 pub struct SplitStr {
     p: *const u8,
     len: usize,
@@ -14097,6 +15348,7 @@ pub struct SplitStr {
     sep: *const u8,
     slen: usize,
     done: bool,
+    emp: bool,
 }
 
 impl Iterator for SplitStr {
@@ -14106,6 +15358,21 @@ impl Iterator for SplitStr {
             return None;
         }
         let st = self.i;
+        if self.slen == 0 {
+            // (the next match: at i, or one char past it; none past the end)
+            let m = if self.emp {
+                st
+            } else if st < self.len {
+                let b0 = unsafe { *self.p.add(st) };
+                st + if b0 < 0x80 { 1 } else if b0 < 0xE0 { 2 } else if b0 < 0xF0 { 3 } else { 4 }
+            } else {
+                self.done = true;
+                return Some(__exr_sub::<()>(unsafe { self.p.add(st) }, 0));
+            };
+            self.emp = false;
+            self.i = m;
+            return Some(__exr_sub::<()>(unsafe { self.p.add(st) }, m - st));
+        }
         let mut k = self.i;
         while k + self.slen <= self.len {
             let mut j = 0;
@@ -14209,7 +15476,32 @@ fn __exr_str_rsplit_once<G>(s: &str, p: &str) -> Option<(&str, &str)> {
 }
 
 fn __exr_str_split_str<G>(s: &str, t: &str) -> SplitStr {
-    SplitStr { p: s.as_ptr(), len: s.len(), i: 0, sep: t.as_ptr(), slen: t.len(), done: false }
+    SplitStr { p: s.as_ptr(), len: s.len(), i: 0, sep: t.as_ptr(), slen: t.len(), done: false, emp: true }
+}
+
+// `s.splitn(n, pat)`: at most n pieces, the last one the rest (a char pattern comes as its UTF-8)
+pub struct SplitNStr {
+    it: SplitStr,
+    n: usize,
+}
+
+impl Iterator for SplitNStr {
+    type Item = &str;
+    fn next(&mut self) -> Option<&str> {
+        if self.n == 0 || self.it.done {
+            return None;
+        }
+        self.n -= 1;
+        if self.n == 0 {
+            self.it.done = true;
+            return Some(__exr_sub::<()>(unsafe { self.it.p.add(self.it.i) }, self.it.len - self.it.i));
+        }
+        self.it.next()
+    }
+}
+
+fn __exr_str_splitn<G>(s: &str, n: usize, t: &str) -> SplitNStr {
+    SplitNStr { it: __exr_str_split_str::<()>(s, t), n: n }
 }
 
 // `s.char_indices()` / `s.bytes()`
@@ -15425,4 +16717,1023 @@ impl __BoolThen for bool {
     fn then<T, F: FnOnce() -> T>(self, f: F) -> Option<T> {
         if self { Some(f()) } else { None }
     }
+}
+
+// --- std::fs::File, OpenOptions, Metadata (libc's open / read / write / lseek / fstat / close), std::os::unix's fd
+// traits. A File owns its fd and closes it when dropped; `into_raw_fd` gives it away without closing ---
+
+unsafe extern "C" {
+    #[link_name = "fstat"]
+    fn __exr_fstat(fd: i32, buf: *mut u8) -> i32;
+}
+
+unsafe extern "C" {
+    #[link_name = "lseek"]
+    fn __exr_lseek(fd: i32, off: i64, whence: i32) -> i64;
+}
+
+unsafe extern "C" {
+    #[link_name = "fsync"]
+    fn __exr_fsync(fd: i32) -> i32;
+}
+
+unsafe extern "C" {
+    #[link_name = "ftruncate"]
+    fn __exr_ftruncate(fd: i32, len: i64) -> i32;
+}
+
+unsafe extern "C" {
+    #[link_name = "fcntl"]
+    fn __exr_fcntl(fd: i32, cmd: i32, arg: i32) -> i32;
+}
+
+pub type RawFd = i32;
+
+pub trait AsRawFd {
+    fn as_raw_fd(&self) -> RawFd;
+}
+pub trait FromRawFd {
+    unsafe fn from_raw_fd(fd: RawFd) -> Self;
+}
+pub trait IntoRawFd {
+    fn into_raw_fd(self) -> RawFd;
+}
+
+pub struct File {
+    __f_fd: i32,
+}
+
+// (open(2) of a path with the flags and the mode a new file gets, retried when a signal interrupts it)
+fn __exr_file_open<G>(p: &[u8], flags: i32, mode: i32) -> Result<File, IoError> {
+    // (a NUL inside the path would end it there: std's InvalidInput)
+    if p.iter().any(|&b| b == 0) {
+        return Err(IoError { code: -8, os: false });
+    }
+    let c = __exr_c_path::<()>(p);
+    loop {
+        // (O_CLOEXEC, as std's)
+        let fd = unsafe { __exr_open(c.as_ptr(), flags | 0x80000, mode) };
+        if fd >= 0 {
+            return Ok(File { __f_fd: fd });
+        }
+        let e = IoError::last_os_error();
+        if e.code != 4 {
+            return Err(e);
+        }
+    }
+}
+
+fn __exr_fd_metadata<G>(fd: i32) -> Result<Metadata, IoError> {
+    let mut m = Metadata { __md: [0u64; 18] };
+    if unsafe { __exr_fstat(fd, m.__md.as_mut_ptr() as *mut u8) } != 0 {
+        return Err(IoError::last_os_error());
+    }
+    Ok(m)
+}
+
+impl File {
+    pub fn open<P>(path: P) -> Result<File, IoError> {
+        __exr_file_open::<()>(path.__as_bytes(), 0, 0o666)
+    }
+    // (O_WRONLY | O_CREAT | O_TRUNC)
+    pub fn create<P>(path: P) -> Result<File, IoError> {
+        __exr_file_open::<()>(path.__as_bytes(), 0x241, 0o666)
+    }
+    // (O_RDWR | O_CREAT | O_EXCL)
+    pub fn create_new<P>(path: P) -> Result<File, IoError> {
+        __exr_file_open::<()>(path.__as_bytes(), 0xc2, 0o666)
+    }
+    pub fn options() -> OpenOptions {
+        OpenOptions::new()
+    }
+    pub fn metadata(&self) -> Result<Metadata, IoError> {
+        __exr_fd_metadata::<()>(self.__f_fd)
+    }
+    pub fn sync_all(&self) -> Result<(), IoError> {
+        if unsafe { __exr_fsync(self.__f_fd) } != 0 {
+            return Err(IoError::last_os_error());
+        }
+        Ok(())
+    }
+    pub fn sync_data(&self) -> Result<(), IoError> {
+        self.sync_all()
+    }
+    pub fn set_len(&self, size: u64) -> Result<(), IoError> {
+        if unsafe { __exr_ftruncate(self.__f_fd, size as i64) } != 0 {
+            return Err(IoError::last_os_error());
+        }
+        Ok(())
+    }
+    pub fn try_clone(&self) -> Result<File, IoError> {
+        // (F_DUPFD_CLOEXEC, as std's: the copy is not left to a child process either)
+        let fd = unsafe { __exr_fcntl(self.__f_fd, 1030, 3) };
+        if fd < 0 {
+            return Err(IoError::last_os_error());
+        }
+        Ok(File { __f_fd: fd })
+    }
+}
+
+impl Read for File {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, IoError> {
+        loop {
+            let n = unsafe { __exr_read(self.__f_fd, buf.as_mut_ptr(), buf.len()) };
+            if n >= 0 {
+                return Ok(n as usize);
+            }
+            let e = IoError::last_os_error();
+            if e.code != 4 {
+                return Err(e);
+            }
+        }
+    }
+}
+
+impl Write for File {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, IoError> {
+        loop {
+            let n = unsafe { __exr_write(self.__f_fd, buf.as_ptr(), buf.len()) };
+            if n >= 0 {
+                return Ok(n as usize);
+            }
+            let e = IoError::last_os_error();
+            if e.code != 4 {
+                return Err(e);
+            }
+        }
+    }
+}
+
+impl Seek for File {
+    fn seek(&mut self, pos: SeekFrom) -> Result<u64, IoError> {
+        let (off, whence) = match pos {
+            SeekFrom::Start(n) => (n as i64, 0),
+            SeekFrom::Current(n) => (n, 1),
+            SeekFrom::End(n) => (n, 2),
+        };
+        let r = unsafe { __exr_lseek(self.__f_fd, off, whence) };
+        if r < 0 {
+            return Err(IoError::last_os_error());
+        }
+        Ok(r as u64)
+    }
+}
+
+impl Drop for File {
+    fn drop(&mut self) {
+        unsafe {
+            __exr_close(self.__f_fd);
+        }
+    }
+}
+
+// (std's names the path and the access mode too, which it reads back from the system)
+impl Debug for File {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.debug_struct("\x46ile").field("fd", &self.__f_fd).finish()
+    }
+}
+
+impl AsRawFd for File {
+    fn as_raw_fd(&self) -> RawFd {
+        self.__f_fd
+    }
+}
+impl FromRawFd for File {
+    unsafe fn from_raw_fd(fd: RawFd) -> File {
+        File { __f_fd: fd }
+    }
+}
+impl IntoRawFd for File {
+    fn into_raw_fd(self) -> RawFd {
+        let fd = self.__f_fd;
+        __core_forget(self);
+        fd
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct OpenOptions {
+    __o_read: bool,
+    __o_write: bool,
+    __o_append: bool,
+    __o_truncate: bool,
+    __o_create: bool,
+    __o_create_new: bool,
+    __o_mode: u32,
+    __o_flags: i32,
+}
+
+impl OpenOptions {
+    pub fn new() -> OpenOptions {
+        OpenOptions {
+            __o_read: false,
+            __o_write: false,
+            __o_append: false,
+            __o_truncate: false,
+            __o_create: false,
+            __o_create_new: false,
+            __o_mode: 0o666,
+            __o_flags: 0,
+        }
+    }
+    pub fn read(&mut self, read: bool) -> &mut OpenOptions {
+        self.__o_read = read;
+        self
+    }
+    pub fn write(&mut self, write: bool) -> &mut OpenOptions {
+        self.__o_write = write;
+        self
+    }
+    pub fn append(&mut self, append: bool) -> &mut OpenOptions {
+        self.__o_append = append;
+        self
+    }
+    pub fn truncate(&mut self, truncate: bool) -> &mut OpenOptions {
+        self.__o_truncate = truncate;
+        self
+    }
+    pub fn create(&mut self, create: bool) -> &mut OpenOptions {
+        self.__o_create = create;
+        self
+    }
+    pub fn create_new(&mut self, create_new: bool) -> &mut OpenOptions {
+        self.__o_create_new = create_new;
+        self
+    }
+    // (std's checks, in its order: an access mode (-5), write access to create or truncate (-6), no truncating with
+    // append (-7); then O_CREAT / O_TRUNC, or O_CREAT | O_EXCL. A custom flag's access bits are dropped)
+    pub fn open<P>(&self, path: P) -> Result<File, IoError> {
+        let creates = self.__o_create || self.__o_truncate || self.__o_create_new;
+        let mut fl = if self.__o_append {
+            (if self.__o_read { 2 } else { 1 }) | 0x400
+        } else if self.__o_write {
+            if self.__o_read { 2 } else { 1 }
+        } else if self.__o_read {
+            0
+        } else {
+            return Err(IoError { code: if creates { -6 } else { -5 }, os: false });
+        };
+        if !self.__o_write && !self.__o_append && creates {
+            return Err(IoError { code: -6, os: false });
+        }
+        if self.__o_append && self.__o_truncate && !self.__o_create_new {
+            return Err(IoError { code: -7, os: false });
+        }
+        if self.__o_create_new {
+            fl |= 0xc0;
+        } else {
+            if self.__o_create {
+                fl |= 0x40;
+            }
+            if self.__o_truncate {
+                fl |= 0x200;
+            }
+        }
+        __exr_file_open::<()>(path.__as_bytes(), fl | self.__o_flags & !3, self.__o_mode as i32)
+    }
+}
+
+pub trait OpenOptionsExt {
+    fn mode(&mut self, mode: u32) -> &mut Self;
+    fn custom_flags(&mut self, flags: i32) -> &mut Self;
+}
+impl OpenOptionsExt for OpenOptions {
+    fn mode(&mut self, mode: u32) -> &mut OpenOptions {
+        self.__o_mode = mode;
+        self
+    }
+    fn custom_flags(&mut self, flags: i32) -> &mut OpenOptions {
+        self.__o_flags = flags;
+        self
+    }
+}
+
+// (struct stat of x86-64 Linux, 144 bytes, as words: st_dev 0, st_ino 1, st_nlink 2, st_mode | st_uid << 32 3,
+// st_gid 4, st_rdev 5, st_size 6, st_blksize 7, st_blocks 8, then the times' seconds and nanoseconds 9..15)
+#[derive(Clone)]
+pub struct Metadata {
+    __md: [u64; 18],
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FileType {
+    __ft_mode: u32,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct Permissions {
+    __pm_mode: u32,
+}
+
+impl Metadata {
+    fn __mode(&self) -> u32 {
+        self.__md[3] as u32
+    }
+    pub fn len(&self) -> u64 {
+        self.__md[6]
+    }
+    pub fn file_type(&self) -> FileType {
+        FileType { __ft_mode: self.__mode() & 0o170000 }
+    }
+    pub fn is_file(&self) -> bool {
+        self.file_type().is_file()
+    }
+    pub fn is_dir(&self) -> bool {
+        self.file_type().is_dir()
+    }
+    pub fn is_symlink(&self) -> bool {
+        self.file_type().is_symlink()
+    }
+    pub fn permissions(&self) -> Permissions {
+        Permissions { __pm_mode: self.__mode() }
+    }
+}
+
+impl Debug for Metadata {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.debug_struct("\x4detadata").field("file_type", &self.file_type()).field("permissions", &self.permissions()).field("len", &self.len()).finish_non_exhaustive()
+    }
+}
+
+impl FileType {
+    pub fn is_file(&self) -> bool {
+        self.__ft_mode & 0o170000 == 0o100000
+    }
+    pub fn is_dir(&self) -> bool {
+        self.__ft_mode & 0o170000 == 0o040000
+    }
+    pub fn is_symlink(&self) -> bool {
+        self.__ft_mode & 0o170000 == 0o120000
+    }
+}
+
+impl Debug for FileType {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.debug_struct("\x46ileType").field("is_file", &self.is_file()).field("is_dir", &self.is_dir()).field("is_symlink", &self.is_symlink()).finish_non_exhaustive()
+    }
+}
+
+impl Permissions {
+    pub fn readonly(&self) -> bool {
+        self.__pm_mode & 0o222 == 0
+    }
+    pub fn set_readonly(&mut self, readonly: bool) {
+        if readonly {
+            self.__pm_mode &= !0o222;
+        } else {
+            self.__pm_mode |= 0o222;
+        }
+    }
+}
+
+impl Debug for Permissions {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.debug_struct("\x50ermissions").field("mode", &self.__pm_mode).finish()
+    }
+}
+
+pub trait MetadataExt {
+    fn dev(&self) -> u64;
+    fn ino(&self) -> u64;
+    fn mode(&self) -> u32;
+    fn nlink(&self) -> u64;
+    fn uid(&self) -> u32;
+    fn gid(&self) -> u32;
+    fn rdev(&self) -> u64;
+    fn size(&self) -> u64;
+    fn blksize(&self) -> u64;
+    fn blocks(&self) -> u64;
+}
+impl MetadataExt for Metadata {
+    fn dev(&self) -> u64 {
+        self.__md[0]
+    }
+    fn ino(&self) -> u64 {
+        self.__md[1]
+    }
+    fn mode(&self) -> u32 {
+        self.__md[3] as u32
+    }
+    fn nlink(&self) -> u64 {
+        self.__md[2]
+    }
+    fn uid(&self) -> u32 {
+        (self.__md[3] >> 32) as u32
+    }
+    fn gid(&self) -> u32 {
+        self.__md[4] as u32
+    }
+    fn rdev(&self) -> u64 {
+        self.__md[5]
+    }
+    fn size(&self) -> u64 {
+        self.__md[6]
+    }
+    fn blksize(&self) -> u64 {
+        self.__md[7]
+    }
+    fn blocks(&self) -> u64 {
+        self.__md[8]
+    }
+}
+
+pub trait PermissionsExt {
+    fn mode(&self) -> u32;
+    fn set_mode(&mut self, mode: u32);
+    fn from_mode(mode: u32) -> Self;
+}
+impl PermissionsExt for Permissions {
+    fn mode(&self) -> u32 {
+        self.__pm_mode
+    }
+    fn set_mode(&mut self, mode: u32) {
+        self.__pm_mode = mode;
+    }
+    fn from_mode(mode: u32) -> Permissions {
+        Permissions { __pm_mode: mode }
+    }
+}
+
+unsafe extern "C" {
+    #[link_name = "chmod"]
+    fn __exr_chmod(path: *const u8, mode: u32) -> i32;
+}
+
+// `fs::set_permissions(p, perm)`: chmod(2)
+pub fn __core_set_permissions<P>(path: P, perm: Permissions) -> Result<(), IoError> {
+    if path.__as_bytes().iter().any(|&b| b == 0) {
+        return Err(IoError { code: -8, os: false });
+    }
+    let c = __exr_c_path::<()>(path.__as_bytes());
+    if unsafe { __exr_chmod(c.as_ptr(), perm.__pm_mode) } != 0 {
+        return Err(IoError::last_os_error());
+    }
+    Ok(())
+}
+
+// `fs::metadata(p)`: stat(2), which follows a symlink
+pub fn __core_metadata<P>(path: P) -> Result<Metadata, IoError> {
+    if path.__as_bytes().iter().any(|&b| b == 0) {
+        return Err(IoError { code: -8, os: false });
+    }
+    let c = __exr_c_path::<()>(path.__as_bytes());
+    let mut m = Metadata { __md: [0u64; 18] };
+    if unsafe { __exr_stat(c.as_ptr(), m.__md.as_mut_ptr() as *mut u8) } != 0 {
+        return Err(IoError::last_os_error());
+    }
+    Ok(m)
+}
+
+// (Read's read_to_end / read_to_string, here at the end, where a program that uses none of them gets no lines of theirs)
+fn __exr_read_to_end<R: Read + ?Sized>(r: &mut R, buf: &mut Vec<u8>) -> Result<usize, IoError> {
+    let start = buf.len();
+    let mut chunk = [0u8; 4096];
+    loop {
+        // (Interrupted: read again, as std's)
+        let n = match r.read(&mut chunk) {
+            Ok(n) => n,
+            Err(e) => {
+                if e.os && e.code == 4 {
+                    continue;
+                }
+                return Err(e);
+            }
+        };
+        if n == 0 {
+            return Ok(buf.len() - start);
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+}
+
+// (as std's: the bytes read, before an error too, are appended when they are UTF-8; buf is left as it was when they
+// are not, with read_to_end's error if it had one)
+fn __exr_read_to_string<R: Read + ?Sized>(r: &mut R, buf: &mut String) -> Result<usize, IoError> {
+    let mut v: Vec<u8> = Vec::new();
+    let ret = __exr_read_to_end(r, &mut v);
+    match String::from_utf8(v) {
+        Ok(t) => {
+            buf.push_str(&t);
+            ret
+        }
+        Err(_) => match ret {
+            Err(e) => Err(e),
+            Ok(_) => Err(IoError { code: -1, os: false }),
+        },
+    }
+}
+
+// `std::num::FpCategory` and `x.classify()` of an f32 / f64, which codegen calls with the value's bits (widened)
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum FpCategory {
+    Nan,
+    Infinite,
+    Zero,
+    Subnormal,
+    Normal,
+}
+
+fn __exr_fp_classify<G>(bits: u64, f32: bool) -> FpCategory {
+    let (exp, man, max) = if f32 { ((bits >> 23) & 0xff, bits & 0x7f_ffff, 0xff) } else { ((bits >> 52) & 0x7ff, bits & 0xf_ffff_ffff_ffff, 0x7ff) };
+    if exp == max {
+        if man == 0 { FpCategory::Infinite } else { FpCategory::Nan }
+    } else if exp == 0 {
+        if man == 0 { FpCategory::Zero } else { FpCategory::Subnormal }
+    } else {
+        FpCategory::Normal
+    }
+}
+
+// `fmt::Binary` / `Octal` / `LowerHex` / `UpperHex` / `LowerExp` / `UpperExp`: what `{:b}` / `{:o}` / `{:x}` / `{:X}` /
+// `{:e}` / `{:E}` of a type of the program's call, and std's impls for the numbers, which write as zustc's own `{:x}`
+// of a number does (`fmt::LowerHex::fmt(&self.0, f)` in a program's impl)
+pub trait Binary {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
+pub trait Octal {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
+pub trait LowerHex {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
+pub trait UpperHex {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
+pub trait LowerExp {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
+pub trait UpperExp {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
+// (std's Pointer of a reference / raw pointer / Box: its address, which the compiler writes itself (`{:p}`, and
+// `fmt::Pointer::fmt(&r, f)` through these); `{:p}` of a type of the program's calls its impl, __exr_fmt_pointer)
+fn __exr_pointer_fmt<G>(a: usize, f: &mut Formatter) -> Result<(), __FmtError> {
+    __exr_fmt_ptr::<()>(f, a);
+    Ok(())
+}
+fn __exr_fat_pointer_fmt<G>(a: usize, n: usize, f: &mut Formatter) -> Result<(), __FmtError> {
+    __exr_fmt_fat_ptr::<()>(f, a, n);
+    Ok(())
+}
+fn __exr_dyn_pointer_fmt<G>(a: usize, vt: usize, f: &mut Formatter) -> Result<(), __FmtError> {
+    __exr_fmt_dyn_ptr::<()>(f, a, vt);
+    Ok(())
+}
+// (the two words of a fat pointer x points to: its address and its length or vtable, as `Pointer::fmt(&p, f)` of a
+// `*const [u8]` / `&dyn Tr` writes them)
+fn __exr_fat_words<T>(x: &T) -> (usize, usize) {
+    let w = x as *const T as *const usize;
+    unsafe { (*w, *w.add(1)) }
+}
+// (a number in the radix of the trait whose fmt is called, whatever spec the Formatter was given: 1 x, 2 X, 3 b, 4 o. A
+// signed one is given as the unsigned type of its width, whose value its bits are: `-1i8` is `ff`, as std's)
+fn __exr_radix_fmt<T>(x: &T, f: &mut Formatter, radix: u8) -> Result<(), __FmtError> {
+    let r = f.radix;
+    f.radix = radix;
+    __exr_display(x, f);
+    f.radix = r;
+    Ok(())
+}
+impl LowerHex for i8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u8), f, 1)
+    }
+}
+impl LowerHex for i16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u16), f, 1)
+    }
+}
+impl LowerHex for i32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u32), f, 1)
+    }
+}
+impl LowerHex for i64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u64), f, 1)
+    }
+}
+impl LowerHex for i128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u128), f, 1)
+    }
+}
+impl LowerHex for isize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as usize), f, 1)
+    }
+}
+impl LowerHex for u8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 1)
+    }
+}
+impl LowerHex for u16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 1)
+    }
+}
+impl LowerHex for u32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 1)
+    }
+}
+impl LowerHex for u64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 1)
+    }
+}
+impl LowerHex for u128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 1)
+    }
+}
+impl LowerHex for usize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 1)
+    }
+}
+impl UpperHex for i8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u8), f, 2)
+    }
+}
+impl UpperHex for i16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u16), f, 2)
+    }
+}
+impl UpperHex for i32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u32), f, 2)
+    }
+}
+impl UpperHex for i64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u64), f, 2)
+    }
+}
+impl UpperHex for i128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u128), f, 2)
+    }
+}
+impl UpperHex for isize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as usize), f, 2)
+    }
+}
+impl UpperHex for u8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 2)
+    }
+}
+impl UpperHex for u16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 2)
+    }
+}
+impl UpperHex for u32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 2)
+    }
+}
+impl UpperHex for u64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 2)
+    }
+}
+impl UpperHex for u128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 2)
+    }
+}
+impl UpperHex for usize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 2)
+    }
+}
+impl Binary for i8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u8), f, 3)
+    }
+}
+impl Binary for i16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u16), f, 3)
+    }
+}
+impl Binary for i32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u32), f, 3)
+    }
+}
+impl Binary for i64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u64), f, 3)
+    }
+}
+impl Binary for i128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u128), f, 3)
+    }
+}
+impl Binary for isize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as usize), f, 3)
+    }
+}
+impl Binary for u8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 3)
+    }
+}
+impl Binary for u16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 3)
+    }
+}
+impl Binary for u32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 3)
+    }
+}
+impl Binary for u64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 3)
+    }
+}
+impl Binary for u128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 3)
+    }
+}
+impl Binary for usize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 3)
+    }
+}
+impl Octal for i8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u8), f, 4)
+    }
+}
+impl Octal for i16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u16), f, 4)
+    }
+}
+impl Octal for i32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u32), f, 4)
+    }
+}
+impl Octal for i64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u64), f, 4)
+    }
+}
+impl Octal for i128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as u128), f, 4)
+    }
+}
+impl Octal for isize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(&(*self as usize), f, 4)
+    }
+}
+impl Octal for u8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 4)
+    }
+}
+impl Octal for u16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 4)
+    }
+}
+impl Octal for u32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 4)
+    }
+}
+impl Octal for u64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 4)
+    }
+}
+impl Octal for u128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 4)
+    }
+}
+impl Octal for usize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_radix_fmt(self, f, 4)
+    }
+}
+impl LowerExp for i8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, false);
+        Ok(())
+    }
+}
+impl LowerExp for i16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, false);
+        Ok(())
+    }
+}
+impl LowerExp for i32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, false);
+        Ok(())
+    }
+}
+impl LowerExp for i64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, false);
+        Ok(())
+    }
+}
+impl LowerExp for i128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, false);
+        Ok(())
+    }
+}
+impl LowerExp for isize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, false);
+        Ok(())
+    }
+}
+impl LowerExp for u8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, false);
+        Ok(())
+    }
+}
+impl LowerExp for u16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, false);
+        Ok(())
+    }
+}
+impl LowerExp for u32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, false);
+        Ok(())
+    }
+}
+impl LowerExp for u64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, false);
+        Ok(())
+    }
+}
+impl LowerExp for u128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, false);
+        Ok(())
+    }
+}
+impl LowerExp for usize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, false);
+        Ok(())
+    }
+}
+impl LowerExp for f64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp::<()>(f, *self, false, false);
+        Ok(())
+    }
+}
+impl LowerExp for f32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp::<()>(f, *self as f64, true, false);
+        Ok(())
+    }
+}
+impl UpperExp for i8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, true);
+        Ok(())
+    }
+}
+impl UpperExp for i16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, true);
+        Ok(())
+    }
+}
+impl UpperExp for i32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, true);
+        Ok(())
+    }
+}
+impl UpperExp for i64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, true);
+        Ok(())
+    }
+}
+impl UpperExp for i128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, true);
+        Ok(())
+    }
+}
+impl UpperExp for isize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let x = *self as i128;
+        __exr_fmt_exp_int::<()>(f, x.unsigned_abs(), x < 0, true);
+        Ok(())
+    }
+}
+impl UpperExp for u8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, true);
+        Ok(())
+    }
+}
+impl UpperExp for u16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, true);
+        Ok(())
+    }
+}
+impl UpperExp for u32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, true);
+        Ok(())
+    }
+}
+impl UpperExp for u64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, true);
+        Ok(())
+    }
+}
+impl UpperExp for u128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, true);
+        Ok(())
+    }
+}
+impl UpperExp for usize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp_int::<()>(f, *self as u128, false, true);
+        Ok(())
+    }
+}
+impl UpperExp for f64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp::<()>(f, *self, false, true);
+        Ok(())
+    }
+}
+impl UpperExp for f32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_exp::<()>(f, *self as f64, true, true);
+        Ok(())
+    }
+}
+// (what codegen calls for `{:b}` / `{:o}` / `{:x}` / `{:X}` / `{:e}` / `{:E}` of a value that is no number: the trait's fmt)
+fn __exr_fmt_binary<T: Binary>(x: &T, f: &mut Formatter) {
+    let _ = Binary::fmt(x, f);
+}
+fn __exr_fmt_octal<T: Octal>(x: &T, f: &mut Formatter) {
+    let _ = Octal::fmt(x, f);
+}
+fn __exr_fmt_lowerhex<T: LowerHex>(x: &T, f: &mut Formatter) {
+    let _ = LowerHex::fmt(x, f);
+}
+fn __exr_fmt_upperhex<T: UpperHex>(x: &T, f: &mut Formatter) {
+    let _ = UpperHex::fmt(x, f);
+}
+fn __exr_fmt_lowerexp<T: LowerExp>(x: &T, f: &mut Formatter) {
+    let _ = LowerExp::fmt(x, f);
+}
+fn __exr_fmt_upperexp<T: UpperExp>(x: &T, f: &mut Formatter) {
+    let _ = UpperExp::fmt(x, f);
+}
+fn __exr_fmt_pointer<T: Pointer>(x: &T, f: &mut Formatter) {
+    let _ = Pointer::fmt(x, f);
 }
