@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795791564246,
+  "lastUpdate": 1795791566997,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -92272,6 +92272,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 138.934,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e0a3d9ddde64ba3a2788177258f2d675b06bdb4f",
+          "message": "Threads: Builder, park_timeout, recv_timeout, Barrier; 6 more rustc thread UI tests (#309)\n\n- thread::Builder (name, stack_size, spawn -> io::Result); named threads in panic messages\n- thread::park_timeout; mpsc recv_timeout / RecvTimeoutError / into_iter; sync::Barrier\n- auto traits of closures: a by-reference capture is the reference it stands for (Sync needs T: Sync; Send\n  needs T: Send for a capture the body mutates, T: Sync + Send otherwise); &T is Send only when T is Sync\n- Builder::spawn checked as thread::spawn (method and path calls); a closure given as a value (a local, a\n  block, an `if`) is checked by its type\n- thread_local!: std's order when an initializer made the value itself; `!` fallback of `|| panic!()`\n- tests/security: 9 new cases; tests/threads/builder.rs; 6 more rustc UI tests pass\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01DA4GokUemhzj5xUVkRtGGb",
+          "timestamp": "2026-11-27T23:53:00+09:00",
+          "tree_id": "885014c112e0fff3d7fe5a2378eb6275eaeade1a",
+          "url": "https://github.com/mizchi/zust/commit/e0a3d9ddde64ba3a2788177258f2d675b06bdb4f"
+        },
+        "date": 1795791566601,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.299,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 1.023,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 2.13,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 15.939,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.464,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.312,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 4.876,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 373.369,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 139.344,
             "unit": "MiB"
           }
         ]
