@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795799225249,
+  "lastUpdate": 1795803768289,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -64553,6 +64553,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 40.706,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9e737c42610982306bcc7ee2d68d2123cbce1149",
+          "message": "macros: end three expansions rustc ends, and name the macro at the recursion limit (#322)\n\nThe seven crates that stopped at \"macro expansion is too deep (recursion limit 128)\" at src/lib.rs:1:1 now get past macro expansion: aho-corasick, writeable, embassy-executor, embassy-sync, embassy-futures, sharded-slab and clap_builder. There were three causes:\n\n- `$x:expr` took tokens no expression can start with. It now checks `expr_may_begin`, which is rustc's `can_begin_expr`, and rejects a joint `!=`, `*=`, `|=`, `&=`, `-=`, `<=`, `<-` or `<<=`. writeable's and sharded-slab's `(@internal, ..)` rules are reached as in rustc.\n- A call by path resolved only by its last segment. `::core::assert!`, `::std::panic!` and similar paths rooted at `core`, `std` or `alloc` now go to the builtin, not to a crate's own `macro_rules! assert` (embassy) or a dependency's `panic` (clap_builder through anstream). A local `macro_rules! stringify` shadows only the bare `stringify!`, so a qualified call's arguments stay text.\n- `cfg::strip` skipped the block of `if !x { .. }`. Only `macro_rules` takes the `name! ident { .. }` form now (aho-corasick).\n\nThe limit error now uses rustc's wording, names the macro, and points at the line and column of the chain's first call. `cratebench/survey/issues.tsv` maps both the old and the new message to #252. The compile-fail ratchet is 5392.\n\nDeferred: #310 (the origin call's position on a line with several calls; the reference expander's macro name), #287 (a bare `stringify!` before a local `macro_rules! stringify`).\n\nFixes #252.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T18:16:33Z",
+          "tree_id": "605413f23ce81b3e80216bdbc7c38b707f5f0c22",
+          "url": "https://github.com/mizchi/zust/commit/9e737c42610982306bcc7ee2d68d2123cbce1149"
+        },
+        "date": 1795803767427,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 163.793,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.956,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 25.749,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 68.324,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.902,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 324.086,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.557,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 131.097,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 800.924,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 720.356,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.998,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 87.304,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 313.173,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.414,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.445,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1903.182,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 613.49,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3938.719,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 72.559,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 108.311,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 48.708,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 91.581,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 92.39,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 234.494,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 77.718,
             "unit": "ms"
           }
         ]
