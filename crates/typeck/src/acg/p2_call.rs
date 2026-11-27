@@ -398,7 +398,7 @@ impl Cx<'_> {
         // (`x.fmt(f)` of a number with LowerHex / Binary / LowerExp .. the one fmt trait in scope (imported, or the impl's
         // own): that one's, `ff` of a u8 under `use std::fmt::LowerHex;`; with another in scope too, rustc's E0034, the
         // ordinary lookup)
-        if self.explicit_trait.is_none() && (base.is_int() || base.is_float()) && self.param_fmt_bound(recv).is_none() {
+        if self.explicit_trait.is_none() && (base.is_int() || base.is_float()) && !self.param_has_fmt_bound(recv) {
             let inside = self.prog.sigs.get(self.root as usize).and_then(|s| s.impl_trait.as_deref()).map(|t| t.split('<').next().unwrap_or(t).trim().rsplit("::").next().unwrap_or(t));
             const TRS: [&str; 8] = ["Display", "Debug", "LowerHex", "UpperHex", "Binary", "Octal", "LowerExp", "UpperExp"];
             let imp = self.prog.fmt_imports;
@@ -560,6 +560,27 @@ impl Cx<'_> {
         let r = self.expr(e, expected);
         self.scopes.pop();
         r.map(Some)
+    }
+
+    /// Whether recv is a parameter of a type parameter with a fmt trait among its bounds (`x: T` with `T: UpperHex`), as
+    /// param_fmt_bound finds it: what its bounds say, not the traits the program imports
+    fn param_has_fmt_bound(&self, recv: &Expr) -> bool {
+        if self.env.params.is_empty() || self.generic_args.is_empty() {
+            return false;
+        }
+        let Expr::Path(None, rp) = strip_paren(recv) else { return false };
+        let Some(rn) = ident_of(rp) else { return false };
+        let Some(declared) = self.generic_args.iter().find(|a| a.0 == rn).map(|a| a.1.clone()) else { return false };
+        if self.scopes.iter().rposition(|s| s.iter().any(|b| b.0 == rn)) != Some(0) {
+            return false;
+        }
+        let Some(g) = self.prog.sigs.get(self.root as usize).and_then(|s| s.generics.iter().find(|g| g.0 == declared)) else { return false };
+        g.1.iter().any(|b| {
+            matches!(
+                b.split('<').next().unwrap_or(b).rsplit("::").next().map(str::trim),
+                Some("Display" | "Debug" | "LowerHex" | "UpperHex" | "Binary" | "Octal" | "LowerExp" | "UpperExp" | "Pointer")
+            )
+        })
     }
 
     /// The fmt trait a value of a type parameter takes from its bounds (`x: T` / `x: &T` with `T: Debug`), as

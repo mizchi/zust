@@ -3583,8 +3583,10 @@ impl Program {
                 return matches!(tr, "Sized" | "Send" | "Sync" | "Unpin") || bs.iter().any(|b| b == tr || name(b) == name(tr));
             }
         }
-        // (std's Pointer of references, raw pointers and Box, whose address the compiler writes itself)
-        if tr == "Pointer" && matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_)) {
+        // (std's Pointer of references, raw pointers and Box, whose address the compiler writes itself; `__p_Pointer`
+        // where the program has a Pointer of its own, which this is not)
+        let std_pointer = if self.traits.contains_key("__p_Pointer") { tr == "__p_Pointer" } else { tr == "Pointer" };
+        if std_pointer && matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_)) {
             return true;
         }
         if matches!(t, Ty::Ref(..)) && !self.ref_impls.is_empty() && self.ref_impls.contains(&(t, tr.to_string())) {
