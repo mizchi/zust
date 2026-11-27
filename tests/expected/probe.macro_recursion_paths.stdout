@@ -3,3 +3,6 @@
 [log] starts: other expr expr expr expr expr
 [log] no expr: other other other other other other
 [log] more: expr expr expr expr
+[log] glued: other other other other other other other other other
+[log] not glued: expr expr expr expr expr
+stringify: again!() | again!(), x | again![] | local

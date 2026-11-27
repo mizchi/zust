@@ -57,6 +57,21 @@ macro_rules! debug {
     };
 }
 
+// a `macro_rules! stringify` takes the bare name only: `core::stringify!` / `std::stringify!` are core's, whose
+// arguments are text, also a call of a macro that would call itself without end
+#[allow(unused_macros)]
+macro_rules! again {
+    () => {
+        again!()
+    };
+}
+
+macro_rules! stringify {
+    ($($t:tt)*) => {
+        "local"
+    };
+}
+
 fn pick(n: usize) -> Option<usize> {
     if !cfg!(target_endian = "little") {
         debug!("skipping: big endian");
@@ -84,4 +99,12 @@ fn main() {
     println!("starts: {} {} {} {} {} {}", kind!(@x), kind!(-1), kind!(!true), kind!(..), kind!(::core::primitive::u8::MAX), kind!(_));
     println!("no expr: {} {} {} {} {} {}", kind!(pub x), kind!(mut x), kind!(.5), kind!(= 1), kind!(-> u8), kind!(+ 1));
     println!("more: {} {} {} {}", kind!(|x: u8| x), kind!(&&1), kind!(<u8 as Default>::default()), kind!(#[allow(unused)] 1));
+    // (a punctuation glued to the next: `!=`, `*=` .. are one token, which starts no expression; `!!b`, `**&&x` are two)
+    let (x, t) = (1, true);
+    let _ = (x, t);
+    println!("glued: {} {} {} {} {} {} {} {} {}", kind!(!= x), kind!(*= x), kind!(|= x), kind!(&= x), kind!(-= x), kind!(<= x), kind!(<- x), kind!(<<= x), kind!(!=));
+    println!("not glued: {} {} {} {} {}", kind!(!!t), kind!(**&&x), kind!(|| 1), kind!(<<u8 as Default>::default as Fn<()>>::call_once), kind!(- x));
+    // (std's println!, not the local one: tokens a `macro_rules!` passes on are respaced, `again ! ()`, a difference of
+    // its own)
+    std::println!("stringify: {} | {} | {} | {}", core::stringify!(again!()), std::stringify!(again!(), x), ::core::stringify!(again![]), stringify!(again!()));
 }

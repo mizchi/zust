@@ -522,11 +522,16 @@ fn is_expr_keyword(s: &str) -> bool {
 /// after `($a:expr, $b:expr, $c:expr, $($arg:tt)+)`, which would take `@internal` as `$a` and call itself without end
 fn expr_may_begin(t: &[TokenTree]) -> bool {
     match t.first() {
+        // (a punctuation joint with the next is one of rustc's tokens when they glue: `!=`, `*=`, `|=`, `&=`, `-=`, `->`,
+        // `<=`, `<-`, `<<=` start no expression; `!!x`, `&&x`, `||`, `<<T as Tr>::f` do)
         Some(TokenTree::Punct(p)) => match p.as_char() {
-            // (unary operators, closures, references, a qualified path, an attribute, a label)
-            '!' | '*' | '|' | '&' | '<' | '#' | '\'' => true,
-            // (not `->`)
-            '-' => !pair_at(t, 0, '-', '>'),
+            // (unary operators, closures, references)
+            c @ ('!' | '*' | '|' | '&') => !pair_at(t, 0, c, '='),
+            '-' => !pair_at(t, 0, '-', '>') && !pair_at(t, 0, '-', '='),
+            // (a qualified path)
+            '<' => !pair_at(t, 0, '<', '=') && !pair_at(t, 0, '<', '-') && !(pair_at(t, 0, '<', '<') && pair_at(t, 1, '<', '=')),
+            // (an attribute, a label)
+            '#' | '\'' => true,
             // (a range `..x`, a path `::a`; not `.5` or `:x`)
             '.' => pair_at(t, 0, '.', '.'),
             ':' => pair_at(t, 0, ':', ':'),
@@ -2523,14 +2528,14 @@ fn expand_joined(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::
             }
             // (the builtin's: `stringify!`, `std::stringify!` / `core::stringify!` and their absolute `::std::` form; not
             // a library's macro of that name, `re::stringify!` / `re::std::stringify!`, which can be another macro
-            // re-exported under it, nor a `macro_rules! stringify` of the crate's own)
+            // re-exported under it, nor a `macro_rules! stringify` of the crate's own, which only the bare name calls:
+            // `core::stringify!` is core's beside it, as std_path makes it)
             let colons = |k: usize| k >= 2 && sym(k - 1, b':') && sym(k - 2, b':');
             // (a label or a lifetime is no path segment: `break 'done ::std::stringify!(..)`. The tokens keep only its
             // name; the quote is the byte before it)
             let label = |k: usize| toks[k].1 > 0 && b[toks[k].1 - 1] == b'\'';
             if tk(i) == b"stringify"
-                && !macros.contains_key("stringify")
-                && (!colons(i)
+                && ((!colons(i) && !macros.contains_key("stringify"))
                     || (i >= 3
                         && toks[i - 3].0 == 0
                         && matches!(tk(i - 3), b"std" | b"core")
@@ -3091,16 +3096,16 @@ fn find_calls(
         }
         // (中にマクロの名前が無い括弧は辿らない: 括弧ごとに中身を写すと、深く入れ子になったソースで遅い)
         // (nor the arguments of the builtin `stringify!(..)`: they are its text, not calls, as in expand_with. The
-        // builtin's path only, as there: `stringify!`, `std::` / `core::stringify!`, `::std::stringify!`)
+        // builtin's path only, as there: `stringify!` (when no `macro_rules! stringify` takes the bare name),
+        // `std::` / `core::stringify!`, `::std::stringify!`)
         let punct = |k: usize, c: char| matches!(&toks[k], TokenTree::Punct(p) if p.as_char() == c);
         let colons = |k: usize| k >= 2 && punct(k - 1, ':') && punct(k - 2, ':');
         let inert = i >= 2
             && matches!(&toks[i - 2], TokenTree::Ident(x) if x == "stringify")
             && punct(i - 1, '!')
-            && !macros.contains_key("stringify")
             && {
                 let s = i - 2;
-                !colons(s)
+                (!colons(s) && !macros.contains_key("stringify"))
                     || (s >= 3
                         && matches!(&toks[s - 3], TokenTree::Ident(x) if x == "std" || x == "core")
                         && !(colons(s - 3)
