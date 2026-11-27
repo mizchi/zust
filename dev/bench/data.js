@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795750522977,
+  "lastUpdate": 1795750525661,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -145212,6 +145212,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1557,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 73.68,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5442,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "eaf33d090ab4b29ca021f27227c98068e91b7681",
+          "message": "syntax: macro_rules reads `ty` / `path` fragments by their grammar, and more matcher fixes (#281)\n\n`ty` and `path` fragments are now read by their grammar, matching rustc's parser. Each fragment ends where its type or path ends, not at whatever token comes next in the matcher. This fixes the pin-project-lite generics and where clauses, futures-util delegate_all!, and time-core impl_per!.\n\n- Fragment stops compare the whole operator, as rustc's lexer glues it (`=>`, `..=`, `::`, `||`). This fixes httparse.\n- A matcher drops only a doc comment's `#[doc = \"text\"]`. It no longer drops `#[doc = $x:literal]`. This fixes syn and zerocopy.\n- A repetition whose first token is the stop token is tried before matching stops there. Repetitions backtrack.\n- In statement position, an expansion that contains only items stays items, and a lone forwarded call is left as written. A braced call keeps its `({ })` wrapper when a single `.` or a `?` follows it, but not before `..`.\n- A `ty` fragment that can begin a type but fails to parse is an error at the macro call, as in rustc. `<=` does not begin a type.\n- `Fn::(A) -> R` is accepted as a path.\n\nDeferred to #287: nested repetition backtracking, committed `ty` errors inside a repetition with no separator, `Vec<,>` and `[u8; +]`, ambiguity between complete parses, exponential backtracking on chains of optional repetitions, edition-2015 keywords, and two parser gaps outside the matcher (`Fn::(..)` as a type, a bare `..` value).\n\nPart of #258.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T03:30:22Z",
+          "tree_id": "5452489465c14551aaac1e3641a61485c147f5d2",
+          "url": "https://github.com/mizchi/zust/commit/eaf33d090ab4b29ca021f27227c98068e91b7681"
+        },
+        "date": 1795750525154,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.86,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1919,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.93,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1558,
             "unit": "tests"
           },
           {
