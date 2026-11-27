@@ -93,6 +93,21 @@ invariants.
 | `rt_box_move_patterns` | the same leak through patterns (`let Pair { a, b } = *b`, `match *b`); no double free (valgrind) |
 | `rt_pattern_partial_move` | what a pattern leaves to `_` / `..` (`let (a, _) = pair();`, `let W { a, .. } = w;`) is never dropped (a leak) |
 
+## Threads (`crates/syntax/src/prelude_lib.rs.in`, `tests/threads/`)
+
+OS threads since [report 2026-11-27-01](docs/reports/2026-11-27-01-native-threads.md). Left:
+
+- No poisoning of a Mutex or RwLock: a panic does not unwind, so one a panicking thread holds stays locked, and the
+  threads that wait for it wait forever (std's is unlocked and poisoned; `lock` then gives `Err`). The other values of
+  that thread are not dropped either. Both need unwinding (SUPPORT.md, "Large features"). (A Once or OnceLock the
+  thread was running, and a StdoutLock it held, are let go: the thread's context keeps them.)
+- Not there: `thread::scope`, `thread::Builder` (names, stack sizes), `park_timeout`, `recv_timeout`,
+  `Condvar::wait_timeout`, `Mutex::try_lock`, `Receiver` as `IntoIterator`. `JoinHandle::join`'s Err is not a
+  `Box<dyn Any + Send>` (no downcast of the payload).
+- The main thread's thread_local! values are not dropped at exit (glibc's std runs their drops).
+- The location of an `unwrap` that panics is kept in one static (`__EXR_CALLER`), which another thread may write
+  meanwhile: the message can point at another thread's call. It needs a thread-local of its own (an ELF TLS slot).
+
 ## Trait solving (`crates/sema/src/traits.rs`, `formal/lean/`)
 
 The program's own traits are solved by the algorithms proved in formal/lean, including E0119, supertrait
@@ -157,7 +172,7 @@ behavior: `cve_2020_36323_join_borrow` (join over a `Borrow<str>` of the program
   Node). A relooper or stackifier, and reuse of locals.
 - Not supported yet:
   - i128 division and i128 to / from float;
-  - threads (green threads need `swapcontext`);
+  - threads (`spawn` needs pthreads; on one thread the atomics, Mutex and the rest work as plain accesses);
   - zustc built as wasm by itself.
 - Traps carry no panic message (the native build prints the location from its trap table).
 
@@ -282,7 +297,7 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   `&Box<S>`, `From`'s bounds, const generic lengths (tests/probe/w1_items5.rs, tests/compile_errors/w1_*). It stops on:
   - `externref.rs:130`: "expected a function".
   - `LocalKey<T>` is a type with `with`, but a `thread_local!` is not one of them yet (each has a key type of its
-    own), so a `&'static LocalKey<T>` cannot point at one.
+    own, over a `__TlsKey`), so a `&'static LocalKey<T>` cannot point at one.
   - a method call on a `Box<[T]>` with the program's `impl Tr for Box<[T]>` derefs to `[T]` and misses it; a
     `Box<str>` cannot be made (`into_boxed_str`, `"x".into()`).
   - the items a macro's `const _: () = { .. };` moves out are visible outside it (rustc scopes its fns to the

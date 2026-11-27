@@ -587,6 +587,21 @@ impl Ins<'_> {
     pub fn bswap(mut self, a: Value) -> Value {
         self.m().bswap(a)
     }
+    pub fn atomic_load(mut self, t: Type, a: Value) -> Value {
+        self.m().atomic_load(t, a)
+    }
+    pub fn atomic_store(mut self, v: Value, a: Value) {
+        self.m().atomic_store(v, a)
+    }
+    pub fn atomic_rmw(mut self, op: crate::ir::AtomicOp, a: Value, x: Value) -> Value {
+        self.m().atomic_rmw(op, a, x)
+    }
+    pub fn atomic_cas(mut self, a: Value, expected: Value, new: Value) -> Value {
+        self.m().atomic_cas(a, expected, new)
+    }
+    pub fn fence(mut self) {
+        self.m().fence()
+    }
     pub fn smin(self, a: Value, b: Value) -> Value {
         let m = &mut self.0.m;
         if is128(m, a) {

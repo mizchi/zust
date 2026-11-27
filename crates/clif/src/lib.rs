@@ -643,6 +643,36 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
             Op::Trap => {
                 b.ins().trap(TrapCode::unwrap_user(1));
             }
+            Op::AtomicLoad(t, a) => {
+                let _t0 = v!(a);
+                let r = b.ins().atomic_load(ty(*t), MemFlagsData::trusted(), _t0);
+                set1(&mut vals, r);
+            }
+            Op::AtomicStore(x, a) => {
+                let _t0 = v!(x);
+                let _t1 = v!(a);
+                b.ins().atomic_store(MemFlagsData::trusted(), _t0, _t1);
+            }
+            Op::AtomicRmw(op, a, x) => {
+                let _t0 = v!(a);
+                let _t1 = v!(x);
+                let o = match op {
+                    minclif::AtomicOp::Xchg => ir::AtomicRmwOp::Xchg,
+                    minclif::AtomicOp::Add => ir::AtomicRmwOp::Add,
+                };
+                let r = b.ins().atomic_rmw(ty(fb.value_type(*x)), MemFlagsData::trusted(), o, _t0, _t1);
+                set1(&mut vals, r);
+            }
+            Op::AtomicCas(a, e, x) => {
+                let _t0 = v!(a);
+                let _t1 = v!(e);
+                let _t2 = v!(x);
+                let r = b.ins().atomic_cas(MemFlagsData::trusted(), _t0, _t1, _t2);
+                set1(&mut vals, r);
+            }
+            Op::Fence => {
+                b.ins().fence();
+            }
             Op::TrapCode(c) => {
                 b.ins().trap(TrapCode::unwrap_user(*c));
             }

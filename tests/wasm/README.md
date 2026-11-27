@@ -104,7 +104,7 @@ table index or signature mismatch) and for `abort`; 126 for a module that needs 
 - `usize` and pointers are 8 bytes (the layouts are those of x86-64), so `cfg(target_pointer_width = "64")` is true.
   Exported functions take and return i64 for them.
 - Traps carry no panic message (the native build prints the location from its trap table).
-- Not supported yet: i128 division and float conversions, threads (green threads need `swapcontext`), processes,
+- Not supported yet: i128 division and float conversions, threads (`spawn` needs pthreads), processes,
   files other than the arguments, and self-hosting zustc as wasm.
 - Speed: every block is a case of one `loop` + `br_table` dispatcher and every value a local, so bench/rt runs 3 to 15
   times slower than the native build under Node (the address checks are 5–20% of that). A relooper / stackifier and
