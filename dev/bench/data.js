@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795803768289,
+  "lastUpdate": 1795803771667,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -92728,6 +92728,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 138.703,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9e737c42610982306bcc7ee2d68d2123cbce1149",
+          "message": "macros: end three expansions rustc ends, and name the macro at the recursion limit (#322)\n\nThe seven crates that stopped at \"macro expansion is too deep (recursion limit 128)\" at src/lib.rs:1:1 now get past macro expansion: aho-corasick, writeable, embassy-executor, embassy-sync, embassy-futures, sharded-slab and clap_builder. There were three causes:\n\n- `$x:expr` took tokens no expression can start with. It now checks `expr_may_begin`, which is rustc's `can_begin_expr`, and rejects a joint `!=`, `*=`, `|=`, `&=`, `-=`, `<=`, `<-` or `<<=`. writeable's and sharded-slab's `(@internal, ..)` rules are reached as in rustc.\n- A call by path resolved only by its last segment. `::core::assert!`, `::std::panic!` and similar paths rooted at `core`, `std` or `alloc` now go to the builtin, not to a crate's own `macro_rules! assert` (embassy) or a dependency's `panic` (clap_builder through anstream). A local `macro_rules! stringify` shadows only the bare `stringify!`, so a qualified call's arguments stay text.\n- `cfg::strip` skipped the block of `if !x { .. }`. Only `macro_rules` takes the `name! ident { .. }` form now (aho-corasick).\n\nThe limit error now uses rustc's wording, names the macro, and points at the line and column of the chain's first call. `cratebench/survey/issues.tsv` maps both the old and the new message to #252. The compile-fail ratchet is 5392.\n\nDeferred: #310 (the origin call's position on a line with several calls; the reference expander's macro name), #287 (a bare `stringify!` before a local `macro_rules! stringify`).\n\nFixes #252.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T18:16:33Z",
+          "tree_id": "605413f23ce81b3e80216bdbc7c38b707f5f0c22",
+          "url": "https://github.com/mizchi/zust/commit/9e737c42610982306bcc7ee2d68d2123cbce1149"
+        },
+        "date": 1795803770988,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.357,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 1.022,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 2.081,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 17.927,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.349,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.333,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 6.173,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 380.867,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 139.75,
             "unit": "MiB"
           }
         ]
