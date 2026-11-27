@@ -11210,8 +11210,10 @@ impl Condvar {
         }
         Ok(g)
     }
-    // (no clock: the time is up when no thread is left that could notify, where `wait` would be std's wait forever)
-    pub fn wait_timeout<T>(&self, guard: MutexGuard<T>, _dur: Duration) -> Result<(MutexGuard<T>, WaitTimeoutResult), PoisonError<(MutexGuard<T>, WaitTimeoutResult)>> {
+    // (the time is up at dur, while other threads run too, or when no thread is left that could notify: the rest of
+    // dur is slept then, as std's blocks for it. A notify is told from the time by the count, not by the wait's
+    // result)
+    pub fn wait_timeout<T>(&self, guard: MutexGuard<T>, dur: Duration) -> Result<(MutexGuard<T>, WaitTimeoutResult), PoisonError<(MutexGuard<T>, WaitTimeoutResult)>> {
         let n = &self.__cv_n as *const u64;
         let seen = unsafe { *n };
         let m = guard.m;
@@ -11219,7 +11221,21 @@ impl Condvar {
             *m = false;
         }
         __exr_green_progress();
-        let notified = __exr_green_wait(|| unsafe { *n != seen });
+        let deadline = Instant::now().checked_add(dur);
+        let up = || match deadline {
+            Some(d) => Instant::now() >= d,
+            None => false,
+        };
+        __exr_green_wait(|| unsafe { *n != seen } || up());
+        let notified = unsafe { *n != seen };
+        if !notified {
+            if let Some(d) = deadline {
+                let now = Instant::now();
+                if now < d {
+                    __core_sleep(d.duration_since(now));
+                }
+            }
+        }
         if !__exr_green_wait(|| unsafe { !*m }) {
             panic!("deadlock: every thread is waiting");
         }
@@ -16268,7 +16284,8 @@ impl<T: 'static> Any for T {
         TypeId::of::<T>()
     }
 }
-impl dyn Any {
+// (for any object lifetime: std's `dyn Any` is always `'static`, as Any is, which `&dyn Any` takes here as `'_`)
+impl<'a> dyn Any + 'a {
     pub fn is<T: 'static>(&self) -> bool {
         self.type_id() == TypeId::of::<T>()
     }
