@@ -17,7 +17,7 @@ needs one filed first (then add it to [cratebench/survey/issues.tsv](cratebench/
 
 <!-- crate-priorities -->
 
-Survey of 2026-11-27 18:23 UTC on `9e737c4`: 45 of 273 crates build (16.4% of their downloads); 943 errors in 178 packages.
+Survey of 2026-11-27 19:04 UTC on `48ec084`: 45 of 273 crates build (16.4% of their downloads); 943 errors in 178 packages.
 
 | # | fix | issue | holds back | crates it alone unblocks |
 |---:|---|---|---:|---:|
