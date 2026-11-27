@@ -442,41 +442,71 @@ fn op_len(t: &[TokenTree], n: usize) -> usize {
     }
 }
 
-/// Whether t[n] is the matcher's next token s. A punct is rustc's whole token: the `=>` a joint `=` stands for is not
-/// the `=` in `..=` (`$p:pat => ..` of `b'0'..=b'9' => ..`), a lone `|` not the first of `||`
-fn at_stop(t: &[TokenTree], n: usize, s: &TokenTree) -> bool {
-    same_tok(&t[n], s)
-        && match s {
-            TokenTree::Punct(p) => {
-                let len = op_len(t, n);
-                len != 0 && (len > 1) == (p.spacing() == Spacing::Joint)
-            }
-            _ => true,
-        }
+/// What a fragment or a repetition ends before: the matcher's next token and, for a punct, the whole operator rustc's
+/// lexer glues from it there (`=>` for its joint `=`), its characters in `op[..len]` (len 0: not a punct)
+#[derive(Clone)]
+struct Stop {
+    t: TokenTree,
+    op: [char; 3],
+    len: u8,
 }
 
-/// パターンの位置 k から後ろで最初に現れる具体的なトークン (断片の終わりの目印)。A punct is joint when it starts
-/// one of rustc's glued operators in the matcher (`=>`), else alone
-fn next_lit(pat: &[Pt], k: usize, follow: Option<&TokenTree>) -> Option<TokenTree> {
-    for (j, p) in pat[k..].iter().enumerate() {
-        match p {
-            Pt::Tok(TokenTree::Punct(t)) => {
-                let glued = t.spacing() == Spacing::Joint && matches!(pat.get(k + j + 1), Some(Pt::Tok(TokenTree::Punct(q))) if glues(t.as_char(), q.as_char()));
-                let mut q = proc_macro2::Punct::new(t.as_char(), if glued { Spacing::Joint } else { Spacing::Alone });
-                q.set_span(t.span());
-                return Some(TokenTree::Punct(q));
-            }
-            Pt::Tok(t) => return Some(t.clone()),
-            // (`$t:ty { .. }`: 次が括弧のグループなら、同じ種類の括弧で断片が終わる)
-            Pt::Group(d, _) if *d != Delimiter::None => {
-                return Some(TokenTree::Group(proc_macro2::Group::new(*d, TokenStream::new())));
-            }
-            Pt::Group(..) => return None,
-            Pt::Rep(_, Some(s), _) => return Some(s.clone()),
-            _ => return None,
+impl Stop {
+    /// A repetition's separator: a joint punct stands for the pair (`::`), as parse_pt reads it
+    fn of_sep(t: &TokenTree) -> Stop {
+        match t {
+            TokenTree::Punct(p) if p.spacing() == Spacing::Joint => Stop { t: t.clone(), op: [p.as_char(), p.as_char(), ' '], len: 2 },
+            TokenTree::Punct(p) => Stop { t: t.clone(), op: [p.as_char(), ' ', ' '], len: 1 },
+            _ => Stop { t: t.clone(), op: [' '; 3], len: 0 },
         }
     }
-    follow.cloned()
+}
+
+/// Whether t[n] is the matcher's next token s. A punct is rustc's whole token, compared by its spelling: the `=>` of
+/// the matcher is neither the `=` in `..=` (`$p:pat => ..` of `b'0'..=b'9' => ..`) nor `==` (`$e:expr => ..` of
+/// `1 == 1 => ..`), a lone `|` not the first of `||`
+fn at_stop(t: &[TokenTree], n: usize, s: &Stop) -> bool {
+    if s.len == 0 {
+        return same_tok(&t[n], &s.t);
+    }
+    let len = s.len as usize;
+    (0..len).all(|k| matches!(t.get(n + k), Some(TokenTree::Punct(p)) if p.as_char() == s.op[k])) && op_len(t, n) == len
+}
+
+/// パターンの位置 k から後ろで最初に現れる具体的なトークン (断片の終わりの目印)。A punct with the whole operator it
+/// starts in the matcher, glued as rustc's lexer glues it
+fn next_lit(pat: &[Pt], k: usize, follow: Option<&Stop>) -> Option<Stop> {
+    let punct = |j: usize| match pat.get(j) {
+        Some(Pt::Tok(TokenTree::Punct(p))) => Some((p.as_char(), p.spacing() == Spacing::Joint)),
+        _ => None,
+    };
+    match pat.get(k) {
+        Some(Pt::Tok(t @ TokenTree::Punct(p))) => {
+            let mut op = [p.as_char(), ' ', ' '];
+            let mut len = 1;
+            if let (true, Some((b, joint2))) = (p.spacing() == Spacing::Joint, punct(k + 1)) {
+                if glues(op[0], b) {
+                    op[1] = b;
+                    len = 2;
+                    if let (true, Some((c, _))) = (joint2, punct(k + 2)) {
+                        if matches!((op[0], b, c), ('.', '.', '.' | '=') | ('<', '<', '=') | ('>', '>', '=')) {
+                            op[2] = c;
+                            len = 3;
+                        }
+                    }
+                }
+            }
+            Some(Stop { t: t.clone(), op, len })
+        }
+        Some(Pt::Tok(t)) => Some(Stop { t: t.clone(), op: [' '; 3], len: 0 }),
+        // (`$t:ty { .. }`: 次が括弧のグループなら、同じ種類の括弧で断片が終わる)
+        Some(Pt::Group(d, _)) if *d != Delimiter::None => {
+            Some(Stop { t: TokenTree::Group(proc_macro2::Group::new(*d, TokenStream::new())), op: [' '; 3], len: 0 })
+        }
+        Some(Pt::Rep(_, Some(s), _)) => Some(Stop::of_sep(s)),
+        Some(_) => None,
+        None => follow.cloned(),
+    }
 }
 
 /// 式の中でオペランドにならない (後ろに続きがある) キーワード
@@ -595,13 +625,14 @@ fn bound_end(t: &[TokenTree], i: usize) -> Option<usize> {
     path_end(t, j)
 }
 
-/// Bounds from t[i]: `Tr + Send + 'a` (only the first when not `plus`)
+/// Bounds from t[i]: `Tr + Send + 'a`, and a `+` after the last (`dyn Debug +`, as rustc's parse_generic_bounds eats
+/// it); only the first bound when not `plus`
 fn bounds_end(t: &[TokenTree], i: usize, plus: bool) -> Option<usize> {
     let mut j = bound_end(t, i)?;
     while plus && punct_at(t, j, '+') {
         match bound_end(t, j + 1) {
             Some(e) => j = e,
-            None => break,
+            None => return Some(j + 1),
         }
     }
     Some(j)
@@ -647,7 +678,17 @@ fn ty_end(t: &[TokenTree], i: usize, plus: bool) -> Option<usize> {
     };
     match t.get(i)? {
         TokenTree::Group(g) => match g.delimiter() {
-            Delimiter::Parenthesis | Delimiter::Bracket => Some(i + 1),
+            Delimiter::Parenthesis => Some(i + 1),
+            // (`[T]` or `[T; len]`, not `[u8;]`; the length, an expression, is not read. One of more than 64 tokens
+            //  is taken as it is)
+            Delimiter::Bracket => {
+                let inner: Vec<TokenTree> = g.stream().into_iter().take(65).collect();
+                if inner.len() > 64 {
+                    return Some(i + 1);
+                }
+                let e = ty_end(&inner, 0, true)?;
+                (e == inner.len() || (punct_at(&inner, e, ';') && e + 1 < inner.len())).then_some(i + 1)
+            }
             _ => None,
         },
         TokenTree::Literal(_) => None,
@@ -719,7 +760,7 @@ fn bad_ty_frag(line: usize, col: usize, name: &[u8]) -> String {
 }
 
 /// 1 つの断片を取る。取った数 (と、式として包むか)
-fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option<(usize, bool)> {
+fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&Stop>) -> Option<(usize, bool)> {
     match kind {
         "ty" => return ty_end(toks, 0, true).map(|n| (n, false)),
         "path" => return path_end(toks, 0).map(|n| (n, false)),
@@ -956,14 +997,14 @@ fn no_rules_expected(text: &str, a: usize, b: usize, rules: Option<&Vec<Rule>>) 
 }
 
 fn match_pat(pat: &[Pt], toks: &[TokenTree], binds: &mut HashMap<String, Bind>) -> bool {
-    match match_prefix(pat, toks, binds, None) {
+    match match_prefix(pat, toks, binds, None, true) {
         Some(n) => n == toks.len(),
         None => false,
     }
 }
 
-/// pat を toks の前から合わせ、使ったトークン数を返す
-fn match_prefix(pat: &[Pt], toks: &[TokenTree], binds: &mut HashMap<String, Bind>, follow: Option<&TokenTree>) -> Option<usize> {
+/// pat を toks の前から合わせ、使ったトークン数を返す。full: the caller needs all of toks matched (a rule, a group)
+fn match_prefix(pat: &[Pt], toks: &[TokenTree], binds: &mut HashMap<String, Bind>, follow: Option<&Stop>, full: bool) -> Option<usize> {
     let mut i = 0;
     for (k, p) in pat.iter().enumerate() {
         match p {
@@ -997,9 +1038,15 @@ fn match_prefix(pat: &[Pt], toks: &[TokenTree], binds: &mut HashMap<String, Bind
             }
             Pt::Rep(inner, sep, op) => {
                 let stop = next_lit(pat, k + 1, follow);
+                let sep_stop = sep.as_ref().map(Stop::of_sep);
+                let start = i;
                 let mut items: Vec<HashMap<String, Bind>> = vec![];
+                // (where each item ends, before the separator after it)
+                let mut ends: Vec<usize> = vec![];
                 // (where the last separator was: `$($x:ident),* ,` gives the trailing `,` back when no item follows it)
                 let mut sep_at: Option<usize> = None;
+                // (an item was tried at the token the matcher has after the repetition, which it starts with too)
+                let mut both = false;
                 let fatal = FRAG_FATAL.with(|c| c.get());
                 loop {
                     if i >= toks.len() {
@@ -1008,18 +1055,21 @@ fn match_prefix(pat: &[Pt], toks: &[TokenTree], binds: &mut HashMap<String, Bind
                     // (not when the repetition starts with that token itself: `$(,)? $($g:ident),*` of `, T`, where the
                     //  `,` that the second repetition's separator stands for is the first's)
                     if let Some(s) = &stop {
-                        if sep.as_ref().is_none_or(|x| !same_tok(x, s))
-                            && at_stop(toks, i, s)
-                            && !matches!(inner.first(), Some(Pt::Tok(t)) if same_tok(t, s))
-                        {
-                            break;
+                        if sep.as_ref().is_none_or(|x| !same_tok(x, &s.t)) && at_stop(toks, i, s) {
+                            if !matches!(inner.first(), Some(Pt::Tok(t)) if same_tok(t, &s.t)) {
+                                break;
+                            }
+                            both = true;
                         }
                     }
                     let mut b = HashMap::default();
-                    let Some(n) = match_prefix(inner, &toks[i..], &mut b, sep.as_ref().or(stop.as_ref())) else {
+                    let Some(n) = match_prefix(inner, &toks[i..], &mut b, sep_stop.as_ref().or(stop.as_ref()), false) else {
                         // (where a repetition ends is no error of the call: an item that matched set nothing, so
-                        // the flag is as it was before the repetition)
-                        FRAG_FATAL.with(|c| c.set(fatal));
+                        // the flag is as it was before the repetition. An item after a separator is one rustc parses,
+                        // `$($t:ty),*` of `u8, impl async`)
+                        if sep_at.is_none() {
+                            FRAG_FATAL.with(|c| c.set(fatal));
+                        }
                         break;
                     };
                     if n == 0 {
@@ -1027,6 +1077,7 @@ fn match_prefix(pat: &[Pt], toks: &[TokenTree], binds: &mut HashMap<String, Bind
                     }
                     i += n;
                     items.push(b);
+                    ends.push(i);
                     sep_at = None;
                     if *op == '?' {
                         break;
@@ -1047,16 +1098,41 @@ fn match_prefix(pat: &[Pt], toks: &[TokenTree], binds: &mut HashMap<String, Bind
                 if let Some(j) = sep_at {
                     i = j;
                 }
-                if *op == '+' && items.is_empty() {
+                let min = usize::from(*op == '+');
+                if items.len() < min {
                     return None;
                 }
-                // 変数ごとに Many にまとめる
                 let mut names = vec![];
                 collect_vars(inner, &mut names);
-                for n in names {
-                    let v = items.iter().map(|b| b.get(&n).cloned().unwrap_or(Bind::Many(vec![]))).collect();
-                    binds.insert(n, Bind::Many(v));
+                // 変数ごとに Many にまとめる
+                let bind = |binds: &mut HashMap<String, Bind>, items: &[HashMap<String, Bind>]| {
+                    for n in &names {
+                        let v = items.iter().map(|b| b.get(n).cloned().unwrap_or(Bind::Many(vec![]))).collect();
+                        binds.insert(n.clone(), Bind::Many(v));
+                    }
+                };
+                if both {
+                    // (the items took a token the rest of the matcher may need: the most items with which the rest
+                    //  matches, all of toks when `full`, as rustc's matcher keeps both ways open. `($(, a)? , a)` of
+                    //  `, a` takes no item, of `, a, a` one)
+                    let mut first: Option<(HashMap<String, Bind>, usize)> = None;
+                    for c in (min..=items.len()).rev() {
+                        let at = if c == 0 { start } else { ends[c - 1] };
+                        let mut b = binds.clone();
+                        bind(&mut b, &items[..c]);
+                        if let Some(m) = match_prefix(&pat[k + 1..], &toks[at..], &mut b, follow, full) {
+                            if !full || at + m == toks.len() {
+                                *binds = b;
+                                return Some(at + m);
+                            }
+                            first.get_or_insert((b, at + m));
+                        }
+                    }
+                    let (b, e) = first?;
+                    *binds = b;
+                    return Some(e);
                 }
+                bind(binds, &items);
             }
         }
     }
@@ -1853,14 +1929,17 @@ fn split_items(body: &str) -> Option<(String, String)> {
     any.then_some((items, rest))
 }
 
-/// A statement-position call's expansion: its items, then a block of the rest. The items alone when they are all of
-/// it, and a lone macro call as it is (a statement too, expanded next round): `const _: () = { a! { .. } b! { .. }
-/// impl S {} };` (pin-project-lite's) gets no `({ })` between them, which would need a `;` before the next item
-fn stmt_expansion(body: String) -> String {
+/// A statement-position call's expansion: its items, then a block of the rest. When the call is a statement by itself
+/// (`alone`: `;`, the block's end or nothing after it, or braces, `m! { .. }`, not followed by `.` / `?`), the items
+/// alone when they are all of it, and a lone macro call as it is (a statement there too, expanded next round):
+/// `const _: () = { a! { .. } b! { .. } impl S {} };` (pin-project-lite's) gets no `({ })` between them, which would
+/// need a `;` before the next item. A call an expression goes on after keeps its block: `outer!() * 3` with
+/// `outer!()` giving `inner! {}` is `({ inner! {} }) * 3`
+fn stmt_expansion(body: String, alone: bool) -> String {
     match split_items(&body) {
-        Some((items, rest)) if rest.trim().is_empty() => items,
+        Some((items, rest)) if alone && rest.trim().is_empty() => items,
         Some((items, rest)) => format!("{items} ({{ {rest} }})"),
-        None if lone_call(&body) => body,
+        None if alone && lone_call(&body) => body,
         None => format!("({{ {body} }})"),
     }
 }
@@ -2533,7 +2612,8 @@ fn expand_joined(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::
                 // expansion's own `let`s are already renamed for hygiene, so they do not capture names)
                 body
             } else if stmt_pos {
-                stmt_expansion(body)
+                let alone = ge + 1 >= toks.len() || sym(ge + 1, b';') || sym(ge + 1, b'}') || (sym(ge, b'}') && !sym(ge + 1, b'.') && !sym(ge + 1, b'?'));
+                stmt_expansion(body, alone)
             } else {
                 format!("({{ {body} }})")
             };
@@ -2804,7 +2884,10 @@ fn find_calls(
                                 } else if top || spliced {
                                     body
                                 } else if stmt_pos {
-                                    stmt_expansion(body)
+                                    let alone = next_semi
+                                        || toks.get(i + 3).is_none()
+                                        || (braced && !matches!(toks.get(i + 3), Some(TokenTree::Punct(q)) if matches!(q.as_char(), '.' | '?')));
+                                    stmt_expansion(body, alone)
                                 } else {
                                     format!("({{ {body} }})")
                                 };

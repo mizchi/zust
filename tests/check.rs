@@ -2574,6 +2574,17 @@ fn macro_fragments_and_unit_patterns() {
         "a `ty` that does not parse"
     );
     assert_eq!(first("macro_rules! m {\n    ($ty:ty) => {};\n    (?$t:path) => { compile_error!(\"no\"); };\n}\nm!(?Sized);\nfn main() {}\n"), None, "`?Sized` for a `ty`");
+    // (also an item after a repetition's separator, and an array type with no length, as rustc rejects both)
+    assert_eq!(
+        first("macro_rules! m {\n    ($($t:ty),*) => {};\n    (u8, impl async) => {};\n}\nm!(u8, impl async);\nfn main() {}\n"),
+        e(5, "the tokens of `m!`'s `ty` fragment do not parse as a type"),
+        "a `ty` after a separator"
+    );
+    assert_eq!(
+        first("macro_rules! m {\n    ($t:ty) => {};\n}\nm!([u8;]);\nm!([u8; 2]);\nfn main() {}\n"),
+        e(4, "the tokens of `m!`'s `ty` fragment do not parse as a type"),
+        "`[u8;]` for a `ty`"
+    );
     assert_eq!(first("pub mod break {\n}\nfn main() {}\n"), e(1, "expected identifier, found keyword `break`"), "a keyword for a module's name");
     assert_eq!(first("mod breaks {\n    pub fn f() {}\n}\nfn main() { breaks::f(); }\n"), None, "a name a keyword starts");
     assert_eq!(first("#![some_nonexistent_attribute]\nfn main() {}\n"), e(1, "cannot find attribute `some_nonexistent_attribute` in this scope"), "an unknown inner attribute");

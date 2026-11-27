@@ -219,7 +219,49 @@ const _: () = {
     }
 };
 
+// a fragment's end is the matcher's whole operator: `=>`, not the `==` that starts with the same `=`
+macro_rules! arrow {
+    ($e:expr => $f:expr) => {
+        ($e, $f)
+    };
+}
+
+// a call that expands to one more call keeps its block where an expression goes on after it: `outer!() * 3` is
+// `(1 + 2) * 3`, not `1 + 2 * 3`
+macro_rules! inner {
+    () => {
+        1 + 2
+    };
+}
+macro_rules! outer {
+    () => {
+        inner! {}
+    };
+}
+fn times_three() -> i32 {
+    outer!() * 3
+}
+
+// `$(, a)?` before `, a`: no item when the rest needs the `,` (rustc's first rule for `, a`), one for `, a, a`
+macro_rules! opt_prefix {
+    ($(, a)? , a) => {
+        1
+    };
+    (, a) => {
+        2
+    };
+}
+
+// a `+` after a type's last bound is the type's: `dyn Debug +`
+macro_rules! boxed_size {
+    ($t:ty) => {
+        size_of::<Box<$t>>()
+    };
+}
+
 fn main() {
+    println!("{:?} {:?} {}", arrow!(1 == 1 => 2), arrow!(2 >= 3 => 4), times_three());
+    println!("{} {} {}", opt_prefix!(, a), opt_prefix!(, a, a), boxed_size!(dyn core::fmt::Debug +));
     println!("{:?} {:?}", micro(), milli());
     println!("{:?}", build(3, Some("four")));
     println!("{}|{}|{}|{}", Holder::<u8, Vec<u8>>::names(), Local::<u8, u8>::names(), Collect::<Vec<u8>>::names(), Peek::<u8>::names());
