@@ -16301,13 +16301,13 @@ impl OpenOptions {
         } else if self.__o_read {
             0
         } else {
-            return Err(IoError { code: if creates { -6 } else { -5 } });
+            return Err(IoError { code: if creates { -6 } else { -5 }, os: false });
         };
         if !self.__o_write && !self.__o_append && creates {
-            return Err(IoError { code: -6 });
+            return Err(IoError { code: -6, os: false });
         }
         if self.__o_append && self.__o_truncate && !self.__o_create_new {
-            return Err(IoError { code: -7 });
+            return Err(IoError { code: -7, os: false });
         }
         if self.__o_create_new {
             fl |= 0xc0;
@@ -16516,7 +16516,7 @@ fn __exr_read_to_string<R: Read + ?Sized>(r: &mut R, buf: &mut String) -> Result
             buf.push_str(&t);
             Ok(n)
         }
-        Err(_) => Err(IoError { code: -1 }),
+        Err(_) => Err(IoError { code: -1, os: false }),
     }
 }
 
