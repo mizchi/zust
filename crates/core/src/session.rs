@@ -10721,6 +10721,12 @@ fn check_blob(b: Blob, req: &[u32]) -> Blob {
     Blob { relocs, ..b }
 }
 
+/// The instances' arguments name no type parameter. One that does (`Option<<T0>::Item>::unwrap` of a projection left
+/// unknown, #313) has no name the cache can write: the encoder has no code for a parameter, and panicked
+fn nameable(a: &Analysis, g: &Insts, ids: &[u32]) -> bool {
+    ids.iter().all(|&i| g.get(i).is_none_or(|inst| !inst.args.iter().any(|&t| a.prog.has_param(t))))
+}
+
 /// Whether the instances ids (of a forked child's) can be sent to the parent: their type arguments have a written form
 /// the cache's encoding takes (types_enc: not a type parameter, not one only inference has)
 fn sendable(a: &Analysis, g: &Insts, ids: &[u32]) -> bool {
@@ -10802,6 +10808,10 @@ impl Session {
             let mut e = vec![];
             {
                 let g = insts.lock().unwrap();
+                // (an instance it requested that the cache cannot name: not cached)
+                if !nameable(a, &*g, &req) {
+                    return Ok((req, None));
+                }
                 crate::build_cache::encode_blob(&b, &a.prog, &*g, &mut e);
             }
             Ok((req, Some(e)))
@@ -12868,6 +12878,8 @@ impl Session {
         // (記録を作るのは、続けて検査する (キャッシュを使う) セッションだけ: 1 度だけの `zustc check` では作らない)
         let keep = check_only && !self.opts.no_cache;
         let mut memo = ChkMemo { fp: a.iface_fp, lint: lint_bits(&a.prog), ents: FxMap::default() };
+        // (an instance the record cannot name was checked: the record is not kept)
+        let mut unnamed = false;
         let mut seen: FxSet<String> = FxSet::default();
         let name_of = |g: &Insts, id: u32| -> String {
             match g.get(id) {
@@ -13009,6 +13021,12 @@ impl Session {
                     }
                     if let (Some(req), Some(bh)) = (req, body_hash(&body)) {
                         let g = insts.lock().unwrap();
+                        // (an instance the record cannot name (nameable): no record is kept, and the next check checks
+                        // everything again, as a check without one does)
+                        if !nameable(&a, &*g, &[id]) {
+                            unnamed = true;
+                            continue;
+                        }
                         let children: Vec<String> = req.iter().filter(|&&i| g.get(i).is_some()).map(|&i| name_of(&*g, i)).collect();
                         let mut me = vec![];
                         if g.get(id).is_some() {
@@ -13043,7 +13061,7 @@ impl Session {
                 break;
             }
         }
-        if keep {
+        if keep && !unnamed {
             self.chk = Some(memo);
         }
         tm.lap("check", format!("{n_memo} from the last check, {n_keys} keys, {n_hit} cached, {n_checked} checked"));

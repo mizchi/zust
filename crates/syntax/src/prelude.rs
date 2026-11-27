@@ -305,6 +305,8 @@ fn gated_impl(h: usize) -> Option<&'static str> {
                     ["impl", t, "for", ..] if matches!(*t, "Binary" | "Octal" | "LowerHex" | "UpperHex" | "LowerExp" | "UpperExp") => Some(*t),
                     // (`{:?}` of a range: only for a program that formats with Debug)
                     ["impl", "T", "Debug", "for", r, ..] if matches!(*r, "Range" | "RangeInclusive") => Some("__range_debug"),
+                    // (std's ExactSizeIterator of Copied and Range: their `len` only with the trait, not with every `len`)
+                    _ if ws.windows(2).any(|w| w == ["ExactSizeIterator", "for"]) => Some("ExactSizeIterator"),
                     _ => None,
                 }
             })
@@ -2006,6 +2008,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if sc.has("IntoIterator for") {
         need.extend(["__into_iter_mark", "Iterator", "next", "iter"]);
     }
+    // (a generic fn's `I: IntoIterator` with `iter.into_iter()`: fastrand's `choice`, #313. The trait's name is no
+    // name the prelude defines, so it is looked for in the text)
+    let into_iter_bound = need.contains("into_iter") && sc.has("IntoIterator");
     let iter_lib = need.contains("Iterator")
         || need.contains("HashMap")
         || need.contains("BTreeMap")
@@ -2016,7 +2021,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         || chain
         || (producer && need.contains("next"))
         // (a slice iterator's type named: `xs: &mut std::slice::Iter<'a, T>`, iterated with no `iter()` of its own)
-        || ["Iter", "IterMut"].iter().any(|n| need.contains(n));
+        || ["Iter", "IterMut"].iter().any(|n| need.contains(n))
+        // (and that one, whose `iter.into_iter()` of a `&[T]` is the slice's Iter; or `I::IntoIter: ExactSizeIterator`)
+        || into_iter_bound
+        || need.contains("ExactSizeIterator");
     // Ordering: `<` is no identifier, so names that suggest comparison (Ord / sort / cmp and so on) add the glue
     // (an iterator's max / min use `>=` inside too)
     const ORD_NAMES: &[&str] = &[
@@ -2131,6 +2139,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     if iter_lib {
         need.insert("Iterator");
+        // (that fn may be given a `&mut Vec<T>` / `&mut [T]`, whose into_iter is iter_mut)
+        if into_iter_bound {
+            need.insert("iter_mut");
+        }
         if need.contains("iter") || need.contains("into_iter") {
             need.insert("__exr_slice_iter");
         }

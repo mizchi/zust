@@ -24,3 +24,4 @@ cannot find value (`[^`]*` )?\(unsupported path\)	265	value paths zustc cannot r
 takes \d+ type arguments?, but \d+ (were|was) given	266	std iterator adapters' arity (`Copied`, `Cloned`, `Map`)
 not all trait items implemented	298	a std trait's default method zustc requires
 duplicate definition of	297	duplicate associated items of two impls
+type `<[^`]*>::\w+` cannot be dereferenced	313	a projection code generation does not normalize (fastrand's choice)

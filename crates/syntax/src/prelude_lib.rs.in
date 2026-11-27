@@ -3674,6 +3674,25 @@ impl<I: Iterator, T: Copy> Iterator for Copied<I, T> {
     }
 }
 
+// (std's ExactSizeIterator of Copied and of an integer Range, only with the trait's name (gated_impl): an array's
+// `into_iter()` is `iter().copied()` here. A Range's length is the difference of its ends as usize, wrapping, so
+// `-128i8..127` is 255)
+impl<I: Iterator, T: Copy> ExactSizeIterator for Copied<I, T> {
+    fn len(&self) -> usize {
+        self.iter.len()
+    }
+}
+
+impl<T: Copy + Ord> ExactSizeIterator for Range<T> {
+    fn len(&self) -> usize {
+        if self.start < self.end {
+            (self.end as usize).wrapping_sub(self.start as usize)
+        } else {
+            0
+        }
+    }
+}
+
 // `a..b` / `a..=b` を値として使ったとき (for で直接回すときは codegen が数える)
 pub struct Range<T> {
     pub start: T,
