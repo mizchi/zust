@@ -946,6 +946,13 @@ impl Cx<'_> {
                 return self.expr(ne, expected);
             }
         }
+        // `x.borrow()` (std's Borrow impls): the target by the function's bound `K: Borrow<Q>` or the expected type
+        if method == "borrow" && margs.is_empty() {
+            if let Some((ne, _)) = self.borrow_rewrite(recv, expected) {
+                let ne = self.keep_expr(ne);
+                return self.expr(ne, expected);
+            }
+        }
         // `x.as_ref()` (AsRef: 文字列・Vec・配列・スライス): 先を期待型か、関数の境界 `T: AsRef<X>` で決める
         if method == "as_ref" && margs.is_empty() {
             if let Some(ne) = self.as_ref_rewrite(recv, expected) {
@@ -2496,6 +2503,79 @@ impl Cx<'_> {
         } else {
             Expr::Ref(false, Box::new(Expr::Index(Box::new(r), Box::new(Expr::Range(None, None, false)), Default::default())))
         })
+    }
+
+    /// `recv.borrow()` by std's Borrow impls, and the `&Q` it is: `T: Borrow<T>` and `&T: Borrow<T>` (recv itself, as
+    /// a `&Q`), `String: Borrow<str>` (`recv.as_str()`), `Vec<T>: Borrow<[T]>` (`&recv[..]`). Q is what the bound `K:
+    /// Borrow<Q>` of the function on the receiver's type parameter says (equivalent's `PartialEq::eq(self,
+    /// key.borrow())`, with `K = String` and `Q = str`), or else the expected type `&Q`. None for a type with a
+    /// `borrow` of its own (a RefCell's, a program's impl), or a Q none of these give: as before
+    pub(crate) fn borrow_rewrite(&self, recv: &Expr, expected: Option<Ty>) -> Option<(Expr, Ty)> {
+        // (a local's type as it is bound, `key: &K`: a copy of the path made by a rewrite (`PartialEq::eq(self,
+        // key.borrow())` as `==`) is not one peek knows in an inlined body)
+        let local = match strip_paren(recv) {
+            Expr::Path(None, rp) => ident_of(rp).and_then(|n| self.lookup(n)).map(|x| x.1),
+            _ => None,
+        };
+        let t = local.or_else(|| self.peek(recv))?;
+        let base = self.strip_refs(t);
+        if let Ty::Struct(sid) = base {
+            if self.prog.method(sid, "borrow").is_some() {
+                return None;
+            }
+        }
+        // (the bound first: an expected type may be a guess from the receiver, `&&str` for `self.cmp(key.borrow())`
+        // with `self: &str`)
+        let bound = self.prog.sigs[self.root as usize].generics.iter().find_map(|(pn, bs)| {
+            let pt = self.env.params.iter().find(|(n, _)| n == pn)?.1;
+            if pt != t && self.strip_refs(pt) != base {
+                return None;
+            }
+            bs.iter().find_map(|b| {
+                let b: String = b.chars().filter(|c| !c.is_whitespace()).collect();
+                let x = b.strip_prefix("Borrow<")?.strip_suffix('>')?.to_string();
+                match self.env.params.iter().find(|(n, _)| *n == x) {
+                    Some(&(_, xt)) => Some(xt),
+                    None => self.prog.resolve_g(&crate::ast_summary::ty_of_text(&x, None)?, &[]).ok(),
+                }
+            })
+        });
+        let wanted = match expected {
+            Some(Ty::Ref(false, q)) => Some(*q),
+            _ => None,
+        };
+        bound.into_iter().chain(wanted).find_map(|q| self.borrow_as(recv, t, base, q))
+    }
+
+    /// recv (of type t, base what its references reach) as a `&q` by one of std's Borrow impls (borrow_rewrite)
+    fn borrow_as(&self, recv: &Expr, t: Ty, base: Ty, q: Ty) -> Option<(Expr, Ty)> {
+        let r = paren(recv.clone());
+        let qr = Ty::Ref(false, intern(q));
+        // (Q itself, through any number of references: `&&str` is a `&str`)
+        if t == q {
+            return Some((Expr::Ref(false, Box::new(r)), qr));
+        }
+        let mut x = r.clone();
+        let mut u = t;
+        while let Ty::Ref(_, i) = u {
+            if *i == q {
+                return Some((x, qr));
+            }
+            x = paren(Expr::Unary("*".into(), Box::new(x), Default::default()));
+            u = *i;
+        }
+        let Ty::Struct(sid) = base else { return None };
+        let b = self.prog.base_of(sid);
+        if self.prog.struct_item.get(b as usize).is_none_or(|&i| i < self.prog.prelude_from) {
+            return None;
+        }
+        match (self.prog.structs[b as usize].name.as_str(), q) {
+            ("String", Ty::Str) => Some((mcall(r, "as_str", vec![]), qr)),
+            ("Vec", Ty::Slice(e)) if self.vec_fields(sid).is_some_and(|f| f.2 == *e) => {
+                Some((Expr::Ref(false, Box::new(Expr::Index(Box::new(r), Box::new(Expr::Range(None, None, false)), Default::default()))), qr))
+            }
+            _ => None,
+        }
     }
 
     /// Which of a Vec's two built-in AsMut impls `recv.as_mut()` is (the receiver a Vec, through references):
@@ -4849,7 +4929,11 @@ impl Cx<'_> {
         // (a primitive; or a struct when two traits of the program's have the method, so that the bound decides which:
         // `s.scaled()` of `S: S1` with S's instance implementing S0 and S1)
         let multi = || matches!(t, Ty::Struct(_)) && self.prog.multi_trait_methods.contains(method);
-        if !(t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) || multi()) {
+        // (or str / a slice behind the reference, `q: &Q` with `Q = str`, by a blanket impl of the bound's trait: Self is
+        // Q, the str, as the bound says, not the `&str` the method's lookup would take for it (equivalent's
+        // `q.equivalent(k)` of `Q: ?Sized + Equivalent<K>`))
+        let unsized_ref = by_ref && matches!(t, Ty::Str | Ty::Slice(_));
+        if !(t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) || multi() || unsized_ref) {
             return None;
         }
         let gens = &self.prog.sigs.get(self.root as usize)?.generics;
@@ -4859,6 +4943,29 @@ impl Cx<'_> {
             }
             for b in bounds {
                 let tr = b.split('<').next().unwrap_or(b).trim();
+                // (the blanket impl's method, named with the bound's trait arguments as this instance has them:
+                // `<str as Equivalent<String>>::equivalent`)
+                if unsized_ref {
+                    let prog = self.prog;
+                    let blanket = prog.fns_named(method).is_some_and(|fs| {
+                        fs.iter().any(|&c| {
+                            let bs = &prog.sigs[c as usize];
+                            matches!(bs.self_ty, Some(Ty::Param(_)))
+                                && matches!(bs.params.first(), Some(Ty::Ref(false, _)))
+                                && bs.impl_trait.as_deref().is_some_and(|it| it.split('<').next().unwrap_or(it).trim() == tr)
+                        })
+                    });
+                    let gn: Vec<&str> = gens.iter().map(|g| g.0.as_str()).collect();
+                    let inst: Vec<Ty> = gens.iter().map(|g| self.env.params.iter().find(|p| p.0 == g.0).map_or(Ty::Unit, |p| p.1)).collect();
+                    let Some(bt) = blanket.then(|| crate::traits::instantiate_bound(prog, b, &gn, &inst)).flatten() else { continue };
+                    let Ok(Expr::Path(q, mut p)) = crate::parse::parse_expr(&format!("<{} as {bt}>::{method}", prog.tn(t))) else { continue };
+                    if let Some(last) = p.segs.last_mut() {
+                        last.args = gargs.to_vec();
+                    }
+                    let mut args = vec![paren(recv.clone())];
+                    args.extend(margs.iter().cloned());
+                    return Some(Expr::Call(Box::new(Expr::Path(q, p)), args));
+                }
                 // (the impl's method, or the trait's default when the impl leaves it out: `<u16 as S0>::scaled`)
                 let Some(id) = self.trait_candidate(&format!("{}::{method}", self.ty_key(t)), tr).or_else(|| self.trait_default(tr, method, t)) else { continue };
                 let first = self.prog.sigs[id as usize].params.first().copied();
@@ -4964,6 +5071,17 @@ impl Cx<'_> {
         // `Ord::cmp(&a, &b)` / `PartialOrd::partial_cmp(..)` / `PartialEq::eq(..)`: メソッド呼び出しの形に
         if matches!(ty, "Ord" | "PartialOrd" | "PartialEq" | "Eq") && cargs.len() == 2 {
             let m = &p.segs[1].name;
+            // (`PartialEq::eq(a, b)` / `ne` of a string, a slice, a scalar or a type whose PartialEq is derived, `a: &str`
+            // (equivalent's `PartialEq::eq(self, key.borrow())` with `Q = str`, `u32` or a derived `Id`): `a == b`. Both
+            // arguments are references (`&Self`, `&Rhs`), and `&A == &B` compares as `A == B`; these types have no
+            // method `eq` here)
+            let no_eq = |t: Ty| {
+                t.is_int() || t.is_float() || matches!(t, Ty::Str | Ty::Slice(_) | Ty::Bool | Ty::Char) || matches!(t, Ty::Struct(sid) if self.prog.method(sid, "eq").is_none())
+            };
+            if matches!(m.as_str(), "eq" | "ne") && self.peek(&cargs[0]).is_some_and(|t| matches!(t, Ty::Ref(..)) && no_eq(self.strip_refs(t))) {
+                let op = if m == "eq" { "==" } else { "!=" };
+                return Some(Expr::Binary(op.into(), Box::new(paren(cargs[0].clone())), Box::new(paren(cargs[1].clone())), crate::parse::Span::default()));
+            }
             return Some(Expr::MethodCall(Box::new(paren(cargs[0].clone())), m.clone(), vec![], vec![cargs[1].clone()], crate::parse::Span::default()));
         }
         // (`U::from(x)` in a generic fn with `U: From<u8>`: U's instance, when it is a number and x a number std

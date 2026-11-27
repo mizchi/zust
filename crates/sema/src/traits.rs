@@ -340,6 +340,12 @@ impl TraitDb {
                 args = None;
                 exact = false;
             }
+            // (a head that names a std type the prelude writes as another's: `OsString` is String there, `Path` and
+            // `OsStr` str. stable_deref_trait's `impl StableDeref for OsString` and `.. for String` are two impls for
+            // two types; their heads are one here, so neither is exact (no E0119 between them))
+            if s.impl_self_ty.iter().chain(&s.impl_trait_args).any(|t| aliased_std(p, t, user, 0)) {
+                exact = false;
+            }
             db.clauses.entry(tr).or_default().push(Clause { n: gn.len(), self_ty, args, body, item: ii, exact, where_ok: s.where_types.is_empty(), assocs });
         }
         db
@@ -729,6 +735,30 @@ fn two_reps(p: &Program, t: Ty, depth: u32) -> bool {
             (cow && sd.args.iter().any(|a| matches!(a, Ty::Param(_))))
                 || sd.args.iter().any(|&x| two_reps(p, x, depth + 1))
         }
+        _ => false,
+    }
+}
+
+/// t names one of the std types the prelude makes an alias of another (`type OsString = String`, `type Path = str`,
+/// `type OsStr = str`), and not a type of the program's of that name (its first `user` items are the program's)
+fn aliased_std(p: &Program, t: &crate::types::TySyn, user: usize, depth: u32) -> bool {
+    use crate::types::TySyn as S;
+    if depth > 32 {
+        return false;
+    }
+    let named = |n: &str| {
+        let last = n.rsplit("::").next().unwrap_or(n);
+        matches!(last, "OsString" | "OsStr" | "Path") && match p.resolve_g(&S::Named(n.to_string()), &[]) {
+            Ok(Ty::Str) => last != "OsString",
+            Ok(Ty::Struct(s)) => last == "OsString" && p.struct_index.get("String") == Some(&s) && p.struct_item.get(s as usize).is_some_and(|&i| i as usize >= user),
+            _ => false,
+        }
+    };
+    match t {
+        S::Named(n) => named(n),
+        S::App(n, xs) => named(n) || xs.iter().any(|x| aliased_std(p, x, user, depth + 1)),
+        S::Ref(_, x) | S::Ptr(_, x) | S::Slice(x) | S::Array(x, _) | S::Assoc(x, _) => aliased_std(p, x, user, depth + 1),
+        S::Tuple(xs) | S::FnPtr(xs) => xs.iter().any(|x| aliased_std(p, x, user, depth + 1)),
         _ => false,
     }
 }

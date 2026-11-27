@@ -3081,6 +3081,12 @@ impl Cx<'_> {
                     return Some(t);
                 }
             }
+            // (std's Borrow, by the function's bound `K: Borrow<Q>`: `&Q`)
+            if m == "borrow" && a.is_empty() {
+                if let Some((_, t)) = self.borrow_rewrite(r, None) {
+                    return Some(t);
+                }
+            }
             // (an array's or a slice's as_mut: `&mut [T]`, its one AsMut)
             if m == "as_mut" && a.is_empty() {
                 if let Some(Ty::Array(el, _) | Ty::Slice(el)) = self.peek(r).map(|t| self.strip_refs(t)) {

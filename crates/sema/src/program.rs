@@ -3368,6 +3368,17 @@ impl Program {
                 Some(self.structs[sid as usize].args.first().is_some_and(|&a| self.implements(a, tr)))
             }
             (Ty::Box(_), "Deref" | "DerefMut") => Some(true),
+            // (`&T: Deref`, `&mut T: DerefMut`; std's Deref of its strings, collections, smart pointers and guards,
+            // which the prelude gives inherent methods instead of an impl (`String: Deref<Target = str>`, `Vec<T>:
+            // DerefMut`, `Rc<T>: Deref` but not DerefMut). A supertrait's goal, `unsafe impl StableDeref for String`)
+            (Ty::Ref(..), "Deref") | (Ty::Ref(true, _), "DerefMut") => Some(true),
+            (Ty::Struct(sid), "Deref" | "DerefMut") if self.struct_item.get(self.base_of(sid) as usize).is_some_and(|&i| i >= self.prelude_from) => {
+                match base_name(t)? {
+                    "String" | "Vec" | "RefMut" | "ManuallyDrop" | "MutexGuard" | "RwLockWriteGuard" | "PathBuf" => Some(true),
+                    "Rc" | "Arc" | "Ref" | "CString" | "RwLockReadGuard" | "Cow" | "__CowStr" if tr == "Deref" => Some(true),
+                    _ => None,
+                }
+            }
             // (a derived Copy of a generic type holds when its arguments are Copy, as `#[derive(Copy)]` bounds them:
             // `Option<String>` is not Copy; PhantomData<T> always is)
             (Ty::Struct(sid), "Copy")
@@ -5529,7 +5540,15 @@ impl Program {
                 continue;
             }
             seen.push(tr);
-            if matches!(tr, "Sized" | "?Sized" | "Send" | "Sync" | "Unpin" | "Debug" | "Display" | "Default" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Clone") {
+            if matches!(tr, "Sized" | "?Sized" | "Send" | "Sync" | "Unpin" | "Debug" | "Display" | "Default" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Clone" | "Copy") {
+                // (std's supertraits of these: `Ord: Eq + PartialOrd`, `Eq: PartialEq`, `PartialOrd: PartialEq`,
+                // `Copy: Clone`. `Q: Ord` is `Q: Eq`, as the blanket impl of equivalent's `Comparable` needs)
+                stack.extend(match tr {
+                    "Ord" => &["Eq", "PartialOrd"][..],
+                    "Eq" | "PartialOrd" => &["PartialEq"][..],
+                    "Copy" => &["Clone"][..],
+                    _ => &[][..],
+                });
                 continue;
             }
             if self.trait_marker_supers.get(tr).is_some_and(|ms| ms.iter().any(|m| want.contains(&m.as_str()) || (m == "Copy" && want.contains(&"Clone")))) {
