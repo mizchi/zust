@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795769778190,
+  "lastUpdate": 1795770407130,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -63758,6 +63758,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 38.009,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "531afefdf139f0e5492eaaee4a6a1ee896adfe3a",
+          "message": "prelude: ExactSizeIterator's default len, from size_hint as std's (#300)\n\nThe prelude's `ExactSizeIterator` now has std's default `len`: `size_hint()`'s lower bound, asserting that the upper bound matches, as std does in every build. So `impl ExactSizeIterator for X {}` compiles. It also gains `Iterator` as its supertrait. An impl's own `len`, or an inherent `len`, still wins. The trait's members are selected only when a program names both `ExactSizeIterator` and `len`.\n\nsmallvec, bit-vec, thread_local, bit-set, regex-automata and matchers get past the missing-`len` error. parking_lot's build moves on to parking_lot_core's `Instant` (#250). The other std traits' default methods (`nth_back`, `rfold`, `rfind`, `size_hint`, `Error::source`, `read_exact`, `write_all`, `Hasher::write_*`) were already accepted when an impl leaves them out; a probe now covers them. `cratebench/survey/issues.tsv` maps the error to #298.\n\nFixes #298.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T09:00:56Z",
+          "tree_id": "cfc9f9d3a8e1f2966eb2a74da9031746be6add0d",
+          "url": "https://github.com/mizchi/zust/commit/531afefdf139f0e5492eaaee4a6a1ee896adfe3a"
+        },
+        "date": 1795770406600,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 132.096,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.747,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 18.629,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 41.915,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.598,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.548,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 130.462,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 797.906,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 587.024,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.713,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 70.81,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 196.133,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.57,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.548,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 612.278,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3930.031,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.194,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 89.525,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 42.957,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 52.341,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 94.423,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 144.651,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 37.956,
             "unit": "ms"
           }
         ]
