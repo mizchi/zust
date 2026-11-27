@@ -3623,8 +3623,11 @@ impl Program {
             while let Ty::Ref(true, i) = b {
                 b = *i;
             }
+            // (std's String / Vec, not a program's type of the name)
             let name = match b {
-                Ty::Struct(sid) => self.structs[self.base_of(sid) as usize].name.as_str(),
+                Ty::Struct(sid) if self.struct_item.get(self.base_of(sid) as usize).is_some_and(|&i| i >= self.prelude_from) => {
+                    self.structs[self.base_of(sid) as usize].name.as_str()
+                }
                 _ => "",
             };
             let elem = match b {
@@ -7713,7 +7716,13 @@ fn syn_unify(a: &TySyn, ga: &[String], b: &TySyn, gb: &[String], sub: &mut Vec<(
         };
         if let Some(n) = var(a, sa) {
             let sized = !g[sa as usize].iter().any(|x| x.strip_prefix('?') == Some(n.as_str()));
-            if sized && matches!(b, TySyn::Slice(_) | TySyn::Str | TySyn::Dyn(_)) {
+            // (and std's unsized types, `impl<T> AsMut<T>` beside `impl AsMut<::std::path::Path>`: `Path`, `OsStr`,
+            // `CStr`, by their last segment)
+            let std_unsized = |t: &TySyn| {
+                matches!(t, TySyn::Named(m) if matches!(m.rsplit("::").next().unwrap_or(m), "Path" | "OsStr" | "CStr"))
+            };
+            // (not the other impl's own parameter of the name, `impl<Path> Pick<Path> for S`)
+            if sized && (matches!(b, TySyn::Slice(_) | TySyn::Str | TySyn::Dyn(_)) || (var(b, sb).is_none() && std_unsized(b))) {
                 return false;
             }
             if let Some((_, (s2, t2))) = sub.iter().find(|x| x.0 == (sa, n.clone())).cloned() {

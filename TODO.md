@@ -349,10 +349,16 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
 test by test (`cratebench/test_result.md`). fnv, rustc-hash, cfg-if and adler2 match, and CI keeps them so
 (`--check`). Tracking issue for the rest: #200.
 
-- either does not build under zurgo yet. The first error is `conflicting implementations of trait AsMut`: a blanket
-  `impl<Target> AsMut<Target>` beside impls for unsized types, which rustc accepts because `Target` is `Sized`. Then
-  serde_core, through the dev-dependency serde_json: #197, #198, and std types the prelude lacks (`CString` /
-  `CStr`, net addresses, `SystemTime`, `LinkedList`, `RwLock`, `Weak`, `Bound`).
+- either does not build under zurgo yet. The first error is `cannot find trait Binary` (lib.rs's
+  `impl_fmt_traits!(Binary, Display, LowerExp, ..)`: the prelude has no `fmt::Binary` / `LowerExp` / `Octal` /
+  `Pointer` / `UpperExp` traits). Then serde_core, through the dev-dependency serde_json: #197, #198, and std types
+  the prelude lacks (`CString` / `CStr`, net addresses, `SystemTime`, `LinkedList`, `RwLock`, `Weak`, `Bound`).
+- A method of a trait with several impls for one type that differ only in the trait's arguments is not chosen by a
+  bound: `fn f<T: AsMut<[u8]>>(t: &mut T) { t.as_mut() }` with `T = Either<..>` (either's `AsMut<str>` /
+  `AsMut<[Target]>` / `AsMut<Target>` ..) takes the first impl's `as_mut`, or cannot infer `Target`. The expected
+  type chooses (`let x: u16 = s.get()`), and a bound does when the impls' arguments are concrete; an impl's trait
+  arguments are not kept per method (FnSig has the trait's name only), so a generic one (`AsMut<[Target]>`) cannot
+  be matched against the bound.
 - hex and itoa: their dev-dependency criterion needs two versions of one crate (#28). The error message names
   `itoa v1.0.19` twice (#178).
 - Smaller gaps found on the way: inherent impls on instances of one type (associated fns, implicit `Sized`: #201),
