@@ -1246,8 +1246,11 @@ fn body_lets(body: &[Pt], out: &mut Vec<String>) {
                 if matches!(body.get(j), Some(Pt::Tok(TokenTree::Ident(m))) if m == "mut") {
                     j += 1;
                 }
-                // (a plain binding only: `let x = ..` / `let x: T` / `let x;`, not `if let Some(..) =`)
-                let plain = matches!(body.get(j + 1), Some(Pt::Tok(TokenTree::Punct(p))) if matches!(p.as_char(), '=' | ':' | ';'));
+                // (a plain binding only: `let x = ..` / `let x: T` / `let x;`, not `if let Some(..) =`, nor a path's `::`,
+                // `if let DecoderResult::InputEmpty = r` (encoding_rs). `::` is a `:` joint with the next `:`: the
+                // annotation's `:` of `let x: ::std::primitive::u8` stands alone, and x is a binding)
+                let path = matches!((body.get(j + 1), body.get(j + 2)), (Some(Pt::Tok(TokenTree::Punct(a))), Some(Pt::Tok(TokenTree::Punct(b)))) if a.as_char() == ':' && a.spacing() == Spacing::Joint && b.as_char() == ':');
+                let plain = !path && matches!(body.get(j + 1), Some(Pt::Tok(TokenTree::Punct(p))) if matches!(p.as_char(), '=' | ':' | ';'));
                 if let (Some(Pt::Tok(TokenTree::Ident(n))), true) = (body.get(j), plain) {
                     let n = n.to_string();
                     if n != "_" && !out.contains(&n) {
@@ -3531,6 +3534,20 @@ mod env_tests {
         assert!(norm.contains("core__mh..core__mh"), "{norm}");
         assert!(norm.contains("r.core()"), "{norm}");
         assert!(norm.contains("fnh(core__mh:u8)->u8{core__mh}"), "{norm}");
+    }
+
+    /// A body's `let x: ::std::primitive::u8` binds x (the annotation's `:` stands alone before the type's `::`), so
+    /// x is renamed apart from the caller's `x`; in `if let E::V = ..` / `let E::W(y) = ..`, `E` is a path's segment
+    /// (joint `::`), no binding, and keeps its name
+    #[test]
+    fn hygiene_let_with_an_absolute_type_and_a_pattern_path() {
+        let src = "enum E { V, W(u8) }\nmacro_rules! m { ($e:expr) => {{ let x: ::std::primitive::u8 = 1; let mut z: ::core::primitive::u8 = 2; if let E::V = E::V { z += 1; } let E::W(y) = E::W(3); $e + x + y + z }} }\nfn main() { let x = 10u8; let _ = m!(x); }\n";
+        let out = expand_cfg(src, Some(&crate::cfg::CfgSet::default())).unwrap().unwrap();
+        let norm: String = out.split_whitespace().collect();
+        assert!(norm.contains("letx__mh:::std::primitive::u8=1"), "{norm}");
+        assert!(norm.contains("letmutz__mh:::core::primitive::u8=2"), "{norm}");
+        assert!(norm.contains("ifletE::V=E::V") && norm.contains("letE::W(y)=E::W(3)") && !norm.contains("E__mh"), "{norm}");
+        assert!(norm.contains("x+x__mh+y+z__mh"), "{norm}");
     }
 
     /// `stringify!(m!())` is the call's text in both expanders (#199), through the builtin's paths; a library's

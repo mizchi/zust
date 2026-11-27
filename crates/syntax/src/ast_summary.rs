@@ -2828,7 +2828,11 @@ fn summarize_type_alias(sm: &mut Summary, n: &String, g: &Generics, t: &PTy) -> 
     if !consts.is_empty() && const_param_in_op(t, &consts) {
         return err("generic parameters may not be used in const operations");
     }
-    sm.aliases.push((n.clone(), gs.into_iter().map(|x| x.0).collect(), tysyn(t, None)?));
+    let names: Vec<String> = gs.into_iter().map(|x| x.0).collect();
+    // (the defaults of its parameters, `type Result<T, E = Error>`, in adt_defaults, which an alias's summary does not
+    // use otherwise: a use may leave them out, `Result<()>`)
+    sm.adt_defaults = adt_defaults(g, &names)?;
+    sm.aliases.push((n.clone(), names, tysyn(t, None)?));
     let own: Vec<&str> = g.params.iter().filter_map(|p| if let GParam::Lifetime(l) = p { Some(l.as_str()) } else { None }).collect();
     let mut named = vec![];
     crate::regions::lifetimes_in(t, &mut named);

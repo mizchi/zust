@@ -772,6 +772,8 @@ pub struct Program {
     pub peq: Vec<u32>,
     /// Type aliases: name → (type parameters, body)
     pub aliases: FxMap<String, (Vec<String>, TySyn)>,
+    /// The defaults of an alias's type parameters, by place (`type Result<T, E = Error>`: [None, Some(Error)])
+    pub alias_defaults: FxMap<String, Vec<Option<TySyn>>>,
     /// Likewise `S::<PartialOrd<R>>::partial_cmp`, looked up when the types of `a < b` differ
     pub pord: Vec<u32>,
     /// The number of the item that writes each struct / enum definition (the low ids)
@@ -1576,6 +1578,7 @@ impl Program {
             derived: FxMap::default(),
             const_param_tys: FxMap::default(),
             struct_defaults: FxMap::default(),
+            alias_defaults: FxMap::default(),
             copy_params: FxMap::default(),
             unsized_params: FxMap::default(),
             fn_sized_gens: FxMap::default(),
@@ -1651,6 +1654,9 @@ impl Program {
             for (n, g, t) in &sm.aliases {
                 if !adt_names.contains(n.as_str()) {
                     p.aliases.insert(n.clone(), (g.clone(), t.clone()));
+                    if !sm.adt_defaults.is_empty() {
+                        p.add_alias_defaults(n, &sm.adt_defaults);
+                    }
                 }
             }
         }
@@ -3925,6 +3931,33 @@ impl Program {
         }
     }
 
+    #[cold]
+    #[inline(never)]
+    fn add_alias_defaults(&mut self, n: &str, ds: &[Option<TySyn>]) {
+        self.alias_defaults.insert(n.to_string(), ds.to_vec());
+    }
+
+    /// The types of alias n's parameters a use leaves out (after vals), from their defaults, which may name the
+    /// parameters before them. Any other name in a default is the type where the alias is declared, never a generic
+    /// parameter of the user's (`type Pair<T, E = Error>` used as `Pair<u8>` in `fn make<Error>()` is the struct)
+    #[cold]
+    #[inline(never)]
+    fn fill_alias_defaults(&self, n: &str, g: &[String], vals: &mut Vec<Ty>) -> R<()> {
+        let ds = self.alias_defaults[n].clone();
+        for d in &ds[vals.len()..] {
+            let d = d.as_ref().ok_or("an alias parameter without a default")?;
+            let k = vals.len();
+            let v = self.resolve_with(d, &|x| g.iter().position(|y| y == x).filter(|&i| i < k).map(|i| vals[i]))?;
+            vals.push(v);
+        }
+        Ok(())
+    }
+
+    /// Whether alias n's type parameters from the k-th on all have defaults (a use may give only the first k)
+    pub fn alias_fills(&self, n: &str, k: usize) -> bool {
+        self.alias_defaults.get(n).is_some_and(|ds| k < ds.len() && ds[k..].iter().all(Option::is_some))
+    }
+
     /// A method of primitive type t (from a trait impl, or else the trait's default method)
     /// prim_method for a method call: of the functions of that name, one that takes self (`impl Foo for isize`
     /// with `fn new() -> bool` and `impl Bar for isize` with `fn new(&self) -> bool`: `1.new()` is Bar's)
@@ -4288,6 +4321,10 @@ impl Program {
                     if g.is_empty() {
                         return self.resolve_with(t, names);
                     }
+                    // (every parameter with a default: `Bytes` for `type Bytes<T = u8>`, as `Bytes<>`)
+                    if self.alias_fills(n, 0) {
+                        return self.resolve_with(&TySyn::App(n.clone(), vec![]), names);
+                    }
                 }
                 match self.struct_index.get(n) {
                     Some(&id) if self.structs[id as usize].generics.is_empty() => Ty::Struct(id),
@@ -4332,10 +4369,14 @@ impl Program {
             TySyn::App(n, args) if n == "Box" && args.len() == 1 && !self.struct_index.contains_key(n) => {
                 Ty::Box(intern(self.bare_dyn(&args[0], names).unwrap_or_else(|| r(&args[0]))?))
             }
-            // An alias with type parameters (`type R<T> = Result<T, String>;`)
-            TySyn::App(n, args) if self.aliases.get(n).is_some_and(|a| a.0.len() == args.len()) => {
+            // An alias with type parameters (`type R<T> = Result<T, String>;`), those left out taking their defaults
+            // (`type Result<T, E = Error>` used as `Result<()>`)
+            TySyn::App(n, args) if self.aliases.get(n).is_some_and(|a| a.0.len() == args.len() || self.alias_fills(n, args.len())) => {
                 let (g, t) = self.aliases[n].clone();
-                let vals = args.iter().map(r).collect::<R<Vec<Ty>>>()?;
+                let mut vals = args.iter().map(r).collect::<R<Vec<Ty>>>()?;
+                if vals.len() < g.len() {
+                    self.fill_alias_defaults(n, &g, &mut vals)?;
+                }
                 return self.resolve_with(&t, &|x| match g.iter().position(|y| y == x) {
                     Some(i) => Some(vals[i]),
                     None => names(x),
