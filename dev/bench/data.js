@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795747146394,
+  "lastUpdate": 1795747148713,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -89308,6 +89308,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 134.895,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b18f94f3cb3ba0084621249140682fa172f3cce6",
+          "message": "syntax: crate items zustc lost — primitive-named items, {self} in use trees, use-tree aliases, macro self (#254) (#277)\n\nFixes the most common ways zustc lost a crate's own items, the top fix of the crate survey (#254, 11% of the surveyed crates' downloads):\n\n- Items named like primitives (`fn u32`, `mod char`, `const u8`): the renaming pass now tells type positions from value positions.\n  - Value positions: call arguments, let and assignment values, comparison operands, match arm values, and after return or break.\n  - A struct expression's head (`S { .. }`) is a type.\n  - Numeric suffixes are never renamed.\n- `{self}` in a use tree: it imports only the type namespace, so a value of the same name is not brought in.\n- Use-tree entries are not expanded through module aliases inside a prefixed group. A group right after `use` is still expanded.\n- Block imports are looked up by the reference's namespace: a call does not take a type-only `use E::{self}`.\n- Macro hygiene: `self` / `super` / `crate` are not taken as match-arm bindings in a macro body.\n\nTests: probes prim_named_fns, use_tree_self and macro_self_arrow, with expected output from rustc 1.97; lexer unit tests; tests/workspace.rs. rust-ui: 0 regressions.\n\nLeftover from the review: #283. Fixes #254 (the parts in the issue's top list; the rest is tracked there).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T11:33:32+09:00",
+          "tree_id": "375d80d7811d4325d298e403e7f4c94a83e184c8",
+          "url": "https://github.com/mizchi/zust/commit/b18f94f3cb3ba0084621249140682fa172f3cce6"
+        },
+        "date": 1795747148420,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.182,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.865,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.912,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 12.804,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.534,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.235,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 4.144,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 324.279,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 135.027,
             "unit": "MiB"
           }
         ]
