@@ -1230,11 +1230,16 @@ impl Cx<'_> {
             Ty::Ref(m, i) => self.auto_rec(*i, sync || !m, stack, depth + 1),
             Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => self.auto_rec(*i, sync, stack, depth + 1),
             Ty::Param(_) | Ty::Assoc(_) => Ans::Overflow,
+            // (an auto trait the object is written with, or one its trait gives: else not, as rustc's (it may hold any
+            // type of its trait); a std trait zustc does not know the supertraits of is left open)
             Ty::Dyn(d) => {
-                if d.split('+').any(|b| self.db.gives_auto(self.p, b, tr) == Some(true)) {
+                let gives: Vec<Option<bool>> = d.split('+').map(|b| self.db.gives_auto(self.p, b, tr)).collect();
+                if gives.contains(&Some(true)) {
                     Ans::Yes
-                } else {
+                } else if gives.contains(&None) {
                     Ans::Overflow
+                } else {
+                    Ans::No
                 }
             }
             Ty::Struct(sid) => {

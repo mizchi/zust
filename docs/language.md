@@ -42,6 +42,9 @@ for building programs that already pass rustc quickly, not a replacement for rus
   - `&dyn Trait` / `&mut dyn Trait`. Implicit conversion from `&T` (arguments, let, fields, arrays, return values) and `as &dyn Trait`
   - Calls through the vtable to default methods, generic impls (`impl<T> Tr for W<T>`), and impls on primitive types
   - `&dyn Fn(A) -> B` (calls a closure through the vtable)
+  - Auto traits: `dyn Trait + Send` / `+ Sync` keep them, as rustc's. A value becomes one only if its type has them
+    (E0277); a plain `dyn Trait` is neither Send nor Sync unless its trait has them as supertraits (`trait Tr: Send`);
+    a coercion may drop them (`Box<dyn Tr + Send>` → `Box<dyn Tr>`), never add them (E0308)
 - Function pointers (`examples/fn_ptr_box.rs`):
   - The `fn(A, B) -> R` type. Using function items as values (arguments, return values, let, struct fields, arrays), `(op.f)(a, b)`
   - Passing a function to `F: Fn(A) -> B` (`apply(double, 5)`, `o.map(double)`)

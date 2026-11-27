@@ -268,7 +268,18 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
                 }
             }
             match tr {
-                Some(s) => TySyn::Dyn(s),
+                // (`+ Send` / `+ Sync` are kept, in that order: they decide the object's own auto traits)
+                Some(s) => {
+                    let has = |n: &str| bs.iter().any(|b| matches!(b, Bound::Trait(_, p) if p.segs.last().is_some_and(|s| s.name == n)));
+                    let mut s = s;
+                    for a in ["Send", "Sync"] {
+                        if has(a) {
+                            s.push_str(" + ");
+                            s.push_str(a);
+                        }
+                    }
+                    TySyn::Dyn(s)
+                }
                 // (an auto trait alone is read right behind a pointer only, see auto_dyn)
                 None => {
                     let _ = auto;

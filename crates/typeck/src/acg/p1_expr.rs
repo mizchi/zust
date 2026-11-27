@@ -1017,6 +1017,18 @@ impl Cx<'_> {
                 return Ok((Some(fat), want));
             }
         }
+        // (`Box<dyn Tr + Send>` → `Box<dyn Tr>`, also behind `&` / `*const`: an object that drops auto traits is the
+        // same value)
+        if let (Some(want), Some(v)) = (expected, v) {
+            let drops = match (want, t) {
+                (Ty::Box(Ty::Dyn(w)), Ty::Box(Ty::Dyn(g))) => w != g && crate::types::dyn_drops_autos(g, w),
+                (Ty::Ref(m2, Ty::Dyn(w)), Ty::Ref(m1, Ty::Dyn(g))) | (Ty::Ptr(m2, Ty::Dyn(w)), Ty::Ptr(m1, Ty::Dyn(g))) => w != g && (m1 || !m2) && crate::types::dyn_drops_autos(g, w),
+                _ => false,
+            };
+            if drops {
+                return Ok((Some(v), want));
+            }
+        }
         // `Box<T>` → `Box<dyn Trait>`
         if let (Some(want @ Ty::Box(Ty::Dyn(tr))), Some(v), Ty::Box(inner)) = (expected, v, t) {
             if !matches!(inner, Ty::Dyn(_)) {
@@ -3207,6 +3219,15 @@ impl Cx<'_> {
 
     /// Makes a `&T` (address v) into a `&dyn tr` fat pointer
     pub(crate) fn to_dyn(&mut self, v: Value, t: Ty, tr: &str, span: Sp) -> R<Value> {
+        // (`dyn Tr + Send` / `+ Sync`: the value's type must have them (E0277), as the object says it does; the vtable
+        // is the trait's)
+        let (tr, send, sync) = crate::types::dyn_autos(tr);
+        if self.user_code && send && super::p2_call::not_send(self.prog, t) {
+            return err(span, format!("`{}` cannot be sent between threads safely (E0277)", self.prog.tn(super::p2_call::auto_culprit(self.prog, t, false))));
+        }
+        if self.user_code && sync && super::p2_call::not_sync(self.prog, t) {
+            return err(span, format!("`{}` cannot be shared between threads safely (E0277)", self.prog.tn(super::p2_call::auto_culprit(self.prog, t, true))));
+        }
         let mut fns = vec![];
         if let (Some((_, bps, _)), Ty::Fn(f)) = (crate::ast_summary::parse_fn_bound(tr), t) {
             // Function pointer: a prelude shim that calls it from the data (the place holding the function pointer)
@@ -3447,6 +3468,8 @@ impl Cx<'_> {
 
     /// The trait of `dyn Tr<A, B, Assoc = C>` and the types of its own arguments (the bindings are left out)
     pub(crate) fn dyn_trait_args(&mut self, tr: &str) -> (String, Vec<Ty>) {
+        // (the object's trait, not the auto traits it keeps: `Tr<u8> + Send`)
+        let tr = crate::types::dyn_autos(tr).0;
         let Some((n, rest)) = tr.split_once('<') else { return (tr.trim().to_string(), vec![]) };
         let inner = rest.trim_end().strip_suffix('>').unwrap_or(rest);
         let mut args = vec![];
@@ -3482,6 +3505,7 @@ impl Cx<'_> {
 
     /// the associated type bindings of `dyn Tr<A, Out = u32>`: (name, type)
     pub(crate) fn dyn_bindings(&mut self, tr: &str) -> Vec<(String, Ty)> {
+        let tr = crate::types::dyn_autos(tr).0;
         let Some((_, rest)) = tr.split_once('<') else { return vec![] };
         let inner = rest.trim_end().strip_suffix('>').unwrap_or(rest);
         let mut out = vec![];
@@ -4057,6 +4081,7 @@ impl Cx<'_> {
     }
 
     pub(crate) fn dyn_fn_sig(&self, s: &str) -> R<(Vec<Ty>, Ty)> {
+        let s = crate::types::dyn_autos(s).0;
         let Some((_, ps, r)) = crate::ast_summary::parse_fn_bound(s) else {
             return Err(format!("`dyn {s}` is not a function type"));
         };

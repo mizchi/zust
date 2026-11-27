@@ -2234,11 +2234,6 @@ impl Session {
             // (the program's own `dyn` scan, when it found one: at the `dyn`, naming the trait rustc names)
             return Err(late_err.take().filter(|l| l.ends_with("is not dyn compatible (E0038)")).unwrap_or(e));
         }
-        // (E0277: a static is reachable from every thread, so its type must be Sync)
-        if let Some((ci, tn)) = crate::acg::static_not_sync(&prog) {
-            let line = items.get(prog.consts[ci].item as usize).map_or(0, |it| it.line);
-            return Err(format!("{line}:1: `{tn}` cannot be shared between threads safely: the type of a `static` must be Sync (E0277)"));
-        }
         // (E0080: a const's or a static's value that reads an extern static, `static X: u32 = symbol;`, which constant
         // evaluation cannot; rustc's E0133 is on the same line)
         if let Some((ci, n)) = extern_static_in_value(&prog) {
@@ -2472,6 +2467,12 @@ impl Session {
                     prog.tdb.auto_supers.insert(tr.to_string(), autos);
                 }
             }
+        }
+        // (E0277: a static is reachable from every thread, so its type must be Sync. After the auto traits of the
+        // program's traits' supertraits are known: a `&dyn Stage` of `trait Stage: Sync` is Sync)
+        if let Some((ci, tn)) = crate::acg::static_not_sync(&prog) {
+            let line = items.get(prog.consts[ci].item as usize).map_or(0, |it| it.line);
+            return Err(format!("{line}:1: `{tn}` cannot be shared between threads safely: the type of a `static` must be Sync (E0277)"));
         }
         // (E0277: an impl of a trait of the program's needs its supertraits, all the way up, of its self type, with the
         // impl's parameters as placeholders whose bounds are all the impl assumes (`impl<T> Complete for T` with `trait

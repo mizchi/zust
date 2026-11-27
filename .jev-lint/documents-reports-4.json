@@ -96,6 +96,14 @@
     "docs_reports_2026-11-27-02-threads-ui.ja": {
       "path": "docs/ja/reports/2026-11-27-02-threads-ui.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-27-03-dyn-auto-traits.en": {
+      "path": "docs/reports/2026-11-27-03-dyn-auto-traits.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-27-03-dyn-auto-traits.ja": {
+      "path": "docs/ja/reports/2026-11-27-03-dyn-auto-traits.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -229,6 +237,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-27-02-threads-ui.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-27-03-dyn-auto-traits",
+      "topic": "The Japanese file docs/ja/reports/2026-11-27-03-dyn-auto-traits.md is a faithful translation of docs/reports/2026-11-27-03-dyn-auto-traits.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-27-03-dyn-auto-traits.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-27-03-dyn-auto-traits.ja"
       }
     }
   ]

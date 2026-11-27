@@ -2576,7 +2576,7 @@ impl Inf<'_> {
             let decl = self
                 .prog
                 .traits
-                .get(tr)
+                .get(crate::types::dyn_autos(tr).0)
                 .and_then(|ds| ds.iter().copied().find(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(n)))
                 .or_else(|| self.prog.prim_method(Ty::Dyn(tr), n).filter(|&d| self.prog.sigs[d as usize].has_self))
                 // (or a default method of a trait the object implements, `impl MyTrait for dyn Tr {}`)

@@ -111,6 +111,28 @@ pub const DST_TAG: u32 = 1 << 31;
 
 /// The intern table of strings (the trait bounds of `dyn`)
 /// (holds a `&String` rather than a fat `&str`, to keep `Ty` at 16 bytes)
+/// A trait object's text without the auto traits it keeps (`Fn() + Send + Sync` is `Fn()`), and whether it is Send,
+/// and Sync (ast_types::tysyn writes them last, in that order)
+pub fn dyn_autos(s: &str) -> (&str, bool, bool) {
+    let (s, sync) = match s.strip_suffix(" + Sync") {
+        Some(r) => (r, true),
+        None => (s, false),
+    };
+    let (s, send) = match s.strip_suffix(" + Send") {
+        Some(r) => (r, true),
+        None => (s, false),
+    };
+    (s, send, sync)
+}
+
+/// A trait object of the text `want` takes one of `got`'s: the same trait, with no auto trait `got` lacks (`dyn Tr +
+/// Send` is a `dyn Tr`, not the other way round)
+pub fn dyn_drops_autos(got: &str, want: &str) -> bool {
+    let (g, gs, gy) = dyn_autos(got);
+    let (w, ws, wy) = dyn_autos(want);
+    g == w && (gs || !ws) && (gy || !wy)
+}
+
 pub fn intern_str(s: &str) -> &'static String {
     static TABLE: OnceLock<Mutex<HashSet<&'static String>>> = OnceLock::new();
     let mut tab = TABLE.get_or_init(|| Mutex::new(HashSet::default())).lock().unwrap();

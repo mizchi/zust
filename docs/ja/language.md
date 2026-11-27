@@ -42,6 +42,9 @@ Rc など) は、zustc が持つ組み込みの prelude (`crates/syntax/src/prel
   - `&dyn Trait` / `&mut dyn Trait`。`&T` からの暗黙の変換（引数・let・フィールド・配列・戻り値）と `as &dyn Trait`
   - デフォルトメソッド、ジェネリックな impl（`impl<T> Tr for W<T>`）、プリミティブ型への impl を vtable 経由で呼ぶ
   - `&dyn Fn(A) -> B`（クロージャを vtable 経由で呼ぶ）
+  - auto trait: `dyn Trait + Send` / `+ Sync` は rustc と同じくそれを持つ。値をそれにするには、その型がそれを持たなければならない（E0277）。
+    ただの `dyn Trait` は、トレイトがスーパートレイトとして持つ（`trait Tr: Send`）のでなければ Send でも Sync でもない。
+    型強制はそれを外せる（`Box<dyn Tr + Send>` → `Box<dyn Tr>`）が、足すことはできない（E0308）
 - 関数ポインタ（`examples/fn_ptr_box.rs`）：
   - `fn(A, B) -> R` 型。関数アイテムを値として使う（引数・戻り値・let・struct のフィールド・配列）、`(op.f)(a, b)`
   - `F: Fn(A) -> B` に関数を渡す（`apply(double, 5)`、`o.map(double)`）

@@ -4932,8 +4932,21 @@ fn base_name(prog: &Program, sid: u32) -> (&str, bool) {
 /// A type whose values may not move to another thread (not Send): an `Rc`, a raw pointer, a `MutexGuard` or an
 /// RwLock guard, a `&T` of a T that is not Sync, an `Arc<T>` of a T that is not Send and Sync, or a type holding one.
 /// A type of the program's with `unsafe impl Send` is Send. The prelude's own types are judged by their arguments (a
-/// Vec holds a raw pointer, and is Send when its elements are). A type parameter is taken as Send. (A `dyn Trait` is
-/// taken as Send: zustc's types do not keep `+ Send`, tests/security/send_dyn_thread.rs.)
+/// Vec holds a raw pointer, and is Send when its elements are). A type parameter is taken as Send. A `dyn Trait` is
+/// Send only when it is written with `+ Send` or its trait has Send as a supertrait (tests/security/send_dyn_thread.rs).
+/// The part of t that makes it not Send (sync: not Sync): a field of a struct or a closure's capture that is not, as
+/// rustc names it (`Rc<i32>`, not the closure's type), else t
+pub fn auto_culprit(prog: &Program, t: Ty, sync: bool) -> Ty {
+    let fails = |x: Ty| if sync { not_sync(prog, x) } else { not_send(prog, x) };
+    match t {
+        Ty::Struct(sid) => prog.structs[sid as usize].fields.iter().map(|f| match f.1 {
+            Ty::Ptr(_, i) if prog.ref_capture(sid, prog.structs[sid as usize].fields.iter().position(|g| g.0 == f.0).unwrap_or(0)).is_some() => *i,
+            x => x,
+        }).find(|&f| fails(f)).unwrap_or(t),
+        _ => t,
+    }
+}
+
 pub fn not_send(prog: &Program, t: Ty) -> bool {
     auto_trait_fails(prog, t, false, &mut vec![], 0)
 }
@@ -4956,6 +4969,11 @@ fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool
     let sync_ = |t: Ty, seen: &mut Vec<(u32, bool)>| auto_trait_fails(prog, t, true, seen, d + 1);
     match t {
         Ty::Ptr(..) => true,
+        // (a trait object: only by an auto trait it is written with (`dyn Tr + Send`) or its trait's supertraits)
+        Ty::Dyn(d) => {
+            let (core, send, sync_) = crate::types::dyn_autos(d);
+            !(if sync { sync_ } else { send }) && prog.tdb.gives_auto(prog, core, if sync { "Sync" } else { "Send" }) != Some(true)
+        }
         // (&T is Send if T is Sync; &mut T if T is Send; both are Sync if T is Sync)
         Ty::Ref(false, i) => sync_(*i, seen),
         Ty::Ref(true, i) if !sync => send(*i, seen),

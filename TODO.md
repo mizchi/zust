@@ -81,7 +81,6 @@ invariants.
 | case | what is accepted that rustc rejects |
 |---|---|
 | `unsafe_fn_pointer` | fn pointer types do not record `unsafe`, so calling an `unsafe fn` pointer needs no unsafe block |
-| `send_dyn_thread` | `dyn Trait` types do not keep `+ Send`, so a `Box<dyn Fn()>` (which may hold an `Rc`) moves to a thread |
 | `cve_2019_12083_error_type_id` | an impl may define a method its trait does not declare (E0407). zustc has no downcast, so no type confusion follows |
 | `const_overflow` | overflow in a const (E0080) is found only when it is evaluated at run time (a panic) |
 
@@ -308,8 +307,9 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
     block); the hand-written one in wasm-bindgen's lib.rs (`__wbindgen_skip_interpret_calls`) is not compiled. One
     whose fn, `use`, trait or impl that would go out names a const, static or type that stays in it (`const N` or
     `struct Local<T>` beside an `impl Tr for u8` that names it) is skipped whole, as before this branch.
-  - a trait object's auto traits are not in zustc's types (`dyn Obj + Send` is `dyn Obj`, ast_types::tysyn): an impl
-    for `dyn Obj + Send` is one for `dyn Obj` too, where rustc reports E0277.
+  - an impl for a trait object with auto traits (`impl M for dyn Obj + Send`) is found by the object's trait alone, so
+    a call of its method on a `dyn Obj` is rejected as a mismatched type (E0308), where rustc reports E0599 (no
+    method). The object's types do keep `+ Send` / `+ Sync` (report 2026-11-27-03).
   - a blanket impl's `self`-by-value method on a `&Box<u8>` (`impl<T: Marker> Tr for T` with `impl Marker for
     &Box<u8>`) asks the bound of the Box's content ("`u8: Marker` is not satisfied").
   - impls for trait objects with parameters (`impl<R> Tr for dyn Fn() -> R`) are matched by the object's trait's name;
