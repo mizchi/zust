@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795770412945,
+  "lastUpdate": 1795770415856,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -148531,6 +148531,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/a744cd515e2ce8437bbabbd277af619c3a359437"
         },
         "date": 1795769777563,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.86,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1919,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.99,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1559,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 73.72,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5445,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "531afefdf139f0e5492eaaee4a6a1ee896adfe3a",
+          "message": "prelude: ExactSizeIterator's default len, from size_hint as std's (#300)\n\nThe prelude's `ExactSizeIterator` now has std's default `len`: `size_hint()`'s lower bound, asserting that the upper bound matches, as std does in every build. So `impl ExactSizeIterator for X {}` compiles. It also gains `Iterator` as its supertrait. An impl's own `len`, or an inherent `len`, still wins. The trait's members are selected only when a program names both `ExactSizeIterator` and `len`.\n\nsmallvec, bit-vec, thread_local, bit-set, regex-automata and matchers get past the missing-`len` error. parking_lot's build moves on to parking_lot_core's `Instant` (#250). The other std traits' default methods (`nth_back`, `rfold`, `rfind`, `size_hint`, `Error::source`, `read_exact`, `write_all`, `Hasher::write_*`) were already accepted when an impl leaves them out; a probe now covers them. `cratebench/survey/issues.tsv` maps the error to #298.\n\nFixes #298.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-27T09:00:56Z",
+          "tree_id": "cfc9f9d3a8e1f2966eb2a74da9031746be6add0d",
+          "url": "https://github.com/mizchi/zust/commit/531afefdf139f0e5492eaaee4a6a1ee896adfe3a"
+        },
+        "date": 1795770415303,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
