@@ -1151,8 +1151,12 @@ impl Insts {
                         }
                     }
                 }
+                // (the solver's answer, asked once: the check below asks the same goal again)
+                let mut held: Option<crate::traits::Ans> = None;
                 if own && !prog.has_param(t) && !prog.names_placeholder(t, 0) && !args.iter().any(|&a| prog.names_placeholder(a, 0) && tr.contains('<')) {
-                    match prog.tdb.holds_in(prog, t, tr, &gn, &args) {
+                    let h = prog.tdb.holds_in(prog, t, tr, &gn, &args);
+                    held = Some(h);
+                    match h {
                         crate::traits::Ans::No => {
                             return Err(format!("the trait bound `{}: {}` is not satisfied (for `{pn}`) {}", crate::traits::display_ty(prog, t), crate::traits::display_name(&crate::traits::bound_text(tr)), crate::traits::SOLVED_NO));
                         }
@@ -1189,7 +1193,7 @@ impl Insts {
                     let r = !blanket && !fn_of_ref && !unit_known && inst_tr().as_deref().is_none_or(|b| b == tr || !prog.implements(t, b));
                     r
                 };
-                if std_no || ((own || t == Ty::Unit) && !prog.has_param(t) && prog.tdb.holds_in(prog, t, tr, &gn, &args) == crate::traits::Ans::No) {
+                if std_no || ((own || t == Ty::Unit) && !prog.has_param(t) && held.unwrap_or_else(|| prog.tdb.holds_in(prog, t, tr, &gn, &args)) == crate::traits::Ans::No) {
                     return Err(format!(
                         "the trait bound `{}: {}` is not satisfied (for `{pn}`)",
                         prog.tn(t),
