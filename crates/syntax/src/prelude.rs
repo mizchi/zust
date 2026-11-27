@@ -267,6 +267,7 @@ fn gated_trait(h: usize) -> Option<&'static str> {
                 }
                 it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).find(|w| {
                     matches!(*w, "Hasher" | "Hash" | "__BoolThen" | "__AsBytes" | "__PathExt" | "__AsPathStr" | "BufRead" | "Read" | "Seek" | "Write" | "__FWr" | "ExactSizeIterator" | "BuildHasher")
+                        || matches!(*w, "Binary" | "Octal" | "LowerHex" | "UpperHex" | "LowerExp" | "UpperExp")
                 })
             })
             .collect()
@@ -287,6 +288,8 @@ fn gated_impl(h: usize) -> Option<&'static str> {
                 let ws: Vec<&'static str> = it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).collect();
                 match ws.as_slice() {
                     ["impl", t, "for", ..] if matches!(*t, "Read" | "BufRead" | "Seek" | "Write" | "__FWr") => Some(*t),
+                    // (the numbers' impls of the radix and exponent fmt traits, only with the trait)
+                    ["impl", t, "for", ..] if matches!(*t, "Binary" | "Octal" | "LowerHex" | "UpperHex" | "LowerExp" | "UpperExp") => Some(*t),
                     // (`{:?}` of a range: only for a program that formats with Debug)
                     ["impl", "T", "Debug", "for", r, ..] if matches!(*r, "Range" | "RangeInclusive") => Some("__range_debug"),
                     _ => None,
@@ -620,6 +623,7 @@ const SHADOWABLE: &[&str] = &[
     "FromStr", "CString", "CStr", "NulError", "LinkedList", "Ipv4Addr", "Ipv6Addr", "IpAddr", "SocketAddrV4", "SocketAddrV6",
     "SocketAddr", "AddrParseError", "RwLock", "SystemTime", "SystemTimeError", "Bound", "Arguments", "Thread", "ThreadId",
     "Once", "OnceState", "Layout", "LayoutError", "Condvar", "ControlFlow", "Repeat",
+    "Binary", "Octal", "LowerHex", "UpperHex", "LowerExp", "UpperExp",
 ];
 
 /// A name as it was before the compiler renamed it: `__u_Iter`, a program's type named as a prelude type
@@ -1155,6 +1159,8 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             "clamp", "from_u32", "char", "join", "concat", "drain", "default", "f64", "f32", "i128", "u128", "Iterator", "into", "split_at_mut",
             "copy_from_slice", "clone_from_slice", "BufRead", "Read", "Seek", "SeekFrom", "Write", "__FWr", "Cursor", "ExactSizeIterator", "BuildHasher", "split_first_chunk", "first_chunk", "chunks_exact", "chunks_mut", "chunks_exact_mut", "is_sorted", "is_sorted_by", "is_sorted_by_key",
             "split_first", "split_last", "splitn",
+            // (the fmt traits of `{:b}` / `{:x}` / `{:e}` .., TraitHeaders and so with no names of their own)
+            "Binary", "Octal", "LowerHex", "UpperHex", "LowerExp", "UpperExp",
         ]);
         // Candidates per (first byte, length): however many prelude names there are, 0 or 1 comparisons per identifier
         let mut t: Vec<Vec<&'static str>> = vec![vec![]; 256 * 32];
@@ -1222,6 +1228,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         cache.map.insert(it.hash, (names, c));
     }
     let mut sc = PreludeScan::new(user_src, user_items, &mut cache.scan);
+    // (a program's write! into a Formatter, which its impl of a fmt trait names: the Formatter of its own that codegen
+    // gives it. Asked of the program's names alone, before any rule adds the formatting names, Formatter among them)
+    if need.contains("Formatter") {
+        need.insert("__exr_sub_formatter");
+    }
     // (`c"..."`: codegen makes it a call of __exr_cstr_lit, a `&'static CStr`; before the `no_std` return, which a
     //  program needing nothing else takes)
     if has_cstr_literal(user_src) {
@@ -1930,6 +1941,8 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     let mut dur_ops = false;
     let mut fmt_write = false;
+    // (the fmt traits of `{:b}` / `{:x}` / `{:e}` .. that the program names: the helper codegen calls for each)
+    let mut fmt_radix = 0u8;
     let mut as_mut_gate = false;
     // (whether the program writes `thread` / `Layout`: asked once one of the functions below is wanted)
     let mut thread_text: Option<bool> = None;
@@ -1952,6 +1965,23 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         // program that names the trait only in a bound, or calls `write!(w, ..)` on a generic `W`, never names
         // `write_str`. Every impl has it and the trait's defaults call it, so it comes with the trait (#148). In the
         // loop, as the trait can come in through another prelude item too)
+        if fmt_radix != 0x3f {
+            const RADIX: [(&str, &str); 6] = [
+                ("Binary", "__exr_fmt_binary"),
+                ("Octal", "__exr_fmt_octal"),
+                ("LowerHex", "__exr_fmt_lowerhex"),
+                ("UpperHex", "__exr_fmt_upperhex"),
+                ("LowerExp", "__exr_fmt_lowerexp"),
+                ("UpperExp", "__exr_fmt_upperexp"),
+            ];
+            for (k, (t, h)) in RADIX.into_iter().enumerate() {
+                if fmt_radix & (1 << k) == 0 && need.contains(t) {
+                    fmt_radix |= 1 << k;
+                    changed = true;
+                    need.insert(h);
+                }
+            }
+        }
         if !fmt_write && need.contains("__FWr") {
             fmt_write = true;
             changed = true;
