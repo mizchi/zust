@@ -227,6 +227,9 @@ python3 bench/ide_golden_ra.py --detail
   pull request では `--dry-run` で測り、ログに行をコミットしない。`KPI` ワークフローが pull request をベースと比べて測り、
   結果をその pull request のコメントに残す (下の CI を参照)。行は main で作るコミットで足す。ブランチで足した行は、その間に
   main が足す行と毎回ぶつかる。
+  `bench/kpi_ratchet.txt` は KPI ごとの上限を持つ。head がどれかの上限を許容幅より超えた pull request は、`KPI`
+  ワークフローが失敗にする。コストを取り除くか、その pull request で上限を上げ (KPI のコメントがその行を出す)、なぜその
+  コストに見合うかを説明に書く。main への push ごとに、main が下回った上限をその値まで下げる。上限を上げるのは、この編集だけ。
 - `bench/rust_ui.py --check` は 0 regressions でなければならない。テストが通るようになったら、ベースラインを書き直す
   (`--write-baseline`)。
   - 新しく通った compile-fail のテストが何で拒否されたかを見る。注釈の行で拒否されても、そのテストが調べている理由と
@@ -310,7 +313,9 @@ origin/main からの差分の行だけを変異させ、テストで見つか�
   そのキーの環境と同じかを確かめる。pull request に書き込めるのは、コメントするジョブだけ。命令数は、同じイメージならどのランナーでも
   同じになる。ベースの値はキャッシュするので、一度測ったベースは測り直さない。`bench/kpi_pr.py` が
   pull request のコメントを 1 件だけ保ち、更新する。そこには KPI ごとのベースとの差と、push ごとの行 (前の push との差つき) が載る。1% を超えて増えた KPI には印を付け、
-  警告を出す。ジョブは失敗にしない。
+  警告を出す。head が `bench/kpi_ratchet.txt` の上限を許容幅より超えると、ジョブは失敗する (`bench/kpi_ratchet.py`)。
+  main への push ごとに、`ratchet` ジョブが main の下回った上限をその値まで下げ、CI を飛ばすコミットにする。上限は
+  測った環境でだけ使う。環境が変わったら何も確かめず、次の main への push で測り直す。
 - `.github/workflows/bench.yml`: main への push ごとに `bench/ci_bench.py` を走らせ、
   [github-action-benchmark](https://github.com/benchmark-action/github-action-benchmark) で gh-pages ブランチの `dev/bench/` に
   結果を積む。ダッシュボードは https://mizchi.github.io/zust/dev/bench/ (リポジトリの Settings → Pages で gh-pages ブランチを
