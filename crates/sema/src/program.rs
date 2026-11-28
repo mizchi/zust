@@ -4102,6 +4102,8 @@ impl Program {
                 // Mutex is Sync when T is Send, an Arc or RwLock when T is Send and Sync)
                 let args = &self.structs[sid as usize].args;
                 match name {
+                    // (std's atomics, AtomicPtr<T> too, are Send and Sync whatever they point to)
+                    n if ours && n.starts_with("Atomic") => return true,
                     "Rc" | "Ref" | "RefMut" if ours => return false,
                     "MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard" | "StdoutLock" if !sync && ours => return false,
                     "Cell" | "RefCell" | "LazyCell" | "OnceCell" | "UnsafeCell" | "__Rcvr__" if sync && ours => return false,

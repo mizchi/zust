@@ -279,7 +279,7 @@ fn gated_trait(h: usize) -> Option<&'static str> {
                 it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).find(|w| {
                     matches!(*w, "Hasher" | "Hash" | "__BoolThen" | "__AsBytes" | "__PathExt" | "__AsPathStr" | "BufRead" | "Read" | "Seek" | "Write" | "__FWr" | "ExactSizeIterator" | "BuildHasher"
                         // (std::os::unix's: `size()` / `mode()` / `as_raw_fd()` of a program's own are no reason for them)
-                        | "MetadataExt" | "OpenOptionsExt" | "PermissionsExt" | "AsRawFd" | "FromRawFd" | "IntoRawFd")
+                        | "MetadataExt" | "OpenOptionsExt" | "PermissionsExt" | "AsRawFd" | "FromRawFd" | "IntoRawFd" | "JoinHandleExt")
                         || matches!(*w, "Binary" | "Octal" | "LowerHex" | "UpperHex" | "LowerExp" | "UpperExp" | "Pointer")
                 })
             })
@@ -1722,6 +1722,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     // (one scan of the source when `io::` is not written; the two below only after it)
     if sc.has("io::") && (sc.has("io::Error") || sc.has("io::Result")) {
         need.extend(["IoError", "Result"]);
+    }
+    // (`thread::Result<T>` is a join's result: the prelude's __ThreadPanic is its Err)
+    if sc.has("thread::Result") {
+        need.extend(["__ThreadPanic", "Result", "Debug"]);
     }
     // (a FusedIterator impl comes with an Iterator impl: the source is scanned only then)
     if (need.contains("Iterator") || need.contains("next")) && sc.has("FusedIterator") {

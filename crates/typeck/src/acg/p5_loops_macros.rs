@@ -2554,7 +2554,8 @@ impl Cx<'_> {
         }
         // (`std::marker::PhantomData` / `m::S`: a unit struct through a module path)
         if segs.len() >= 2 && p.segs.iter().all(|s| s.args.is_empty()) {
-            let last = segs.last().unwrap();
+            let names: Vec<&str> = segs.iter().map(|s| s.as_str()).collect();
+            let last = &crate::types::std_unit_name(&names).to_string();
             let unit = self.prog.struct_index.get(last.as_str()).is_some_and(|&sid| {
                 let sd = &self.prog.structs[sid as usize];
                 !sd.is_enum && sd.fields.is_empty()

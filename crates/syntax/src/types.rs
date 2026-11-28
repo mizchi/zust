@@ -636,3 +636,13 @@ pub const TYS: [Ty; 18] = [
     Ty::I128,
     Ty::U128,
 ];
+
+/// The prelude's name of a std unit struct a value path names by another (`fmt::Error`, std's unit struct, is the
+/// prelude's `__FmtError`), else the path's last segment
+pub fn std_unit_name<'a>(segs: &[&'a str]) -> &'a str {
+    match segs {
+        [.., "fmt", "Error"] => "__FmtError",
+        [.., last] => last,
+        [] => "",
+    }
+}

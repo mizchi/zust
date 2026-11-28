@@ -1,0 +1,23 @@
+table [7, 7, 7, 7] prev null true hits 1
+try_lock: would block
+holder saw 6
+try_lock after: 15
+mutex poisoned false
+try_read under a reader: 3
+try_write under a reader: would block
+reader sees [1, 2, 3]
+try_read under a writer: try_lock failed because the operation would block
+try_write free: [1, 2, 3, 4, 5]
+rwlock poisoned false
+into_inner [1, 2, 3, 4, 5]
+sharded try_read Some(5)
+sharded into_inner shard
+try_lock failed because the operation would block / "WouldBlock"
+an error occurred when formatting an argument / Error
+an error occurred when formatting an argument / Error
+boxed: an error occurred when formatting an argument
+format fails: Err(Error)
+thread::Result ok 7
+scoped pthread_t nonzero true
+scoped joined 1
+pthread_join 0 got 9

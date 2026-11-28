@@ -1438,7 +1438,7 @@ impl Inf<'_> {
                             Some(_) if segs.len() == 2 && segs[1] == "BITS" => self.known(Ty::U32),
                             Some(t) if segs.len() == 2 => self.known(t),
                             // (`std::marker::PhantomData` / `m::S`: a unit struct through a module path)
-                            _ => match self.prog.struct_index.get(*segs.last().unwrap()).copied() {
+                            _ => match self.prog.struct_index.get(crate::types::std_unit_name(&segs)).copied() {
                                 Some(sid)
                                     if !self.prog.structs[sid as usize].is_enum
                                         && self.prog.structs[sid as usize].fields.is_empty()

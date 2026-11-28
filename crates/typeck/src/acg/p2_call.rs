@@ -5162,6 +5162,8 @@ fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool
             if prelude {
                 let args = &sd.args;
                 return match (name, sync) {
+                    // (std's atomics, AtomicPtr<T> too, are Send and Sync whatever they point to)
+                    (n, _) if n.starts_with("Atomic") => false,
                     ("Rc", _) | ("MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard" | "StdoutLock", false) => true,
                     // (a RefCell's guards share the cell's non-atomic borrow flag: neither Send nor Sync, as in std)
                     ("Ref" | "RefMut", _) => true,

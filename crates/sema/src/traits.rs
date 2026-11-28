@@ -1350,6 +1350,8 @@ impl Cx<'_> {
                     let name = self.p.structs[b as usize].name.as_str();
                     let each = |sy: bool| args.iter().map(|&a| (a, sy)).collect::<Vec<_>>();
                     return match name {
+                        // (std's atomics, AtomicPtr<T> too, are Send and Sync whatever they point to)
+                        n if n.starts_with("Atomic") => Ans::Yes,
                         "Rc" => Ans::No,
                         "Cell" | "RefCell" | "OnceCell" if sync => Ans::No,
                         // (std's stdout guard holds a reentrant lock owned by its thread: not Send)
