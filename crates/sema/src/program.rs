@@ -4641,7 +4641,8 @@ impl Program {
                     "overflowing_rem", "wrapping_div", "wrapping_rem", "saturating_mul", "saturating_div", "checked_next_power_of_two",
                     "checked_next_multiple_of", "checked_isqrt", "checked_div_euclid", "checked_rem_euclid", "wrapping_div_euclid", "wrapping_rem_euclid",
                     "from_be", "from_le", "cast_signed", "cast_unsigned", "checked_add_signed", "saturating_add_signed", "overflowing_add_signed",
-                    "checked_sub_unsigned", "checked_add_unsigned", "saturating_add_unsigned", "wrapping_add_unsigned", "is_multiple_of",
+                    "checked_sub_unsigned", "checked_add_unsigned", "saturating_add_unsigned", "wrapping_add_unsigned", "is_multiple_of", "checked_neg",
+                    "wrapping_neg", "overflowing_neg", "leading_ones", "trailing_ones", "abs_diff", "isqrt",
                 ];
                 let known = match u {
                     _ if ascii => matches!(u, Ty::U8 | Ty::Char),
@@ -4651,7 +4652,9 @@ impl Program {
                     u => {
                         let signed_only = matches!(m, "abs" | "signum" | "is_positive" | "is_negative" | "checked_abs" | "wrapping_abs" | "saturating_abs" | "overflowing_abs" | "unsigned_abs" | "saturating_neg");
                         let unsigned_only = matches!(m, "is_power_of_two" | "next_power_of_two" | "next_multiple_of" | "wrapping_add_signed" | "checked_next_power_of_two");
-                        (INT.contains(&m) || (crate::ast_infer::is_builtin_scalar_method(m) && !NOT_NUM.contains(&m))) && !(signed_only && !u.signed()) && !(unsigned_only && u.signed())
+                        (INT.contains(&m) || signed_only || unsigned_only || (crate::ast_infer::is_builtin_scalar_method(m) && !NOT_NUM.contains(&m)))
+                            && !(signed_only && !u.signed())
+                            && !(unsigned_only && u.signed())
                     }
                 };
                 known.then(|| (ascii || m == "total_cmp").then(|| m.starts_with("make_ascii")))

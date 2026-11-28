@@ -79,6 +79,14 @@ impl<T> Nl for &T {
         false
     }
 }
+trait Ua {
+    fn unsigned_abs(self) -> u32;
+}
+impl<T> Ua for &T {
+    fn unsigned_abs(self) -> u32 {
+        99
+    }
+}
 struct Own;
 impl Own {
     fn val(&self) -> u32 {
@@ -107,4 +115,6 @@ fn main() {
     println!("{}", u.pv());
     let p = 0usize as *const u8;
     println!("{} {}", p.is_null(), (&p).is_null());
+    let n = -3i32;
+    println!("{} {}", n.unsigned_abs(), (&n).unsigned_abs());
 }
