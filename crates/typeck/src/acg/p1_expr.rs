@@ -4781,6 +4781,16 @@ impl Cx<'_> {
                 };
                 let m = Expr::MethodCall(Box::new(Expr::Paren(Box::new(recv))), p.segs[1].name.clone(), p.segs[1].args.clone(), cargs[1..].to_vec(), span);
                 let m = self.keep_expr(m);
+                // (`Borrow::borrow(&s)` of std's Borrow (not a trait of the program's of that name): in scope as the path
+                // names it, whatever is imported: std's impls (borrow_rewrite))
+                if let Expr::MethodCall(r, ..) = m {
+                    if p.segs[0].name == "Borrow" && p.segs[1].name == "borrow" && cargs.len() == 1 && !self.prog.user_traits.iter().any(|t| t.rsplit("::").next() == Some("Borrow")) {
+                        if let Some((ne, _)) = self.borrow_rewrite(r, expected, true) {
+                            let ne = self.keep_expr(ne);
+                            return self.expr(ne, expected);
+                        }
+                    }
+                }
                 // (`Foo::tag(&s)`: the trait's method, not an inherent `tag` of the receiver's type)
                 if user {
                     self.explicit_traits.insert(m as *const Expr as usize, p.segs[0].name.clone());

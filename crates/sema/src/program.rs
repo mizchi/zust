@@ -644,6 +644,10 @@ pub struct Program {
     /// scope's): 1 Display, 2 Debug (`use std::fmt::Debug;`, `use core::fmt::{self, Display as _}`; a glob `fmt::*`
     /// both). Which one `x.fmt(f)` calls where x's type has both (#256)
     pub fmt_imports: u8,
+    /// the program's `use` declarations bring std's Borrow into scope (`use std::borrow::Borrow;`, a glob of
+    /// `borrow::*`; fn bodies' too; of the whole program, not each scope's): `x.borrow()` by std's impls of it
+    /// (borrow_rewrite), else rustc's E0599 where no bound of the receiver's type parameter names it
+    pub borrow_imported: bool,
     /// a constant with a lowercase name exists (`const or: usize`): an identifier pattern of any case may name one;
     /// without, only an uppercase one is looked up
     pub lower_consts: bool,
@@ -1716,6 +1720,7 @@ impl Program {
             unbounded_blankets: FxSet::default(),
             use_names: FxSet::default(),
             fmt_imports: 0,
+            borrow_imported: false,
             impl_selfs: FxMap::default(),
             user_traits: FxSet::default(),
             tdb: Default::default(),
@@ -3479,10 +3484,17 @@ impl Program {
                 Some(self.structs[sid as usize].args.first().is_some_and(|&a| self.implements(a, tr)))
             }
             (Ty::Box(_), "Deref" | "DerefMut") => Some(true),
-            // (std's Deref of a reference, a String and a Vec, which the compiler derefs itself: `L: Deref` of an
-            // `Either<String, &str>`)
-            (Ty::Ref(_, _), "Deref") | (Ty::Ref(true, _), "DerefMut") => Some(true),
-            (Ty::Struct(_), "Deref" | "DerefMut") if matches!(base_name(t), Some("String" | "Vec")) => Some(true),
+            // (`&T: Deref`, `&mut T: DerefMut`; std's Deref of its strings, collections, smart pointers and guards,
+            // which the prelude gives inherent methods instead of an impl (`String: Deref<Target = str>`, `Vec<T>:
+            // DerefMut`, `Rc<T>: Deref` but not DerefMut). A supertrait's goal, `unsafe impl StableDeref for String`)
+            (Ty::Ref(..), "Deref") | (Ty::Ref(true, _), "DerefMut") => Some(true),
+            (Ty::Struct(sid), "Deref" | "DerefMut") if self.struct_item.get(self.base_of(sid) as usize).is_some_and(|&i| i >= self.prelude_from) => {
+                match base_name(t)? {
+                    "String" | "Vec" | "RefMut" | "ManuallyDrop" | "MutexGuard" | "RwLockWriteGuard" | "PathBuf" => Some(true),
+                    "Rc" | "Arc" | "Ref" | "CString" | "RwLockReadGuard" | "Cow" | "__CowStr" if tr == "Deref" => Some(true),
+                    _ => None,
+                }
+            }
             // (a derived Copy of a generic type holds when its arguments are Copy, as `#[derive(Copy)]` bounds them:
             // `Option<String>` is not Copy; PhantomData<T> always is)
             (Ty::Struct(sid), "Copy")
@@ -5777,7 +5789,15 @@ impl Program {
                 continue;
             }
             seen.push(tr);
-            if matches!(tr, "Sized" | "?Sized" | "Send" | "Sync" | "Unpin" | "Debug" | "Display" | "Default" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Clone") {
+            if matches!(tr, "Sized" | "?Sized" | "Send" | "Sync" | "Unpin" | "Debug" | "Display" | "Default" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Clone" | "Copy") {
+                // (std's supertraits of these: `Ord: Eq + PartialOrd`, `Eq: PartialEq`, `PartialOrd: PartialEq`,
+                // `Copy: Clone`. `Q: Ord` is `Q: Eq`, as the blanket impl of equivalent's `Comparable` needs)
+                stack.extend(match tr {
+                    "Ord" => &["Eq", "PartialOrd"][..],
+                    "Eq" | "PartialOrd" => &["PartialEq"][..],
+                    "Copy" => &["Clone"][..],
+                    _ => &[][..],
+                });
                 continue;
             }
             if self.trait_marker_supers.get(tr).is_some_and(|ms| ms.iter().any(|m| want.contains(&m.as_str()) || (m == "Copy" && want.contains(&"Clone")))) {

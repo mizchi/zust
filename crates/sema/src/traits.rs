@@ -88,6 +88,9 @@ pub struct Clause {
     pub where_ok: bool,
     /// the associated types the impl defines (`type Assoc = u32;`), over its parameters
     pub assocs: Vec<(String, Ty)>,
+    /// the head as written (the self type, then the trait's arguments, as Rust writes each), when it names a std type
+    /// the prelude makes an alias of another (`OsString`, `Path`, `OsStr`): aliased_head
+    pub alias: Option<Vec<String>>,
     /// the regions of the impl's head, where it names some (Summary::impl_head): a goal that selects the impl
     /// relates its own to them (regionck's trait obligations)
     pub head: Option<Box<crate::types::RHeadSyn>>,
@@ -287,6 +290,8 @@ impl TraitDb {
         if db.user.is_empty() {
             return db;
         }
+        // (the program's own aliases, for the heads written through them: aliased_head)
+        let own: OwnAliases = sums[..user.min(sums.len())].iter().flat_map(|s| s.aliases.iter().map(|(n, g, t)| (n.as_str(), (g.as_slice(), t)))).collect();
         for (ii, s) in sums.iter().enumerate().take(user) {
             let Some(tr) = &s.impl_trait else { continue };
             // (`impl a::Tr<u8> for S`: the trait's own name)
@@ -347,11 +352,12 @@ impl TraitDb {
                 args = None;
                 exact = false;
             }
+            let alias = aliased_head(p, s, &gn, user, &own);
             let head = s.impl_head.clone();
             if head.is_some() {
                 db.lt_traits.insert(tr.clone());
             }
-            db.clauses.entry(tr).or_default().push(Clause { n: gn.len(), self_ty, args, body, item: ii, exact, where_ok: s.where_types.is_empty(), assocs, head });
+            db.clauses.entry(tr).or_default().push(Clause { n: gn.len(), self_ty, args, body, item: ii, exact, where_ok: s.where_types.is_empty(), assocs, alias, head });
         }
         // (and a trait an impl of which has a where clause of such a trait (`impl<T> DeserializeOwned for T where T:
         // for<'de> Deserialize<'de>`), or one with a lifetime (`T: Tr<'a>`), to a fixed point)
@@ -695,6 +701,9 @@ impl TraitDb {
                 }
                 for i in earlier {
                     let a = &cs[i];
+                    if two_written(p, a, b) {
+                        continue;
+                    }
                     if let Some(g) = self.both_apply(p, a, b).filter(|_| read_all(a.item) && read_all(b.item)) {
                         let (x, y) = if a.item > b.item { (a.item, b.item) } else { (b.item, a.item) };
                         return Some((x, y, tr.clone(), g));
@@ -795,6 +804,179 @@ fn two_reps(p: &Program, t: Ty, depth: u32) -> bool {
         }
         _ => false,
     }
+}
+
+/// The program's own type aliases (`type MyOs = OsString;`), by name: their parameters and body (aliased_head)
+type OwnAliases<'a> = FxMap<&'a str, (&'a [String], &'a crate::types::TySyn)>;
+
+/// The head of impl s (its self type, then its trait arguments) as written, each as Rust writes the type (each path
+/// by its last segment, the program's own aliases replaced by what they name), when it names one of the std types the
+/// prelude makes an alias of another (`type OsString = String`, `type Path = str`, `type OsStr = str`): not a parameter
+/// of the impl (gn) of that name, nor a type or an alias of the program's (its first `user` items are the program's;
+/// `type Path = str;` of its own is str, and conflicts with an impl for str as in rustc)
+fn aliased_head(p: &Program, s: &Summary, gn: &[&str], user: usize, own: &OwnAliases) -> Option<Vec<String>> {
+    use crate::types::TySyn as S;
+    // (the cheap look first: a name of the three, or of an alias of the program's)
+    fn may(t: &S, own: &OwnAliases, depth: u32) -> bool {
+        let named = |n: &str| matches!(n.rsplit("::").next().unwrap_or(n), "OsString" | "OsStr" | "Path") || own.contains_key(n);
+        depth <= 32
+            && match t {
+                S::Named(n) => named(n),
+                S::App(n, xs) => named(n) || xs.iter().any(|x| may(x, own, depth + 1)),
+                S::Ref(_, x) | S::Ptr(_, x) | S::Slice(x) | S::Array(x, _) | S::Assoc(x, _) => may(x, own, depth + 1),
+                S::Tuple(xs) | S::FnPtr(xs) => xs.iter().any(|x| may(x, own, depth + 1)),
+                _ => false,
+            }
+    }
+    // (t with each alias of the program's as what it names, its parameters as the arguments: not a parameter of the
+    // impl's of that name, nor the alias's own name inside its body (`type Path = std::path::Path;`: std's Path))
+    fn expand<'a>(t: &S, gn: &[&str], own: &OwnAliases<'a>, inside: &mut Vec<&'a str>, depth: u32) -> S {
+        if depth > 32 {
+            return t.clone();
+        }
+        let each = |xs: &[S], inside: &mut Vec<&'a str>| xs.iter().map(|x| expand(x, gn, own, inside, depth + 1)).collect::<Vec<S>>();
+        let alias = |n: &str, k: usize, inside: &[&str]| own.get_key_value(n).filter(|&(&a, &(g, _))| g.len() == k && !gn.contains(&a) && !inside.contains(&a)).map(|(&a, &(g, b))| (a, g, b));
+        let (name, g, body, args) = match t {
+            S::Named(n) => match alias(n, 0, inside) {
+                Some((a, g, b)) => (a, g, b, vec![]),
+                None => return t.clone(),
+            },
+            S::App(n, xs) => {
+                let xs = each(xs, inside);
+                match alias(n, xs.len(), inside) {
+                    Some((a, g, b)) => (a, g, b, xs),
+                    None => return S::App(n.clone(), xs),
+                }
+            }
+            S::Ref(m, x) => return S::Ref(*m, Box::new(expand(x, gn, own, inside, depth + 1))),
+            S::Ptr(m, x) => return S::Ptr(*m, Box::new(expand(x, gn, own, inside, depth + 1))),
+            S::Slice(x) => return S::Slice(Box::new(expand(x, gn, own, inside, depth + 1))),
+            S::Array(x, l) => return S::Array(Box::new(expand(x, gn, own, inside, depth + 1)), l.clone()),
+            S::Assoc(x, n) => return S::Assoc(Box::new(expand(x, gn, own, inside, depth + 1)), n.clone()),
+            S::Tuple(xs) => return S::Tuple(each(xs, inside)),
+            S::FnPtr(xs) => return S::FnPtr(each(xs, inside)),
+            _ => return t.clone(),
+        };
+        fn subst(t: &S, g: &[String], args: &[S], depth: u32) -> S {
+            if depth > 32 {
+                return t.clone();
+            }
+            let each = |xs: &[S]| xs.iter().map(|x| subst(x, g, args, depth + 1)).collect::<Vec<S>>();
+            match t {
+                S::Named(n) => g.iter().position(|x| x == n).map_or_else(|| t.clone(), |i| args[i].clone()),
+                S::App(n, xs) => S::App(n.clone(), each(xs)),
+                S::Ref(m, x) => S::Ref(*m, Box::new(subst(x, g, args, depth + 1))),
+                S::Ptr(m, x) => S::Ptr(*m, Box::new(subst(x, g, args, depth + 1))),
+                S::Slice(x) => S::Slice(Box::new(subst(x, g, args, depth + 1))),
+                S::Array(x, l) => S::Array(Box::new(subst(x, g, args, depth + 1)), l.clone()),
+                S::Assoc(x, n) => S::Assoc(Box::new(subst(x, g, args, depth + 1)), n.clone()),
+                S::Tuple(xs) => S::Tuple(each(xs)),
+                S::FnPtr(xs) => S::FnPtr(each(xs)),
+                _ => t.clone(),
+            }
+        }
+        let body = if g.is_empty() { body.clone() } else { subst(body, g, &args, 0) };
+        inside.push(name);
+        let r = expand(&body, gn, own, inside, depth + 1);
+        inside.pop();
+        r
+    }
+    fn names(p: &Program, t: &S, gn: &[&str], user: usize, depth: u32) -> bool {
+        if depth > 32 {
+            return false;
+        }
+        let named = |n: &str| {
+            let last = n.rsplit("::").next().unwrap_or(n);
+            matches!(last, "OsString" | "OsStr" | "Path")
+                && !gn.contains(&n)
+                && match p.resolve_g(&S::Named(n.to_string()), &[]) {
+                    Ok(Ty::Str) => last != "OsString",
+                    Ok(Ty::Struct(s)) => last == "OsString" && p.struct_index.get("String") == Some(&s) && p.struct_item.get(s as usize).is_some_and(|&i| i as usize >= user),
+                    _ => false,
+                }
+        };
+        match t {
+            S::Named(n) => named(n),
+            S::App(n, xs) => named(n) || xs.iter().any(|x| names(p, x, gn, user, depth + 1)),
+            S::Ref(_, x) | S::Ptr(_, x) | S::Slice(x) | S::Array(x, _) | S::Assoc(x, _) => names(p, x, gn, user, depth + 1),
+            S::Tuple(xs) | S::FnPtr(xs) => xs.iter().any(|x| names(p, x, gn, user, depth + 1)),
+            _ => false,
+        }
+    }
+    let heads: Vec<&S> = s.impl_self_ty.iter().chain(&s.impl_trait_args).collect();
+    if !heads.iter().any(|t| may(t, own, 0)) {
+        return None;
+    }
+    let heads: Vec<S> = heads.into_iter().map(|t| if own.is_empty() { t.clone() } else { expand(t, gn, own, &mut vec![], 0) }).collect();
+    if !heads.iter().any(|t| names(p, t, gn, user, 0)) {
+        return None;
+    }
+    Some(heads.iter().map(|t| ty_text(t, 0)).collect())
+}
+
+/// A written type as Rust writes it, each path by its last segment (`std::ffi::OsString` and `OsString` are one type):
+/// `[OsString; 2]`, `&mut (u8, OsString)`, `*const Path`, `fn(u8) -> OsString`, `<T as Tr>::A`
+fn ty_text(t: &crate::types::TySyn, depth: u32) -> String {
+    use crate::ast_types::{split_trait_assoc, GAT_PREFIX, NO_STD_ASSOC, TARGS_PREFIX};
+    use crate::types::{ArrLen, TySyn as S};
+    if depth > 32 {
+        return "_".into();
+    }
+    let last = |n: &str| n.rsplit("::").next().unwrap_or(n).replace("__u_", "");
+    let list = |xs: &[S]| xs.iter().map(|x| ty_text(x, depth + 1)).collect::<Vec<_>>().join(", ");
+    match t {
+        S::Prim(Ty::Unit) => "()".into(),
+        S::Prim(Ty::Never) => "!".into(),
+        S::Prim(p) => format!("{p:?}").to_lowercase(),
+        S::Str => "str".into(),
+        S::Infer => "_".into(),
+        S::Named(n) => last(n),
+        S::App(n, xs) => format!("{}<{}>", last(n), list(xs)),
+        S::Ref(m, x) => format!("&{}{}", if *m { "mut " } else { "" }, ty_text(x, depth + 1)),
+        S::Ptr(m, x) => format!("*{} {}", if *m { "mut" } else { "const" }, ty_text(x, depth + 1)),
+        S::Slice(x) => format!("[{}]", ty_text(x, depth + 1)),
+        S::Array(x, ArrLen::Lit(k)) => format!("[{}; {k}]", ty_text(x, depth + 1)),
+        S::Array(x, ArrLen::Const(c)) => format!("[{}; {}]", ty_text(x, depth + 1), last(c)),
+        S::Tuple(xs) if xs.len() == 1 => format!("({},)", ty_text(&xs[0], depth + 1)),
+        S::Tuple(xs) => format!("({})", list(xs)),
+        S::Dyn(d) => format!("dyn {d}"),
+        // (the last is the return value; `()` is not written)
+        S::FnPtr(xs) => match xs.split_last() {
+            Some((r, ps)) if matches!(r, S::Prim(Ty::Unit)) || matches!(r, S::Tuple(v) if v.is_empty()) => format!("fn({})", list(ps)),
+            Some((r, ps)) => format!("fn({}) -> {}", list(ps), ty_text(r, depth + 1)),
+            None => "fn()".into(),
+        },
+        // (`P::Pointer<String>`, `<S as Trait<usize>>::Assoc`, `<&J as BitAnd>::Output`, `T::Item`)
+        S::Assoc(b, n) => match (&**b, n.strip_prefix(GAT_PREFIX), n.strip_prefix(TARGS_PREFIX)) {
+            (S::Tuple(parts), Some(g), _) if !parts.is_empty() => format!("{}::{g}<{}>", ty_text(&parts[0], depth + 1), list(&parts[1..])),
+            (S::Tuple(parts), _, Some(rest)) if !parts.is_empty() => {
+                let (tr, name) = rest.split_once('#').unwrap_or(("", rest));
+                format!("<{} as {}<{}>>::{}", ty_text(&parts[0], depth + 1), last(tr), list(&parts[1..]), name.strip_prefix(NO_STD_ASSOC).unwrap_or(name))
+            }
+            _ => {
+                let (name, tr) = split_trait_assoc(n);
+                let name = name.strip_prefix(NO_STD_ASSOC).unwrap_or(name);
+                match (tr, &**b) {
+                    (Some(tr), b) => format!("<{} as {}>::{name}", ty_text(b, depth + 1), last(tr)),
+                    (None, S::Named(_)) => format!("{}::{name}", ty_text(b, depth + 1)),
+                    (None, b) => format!("<{}>::{name}", ty_text(b, depth + 1)),
+                }
+            }
+        },
+    }
+}
+
+/// Two impls whose heads are one type here only because the prelude makes a std type an alias of another: neither head
+/// names a parameter, and they are written as two types, at least one through such an alias (stable_deref_trait's `impl
+/// StableDeref for OsString` and `.. for String`, `.. for Cow<'a, Path>` and `.. for Cow<'a, OsStr>`). No conflict
+/// (E0119) between them. A generic impl is compared as any other: `impl<T: Marker> Tr for T` with `impl Marker for
+/// OsString` conflicts with `impl Tr for OsString`
+fn two_written(p: &Program, a: &Clause, b: &Clause) -> bool {
+    if a.alias.is_none() && b.alias.is_none() {
+        return false;
+    }
+    let ground_head = |c: &Clause| c.self_ty.is_some_and(|t| !p.has_param(t)) && c.args.as_ref().is_some_and(|v| v.iter().all(|&t| !p.has_param(t)));
+    a.alias != b.alias && ground_head(a) && ground_head(b)
 }
 
 /// t holds an associated type

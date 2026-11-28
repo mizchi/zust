@@ -256,10 +256,33 @@ fn use_end(sb: &[u8], b: usize, stop: usize) -> usize {
 }
 
 /// The fmt traits the items' `use` declarations import (fn bodies' too), by each declaration's use tree, its comments
-/// left out (use_tree_fmt): 1 Display, 2 Debug, then 4 LowerHex, 8 UpperHex, 16 Binary, 32 Octal, 64 LowerExp, 128
+/// left out (use_tree_bits): 1 Display, 2 Debug, then 4 LowerHex, 8 UpperHex, 16 Binary, 32 Octal, 64 LowerExp, 128
 /// UpperExp; a glob of a `fmt` path all. Only a name under a `fmt` path: a trait
 /// of the program's named Debug is not std's (Program::fmt_imports)
 fn fmt_imports(src: &str, items: &[SrcItem]) -> u8 {
+    use_imports(src, items, "fmt", |name| match name {
+        "Display" => 1,
+        "Debug" => 2,
+        "LowerHex" => 4,
+        "UpperHex" => 8,
+        "Binary" => 16,
+        "Octal" => 32,
+        "LowerExp" => 64,
+        "UpperExp" => 128,
+        _ => 0,
+    })
+}
+
+/// Whether the items' `use` declarations (fn bodies' too) bring std's Borrow into scope: `use std::borrow::Borrow;`,
+/// `.. as _`, `core::borrow::{self, Borrow}`, a glob of a `borrow` path. Not a trait of the program's named Borrow
+/// (Program::borrow_imported)
+fn borrow_imported(src: &str, items: &[SrcItem]) -> bool {
+    use_imports(src, items, "borrow", |name| u8::from(name == "Borrow")) != 0
+}
+
+/// The bits of the names under a path ending in `module` that the items' `use` declarations import (fn bodies' too), by
+/// each declaration's use tree, its comments left out (use_tree_bits); a glob of such a path all
+fn use_imports(src: &str, items: &[SrcItem], module: &str, bit: fn(&str) -> u8) -> u8 {
     let sb = src.as_bytes();
     let mut mask = 0u8;
     for it in items {
@@ -270,12 +293,12 @@ fn fmt_imports(src: &str, items: &[SrcItem]) -> u8 {
             // (the declaration, up to its `;` (not one in a comment), without its comments)
             let end = use_end(sb, b as usize, it.end.min(sb.len()));
             let text = blank_comments(src.get(b as usize..end).unwrap_or(""));
-            if !text.contains("fmt") {
+            if !text.contains(module) {
                 continue;
             }
             let toks = use_tokens(&text);
             let mut k = 0;
-            use_tree_fmt(&toks, &mut k, &mut vec![], &mut mask, 0);
+            use_tree_bits(&toks, &mut k, &mut vec![], module, bit, &mut mask, 0);
         }
     }
     mask
@@ -309,11 +332,11 @@ fn use_tokens(t: &str) -> Vec<&str> {
     out
 }
 
-/// One use tree at toks[*k] under the path `prefix`: a leaf `fmt::Display` / `fmt::Debug` (also aliased, `Debug as D`
-/// or `as _`: the trait is in scope under any name; an alias that is spelled `Debug`, `io::Error as Debug`, is no trait
-/// of fmt) sets its bit, and a glob whose path ends in `fmt` (`fmt::*`, `fmt::{*, ..}`) both. A glob elsewhere
-/// (`ops::*`) none
-fn use_tree_fmt(toks: &[&str], k: &mut usize, prefix: &mut Vec<String>, mask: &mut u8, depth: u32) {
+/// One use tree at toks[*k] under the path `prefix`: a leaf under a path ending in `module`, `fmt::Display` /
+/// `fmt::Debug` (also aliased, `Debug as D` or `as _`: the trait is in scope under any name; an alias that is spelled
+/// `Debug`, `io::Error as Debug`, is no trait of fmt) sets its bit, and a glob whose path ends in `module` (`fmt::*`,
+/// `fmt::{*, ..}`) all. A glob elsewhere (`ops::*`) none
+fn use_tree_bits(toks: &[&str], k: &mut usize, prefix: &mut Vec<String>, module: &str, bit: fn(&str) -> u8, mask: &mut u8, depth: u32) {
     let base = prefix.len();
     if toks.get(*k) == Some(&"::") {
         *k += 1;
@@ -323,7 +346,7 @@ fn use_tree_fmt(toks: &[&str], k: &mut usize, prefix: &mut Vec<String>, mask: &m
             "{" if depth < 16 => {
                 *k += 1;
                 while toks.get(*k).is_some_and(|&t| t != "}") {
-                    use_tree_fmt(toks, k, prefix, mask, depth + 1);
+                    use_tree_bits(toks, k, prefix, module, bit, mask, depth + 1);
                     if toks.get(*k) == Some(&",") {
                         *k += 1;
                     } else {
@@ -337,7 +360,7 @@ fn use_tree_fmt(toks: &[&str], k: &mut usize, prefix: &mut Vec<String>, mask: &m
             }
             "*" => {
                 *k += 1;
-                if prefix.last().is_some_and(|p| p == "fmt") {
+                if prefix.last().is_some_and(|p| p == module) {
                     *mask = !0;
                 }
                 break;
@@ -354,18 +377,8 @@ fn use_tree_fmt(toks: &[&str], k: &mut usize, prefix: &mut Vec<String>, mask: &m
                 if toks.get(*k) == Some(&"as") {
                     *k += 2;
                 }
-                if prefix.last().is_some_and(|p| p == "fmt") {
-                    match name {
-                        "Display" => *mask |= 1,
-                        "Debug" => *mask |= 2,
-                        "LowerHex" => *mask |= 4,
-                        "UpperHex" => *mask |= 8,
-                        "Binary" => *mask |= 16,
-                        "Octal" => *mask |= 32,
-                        "LowerExp" => *mask |= 64,
-                        "UpperExp" => *mask |= 128,
-                        _ => {}
-                    }
+                if prefix.last().is_some_and(|p| p == module) {
+                    *mask |= bit(name);
                 }
                 break;
             }
@@ -2445,6 +2458,11 @@ impl Session {
         if src[..user_end].contains(".fmt") {
             prog.fmt_imports = fmt_imports(&src, &items[..user]);
         }
+        // (and whether they bring std's Borrow into scope, for `x.borrow()` by std's impls: only when the program
+        // calls a `borrow`)
+        if src[..user_end].contains("borrow") {
+            prog.borrow_imported = borrow_imported(&src, &items[..user]);
+        }
         // (a field or an impl's self type that names a struct of the program's whose parameter's bound does not hold:
         // `struct Hoge<K> { s: S<K> }` with `struct S<T: Tr>`)
         // (only when one of them has a bounded parameter)
@@ -2761,7 +2779,9 @@ impl Session {
         }
         if let Some((later, _, tr, g)) = prog.tdb.conflict(&prog, &read_all) {
             let line = items.get(later).map_or(1, |it| it.line);
-            let ty = g.map(|g| format!(" for type `{}`", prog.tn(g).replace("__u_", ""))).unwrap_or_default();
+            // (a self type written as a std type the prelude makes an alias of another: as written, `OsString`)
+            let written = prog.tdb.clauses.get(&tr).and_then(|cs| cs.iter().find(|c| c.item == later && c.self_ty == g)).and_then(|c| c.alias.as_ref()?.first());
+            let ty = g.map(|g| format!(" for type `{}`", written.map_or_else(|| prog.tn(g).replace("__u_", ""), String::clone))).unwrap_or_default();
             return Err(format!("{line}:1: conflicting implementations of trait `{tr}`{ty} (E0119)"));
         }
         // (E0107: an impl giving one of the program's traits the wrong number of generic arguments; only with a trait
@@ -9972,6 +9992,9 @@ impl Session {
         // (a closed fn's key holds the program's fmt imports only when its body calls a `fmt` method (#256): the mask
         // is the whole program's, which a crate's keys would otherwise take from its consumer)
         let fmt_mask = || a.src.get(a.items[ii].start..a.items[ii].end).is_some_and(|t| t.contains(".fmt")).then_some(a.prog.fmt_imports);
+        // (and whether std's Borrow is imported, only when its body calls a `borrow` (borrow_rewrite, which the prelude's
+        // bodies do not ask))
+        let borrow_mask = || a.src.get(a.items[ii].start..a.items[ii].end).is_some_and(|t| t.contains("borrow")).then_some(a.prog.borrow_imported);
         // 閉じた依存するクレートの関数 (と、型引数に依存するクレートの型を持つ prelude の関数): 本体・自分のシグネチャと、
         // 見えるクレートの中の参照先だけ (prelude はコンパイラで決まる、ほかのクレートのものは呼べない)
         if let Some(u) = closed.filter(|u| ii < pf || u.iter().any(|&x| x)) {
@@ -10037,6 +10060,9 @@ impl Session {
             if let Some(m) = fmt_mask() {
                 h.add(&m);
             }
+            if let Some(m) = borrow_mask() {
+                h.add(&m);
+            }
             match a.prog.panic_handler {
                 Some(p) => h.add(&a.prog.names[p as usize]),
                 None => h.add(&0u8),
@@ -10080,6 +10106,8 @@ impl Session {
         // (and the fmt traits the program imports, which `x.fmt(f)` takes its trait from (#256): a `use std::fmt::Debug;`
         // changed elsewhere changes the call, the body the same; also an inlined body's)
         h.add(&a.prog.fmt_imports);
+        // (and whether std's Borrow is imported, which `x.borrow()` takes std's impls by)
+        h.add(&a.prog.borrow_imported);
         if a.prog.closures.contains_key(&(id as u32)) {
             h.add(&a.prog.names[id]);
         }
