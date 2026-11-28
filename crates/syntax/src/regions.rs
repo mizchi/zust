@@ -1,7 +1,7 @@
 //! The regions of signatures and of struct / enum fields, as region slots (see `types::RSigSyn`). The types of the
 //! summaries (`TySyn`) and of the program (`Ty`) carry no regions: the region checker reads these beside them.
 
-use crate::parse::{Bound, FnSig as PSig, GArg, GParam, Generics, Ty as PTy};
+use crate::parse::{Bound, FnSig as PSig, GArg, GParam, Generics, Path, Ty as PTy};
 use crate::types::{RAdtSyn, RImplSyn, RSigSyn, R_BOUND, R_DYN_ARGS, R_DYN_DEFAULT, R_ELIDED, R_ELIDED_ADT, R_FN, R_STATIC, R_UNKNOWN};
 
 const PRIMS: &[&str] = &[
@@ -943,6 +943,48 @@ fn static_dyn(t: &mut PTy, behind: bool) {
         PTy::Ref(_, _, i) => static_dyn(i, true),
         _ => {}
     }
+}
+
+/// The regions of a trait impl's head (RHeadSyn): None where it names no lifetime, binds none in a fn pointer type and
+/// declares no outlives, so that its regions are all its own
+pub fn impl_head(g: &Generics, self_ty: &PTy, tr: &Path) -> Option<Box<crate::types::RHeadSyn>> {
+    // (`impl Tr for S<'_>`: each `'_` of the self type is a lifetime parameter of the impl of its own)
+    let mut anon = vec![];
+    let named = has_anon(self_ty).then(|| {
+        let mut t = self_ty.clone();
+        name_anon(&mut t, &mut anon);
+        t
+    });
+    let self_ty = named.as_ref().unwrap_or(self_ty);
+    let mut s = Slots::new(g, None, &[]);
+    s.lts.extend(anon);
+    let mut self_slots = vec![];
+    s.slots(self_ty, false, &mut self_slots);
+    let last = tr.segs.last()?;
+    let mut trait_lts = vec![];
+    let mut trait_args = vec![];
+    for a in &last.args {
+        match a {
+            GArg::Lifetime(l) => trait_lts.push(s.code(Some(l))),
+            GArg::Ty(t) => {
+                let mut c = vec![];
+                s.slots(t, false, &mut c);
+                trait_args.push(c);
+            }
+            _ => {}
+        }
+    }
+    // (`Fn(&u8)`-style arguments: not a trait of the program's, which this is for)
+    if last.fn_args.is_some() {
+        return None;
+    }
+    let (mut outlives, mut ty_outlives) = (vec![], vec![]);
+    s.bounds(g, &mut outlives, &mut ty_outlives);
+    let bound = self_slots.iter().chain(trait_args.iter().flatten()).any(|&c| c == R_BOUND);
+    if !s.any && !bound && outlives.is_empty() {
+        return None;
+    }
+    Some(Box::new(crate::types::RHeadSyn { lts: s.lts, self_slots, trait_lts, trait_args, outlives }))
 }
 
 /// The regions of an impl / trait header

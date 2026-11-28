@@ -622,6 +622,47 @@ fn bound_targ_ptys(prog: &Program, sid: u32, tr: &str) -> Option<(Vec<PTy>, Vec<
     Some((args, lts))
 }
 
+/// A bound's trait, by its last name (`a::Foo<&'x u8>`: `Foo`)
+pub(crate) fn bound_trait(b: &str) -> &str {
+    let n = b.split('<').next().unwrap_or(b).split('(').next().unwrap_or(b).trim();
+    n.rsplit("::").next().unwrap_or(n)
+}
+
+/// The lifetimes a bound names, in order, but `'static`, `'_` and those a type within it binds (`for<'b> fn(&'b u32)`)
+fn bound_names(b: &str) -> Vec<String> {
+    let nested = nested_binder_lts(b);
+    let mut lts: Vec<String> = vec![];
+    let cs: Vec<char> = b.chars().collect();
+    let mut i = 0;
+    while i < cs.len() {
+        if cs[i] == '\'' {
+            let mut j = i + 1;
+            while j < cs.len() && (cs[j].is_alphanumeric() || cs[j] == '_') {
+                j += 1;
+            }
+            let l: String = cs[i..j].iter().collect();
+            if l.len() > 1 && l != "'static" && l != "'_" && !lts.contains(&l) && !nested.contains(&l.as_str()) {
+                lts.push(l);
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    lts
+}
+
+/// The type arguments a bound's trait path writes, parsed (`Foo<&'a isize>`: `&'a isize`)
+fn bound_type_args(b: &str) -> Option<Vec<PTy>> {
+    let f = crate::parse::parse_file(&format!("type __B = dyn {b};")).ok()?;
+    let Some(crate::parse::ItemKind::Type(_, _, _, Some(PTy::Dyn(dbs)))) = f.items.first().map(|i| &i.kind) else { return None };
+    let Some(crate::parse::Bound::Trait(_, p)) = dbs.first() else { return None };
+    Some(p.segs.last()?.args.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t.clone()) } else { None }).collect())
+}
+
+/// The mark of a universal region that is a placeholder of a trait obligation's binder, before the trait's name
+pub const HR_MARK: char = '\u{1}';
+
 /// A struct or an enum in t (under references, boxes, slices, arrays, type arguments) whose definition bounds a type
 /// parameter by 'static (`struct Static<T: 'static>(T)`)
 /// t has a reference to a type that holds a placeholder (`&'x T#`, `Vec<&'x <T# as Tr>::Out#>`); `under` is whether
@@ -2093,7 +2134,12 @@ impl RgSt {
                             let other = if j == 0 { "'static".to_string() } else { self.univ[j - 1].1.clone() };
                             // (a region the closure's signature binds flowing into one from outside)
                             let escapes = self.in_closure && !self.externals.contains(&u) && !self.outer_univ.contains(&u) && self.cap_regions.contains(&y);
-                            let msg = if escapes {
+                            // (a placeholder of a trait obligation's binder that must outlive, or be outlived by,
+                            // another region: the impl selected holds for some of the binder's lifetimes only)
+                            let hr = uname.split_once(HR_MARK).or_else(|| other.split_once(HR_MARK)).map(|x| x.1.to_string());
+                            let msg = if let Some(tr) = hr {
+                                format!("implementation of `{tr}` is not general enough")
+                            } else if escapes {
                                 "borrowed data escapes outside of closure (a region of its signature flows into one from outside)".to_string()
                             } else if let Some(tp) = uname.strip_suffix('#') {
                                 // (a type parameter's placeholder: what its values may borrow must outlive `other`;
@@ -3664,6 +3710,148 @@ impl Cx<'_> {
         }
     }
 
+    /// The trait obligations of a call's bounds on the callee's type parameters that select an impl of the program's
+    /// whose head has regions to relate (TraitDb::lt_traits): see rg_obligation. `lts`: the callee's lifetimes at the
+    /// call; `targs`: the trees of its type arguments
+    pub(crate) fn rg_obligations(&mut self, id: u32, sol: &[Option<Ty>], lts: &[u32], targs: &[Option<RT>], sp: Sp) {
+        let prog = self.prog;
+        if prog.tdb.lt_traits.is_empty() {
+            return;
+        }
+        let sig0 = &prog.sigs[id as usize];
+        if !sig0.generics.iter().any(|(_, bs)| bs.iter().any(|b| prog.tdb.lt_traits.contains(bound_trait(b)))) {
+            return;
+        }
+        let names: Vec<String> = sig0.regions.as_deref().map(|r| r.lts.clone()).unwrap_or_default();
+        let scope: Vec<(String, u32)> = names.into_iter().zip(lts.iter().copied()).collect();
+        let gn: Vec<&str> = sig0.generics.iter().map(|g| g.0.as_str()).collect();
+        let all: Option<Vec<Ty>> = sol.iter().copied().collect();
+        for (gi, (_, bounds)) in sig0.generics.iter().enumerate() {
+            let (Some(&Some(t)), Some(Some(tree))) = (sol.get(gi), targs.get(gi)) else { continue };
+            if prog.has_param(t) || prog.holds_placeholder(t, 0) {
+                continue;
+            }
+            for b in bounds {
+                if !prog.tdb.lt_traits.contains(bound_trait(b)) {
+                    continue;
+                }
+                let Some(mut pr) = crate::traits::preds_of(prog, t, &[b.as_str()], &gn).pop() else { continue };
+                // (arguments with a tuple in them, which pred_of leaves for `Fn(..)` sugar: `Foo<(&'a isize, &'b isize)>`)
+                if pr.args.is_none() && b.find('<').is_some_and(|i| b.find('(').is_some_and(|j| j > i)) {
+                    pr.args = crate::ast_summary::bound_args(b).and_then(|(_, a)| a.iter().map(|x| prog.resolve_g(x, &gn).ok()).collect());
+                }
+                // (the bound's arguments with the call's types for the callee's parameters)
+                let conc = match (&pr.args, &all) {
+                    (Some(a), _) if a.iter().all(|&x| !prog.has_param(x)) => Some(a.clone()),
+                    (Some(a), Some(all)) => Some(a.iter().map(|&x| prog.subst(x, all)).collect()),
+                    (Some(_), None) => continue,
+                    (None, _) => None,
+                };
+                if conc.as_ref().is_some_and(|a| a.iter().any(|&x| prog.holds_placeholder(x, 0))) {
+                    continue;
+                }
+                self.rg_obligation(t, tree, b, pr.args.as_deref(), conc.as_deref(), &gn, targs, &scope, sp, 0);
+            }
+        }
+    }
+
+    /// One trait obligation `t: b` (tree: t's regions) that selects impl c of the program's: c's head is t (and its
+    /// trait's arguments the bound's), so their regions are equal; c's `'b: 'a` must hold of its lifetimes there, and
+    /// its where clauses of such traits are obligations in turn. A lifetime b names that is not in `scope` is the
+    /// bound's own (`for<'a> Foo<&'a isize>`): a placeholder of the call, a universal region that only itself and
+    /// 'static outlive. A region of the impl's that must be it and something else ('static, a lifetime of the caller,
+    /// another placeholder) is "implementation of `Foo` is not general enough"
+    #[allow(clippy::too_many_arguments)]
+    fn rg_obligation(&mut self, t: Ty, tree: &[u32], b: &str, gen_args: Option<&[Ty]>, args: Option<&[Ty]>, tparams: &[&str], targs: &[Option<RT>], scope: &[(String, u32)], sp: Sp, depth: u32) {
+        let prog = self.prog;
+        if depth > 4 {
+            return;
+        }
+        let tr = bound_trait(b);
+        let sel = prog.tdb.select(prog, t, tr, args);
+        if debug() {
+            eprintln!("regionck: obligation {}: {b} (args {:?}) selects {:?}", prog.tn(t), args.map(|a| a.iter().map(|&x| prog.tn(x)).collect::<Vec<_>>()), sel.as_ref().map(|x| (x.0.item, x.0.head.is_some())));
+        }
+        let Some((c, isol)) = sel else { return };
+        let (Some(st), Some(n)) = (c.self_ty, count(prog, t, 0)) else { return };
+        if n != tree.len() {
+            return;
+        }
+        let rg = &mut self.rg;
+        let mut scope = scope.to_vec();
+        for l in bound_names(b) {
+            if !scope.iter().any(|x| x.0 == l) {
+                let v = rg.var();
+                rg.univ.push((v, format!("{l}{HR_MARK}{tr}")));
+                scope.push((l, v));
+            }
+        }
+        let h = c.head.as_deref();
+        let hl: Vec<u32> = h.map(|h| h.lts.iter().map(|_| rg.var()).collect()).unwrap_or_default();
+        let ptrees: Vec<Option<RT>> = isol.iter().map(|x| x.and_then(|t| rg.fresh(prog, t))).collect();
+        let var_of = |c: u8| if c == R_STATIC { Some(STATIC) } else { hl.get(c as usize).copied() };
+        // (the self type: the goal's regions are the head's)
+        if let Some(ht) = rg.instantiate(prog, st, h.map(|h| h.self_slots.as_slice()), &hl, &ptrees, &mut |me| me.var()) {
+            if ht.len() == tree.len() {
+                for (&a, &x) in tree.iter().zip(&ht) {
+                    rg.constrain(a, x, Var::Inv, sp);
+                }
+            }
+        }
+        if let Some(h) = h {
+            // (the trait's type arguments: as the bound writes them, with its lifetimes, against the head's)
+            if let (Some(ga), Some(ha), Some(pts)) = (gen_args, c.args.as_deref(), bound_type_args(b)) {
+                if ga.len() == ha.len() && pts.len() == ga.len() && h.trait_args.len() == ha.len() {
+                    let names: Vec<String> = scope.iter().map(|x| x.0.clone()).collect();
+                    let vars: Vec<u32> = scope.iter().map(|x| x.1).collect();
+                    for ((pt, &g), (&hx, hc)) in pts.iter().zip(ga).zip(ha.iter().zip(&h.trait_args)) {
+                        let mut sl = crate::regions::Slots { lts: names.clone(), tparams: tparams.to_vec(), self_slots: &[], self_paths: &[], any: false, in_fn: 0, derived: None };
+                        let mut codes = vec![];
+                        sl.slots(pt, false, &mut codes);
+                        let gt = rg.instantiate(prog, g, Some(&codes), &vars, targs, &mut |me| me.var());
+                        let xt = rg.instantiate(prog, hx, Some(hc), &hl, &ptrees, &mut |me| me.var());
+                        if let (Some(gt), Some(xt)) = (gt, xt) {
+                            if gt.len() == xt.len() {
+                                for (&a, &x) in gt.iter().zip(&xt) {
+                                    rg.constrain(a, x, Var::Inv, sp);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // (its lifetime arguments)
+            let wl = bound_lts(b);
+            if wl.len() == h.trait_lts.len() {
+                for (l, &hc) in wl.iter().zip(&h.trait_lts) {
+                    let g = if l == "'static" { Some(STATIC) } else { scope.iter().find(|x| x.0 == *l).map(|x| x.1) };
+                    if let (Some(g), Some(x)) = (g, var_of(hc)) {
+                        rg.constrain(g, x, Var::Inv, sp);
+                    }
+                }
+            }
+            // (the header's `'b: 'a`)
+            for &(a, bb) in &h.outlives {
+                if let (Some(x), Some(y)) = (var_of(a), var_of(bb)) {
+                    rg.constrain(x, y, Var::Co, sp);
+                }
+            }
+        }
+        // (its where clauses of such traits, on its parameters: obligations of the impl's lifetimes)
+        let hscope: Vec<(String, u32)> = h.map(|h| h.lts.iter().cloned().zip(hl.iter().copied()).collect()).unwrap_or_default();
+        let isol_all: Option<Vec<Ty>> = isol.iter().copied().collect();
+        for w in &c.body {
+            if !prog.tdb.lt_traits.contains(&w.tr) {
+                continue;
+            }
+            let Some(all) = isol_all.as_ref() else { continue };
+            let wt = prog.subst(w.ty, all);
+            let Some(wtree) = self.rg.instantiate(prog, w.ty, None, &[], &ptrees, &mut |me| me.var()) else { continue };
+            let conc: Option<Vec<Ty>> = w.args.as_ref().map(|a| a.iter().map(|&x| prog.subst(x, all)).collect());
+            self.rg_obligation(wt, &wtree, &w.raw, w.args.as_deref(), conc.as_deref(), &[], &ptrees, &hscope, sp, depth + 1);
+        }
+    }
+
     /// The tree of a value of type t written as ann (the annotation of a `let`): the regions it writes, fresh ones for
     /// a hole (`_`) and for what it elides; through tuples element by element
     fn rg_ann_tree(&mut self, ann: &PTy, t: Ty) -> Option<RT> {
@@ -4060,6 +4248,13 @@ impl Cx<'_> {
                 }
             }
         }
+        // (the trait obligations of the callee's bounds: the impls they select, with their regions)
+        if !prog.tdb.lt_traits.is_empty() {
+            let lts2 = lts.clone();
+            let targs2 = targs.clone();
+            self.rg_obligations(id, sol, &lts2, &targs2, sp);
+        }
+        let rg = &mut self.rg;
         // (the regions a type argument brings are not the signature's own: elision does not see them)
         let substituted: Vec<u32> = targs.iter().flatten().flatten().copied().collect();
         let mut ptrees: Vec<Option<RT>> = vec![];

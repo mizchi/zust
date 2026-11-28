@@ -131,6 +131,7 @@ crate::enc_struct!(SigSyn {
 });
 crate::enc_struct!(RSigSyn { lts, slots, outlives, ty_outlives, outer, self_slots, derived, derived_ty });
 crate::enc_struct!(RImplSyn { lts, self_slots, outlives, ty_outlives, free, wf_pairs, wf_vague, trait_lts, self_paths });
+crate::enc_struct!(RHeadSyn { lts, self_slots, trait_lts, trait_args, outlives });
 crate::enc_struct!(Summary {
     fns,
     structs,
@@ -164,6 +165,7 @@ crate::enc_struct!(Summary {
     impl_trait_lts,
     assoc_bounds,
     hdr_regions,
+    impl_head,
     adt_regions,
     assoc_regions,
     ref_impl_fns,

@@ -3799,7 +3799,9 @@ impl Cx<'_> {
         let sig0 = self.prog.sigs[id as usize].clone();
         // (a callee that requires 'static (`fn f<T: 'static>`, `&'static T`): checked from its arguments on
         // (`f(&g())`: the temporary))
-        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && (sig0.regions.as_deref().is_some_and(Self::callee_needs_static) || sig0.params.iter().any(|&p| Self::static_object(p))) {
+        // (or whose bounds are of traits an impl of which has regions to relate: the trait obligations they make)
+        let lt_bound = || !self.prog.tdb.lt_traits.is_empty() && sig0.generics.iter().any(|(_, bs)| bs.iter().any(|b| self.prog.tdb.lt_traits.contains(super::regionck::bound_trait(b))));
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && (sig0.regions.as_deref().is_some_and(Self::callee_needs_static) || sig0.params.iter().any(|&p| Self::static_object(p)) || lt_bound()) {
             self.rg_late_on();
         }
         let skip = recv.is_some() as usize;
