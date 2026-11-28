@@ -26,6 +26,10 @@ fn clone_item(it: &SrcItem) -> SrcItem {
     SrcItem { start: it.start, end: it.end, line: it.line, hash: it.hash, idents: it.idents.clone(), kind: it.kind }
 }
 
+fn same_items(a: &[SrcItem], b: &[SrcItem]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| a.start == b.start && a.end == b.end && a.line == b.line && a.hash == b.hash && a.idents == b.idents && a.kind == b.kind)
+}
+
 fn count_nl(b: &[u8]) -> usize {
     b.iter().filter(|&&c| c == b'\n').count()
 }
@@ -44,10 +48,7 @@ pub fn split_inc(src: &str, memo: &mut Option<(String, Vec<SrcItem>)>) -> R<Vec<
         None => lexer::split(src)?,
     };
     if std::env::var_os("ZUSTC_SPLIT_VERIFY").is_some() {
-        let full = lexer::split(src)?;
-        let same = full.len() == items.len()
-            && full.iter().zip(&items).all(|(a, b)| a.start == b.start && a.end == b.end && a.line == b.line && a.hash == b.hash && a.idents == b.idents && a.kind == b.kind);
-        if !same {
+        if !same_items(&lexer::split(src)?, &items) {
             return Err("internal: incremental split differs from the full split".into());
         }
     }
@@ -174,6 +175,8 @@ pub fn with_prelude_in(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i3
     tm.lap("split", String::new());
     cache.sel.shadow_paths = to_shadowed.is_some();
     let extra = crate::prelude::select_with(src, &items, &mut cache.sel);
+    // (the selection's items, unless the text is renamed below: what splitting it would give)
+    let picked = cache.sel.items.take().filter(|_| defined.is_empty());
     let extra = crate::prelude::rename_shadowed(&defined, extra);
     tm.lap("prelude", String::new());
     if extra.is_empty() {
@@ -182,7 +185,16 @@ pub fn with_prelude_in(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i3
     let base = src.len() + 1;
     let lines = src.bytes().filter(|&c| c == b'\n').count() + 1;
     let n0 = items.len() as u32;
-    for mut it in lexer::split(&extra)? {
+    let extra_items = match picked {
+        Some(v) => {
+            if std::env::var_os("ZUSTC_SPLIT_VERIFY").is_some() && !same_items(&v, &lexer::split(&extra)?) {
+                return Err("internal: the prelude selection's items differ from splitting its text".into());
+            }
+            v
+        }
+        None => lexer::split(&extra)?,
+    };
+    for mut it in extra_items {
         it.start += base;
         it.end += base;
         it.line += lines;
@@ -202,4 +214,33 @@ pub fn with_prelude_in(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i3
     full.push('\n');
     full.push_str(&extra);
     Ok((full, items, user, lines))
+}
+
+#[cfg(test)]
+mod tests {
+    /// The items the selection gives with its text are what splitting the text gives (with_prelude_in appends them
+    /// without splitting it), for the programs of tests/acg
+    #[test]
+    fn selection_items_are_its_split() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/acg");
+        let mut checked = 0;
+        for e in std::fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.extension().is_none_or(|x| x != "rs") {
+                continue;
+            }
+            let src = std::fs::read_to_string(&p).unwrap();
+            let items = match crate::lexer::split(&src) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let mut sc = crate::prelude::SelectCache::default();
+            let extra = crate::prelude::select_with(&src, &items, &mut sc);
+            if let Some(v) = sc.items {
+                assert!(super::same_items(&v, &crate::lexer::split(&extra).unwrap()), "{}", p.display());
+                checked += 1;
+            }
+        }
+        assert!(checked > 20, "only {checked} programs selected prelude items");
+    }
 }

@@ -25,11 +25,11 @@ fn items() -> &'static [(SrcItem, Option<String>, bool)] {
         // (build.rs has already done the splitting)
         PRELUDE_ITEMS
             .iter()
-            .map(|&(start, end, line, k, a, idents)| SrcItem {
+            .map(|&(start, end, line, k, a, idents, hi, lo)| SrcItem {
                 start: start as usize,
                 end: end as usize,
                 line: line as usize,
-                hash: 0,
+                hash: (hi as u128) << 64 | lo as u128,
                 idents: idents.to_vec(),
                 kind: match k {
                     0 => ItemKind::Normal,
@@ -1114,6 +1114,10 @@ pub struct SelectCache {
     /// The source has std paths std_paths_to_shadowed rewrote to `__p_Name`: such identifiers are looked at (asked
     /// of every identifier only then)
     pub shadow_paths: bool,
+    /// The items of the last selection's text, as lexer::split would give them (positions in that text): the
+    /// prelude's, moved to where the text has them (None when the selection is empty). What front::with_prelude_in
+    /// appends, without splitting the text again
+    pub items: Option<Vec<SrcItem>>,
 }
 
 /// Checks each item instead of the whole user source (`contains` and so on), keeping results by item hash.
@@ -1339,6 +1343,7 @@ fn float_lit_in(src: &str) -> bool {
 
 pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCache) -> String {
     let all = items();
+    cache.items = None;
     // Collect only the user's identifiers that match a name the prelude defines (or a related name).
     // Building a set of every identifier costs ms per build on a large program, so look up in a small set
     // Compare directly with the few candidates per first character: no hashing, so large programs stay fast
@@ -2365,6 +2370,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     let mut open_impl = false;
     // (items keep their prelude lines, newline-padded: panic lines never vary, so crates can share machine code)
     let mut cur_line = 1usize;
+    // (the items of `out`, as lexer::split would give them: each prelude item's, moved to where `out` has its text,
+    // its impl's or trait's header by its index here. `at[i]`: the index here of the prelude's item i)
+    let mut picked: Vec<SrcItem> = Vec::new();
+    let mut at: Vec<u32> = vec![u32::MAX; all.len()];
+    let mut whole = true;
     for (i, (it, _, _)) in all.iter().enumerate() {
         let in_impl = matches!(it.kind, ItemKind::ImplMember(_) | ItemKind::TraitMember(_));
         if open_impl && !in_impl {
@@ -2387,6 +2397,24 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             cur_line += 1;
         }
         let text = &PRELUDE[it.start..it.end];
+        let start = out.len();
+        let kind = match it.kind {
+            ItemKind::ImplMember(h) => ItemKind::ImplMember(at[h as usize]),
+            ItemKind::TraitMember(h) => ItemKind::TraitMember(at[h as usize]),
+            k => k,
+        };
+        // (a member whose header is not chosen: the text is split, as it was)
+        whole &= !matches!(kind, ItemKind::ImplMember(u32::MAX) | ItemKind::TraitMember(u32::MAX));
+        let shift = |p: u32| p - it.start as u32 + start as u32;
+        at[i] = picked.len() as u32;
+        picked.push(SrcItem {
+            start,
+            end: start + text.len(),
+            line: cur_line,
+            hash: it.hash,
+            idents: it.idents.iter().map(|&(a, b)| (shift(a), shift(b))).collect(),
+            kind,
+        });
         out.push_str(text);
         out.push('\n');
         cur_line += text.bytes().filter(|&c| c == b'\n').count() + 1;
@@ -2397,7 +2425,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if open_impl {
         out.push_str("}\n");
     }
-
+    if whole && !out.is_empty() {
+        cache.items = Some(picked);
+    }
     out
 }
 
