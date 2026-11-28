@@ -3474,6 +3474,17 @@ impl Program {
                 Some(self.structs[sid as usize].args.first().is_some_and(|&a| self.implements(a, tr)))
             }
             (Ty::Box(_), "Deref" | "DerefMut") => Some(true),
+            // (std's ExactSizeIterator of the prelude's iterators that know their length, which the prelude does not
+            // write out: a slice's Iter / IterMut and Vec's IntoIter, whose own `len` is the trait's (#313). And of `&mut
+            // I` when I is one)
+            (Ty::Struct(sid), "ExactSizeIterator")
+                if self.struct_item.get(self.base_of(sid) as usize).is_some_and(|&i| i >= self.prelude_from)
+                    && self.method(sid, "next").is_some()
+                    && self.method(sid, "len").is_some() =>
+            {
+                Some(true)
+            }
+            (Ty::Ref(true, i), "ExactSizeIterator") => Some(self.implements(*i, tr)),
             // (std's Deref of a reference, a String and a Vec, which the compiler derefs itself: `L: Deref` of an
             // `Either<String, &str>`)
             (Ty::Ref(_, _), "Deref") | (Ty::Ref(true, _), "DerefMut") => Some(true),
@@ -6657,11 +6668,74 @@ impl Program {
             ("Output", t) if prim(t) => Some(t),
             ("Output", Ty::Ref(_, i)) if prim(*i) => Some(*i),
             ("Target", Ty::Ref(_, i) | Ty::Box(i)) => Some(*i),
+            ("Item" | "IntoIter", t) => self.std_into_iter_assoc(t, name),
             // (`<String as Deref>::Target` is str, `<Vec<T> as Deref>::Target` is [T]: their Deref is the compiler's)
             ("Target", Ty::Struct(sid)) if self.structs[sid as usize].name == "String" && self.structs[sid as usize].base.is_none() => Some(Ty::Str),
             ("Target", Ty::Struct(sid)) if self.structs[self.base_of(sid) as usize].name == "Vec" => self.structs[sid as usize].args.first().map(|&e| Ty::Slice(intern(e))),
             _ => None,
         }
+    }
+
+    /// `<t as IntoIterator>::IntoIter` / `::Item` of std's impls, which the prelude does not write out (its
+    /// IntoIterator is a name only): the iterator acg makes of `t.into_iter()` and that iterator's Item. `&[T]` /
+    /// `&[T; N]` give the slice's `Iter<T>` (`&mut` ones `IterMut<T>`), `&Vec<T>` its `iter()`, a collection its
+    /// `into_iter()`, an array `iter().copied()`, and an iterator itself (#313: fastrand's `choice(&[u8])`, `I::Item`)
+    fn std_into_iter_assoc(&self, t: Ty, name: &str) -> Option<Ty> {
+        let is_iter = |t: Ty| matches!(t, Ty::Struct(sid) if self.method(sid, "next").is_some());
+        // (a method's result for the receiver type `recv`: the impl's parameters solved from its self type)
+        let ret_of = |sid: u32, m: &str, recv: Ty| -> Option<Ty> {
+            let id = self.method(sid, m)?;
+            let sig = &self.sigs[id as usize];
+            let mut sol = vec![None; sig.generics.len()];
+            if !self.match_ty(*sig.params.first()?, recv, &mut sol) {
+                return None;
+            }
+            let r = self.subst(sig.ret, &sol.into_iter().collect::<Option<Vec<Ty>>>()?);
+            (!self.has_param(r)).then_some(r)
+        };
+        let slice_iter = |m: bool, e: Ty| {
+            let (s, f) = if m { ("IterMut", "__exr_slice_iter_mut") } else { ("Iter", "__exr_slice_iter") };
+            let &b = self.struct_index.get(s)?;
+            self.index.contains_key(f).then(|| self.instantiate(b, vec![e]).ok().map(Ty::Struct)).flatten()
+        };
+        let it = match t {
+            // (an iterator is its own, and `&mut I` of one: its Item was looked for already, by the Iterator impl)
+            t if is_iter(t) => return (name == "IntoIter").then_some(t),
+            Ty::Ref(true, i) if is_iter(*i) => return if name == "IntoIter" { Some(t) } else { self.assoc_of(*i, "Item") },
+            Ty::Ref(m, Ty::Slice(e) | Ty::Array(e, _)) => slice_iter(m, **e)?,
+            // (as `xs.into_iter()` of an array of no drop is lowered)
+            Ty::Array(e, _) => {
+                let &c = self.struct_index.get("Copied")?;
+                if self.needs_drop(*e) {
+                    return None;
+                }
+                Ty::Struct(self.instantiate(c, vec![slice_iter(false, *e)?, *e]).ok()?)
+            }
+            // (`&Vec<T>` / `&mut Vec<T>`: what `for x in &v` iterates, when the collection's own into_iter takes it by
+            // value; a collection's into_iter of `&self` is its own)
+            Ty::Ref(m, Ty::Struct(sid)) => {
+                let by_value = self.method(*sid, "into_iter").is_some_and(|id| !matches!(self.sigs[id as usize].params.first(), Some(Ty::Ref(..))));
+                let own = if !by_value {
+                    "into_iter"
+                } else if m {
+                    "iter_mut"
+                } else if self.method(*sid, "__ref_into_iter").is_some() {
+                    "__ref_into_iter"
+                } else {
+                    "iter"
+                };
+                ret_of(*sid, own, t)?
+            }
+            Ty::Struct(sid) => ret_of(sid, "into_iter", t)?,
+            _ => return None,
+        };
+        if name == "IntoIter" {
+            return Some(it);
+        }
+        if it == t {
+            return None;
+        }
+        self.assoc_of(it, "Item")
     }
 
     /// t names a type parameter numbered `from` or above

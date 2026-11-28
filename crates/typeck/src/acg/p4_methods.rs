@@ -487,12 +487,20 @@ impl Cx<'_> {
                     Ty::Ptr(name == "as_mut_ptr", intern(elem)),
                 )))
             }
-            // (`r.into_iter()` with r: `&[T; N]` / `&[T]` (a generic fn's `I: IntoIterator`): `r.iter()`)
+            // (`r.into_iter()` with r: `&[T; N]` / `&[T]` (a generic fn's `I: IntoIterator`): `r.iter()`; `r.iter_mut()`
+            // of a `&mut` one)
             "into_iter"
                 if matches!(self.peek(mc_recv), Some(Ty::Ref(false, Ty::Array(..) | Ty::Slice(_))))
                     && self.prog.index.contains_key("__exr_slice_iter") =>
             {
                 let e: &Expr = self.keep_expr(mcall(Expr::Paren(Box::new(mc_recv.clone())), "iter", vec![]));
+                self.expr(e, None).map(Some)
+            }
+            "into_iter"
+                if matches!(self.peek(mc_recv), Some(Ty::Ref(true, Ty::Array(..) | Ty::Slice(_))))
+                    && self.prog.index.contains_key("__exr_slice_iter_mut") =>
+            {
+                let e: &Expr = self.keep_expr(mcall(Expr::Paren(Box::new(mc_recv.clone())), "iter_mut", vec![]));
                 self.expr(e, None).map(Some)
             }
             "iter" | "iter_mut" | "into_iter" | "enumerate" | "rev" | "copied" | "cloned" => err(
