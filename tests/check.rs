@@ -3893,6 +3893,10 @@ fn a_turbofish_collect_s_elements_a_ref_array_s_and_an_unimported_collection_bes
     assert!(e.iter().any(|(l, m)| *l == 2 && m.contains("use of undeclared type `HashMap` (E0433)")), "{e:?}");
     let e = errs("use std::collections::HashMap;\nfn main() {\n    let mut m = HashMap::new();\n    m.insert(1u8, 2u8);\n    let _: () = 1;\n}\n");
     assert!(!e.iter().any(|(_, m)| m.contains("E0433")), "{e:?}");
+    // (a value of the name is none: `let HashMap = 1;` and its use, beside another error (CodeRabbit on #224))
+    let e = errs("fn main() {\n    let HashMap = 1;\n    let _ = HashMap;\n    let _: u8 = \"s\";\n}\n");
+    assert!(!e.iter().any(|(_, m)| m.contains("E0412") || m.contains("E0433")), "{e:?}");
+    assert!(e.iter().any(|(_, m)| m.contains("mismatched types")), "{e:?}");
 }
 
 #[test]

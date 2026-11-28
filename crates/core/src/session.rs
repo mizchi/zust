@@ -9107,8 +9107,17 @@ fn undeclared_std_collection(src: &str) -> Option<String> {
         }
         i += 1;
     }
+    // (the names the program binds or defines as values, `let HashMap = 1;` .. `HashMap`: none of them is a type
+    // where it is written)
+    let values: Vec<&str> = toks
+        .iter()
+        .enumerate()
+        .filter(|&(i, t)| t.kind == crate::parse::TokKind::Ident && i >= 1 && matches!(text(i - 1), "let" | "mut" | "ref" | "const" | "static" | "fn"))
+        .map(|(_, t)| t.text.as_str())
+        .filter(|n| NAMES.contains(n))
+        .collect();
     for (i, t) in toks.iter().enumerate() {
-        if t.kind != crate::parse::TokKind::Ident || !NAMES.contains(&t.text.as_str()) || known.contains(&t.text.as_str()) {
+        if t.kind != crate::parse::TokKind::Ident || !NAMES.contains(&t.text.as_str()) || known.contains(&t.text.as_str()) || values.contains(&t.text.as_str()) {
             continue;
         }
         // (a path's first segment, not `collections::HashMap`, nor a field or method of the name)
