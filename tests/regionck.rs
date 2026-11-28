@@ -6019,3 +6019,137 @@ fn c<T: 'static + Copy>(x: T) -> usize {
 fn main() { let _ = c(3u8); let _ = En::<u8>::B; }
 "#, &[], "q17");
 }
+
+#[test]
+fn part41_drop_impls_specialized_or_requiring_more_ref_bindings_of_owned_places() {
+    // (each checked with rustc 1.97. A Drop impl's self type writes the impl's own parameters, each once (E0366))
+    errors_at("struct P<T>(*const T);\nimpl Drop for P<i8> {\n    fn drop(&mut self) {}\n}\nfn main() {}\n", &[(2, "cannot be specialized (E0366)")], "r1");
+    errors_at("struct N<'n>(&'n i8);\nimpl Drop for N<'static> {\n    fn drop(&mut self) {}\n}\nfn main() {}\n", &[(2, "cannot be specialized (E0366)")], "r2");
+    errors_at("struct V<A, B>(*const A, *const B);\nimpl<One> Drop for V<One, One> {\n    fn drop(&mut self) {}\n}\nfn main() {}\n", &[(2, "cannot be specialized (E0366)")], "r3");
+    errors_at("struct W<'a, 'b>(&'a i8, &'b u8);\nimpl<'l> Drop for W<'l, 'l> {\n    fn drop(&mut self) {}\n}\nfn main() {}\n", &[(2, "cannot be specialized (E0366)")], "r4");
+    errors_at("struct X<const C: usize>;\nimpl Drop for X<3> {\n    fn drop(&mut self) {}\n}\nfn main() {}\n", &[(2, "cannot be specialized (E0366)")], "r5");
+    // (and requires of them only what the definition does, or its fields imply (E0367))
+    errors_at("struct K<'a, 'b>(&'a i8, &'b u8);\nimpl<'a, 'b: 'a> Drop for K<'a, 'b> {\n    fn drop(&mut self) {}\n}\nfn main() {}\n", &[(2, "requires `'b: 'a`")], "r6");
+    errors_at("struct L<'a, 'b>(&'a i8, &'b u8);\nimpl<'a, 'b> Drop for L<'a, 'b>\nwhere\n    'b: 'a,\n{\n    fn drop(&mut self) {}\n}\nfn main() {}\n", &[(2, "requires `'b: 'a`")], "r7");
+    errors_at("trait Bound {}\nstruct Q<T>(*const T);\nimpl<T: Bound> Drop for Q<T> {\n    fn drop(&mut self) {}\n}\nfn main() {}\n", &[(3, "requires `T: Bound` but the struct")], "r8");
+    errors_at("struct Wrapper<'a, T>(&'a T)\nwhere\n    T: 'a;\nimpl<'a, T> Drop for Wrapper<'a, T>\nwhere\n    T: 'static,\n{\n    fn drop(&mut self) {}\n}\nfn main() {}\n", &[(6, "requires `T: 'static`")], "r9");
+    errors_at("struct G<T: ?Sized>(*const T);\nimpl<T> Drop for G<T> {\n    fn drop(&mut self) {}\n}\nfn main() {}\n", &[(2, "requires `T: Sized`")], "r10");
+    errors_at("trait Tr { type Assoc; }\nstruct Foo<T: Tr, U: ?Sized>(T, U);\nimpl<T: Tr<Assoc = U>, U: ?Sized> Drop for Foo<T, U> {\n    fn drop(&mut self) {}\n}\nfn main() {}\n", &[(3, "requires `<T as Tr>::Assoc == U`")], "r11");
+    errors_at("trait Bound {}\nenum E<T> { A(T) }\nimpl<T: Bound> Drop for E<T> {\n    fn drop(&mut self) {}\n}\nfn main() {}\n", &[(3, "but the enum it is implemented for")], "r12");
+    errors_at("trait Bound {}\nunion U<T: Copy> { f: T }\nimpl<T: Copy + Bound> Drop for U<T> {\n    fn drop(&mut self) {}\n}\nfn main() {}\n", &[(3, "but the union it is implemented for")], "r13");
+    // (what the definition gives: its bounds, supertraits, the outlives its fields imply, transitively)
+    errors_at(r#"use std::fmt::{Debug, Display};
+struct A<T>(T);
+impl<T> Drop for A<T> { fn drop(&mut self) {} }
+struct B<'a, T: ?Sized + 'a>(&'a T);
+impl<'a, T: ?Sized> Drop for B<'a, T> { fn drop(&mut self) {} }
+struct D<T: Ord>(T);
+impl<T: Ord + PartialOrd + PartialEq> Drop for D<T> { fn drop(&mut self) {} }
+struct E<T> where T: Clone + Debug { t: T }
+impl<T: Clone + Debug> Drop for E<T> where T: Debug { fn drop(&mut self) {} }
+struct G<'a, 'b: 'a, T: 'b>(&'a &'b T);
+impl<'x, 'y: 'x, U: 'y> Drop for G<'x, 'y, U> { fn drop(&mut self) {} }
+struct H<'a>(&'a u8);
+impl Drop for H<'_> { fn drop(&mut self) {} }
+trait Tr: Debug {}
+struct J<T: Tr>(T);
+impl<T: Tr + Debug> Drop for J<T> { fn drop(&mut self) {} }
+struct K<'a, T>(&'a T);
+impl<'a, T: 'a> Drop for K<'a, T> { fn drop(&mut self) {} }
+struct L<'a, T>(&'a T);
+impl<'a, T> Drop for L<'a, T> where 'static: 'a { fn drop(&mut self) {} }
+struct R<T>(*const T);
+impl<'r, T: 'r> Drop for R<T> { fn drop(&mut self) {} }
+struct M<'a, 'b: 'a, 'c: 'b>(&'a u8, &'b u8, &'c u8);
+impl<'a, 'b, 'c> Drop for M<'a, 'b, 'c> where 'c: 'a { fn drop(&mut self) {} }
+struct S<T: Display>(T);
+impl<T: Display> Drop for S<T> { fn drop(&mut self) {} }
+fn main() {}
+"#, &[], "r14");
+    // (a `ref` binding of a place the function owns borrows it: a closure's parameter bound `ref` (a loan of its
+    // parameter) returned through an impl's lifetime is E0515)
+    errors_at(r#"pub struct History<'a> { pub s: &'a str }
+fn make_entry<'x, 'a>(_h: &'x History<'a>, _s: &'a String) -> Option<&'x str> { None }
+impl<'a> History<'a> {
+    fn me(&self, _s: &'a String) -> Option<&str> { None }
+    pub fn page(&self) -> usize {
+        let f = |ref line: String| make_entry(self, line);
+        f(String::new()).is_some() as usize
+    }
+    pub fn page2(&self) -> usize {
+        let g = |ref line: String| self.me(line);
+        g(String::new()).is_some() as usize
+    }
+}
+fn main() {}
+"#, &[(6, "cannot return value referencing function parameter (E0515)"), (10, "cannot return value referencing function parameter (E0515)")], "r15");
+    errors_at("fn mk(s: &String) -> &str { s.as_str() }\nfn f() -> usize {\n    let g = |ref s: String| mk(s);\n    g(String::new()).len()\n}\nfn main() {}\n", &[(3, "referencing function parameter (E0515)")], "r16");
+    // (and is fine where the borrow does not escape)
+    errors_at(r#"pub struct History<'a> { pub s: &'a str }
+impl<'a> History<'a> {
+    fn me(&self, _s: &String) -> usize { self.s.len() }
+    pub fn page(&self) -> usize {
+        let f = |ref line: String| self.me(line) + line.len();
+        let (ref a, b) = (String::from("x"), 1);
+        f(String::new()) + a.len() + b
+    }
+}
+fn main() {
+    let h = History { s: "abc" };
+    let v: Vec<usize> = vec![String::from("ab")].into_iter().map(|ref s| s.len()).collect();
+    let _ = (h.page(), v);
+}
+"#, &[], "r17");
+    // (a `ref` binding through a reference borrows what it points to, not the place matched: `|&ref ints| ints`,
+    // `match self { Imp::Owned(ref x) => x }` of `self: &Imp`)
+    errors_at(r#"fn with<'a, F>(_: F) where F: FnOnce(&'a Vec<isize>) -> &'a Vec<isize> {}
+enum Imp<'a> { Borrowed(&'a [u8]), Owned(Box<[u8]>) }
+impl<'a> Imp<'a> {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Imp::Owned(ref x) => x,
+            Imp::Borrowed(x) => x,
+        }
+    }
+}
+fn keep<'a>(x: &'a String) -> &'a str {
+    let ref r = *x;
+    r.as_str()
+}
+fn opt<'a>(o: &'a Option<String>) -> Option<&'a str> {
+    match *o {
+        Some(ref s) => Some(s.as_str()),
+        None => None,
+    }
+}
+fn main() {
+    with(|&ref ints| ints);
+    let _ = (Imp::Borrowed(&[1]).as_slice().len(), keep(&String::new()), opt(&None));
+}
+"#, &[], "r18");
+    // (the review's: a definition's bound written twice gives its equation (`T: Iterator` and `where T: Iterator<Item =
+    // u8>`), and a bound that makes a `?Sized` parameter Sized (Clone, Copy, a trait of the program's `: Sized`))
+    errors_at(r#"struct S<T: Iterator>(T) where T: Iterator<Item = u8>;
+impl<T: Iterator<Item = u8>> Drop for S<T> { fn drop(&mut self) {} }
+struct C<T: ?Sized + Clone>(Box<T>);
+impl<T: Clone> Drop for C<T> { fn drop(&mut self) {} }
+struct P<T: ?Sized + Copy>(Box<T>);
+impl<T: Copy> Drop for P<T> { fn drop(&mut self) {} }
+trait Tr: Sized {}
+struct Q<T: ?Sized + Tr>(Box<T>);
+impl<T: Tr> Drop for Q<T> { fn drop(&mut self) {} }
+fn main() {}
+"#, &[], "r19");
+    // (a trait of the program's makes the parameter Sized only through its header (`: Sized`, `where Self: Sized`,
+    // a supertrait that is Clone): an empty one does not, E0367)
+    errors_at("trait Tr {}\nstruct S<T: ?Sized + Tr>(Box<T>);\nimpl<T: Tr> Drop for S<T> { fn drop(&mut self) {} }\nfn main() {}\n", &[(3, "requires `T: Sized`")], "r20");
+    errors_at(r#"trait B: Clone {}
+trait Tr: B {}
+struct S<T: ?Sized + Tr>(Box<T>);
+impl<T: Tr> Drop for S<T> { fn drop(&mut self) {} }
+trait W where Self: Sized {}
+struct V<T: ?Sized + W>(Box<T>);
+impl<T: W> Drop for V<T> { fn drop(&mut self) {} }
+fn main() {}
+"#, &[], "r21");
+}
