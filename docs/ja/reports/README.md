@@ -138,3 +138,4 @@ zustc / zust-analyzer の作業の記録 (日付順)。数値はそれぞれの�
 | 2026-11-27 | [OS スレッドの上で rustc のスレッドのテストを通す: `thread::Builder`、`recv_timeout`、`park_timeout`、`Barrier`、借りているものを通して Sync になるクロージャ](2026-11-27-02-threads-ui.md) |
 | 2026-11-27 | [トレイトオブジェクトが auto trait を持つようにする: `dyn Tr + Send` / `+ Sync`](2026-11-27-03-dyn-auto-traits.md) |
 | 2026-11-27 | [リージョン (ライフタイム) 検査、その 41: 特殊化する、または型より多くを求める Drop の impl と、所有する場所の `ref` 束縛](2026-11-27-04-region-check-41.md) |
+| 2026-11-28 | [リージョン (ライフタイム) 検査、その 42: Drop の検査でのトレイトのヘッダと等式の値、`let _` でのトレイトオブジェクトの引数の不変性](2026-11-28-01-region-check-42.md) |
