@@ -5847,6 +5847,24 @@ impl Program {
     /// too: `&&S` of `impl<T: Tr> Tr for &T` with `S: Tr`, where the impl's bounds of T hold of S (`T: Tr + Marker`;
     /// none, `impl<T: ?Sized> Tr for &T`, holds of every referent)
     pub fn ref_param_implements(&self, tr: &str, u: Ty, depth: u32) -> bool {
+        // (each (trait, type) once in a call: impls whose bounds name each other (`T: A + B + C` of A's, B's and C's
+        // impls for `&T`) would ask the same goals again at each reference layer)
+        let mut memo: FxMap<(String, Ty), bool> = FxMap::default();
+        self.ref_param_implements_in(tr, u, depth, &mut memo)
+    }
+
+    fn ref_param_implements_in(&self, tr: &str, u: Ty, depth: u32, memo: &mut FxMap<(String, Ty), bool>) -> bool {
+        if let Some(&r) = memo.get(&(tr.to_string(), u)) {
+            return r;
+        }
+        // (a goal met again while it is proved: not by itself)
+        memo.insert((tr.to_string(), u), false);
+        let r = self.ref_param_implements_step(tr, u, depth, memo);
+        memo.insert((tr.to_string(), u), r);
+        r
+    }
+
+    fn ref_param_implements_step(&self, tr: &str, u: Ty, depth: u32, memo: &mut FxMap<(String, Ty), bool>) -> bool {
         match u {
             Ty::Ref(m, i) if self.ref_param_impls.iter().any(|(t, rm)| t == tr && *rm == m) => {
                 let bounds = self.ref_param_bounds.get(&(tr.to_string(), m));
@@ -5862,7 +5880,7 @@ impl Program {
                         if bn == tr || self.ref_param_impls.iter().any(|(t, _)| t == bn) {
                             // (a bound of a trait with impls for references of its own (`T: Tr + Marker` beside
                             // `impl<T> Marker for &T`): by them, structurally, not by the blanket answer)
-                            self.ref_param_implements(bn, *i, depth + 1)
+                            self.ref_param_implements_in(bn, *i, depth + 1, memo)
                         } else {
                             relaxed_bound(b) || self.has_param(*i) || self.implements(*i, b)
                         }

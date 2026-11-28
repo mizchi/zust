@@ -3,7 +3,8 @@
 // impl at `&&str`; and an impl for `&str` beside `impl<T: Nm> Nm for &T` (whose T is Sized), which a call through a
 // bound with `T = &str` takes; bounds of the impl written in a where clause; a number's and a
 // slice's own methods; two-phase borrows of a `&mut` autoref (an index
-// receiver's index first, a local one too); another trait's method at an earlier try; an extra bound with impls for references
+// receiver's index first, a local one too); another trait's method at an earlier try; deep chains of
+// impls whose bounds name each other; an extra bound with impls for references
 trait Tr {
     fn len(self) -> usize;
 }
@@ -58,6 +59,16 @@ struct Cur(usize, usize);
 impl Bf for Cur { fn remaining(&self) -> usize { self.1 - self.0 } fn advance(&mut self, n: usize) { self.0 += n } }
 impl<T: Bf + ?Sized> Bf for &mut T { fn remaining(&self) -> usize { (**self).remaining() } fn advance(&mut self, n: usize) { (**self).advance(n) } }
 fn idx() -> usize { println!("idx"); 1 }
+// impls for references whose bounds name each other, through 16 reference layers (each goal once)
+trait Ma { fn ma(&self) -> u32; }
+trait Mb { fn mb(&self) -> u32; }
+trait Mc { fn mc(&self) -> u32; }
+impl Ma for S3 { fn ma(&self) -> u32 { 1 } }
+impl Mb for S3 { fn mb(&self) -> u32 { 1 } }
+impl Mc for S3 { fn mc(&self) -> u32 { 1 } }
+impl<T: Ma + Mb + Mc> Ma for &T { fn ma(&self) -> u32 { 1 + (**self).ma() } }
+impl<T: Ma + Mb + Mc> Mb for &T { fn mb(&self) -> u32 { 1 + (**self).mb() } }
+impl<T: Ma + Mb + Mc> Mc for &T { fn mc(&self) -> u32 { 1 + (**self).mc() } }
 // another trait's method of the name at an earlier try: `r.nm3()` of `r: &S3` is A3's (S3's, by value at `&S3`),
 // not B3's impl for `&T` (an autoref)
 trait A3 { fn nm3(&self) -> u32; }
@@ -95,6 +106,9 @@ fn main() {
     let mut i = 0;
     println!("{}", a[i].write({ i = 1; a[i].read() }));
     println!("{}", f3::<u8>(&S3));
+    let s3 = S3;
+    let deep = &&&&&&&&&&&&&&&s3;
+    println!("{} {} {}", (&deep).ma(), deep.mb(), (&&deep).mc());
     let s2 = S2;
     println!("{}", (&&s2).name2());
 }
