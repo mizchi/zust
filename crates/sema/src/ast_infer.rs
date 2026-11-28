@@ -1883,6 +1883,10 @@ impl Inf<'_> {
     }
 
     fn call(&mut self, f: &Expr, args: &[Expr]) -> u32 {
+        // (`u32::max_value()`: the integer type's `MAX`, #265)
+        if let Some((t, _)) = crate::parse::int_bound_call(f, args) {
+            return self.known(t);
+        }
         // (`std::clone::Clone::clone(&x)`, `std::fmt::Write::write_str(&mut s, ..)`: as the call its last two segments
         // make, `Clone::clone(&x)` (#153))
         if let Expr::Path(None, p) = f {

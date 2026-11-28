@@ -3594,6 +3594,27 @@ fn constraint_err(toks: &[Tok], st: usize) -> String {
     }
 }
 
+/// `u32::max_value()` / `i8::min_value()`, a call of an integer type's deprecated associated fn
+/// (`#[deprecated(since = "TBD")]`, which warns of nothing): its type and the constant it is, `MAX` / `MIN` (#265:
+/// getrandom's `const UNINIT: usize = usize::max_value();`, ipnet's netmasks). Type inference, the constant evaluator
+/// and acg each read the call as that constant (`u32::MAX`); the syntax tree keeps the call, as syn's has it. The
+/// type by a primitive's name only: rustc takes the inherent fn before any trait's (num-traits' `Bounded`), and an
+/// alias (`type W = u64;`) is not one
+pub fn int_bound_call(f: &Expr, args: &[Expr]) -> Option<(crate::types::Ty, &'static str)> {
+    let Expr::Path(None, p) = f else { return None };
+    let [t, f] = p.segs.as_slice() else { return None };
+    let c = match f.name.as_str() {
+        "max_value" => "MAX",
+        "min_value" => "MIN",
+        _ => return None,
+    };
+    if !args.is_empty() || p.global || !t.args.is_empty() || !f.args.is_empty() {
+        return None;
+    }
+    let t = crate::types::Ty::from_suffix(&t.name).filter(|t| t.is_int())?;
+    Some((t, c))
+}
+
 pub fn path_text(p: &Path) -> String {
     let mut s = String::new();
     if p.global {
