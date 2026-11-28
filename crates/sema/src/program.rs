@@ -534,6 +534,27 @@ pub fn prim_assoc_const(t: Ty, name: &str) -> Option<i128> {
     })
 }
 
+/// A method of an impl of trait `tr` for a reference to a type parameter, `impl<T: B> Tr for &T` / `&mut T`, that a
+/// call on the reference must run itself (#144): one that does more than forward to T's (or any, when T is bounded
+/// by another trait: `impl<T: Display> AsDisplay for &T`, whose X has no AsDisplay to reach), or a default method of
+/// the trait the impl leaves out, which runs with Self = &T
+#[derive(Clone, Debug)]
+pub struct RefImplFn {
+    pub tr: String,
+    /// the impl is for `&mut T`
+    pub mutable: bool,
+    /// the impl's fn (`T::__ref_m`), or None for the trait's default
+    pub f: Option<u32>,
+    /// how the method takes self: 0 `self`, 1 `&self`, 2 `&mut self`
+    pub recv: u8,
+    /// T's bounds in the impl's header (`Display`, `?Sized`); of a blanket impl's (`blanket`), Self's
+    pub bounds: Vec<String>,
+    /// A blanket impl's method (`impl<T: Name> Loud for T`, its own or the trait's default), whose bounds name a trait
+    /// with such methods: Self is any reference that meets them (`(&&s).loud()` runs it with Self = &S, and its
+    /// `self.name()` is the impl's for `&S`), not only one of `mutable`
+    pub blanket: bool,
+}
+
 /// A Mutex that clones its content (Program's caches)
 #[derive(Default)]
 pub struct CloneMutex<T>(pub Mutex<T>);
@@ -667,6 +688,12 @@ pub struct Program {
     pub blanket_selfs: HashSet<String>,
     /// Traits with a blanket impl (`impl<T> Tr for T`): every type implements them (bounds are not checked)
     pub blanket_traits: HashSet<String>,
+    /// By method name, the methods of `impl<T> Tr for &T` / `&mut T` that a call on a reference dispatches to (#144,
+    /// RefImplFn): empty in most programs (the prelude's such impl only forwards), so the method lookup asks only then
+    pub ref_dispatch: FxMap<String, Vec<RefImplFn>>,
+    /// The traits with an impl for references to a type parameter: whether each is for `&mut T`, and T's bounds
+    /// (whether `&X` implements the trait, which the blanket answer of evaluate holds for any type)
+    pub ref_impls_of: FxMap<String, Vec<(bool, Vec<String>)>>,
     /// The structs that are unions
     pub unions: HashSet<String>,
     /// The program's unit structs (`struct S;`; not the prelude's): `let S = 1;` is a pattern of S, not a new name
@@ -1625,6 +1652,8 @@ impl Program {
             blanket_bounds: FxMap::default(),
             blanket_selfs: Default::default(),
             blanket_traits: Default::default(),
+            ref_dispatch: FxMap::default(),
+            ref_impls_of: FxMap::default(),
             unions: Default::default(),
             unit_structs: Default::default(),
             reprs: Default::default(),
@@ -2788,16 +2817,12 @@ impl Program {
                 continue;
             }
             // (`impl<T> Tr for T`, with or without members)
-            // (`impl<T: Tr> Tr for &T` / `&mut T` that defines each default method of the trait: a call on `&T` reaches
-            // T's method through the deref (its own methods forward to it, or are not called), so it counts as a
-            // blanket impl)
+            // (`impl<T: B> Tr for &T` / `&mut T`: a blanket impl for the references. A call on `&X` that rustc's probe
+            // takes it for runs its methods (#144, Program::ref_dispatch), except those that only forward to T's: a call
+            // that reaches T's method through the deref runs the same code)
             let ref_of_param = matches!(&sm.impl_self_ty, Some(TySyn::Ref(_, i)) if matches!(&**i, TySyn::Named(n) if n == sn))
                 && sm.impl_generics.iter().any(|g| g.0 == *sn);
             if ref_of_param {
-                // (its methods are not called: a call on the reference reaches T's through the deref, which is what
-                // one that forwards to T's does. One that does more, and a default method it leaves out (which would run
-                // with Self = &T, not T's), the driver reports where the program may call it through a bound
-                // (first_called_ref_impl_fn))
                 // (`impl<T> Foo for T` covers `&U` too; `&T` and `&mut T` are two types)
                 let m = matches!(&sm.impl_self_ty, Some(TySyn::Ref(true, _)));
                 if bare_blankets.contains(tr) || !ref_blankets.insert((tr.clone(), m)) {
@@ -2805,6 +2830,7 @@ impl Program {
                 }
                 p.blanket_selfs.insert(sn.clone());
                 p.blanket_traits.insert(tr.clone());
+                p.note_ref_impl(items, sums, ii, sn, tr, m);
                 continue;
             }
             if sm.impl_generics.iter().any(|g| g.0 == *sn) && matches!(sm.impl_self_ty, Some(TySyn::Named(_))) {
@@ -2880,6 +2906,9 @@ impl Program {
                     it.line
                 ));
             }
+        }
+        if !p.ref_dispatch.is_empty() {
+            p.note_ref_blankets();
         }
         // (an unbounded blanket impl and any other impl of its trait in the program)
         for (tr, bl) in &unbounded_blankets {
@@ -3210,6 +3239,11 @@ impl Program {
                 return Err(format!("{}:1: {why} (E0080)", items[c.item as usize].line));
             }
         }
+        // (a const parameter's default is evaluated where the type is declared, used or not, as rustc's: `struct
+        // S<const N: u8 = { u8::MAX + 1 }>` is an E0080. One with an operation only (a name or a literal has none))
+        if !p.struct_defaults.is_empty() {
+            p.const_default_errs(items, user)?;
+        }
         let header = |ii: usize| match items.get(ii).map(|it| it.kind) {
             Some(crate::lexer::ItemKind::ImplMember(h)) => Some(h as usize),
             _ => None,
@@ -3495,6 +3529,99 @@ impl Program {
             && self.traits.get(n).or_else(|| self.traits.get(last)).is_some_and(|fs| {
                 !fs.is_empty() && fs.iter().all(|&f| self.item_of.get(f as usize).copied().flatten().is_some_and(|i| i >= self.prelude_from))
             })
+    }
+
+    /// The methods of the impl `impl<T: B> tr for &T` (`&mut T` when mutable) at item ii that a call on a reference must
+    /// run (RefImplFn), into ref_dispatch: of the trait's methods with a receiver, those the impl defines and that do
+    /// more than forward to T's (Summary::ref_impl_bad), and the defaults it leaves out
+    #[cold]
+    #[inline(never)]
+    fn note_ref_impl(&mut self, items: &[SrcItem], sums: &[Summary], ii: usize, sn: &str, tr: &str, mutable: bool) {
+        // (the impl's members: the items that name this header)
+        let members = || items.iter().zip(sums).skip(ii + 1).take_while(|(m, _)| matches!(m.kind, crate::lexer::ItemKind::ImplMember(h) if h as usize == ii));
+        let defined: Vec<&String> = members().flat_map(|(_, s)| s.ref_impl_fns.iter()).collect();
+        let mut bad: Vec<&String> = members().flat_map(|(_, s)| s.ref_impl_bad.iter()).collect();
+        // (a forward that gives a `_` parameter its type's path is one only when that names a unit struct, not one of
+        // the program's consts or statics, whose value it would pass)
+        if members().any(|(_, s)| !s.ref_impl_unit_args.is_empty()) {
+            let values: Vec<&str> = sums.iter().flat_map(|s| s.consts.iter().map(|c| c.0.as_str()).chain(s.statics.iter().map(|c| c.0.as_str()))).map(|n| n.rsplit("::").next().unwrap_or(n)).collect();
+            bad.extend(members().flat_map(|(_, s)| s.ref_impl_unit_args.iter()).filter(|(_, v)| values.contains(&v.as_str())).map(|(m, _)| m));
+        }
+        let bounds: Vec<String> = sums[ii].impl_generics.iter().find(|g| g.0 == sn).map(|g| g.1.clone()).unwrap_or_default();
+        self.ref_impls_of.entry(tr.to_string()).or_default().push((mutable, bounds.clone()));
+        let Some(ids) = self.traits.get(tr) else { return };
+        for &d in ids {
+            let sg = &self.sigs[d as usize];
+            // (how the trait's declaration takes self: Self is its parameter 0)
+            let recv = match sg.params.first() {
+                Some(Ty::Param(0)) => 0,
+                Some(Ty::Ref(false, Ty::Param(0))) => 1,
+                Some(Ty::Ref(true, Ty::Param(0))) => 2,
+                _ => continue,
+            };
+            if !sg.has_self {
+                continue;
+            }
+            let m = self.names[d as usize].rsplit("::").next().unwrap_or("");
+            let f = if defined.iter().any(|f| *f == m) {
+                if !bad.iter().any(|f| *f == m) {
+                    continue;
+                }
+                // (`T::__ref_m`, among the overloads of that name the one of this impl: its trait and its self type)
+                let name = format!("{sn}::__ref_{m}");
+                let of_impl = |i: u32| {
+                    let s = &self.sigs[i as usize];
+                    s.impl_trait.as_deref().is_some_and(|t| t.split('<').next().unwrap_or(t).trim() == tr) && matches!(s.self_ty, Some(Ty::Ref(mm, Ty::Param(_))) if mm == mutable)
+                };
+                let Some(f) = self.index.get(&name).copied().filter(|&i| of_impl(i)).or_else(|| self.overloads.get(&name).and_then(|cs| cs.iter().copied().find(|&c| of_impl(c)))) else { continue };
+                Some(f)
+            } else if sg.has_body {
+                None
+            } else {
+                continue;
+            };
+            let e = RefImplFn { tr: tr.to_string(), mutable, f, recv, bounds: bounds.clone(), blanket: false };
+            self.ref_dispatch.entry(m.to_string()).or_default().push(e);
+        }
+    }
+
+    /// The methods of blanket impls (Program::blanket) whose bounds name a trait with methods in ref_dispatch, into it
+    /// (RefImplFn::blanket): with Self = `&X` their bodies' calls through Self reach those methods, with Self = X the
+    /// referent's
+    #[cold]
+    #[inline(never)]
+    fn note_ref_blankets(&mut self) {
+        let dispatched: HashSet<&str> = self.ref_dispatch.values().flatten().map(|c| c.tr.as_str()).collect();
+        let mut add = vec![];
+        for (m, &bid) in &self.blanket {
+            // (not an impl for references' own `T::__ref_m`, which the blanket table also has)
+            if m.starts_with("__ref_") {
+                continue;
+            }
+            let sg = &self.sigs[bid as usize];
+            let Some(tr) = sg.trait_of.as_deref().or(sg.impl_trait.as_deref()) else { continue };
+            let tr = tr.split('<').next().unwrap_or(tr).trim();
+            let recv = match sg.params.first() {
+                Some(Ty::Param(_)) => 0,
+                Some(Ty::Ref(false, Ty::Param(_))) => 1,
+                Some(Ty::Ref(true, Ty::Param(_))) => 2,
+                _ => continue,
+            };
+            for bs in self.blanket_bounds.get(tr).map(|v| v.as_slice()).unwrap_or(&[]) {
+                let names = |b: &String| {
+                    let b = b.trim();
+                    let b = b.split('<').next().unwrap_or(b).trim();
+                    b.rsplit("::").next().unwrap_or(b).to_string()
+                };
+                if bs.iter().any(|b| dispatched.contains(names(b).as_str())) {
+                    add.push((m.clone(), RefImplFn { tr: tr.to_string(), mutable: false, f: Some(bid), recv, bounds: bs.clone(), blanket: true }));
+                    break;
+                }
+            }
+        }
+        for (m, e) in add {
+            self.ref_dispatch.entry(m).or_default().push(e);
+        }
     }
 
     pub fn implements(&self, t: Ty, tr: &str) -> bool {
@@ -4129,6 +4256,37 @@ impl Program {
     /// Whether alias n's type parameters from the k-th on all have defaults (a use may give only the first k)
     pub fn alias_fills(&self, n: &str, k: usize) -> bool {
         self.alias_defaults.get(n).is_some_and(|ds| k < ds.len() && ds[k..].iter().all(Option::is_some))
+    }
+
+    /// The first E0080 of a const parameter's default of the program's types, at the type's line (build_in)
+    #[cold]
+    #[inline(never)]
+    fn const_default_errs(&self, items: &[SrcItem], user: usize) -> R<()> {
+        let mut ids: Vec<&u32> = self.struct_defaults.keys().collect();
+        ids.sort();
+        for &id in ids {
+            let Some(&ii) = self.struct_item.get(id as usize).filter(|&&ii| (ii as usize) < user) else { continue };
+            for (k, d) in self.struct_defaults[&id].iter().enumerate() {
+                let Some(TySyn::Array(_, ArrLen::Const(text))) = d else { continue };
+                if !text.bytes().any(|b| matches!(b, b'+' | b'-' | b'*' | b'/' | b'%' | b'<' | b'>' | b'(' | b'&' | b'|' | b'^' | b'!')) {
+                    continue;
+                }
+                let ty = self.const_param_tys.get(&id).and_then(|v| v.iter().find(|x| x.0 == k)).and_then(|x| Ty::prim(&x.1)).unwrap_or(Ty::Usize);
+                let Ok(e) = crate::parse::parse_expr(text) else { continue };
+                match self.eval_const_as(&e, ty) {
+                    Err(m) if m.ends_with("(E0080)") => return Err(format!("{}:1: {m}", items[ii as usize].line)),
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether struct n is generic with defaults, so that written with no arguments it is a type only through them:
+    /// an expression's path leaves its arguments to inference, as rustc does (`Buf::default()` of `struct Buf<const N:
+    /// usize = 3>` may be a `Buf<5>`), while a type's place takes the defaults
+    pub fn bare_by_defaults(&self, n: &str) -> bool {
+        self.struct_index.get(n).is_some_and(|id| self.struct_defaults.contains_key(id) && !self.structs[*id as usize].generics.is_empty())
     }
 
     /// A method of primitive type t (from a trait impl, or else the trait's default method)
@@ -8232,7 +8390,19 @@ fn subst_tysyn(t: &TySyn, ps: &[String], args: &[TySyn]) -> TySyn {
         TySyn::Ref(m, i) => TySyn::Ref(*m, Box::new(r(i))),
         TySyn::Ptr(m, i) => TySyn::Ptr(*m, Box::new(r(i))),
         TySyn::Slice(i) => TySyn::Slice(Box::new(r(i))),
-        TySyn::Array(i, n) => TySyn::Array(Box::new(r(i)), n.clone()),
+        // (a length that is a const parameter takes its argument's: `struct S<const N: usize = 2, const M: usize = N>`
+        // used as `S` is `S<2, 2>`, M's default `[(); N]` written with N's argument, not a name of the user's scope)
+        TySyn::Array(i, n) => {
+            let len = match n {
+                ArrLen::Const(c) => match ps.iter().position(|p| p == c).map(|k| &args[k]) {
+                    Some(TySyn::Array(e, l)) if matches!(**e, TySyn::Prim(Ty::Unit)) => l.clone(),
+                    Some(TySyn::Named(x)) => ArrLen::Const(x.clone()),
+                    _ => n.clone(),
+                },
+                ArrLen::Lit(_) => n.clone(),
+            };
+            TySyn::Array(Box::new(r(i)), len)
+        }
         TySyn::Tuple(v) => TySyn::Tuple(v.iter().map(r).collect()),
         TySyn::FnPtr(v) => TySyn::FnPtr(v.iter().map(r).collect()),
         TySyn::Assoc(b, n) => TySyn::Assoc(Box::new(r(b)), n.clone()),

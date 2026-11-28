@@ -6230,3 +6230,60 @@ fn take2<'a: 'static>(x: Box<dyn Gen<&'static u32>>, _: &'a u32) {
 fn main() {}
 "#, &[], "d4");
 }
+
+#[test]
+fn part43_trait_obligations_of_calls_relate_the_impls_they_select() {
+    // (each checked with rustc 1.97. A bound of the callee that selects one of the program's impls: the impl's head is
+    // the goal's type. A lifetime the bound binds (`for<'a>`) is a placeholder of the call, which no region of the
+    // impl's may be but its own)
+    errors_at("trait Foo<X> {}\nfn want_hrtb<T>() where T: for<'a> Foo<&'a isize> {}\nstruct StaticInt;\nimpl Foo<&'static isize> for StaticInt {}\nfn give_static() {\n    want_hrtb::<StaticInt>()\n}\nfn main() {}\n", &[(6, "implementation of `Foo` is not general enough")], "static");
+    errors_at("trait Foo<X> {}\nfn want_hrtb<T>() where T: for<'a> Foo<&'a isize> {}\nimpl<'a> Foo<&'a isize> for &'a u32 {}\nfn give_some<'a>() {\n    want_hrtb::<&'a u32>()\n}\nfn main() {}\n", &[(5, "implementation of `Foo` is not general enough")], "some");
+    errors_at("trait Foo<X> {}\nfn want_foo2<T: for<'a, 'b> Foo<(&'a isize, &'b isize)>>() {}\nstruct SomeStruct;\nimpl<'a> Foo<(&'a isize, &'a isize)> for SomeStruct {}\nfn b() { want_foo2::<SomeStruct>(); }\nfn main() {}\n", &[(5, "implementation of `Foo` is not general enough")], "conflate");
+    errors_at("trait Bar<'x> {}\nimpl Bar<'static> for u16 {}\nfn want_bar_hr<T: for<'q> Bar<'q>>() {}\nfn f() { want_bar_hr::<u16>(); }\nfn main() {}\n", &[(4, "implementation of `Bar` is not general enough")], "lifetime arg");
+    // (the impl's where clauses of such traits are obligations in turn, with its header's `'de: 'a`)
+    errors_at(r#"trait Deserialize<'de> {}
+trait DeserializeOwned: for<'de> Deserialize<'de> {}
+impl<T> DeserializeOwned for T where T: for<'de> Deserialize<'de> {}
+impl<'de: 'a, 'a> Deserialize<'de> for &'a str {}
+fn main() {
+    fn assert_deserialize_owned<T: DeserializeOwned>() {}
+    assert_deserialize_owned::<&'static str>();
+}
+"#, &[(7, "implementation of `Deserialize` is not general enough")], "where clause");
+    // (not only under a binder: an impl for `'static` makes the callee's lifetime 'static)
+    errors_at("trait Foo<X> {}\nstruct St;\nimpl Foo<&'static isize> for St {}\nfn want_a<'a, T: Foo<&'a isize>>(_: &'a isize) {}\nfn f() { let x = 5; want_a::<St>(&x); }\nfn main() {}\n", &[(5, "does not live long enough")], "static arg");
+    errors_at("trait Bar<'x> {}\nimpl Bar<'static> for u16 {}\nfn want_bar<'q, T: Bar<'q>>(_: &'q u8) {}\nfn f() { let x = 5u8; want_bar::<u16>(&x); }\nfn main() {}\n", &[(4, "does not live long enough")], "static lifetime arg");
+    // (and impls that hold for every lifetime, or for the ones given, are fine)
+    errors_at(r#"trait Foo<X> { fn foo(&self, _x: X) { } }
+fn want_hrtb<T>() where T : for<'a> Foo<&'a isize> {}
+fn want_foo1<T>() where T : for<'z> Foo<(&'z isize, &'z isize)> {}
+fn want_a<'a, T: Foo<&'a isize>>(_: &'a isize) {}
+struct AnyInt;
+impl<'a> Foo<&'a isize> for AnyInt { }
+struct SomeStruct;
+impl<'a> Foo<(&'a isize, &'a isize)> for SomeStruct {}
+struct Pair;
+impl<'a, 'b> Foo<(&'a isize, &'b isize)> for Pair {}
+struct St;
+impl Foo<&'static isize> for St {}
+impl<'a> Foo<&'a isize> for &'a u32 { }
+trait Bar<'x> {}
+impl<'x> Bar<'x> for u8 {}
+impl Bar<'static> for u16 {}
+fn want_bar<'q, T: Bar<'q>>(_: &'q u8) {}
+fn want_bar_hr<T: for<'q> Bar<'q>>() {}
+fn caller<'c>(r: &'c isize, q: &'c u8) {
+    want_hrtb::<AnyInt>();
+    want_foo1::<SomeStruct>();
+    want_foo1::<Pair>();
+    want_a::<AnyInt>(r);
+    want_a::<&u32>(r);
+    want_bar::<u8>(q);
+    want_bar_hr::<u8>();
+    static S: isize = 1;
+    want_a::<St>(&S);
+    want_bar::<u16>(&7);
+}
+fn main() { caller(&1, &2); }
+"#, &[], "ok");
+}

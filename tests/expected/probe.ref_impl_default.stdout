@@ -1,0 +1,11 @@
+ref S!
+S own shout
+S own shout
+ref S!
+take ref S
+take ref S
+S own take
+0
+1
+7
+3

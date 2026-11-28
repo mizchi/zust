@@ -682,7 +682,8 @@ pub struct Generics {
 pub enum GParam {
     Lifetime(String),
     Ty(String, Vec<Bound>, Option<Ty>),
-    Const(String, Ty),
+    /// (and its default, `const N: usize = 4`)
+    Const(String, Ty, Option<Box<Expr>>),
 }
 
 #[derive(Clone, Debug)]
@@ -2961,11 +2962,12 @@ impl Parser {
                 let n = self.ident()?;
                 self.expect_punct(":")?;
                 let t = self.ty()?;
+                let mut d = None;
                 if self.eat_punct("=") {
-                    let _ = self.unary_expr(true)?;
+                    d = Some(Box::new(self.unary_expr(true)?));
                     self.gdefaults.push((g.params.len() as u32, kw as u32, nt as u32, true));
                 }
-                g.params.push(GParam::Const(n, t));
+                g.params.push(GParam::Const(n, t, d));
             } else {
                 let nt = self.i;
                 let n = self.ident()?;
@@ -3044,7 +3046,7 @@ impl Parser {
                 let t = &self.toks[k];
                 if t.kind == TokKind::Ident
                     && !(k > 0 && self.toks[k - 1].text == ":")
-                    && g.params[pi..].iter().any(|p| matches!(p, GParam::Ty(n, ..) | GParam::Const(n, _) if *n == t.text))
+                    && g.params[pi..].iter().any(|p| matches!(p, GParam::Ty(n, ..) | GParam::Const(n, ..) if *n == t.text))
                 {
                     return Err(format!("{}:{}: generic parameter defaults cannot reference parameters before they are declared (E0128)", t.line, t.col + 1));
                 }
@@ -3799,8 +3801,9 @@ impl Counts {
                 }
             }
             ItemKind::Struct(..) => self.structs += 1,
-            ItemKind::Enum(_, _, vs) => {
+            ItemKind::Enum(_, g, vs) => {
                 self.enums += 1;
+                self.const_defaults(g);
                 for v in vs {
                     if let Some(e) = &v.2 {
                         self.expr(e);
@@ -3813,12 +3816,14 @@ impl Counts {
                     self.item(i);
                 }
             }
-            ItemKind::Trait(_, _, _, items) => {
+            ItemKind::Trait(_, g, _, items) => {
                 self.traits += 1;
+                self.const_defaults(g);
                 for i in items {
                     self.item(i);
                 }
             }
+            ItemKind::Type(_, g, ..) => self.const_defaults(g),
             ItemKind::Const(_, _, Some(e)) | ItemKind::Static(_, _, _, e) => self.expr(e),
             ItemKind::Mod(_, Some(items)) | ItemKind::Extern(items) => {
                 for i in items {
@@ -3827,6 +3832,15 @@ impl Counts {
             }
             ItemKind::Macro(..) | ItemKind::MacroRules(..) => self.macros += 1,
             _ => {}
+        }
+    }
+    /// The default of each const parameter (`const N: usize = 2`), an expression (as syn's visitor reads it: a
+    /// struct's are not visited there)
+    fn const_defaults(&mut self, g: &Generics) {
+        for p in &g.params {
+            if let GParam::Const(_, _, Some(d)) = p {
+                self.expr(d);
+            }
         }
     }
     fn block(&mut self, b: &Block) {

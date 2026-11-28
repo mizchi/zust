@@ -1,0 +1,1 @@
+19:16: calls through a type parameter's bound on a receiver of this form (a closure's capture, a pattern's binding, a method's result) are not supported for `impl<T> Name for &T` (#144): this `&S` may be a value of `N`, whose `.name()` runs the impl's
