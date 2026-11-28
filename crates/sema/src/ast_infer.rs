@@ -258,6 +258,8 @@ struct Inf<'p> {
     /// (method, trait) of a path call `Tr::m(x)` the method call it becomes keeps to (the code generator's
     /// explicit_traits)
     named_trait: Option<(String, String)>,
+    /// the body is the program's own code, not the prelude's (the code generator's user_code)
+    user: bool,
 }
 
 impl<'p> std::ops::Deref for Inf<'p> {
@@ -360,6 +362,7 @@ pub fn infer_ctx_margs(
         clo_depth: 0,
         pre_recv: None,
         named_trait: None,
+        user: root.is_some_and(|r| prog.item_of.get(r.0 as usize).copied().flatten().is_some_and(|i| i < prog.prelude_from)),
     };
     s.ret = match ret {
         Some(t) if prog.has_param(t) => s.known_g(t, &mut vec![]),
@@ -2486,6 +2489,11 @@ impl Inf<'_> {
             if let Ty::Param(i) = g {
                 param = Some(i as usize);
             }
+        }
+        // (a receiver of a type of its own: only in the program's own code, where its traits are in scope, as the
+        // code generator's ref_impl_pick)
+        if param.is_none() && !self.user {
+            return None;
         }
         let gens = self.gen_root.and_then(|r| prog.sigs.get(r as usize)).map(|s| s.generics.as_slice()).unwrap_or(&[]);
         let (f, derefs, autoref) = prog.ref_impl_walk(all, t, n, param, k, gens, named, &|x| prog.ref_own_method(x, n))?;

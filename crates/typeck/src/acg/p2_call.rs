@@ -5068,6 +5068,12 @@ impl Cx<'_> {
                 param = Some(i as usize);
             }
         }
+        // (a receiver of a type of its own takes a trait's method only where the trait is in scope: the program's
+        // own code, not the prelude's (`[u64; 19].as_mut_ptr()` there is the slice's whatever the program's
+        // `impl<T: ?Sized> Tr for &T` has))
+        if param.is_none() && !self.user_code {
+            return Ok(None);
+        }
         let pick = self.ref_impl_walk(all, rt, method, param, k);
         if g.is_none() && matches!(rt, Ty::Ref(..)) && !self.env.params.is_empty() {
             let gens = self.prog.sigs.get(self.root as usize).map(|s| s.generics.as_slice()).unwrap_or(&[]);

@@ -4435,6 +4435,26 @@ impl Program {
             if param.is_some() && k > 0 {
                 return None;
             }
+            // (a value of a type of its own, `a.len()` of `a: [i32; 3]`: Self is the value by an autoref (`&a`, then
+            // `&mut a`) where no own method of the name comes first, one taking self by value at the value, one taking
+            // `&self` at the `&` autoref (`&mut self` at the `&mut` one))
+            if let (None, 0) = (param, k) {
+                let o = own(rt);
+                if o == Some(0) {
+                    return None;
+                }
+                if o != Some(1) {
+                    if let Some(f) = self.ref_impl_fn(&cs, method, Ty::Ref(false, intern(rt))) {
+                        return Some((f, 0, Some(false)));
+                    }
+                }
+                if !matches!(o, Some(1 | 2)) {
+                    if let Some(f) = self.ref_impl_fn(&cs, method, Ty::Ref(true, intern(rt))) {
+                        return Some((f, 0, Some(true)));
+                    }
+                }
+                return None;
+            }
             // (`(&s).take()`: S's own `take(&self)` comes first)
             if let (None, 1, Ty::Ref(m, x)) = (param, k, rt) {
                 if own(*x) == Some(1 + m as u8) {
@@ -4546,28 +4566,48 @@ impl Program {
     /// impl's for `&T`, nor `s.as_mut_ptr()` of `s: &[u8]` the slice's `as_mut_ptr(&mut self)`), before an impl's
     /// method of a trait at that step (#144)
     pub fn builtin_method(&self, u: Ty, m: &str) -> Option<Option<bool>> {
-        // (a number's methods that take `&self`; its others take self by value)
-        const NUM_BY_REF: &[&str] = &[
-            "to_string", "eq_ignore_ascii_case", "to_ascii_uppercase", "to_ascii_lowercase", "make_ascii_uppercase", "make_ascii_lowercase", "fmt", "clone", "cmp", "partial_cmp", "eq", "ne", "lt", "le", "gt", "ge", "hash",
+        // (std's own methods of a str, a slice, an array; a number's that take `&self` (its others take self by
+        // value); the names the compiler knows for numbers that are not numbers' (a pointer's, a str's))
+        const STR: &[&str] = &[
+            "len", "is_empty", "is_char_boundary", "as_bytes", "as_bytes_mut", "as_ptr", "as_mut_ptr", "get", "get_mut", "get_unchecked", "get_unchecked_mut", "split_at",
+            "split_at_mut", "chars", "char_indices", "bytes", "split_whitespace", "split_ascii_whitespace", "lines", "encode_utf16", "contains", "starts_with", "ends_with",
+            "find", "rfind", "split", "rsplit", "split_terminator", "rsplit_terminator", "split_inclusive", "splitn", "rsplitn", "split_once", "rsplit_once", "matches",
+            "rmatches", "match_indices", "rmatch_indices", "trim", "trim_start", "trim_end", "trim_matches", "trim_start_matches", "trim_end_matches", "strip_prefix",
+            "strip_suffix", "parse", "is_ascii", "eq_ignore_ascii_case", "make_ascii_uppercase", "make_ascii_lowercase", "escape_debug", "escape_default", "escape_unicode",
+            "replace", "replacen", "to_lowercase", "to_uppercase", "repeat", "to_ascii_uppercase", "to_ascii_lowercase",
         ];
-        const SEQ: &[&str] = &[
-            "len", "is_empty", "as_bytes", "as_ptr", "as_mut_ptr", "iter", "iter_mut", "first", "last", "get", "get_mut", "contains", "to_vec", "to_owned", "starts_with", "ends_with", "split_at", "chunks", "windows", "join", "concat", "sort", "sort_unstable", "reverse", "swap", "fill", "first_mut", "last_mut", "binary_search", "to_string", "chars", "bytes", "lines", "trim", "split",
+        const SLICE: &[&str] = &[
+            "len", "is_empty", "first", "last", "split_first", "split_last", "get", "get_unchecked", "as_ptr", "as_ptr_range", "iter", "windows", "chunks", "chunks_exact",
+            "rchunks", "rchunks_exact", "split_at", "split", "splitn", "rsplit", "rsplitn", "contains", "starts_with", "ends_with", "strip_prefix", "strip_suffix",
+            "binary_search", "binary_search_by", "binary_search_by_key", "to_vec", "into_vec", "repeat", "concat", "join", "is_sorted", "is_sorted_by", "is_sorted_by_key",
+            "partition_point", "is_ascii", "eq_ignore_ascii_case", "to_ascii_uppercase", "to_ascii_lowercase", "escape_ascii", "iter_mut",
         ];
+        // (an array's own; a slice's are at the unsized step, `[T]`, not at `[T; N]`)
+        const ARRAY: &[&str] = &["map", "as_slice", "as_mut_slice", "each_ref", "each_mut"];
+        const NUM_BY_REF: &[&str] = &["eq_ignore_ascii_case", "to_ascii_uppercase", "to_ascii_lowercase", "make_ascii_uppercase", "make_ascii_lowercase"];
+        const NOT_NUM: &[&str] = &["as_bytes", "as_ptr", "is_null", "read_volatile", "write_volatile", "offset", "wrapping_offset", "read_unaligned", "write_unaligned", "try_into"];
         let helper = |pre: &str| self.index.contains_key(&format!("{pre}{m}"));
+        if !matches!(u, Ty::Str | Ty::Slice(_) | Ty::Array(..) | Ty::Bool | Ty::Char) && !u.is_int() && !u.is_float() {
+            return None;
+        }
+        // (the prelude's own inherent method of the type: as its signature takes self)
+        if let Some(i) = self.prim_method(u, m).filter(|&i| self.sigs[i as usize].impl_trait.is_none() && self.sigs[i as usize].has_self) {
+            return Some(match self.sigs[i as usize].params.first() {
+                Some(Ty::Ref(rm, _)) => Some(*rm),
+                _ => None,
+            });
+        }
         // (by reference, `&mut self` for the methods that mutate)
-        let by_ref = || Some(Some(MUT_SLICE_METHODS.contains(&m) || m.ends_with("_mut") || matches!(m, "as_bytes_mut")));
+        let by_ref = || Some(Some(MUT_SLICE_METHODS.contains(&m) || m.ends_with("_mut")));
         match u {
-            Ty::Str => (SEQ.contains(&m) || helper("__exr_str_") || crate::ast_infer::is_builtin_scalar_method(m)).then(by_ref).flatten(),
-            Ty::Slice(_) | Ty::Array(..) => (SEQ.contains(&m) || helper("__exr_slice_") || m.starts_with("sort_") || MUT_SLICE_METHODS.contains(&m)).then(by_ref).flatten(),
+            Ty::Str => (STR.contains(&m) || helper("__exr_str_")).then(by_ref).flatten(),
+            Ty::Slice(_) => (SLICE.contains(&m) || MUT_SLICE_METHODS.contains(&m) || helper("__exr_slice_")).then(by_ref).flatten(),
+            Ty::Array(..) => match m {
+                "map" => Some(None),
+                _ => ARRAY.contains(&m).then(by_ref).flatten(),
+            },
             u if u.is_int() || u.is_float() || matches!(u, Ty::Bool | Ty::Char) => {
-                // (the prelude's own method: as its signature takes self)
-                if let Some(i) = self.prim_method(u, m).filter(|&i| self.sigs[i as usize].impl_trait.is_none()) {
-                    return Some(match self.sigs[i as usize].params.first() {
-                        Some(Ty::Ref(rm, _)) => Some(*rm),
-                        _ => None,
-                    });
-                }
-                if !(crate::ast_infer::is_builtin_scalar_method(m) || helper("__exr_char_")) {
+                if !((crate::ast_infer::is_builtin_scalar_method(m) && !NOT_NUM.contains(&m)) || helper("__exr_char_")) {
                     return None;
                 }
                 Some((m.starts_with("is_ascii") || NUM_BY_REF.contains(&m)).then(|| m.starts_with("make_ascii")))
