@@ -3399,6 +3399,17 @@ impl Cx<'_> {
             }
             &same_self
         };
+        // (a function without `self` or arguments in impls of one trait with other arguments for one type (typenum's
+        // `impl ToInt<i8> for Z0 { fn to_int() -> i8 }` beside `ToInt<i16>`'s): the one whose result is the type
+        // expected, from which rustc infers the trait's argument)
+        if recv.is_none() && args.is_empty() && !own.has_self && own.impl_trait.is_some() {
+            if let Some(want) = expected.filter(|&w| !self.prog.has_param(w)) {
+                let by_ret: Vec<u32> = cands.iter().copied().filter(|&c| self.prog.sigs[c as usize].impl_trait.is_some() && self.prog.sigs[c as usize].ret == want).collect();
+                if let [c] = by_ret[..] {
+                    return c;
+                }
+            }
+        }
         let Some(at) = recv.or_else(|| args.first().and_then(|a| self.peek(a))) else {
             return id;
         };
