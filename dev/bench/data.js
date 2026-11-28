@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795855631737,
+  "lastUpdate": 1795855634588,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -96832,6 +96832,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 155.891,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f025189cc6c58470c828221b29b9e5d482df97c1",
+          "message": "Region check part 43: trait obligations of calls and the placeholders of their binders (higher-ranked bounds, 1) (#350)\n\nRegion check part 43: trait obligations of calls and the placeholders of their binders (higher-ranked bounds, 1)",
+          "timestamp": "2026-11-28T17:39:24+09:00",
+          "tree_id": "57ac214bbfc62096c8f5fe645049efad9532648f",
+          "url": "https://github.com/mizchi/zust/commit/f025189cc6c58470c828221b29b9e5d482df97c1"
+        },
+        "date": 1795855634066,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.08,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.848,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 2.25,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.961,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.194,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.482,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 3.077,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 332.501,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 160.312,
             "unit": "MiB"
           }
         ]
