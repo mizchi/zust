@@ -4062,9 +4062,8 @@ fn __exr_str_chars<G>(s: &str) -> Chars {
 // マクロは codegen が展開し、値ごとに `__exr_display::<T>` / `__exr_debug::<T>` (型ごとに codegen が
 // 本体を作る) を呼ぶ。数値・文字列の書き出しとパディング、Debug の整形はここの関数が行う
 
-pub struct __FmtError {
-    _p: u8,
-}
+// `std::fmt::Error`: a unit struct, as std's (`Err(fmt::Error)`)
+pub struct __FmtError;
 
 pub struct Formatter {
     buf: &mut String,
@@ -10210,6 +10209,28 @@ impl<T> JoinHandle<T> {
     }
 }
 
+// `std::os::unix::thread::RawPthread` / `JoinHandleExt`: a JoinHandle's pthread_t (an unsigned long on Linux)
+pub type RawPthread = u64;
+
+pub trait JoinHandleExt {
+    fn as_pthread_t(&self) -> RawPthread;
+    fn into_pthread_t(self) -> RawPthread;
+}
+
+impl<T> JoinHandleExt for JoinHandle<T> {
+    fn as_pthread_t(&self) -> RawPthread {
+        self.pt
+    }
+    // (as std's: the handle is given up, neither joined nor detached, so the caller may join the pthread_t)
+    fn into_pthread_t(self) -> RawPthread {
+        let (pt, pk, th) = (self.pt, self.pk, self.th.__th);
+        __core_forget(self);
+        __exr_thread_release(th);
+        __exr_packet_release(pk);
+        pt
+    }
+}
+
 // (a handle dropped without join: the thread is detached, and runs on alone)
 impl<T> Drop for JoinHandle<T> {
     fn drop(&mut self) {
@@ -12291,6 +12312,15 @@ impl Error for LayoutError {
 impl Error for Infallible {
     fn __err_mark(&self) {}
 }
+impl Error for __FmtError {
+    fn __err_mark(&self) {}
+}
+impl<T> Error for PoisonError<T> {
+    fn __err_mark(&self) {}
+}
+impl<T> Error for TryLockError<T> {
+    fn __err_mark(&self) {}
+}
 
 // `Box<dyn Error>`: 変換した時点で表示 ({}) と Debug ({:?}) の文字列にしておく
 pub struct __DynError {
@@ -12301,6 +12331,14 @@ pub struct __DynError {
 impl Display for __DynError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
         __exr_fmt_str::<()>(f, self.msg.as_str());
+        Ok(())
+    }
+}
+
+// (std's text for `fmt::Error`)
+impl Display for __FmtError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_str::<()>(f, "an error occurred when formatting an argument");
         Ok(())
     }
 }
@@ -17817,7 +17855,8 @@ impl Debug for Instant {
         // taken off)
         let t = self.__in_d.as_secs();
         let (sign, mag) = if t < __EXR_INSTANT_BASE { ("-", __EXR_INSTANT_BASE - t) } else { ("", t - __EXR_INSTANT_BASE) };
-        let s = format!("Instant {{ tv_sec: {}{}, tv_nsec: {} }}", sign, mag, self.__in_d.subsec_nanos());
+        // (`\x49` for the `I`: a program's own `Instant` renames this one, word by word, as in Layout's and Thread's)
+        let s = format!("\x49nstant {{ tv_sec: {}{}, tv_nsec: {} }}", sign, mag, self.__in_d.subsec_nanos());
         f.pad(&s)
     }
 }
