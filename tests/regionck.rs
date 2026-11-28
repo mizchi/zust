@@ -6196,6 +6196,19 @@ struct S8<T: Iterator<Item = (u8, Vec<String>)>>(T);
 impl<T: Iterator<Item = (u8, Vec<String>)>> Drop for S8<T> { fn drop(&mut self) {} }
 fn main() {}
 "#, &[], "e2-e8");
+    // (the review's: values the same type spelled apart (a path's prefix, an alias of the program's) are not
+    // reported; ones surely apart are, std's and the program's types among them)
+    errors_at(r#"type B = u8;
+struct S1<T: Iterator<Item = String>>(T);
+impl<T: Iterator<Item = std::string::String>> Drop for S1<T> { fn drop(&mut self) {} }
+struct S2<T: Iterator<Item = u8>>(T);
+impl<T: Iterator<Item = B>> Drop for S2<T> { fn drop(&mut self) {} }
+struct S4<T: Iterator<Item = Option<u8>>>(T);
+impl<T: Iterator<Item = core::option::Option<u8>>> Drop for S4<T> { fn drop(&mut self) {} }
+fn main() {}
+"#, &[], "q1-q4");
+    errors_at("struct S<T: Iterator<Item = Vec<u8>>>(T);\nimpl<T: Iterator<Item = std::vec::Vec<u16>>> Drop for S<T> { fn drop(&mut self) {} }\nfn main() {}\n", &[(2, "requires `<T as Iterator>::Item == std::vec::Vec<u16>`")], "v1");
+    errors_at("struct Foo;\nstruct S<T: Iterator<Item = Foo>>(T);\nimpl<T: Iterator<Item = u8>> Drop for S<T> { fn drop(&mut self) {} }\nfn main() {}\n", &[(3, "requires `<T as Iterator>::Item == u8`")], "v3");
     // (a trait object's arguments are invariant: a `'static` of the value's there makes `let _`'s annotation's
     // lifetime 'static (variance/variance-associated-types2.rs))
     errors_at("trait Foo { type Bar; }\nfn make() -> Box<dyn Foo<Bar = &'static u32>> { panic!() }\nfn take<'a>(_: &'a u32) {\n    let _: Box<dyn Foo<Bar = &'a u32>> = make();\n}\nfn main() {}\n", &[(4, "lifetime may not live long enough")], "d1");

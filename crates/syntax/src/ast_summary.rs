@@ -1265,6 +1265,55 @@ fn eq_ty_text(t: &PTy, rename: &dyn Fn(&str) -> Option<String>, depth: u32) -> O
     })
 }
 
+/// Whether two equations' values (eq_ty_text's, in the definition's names) are surely of different types: apart with
+/// each path taken by its last segment (`std::string::String` is `String`), and naming only primitives, std's
+/// nominal types, the program's structs, enums and unions and the definition's parameters (lts, tys), none of which
+/// the program declares an alias of (another name may be an alias of the other side's: `type B = u8`)
+fn eq_values_apart(src: &str, a: &str, b: &str, lts: &[&str], tys: &[&str]) -> bool {
+    // (`struct Foo` in the program's text, a whole name: a nominal type of its own)
+    let declares = |pat: &str| src.match_indices(pat).any(|(i, _)| !src[i + pat.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_'));
+    let norm = |s: &str| -> Option<String> {
+        let cs: Vec<char> = s.chars().collect();
+        let mut out = String::new();
+        let mut i = 0;
+        while i < cs.len() {
+            let c = cs[i];
+            if c.is_alphabetic() || c == '_' || c == '\'' {
+                let st = i;
+                i += 1;
+                while i < cs.len() && (cs[i].is_alphanumeric() || cs[i] == '_') {
+                    i += 1;
+                }
+                let w: String = cs[st..i].iter().collect();
+                // (a path's prefix: dropped)
+                if cs.get(i) == Some(&':') && cs.get(i + 1) == Some(&':') {
+                    i += 2;
+                    continue;
+                }
+                if w.starts_with('\'') {
+                    if w != "'static" && !lts.contains(&w.as_str()) {
+                        return None;
+                    }
+                } else if !matches!(w.as_str(), "mut" | "const") {
+                    let known = matches!(w.as_str(), "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "f32" | "f64" | "bool" | "char" | "str"
+                        | "String" | "Vec" | "Option" | "Box" | "Rc" | "Arc" | "Cell" | "RefCell" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "VecDeque")
+                        || tys.contains(&w.as_str())
+                        || ["struct ", "enum ", "union "].iter().any(|k| declares(&format!("{k}{w}")));
+                    if !known || src.contains(&format!("type {w} ")) || src.contains(&format!("type {w}<")) || src.contains(&format!("type {w}=")) {
+                        return None;
+                    }
+                }
+                out.push_str(&w);
+            } else {
+                out.push(c);
+                i += 1;
+            }
+        }
+        Some(out)
+    };
+    matches!((norm(a), norm(b)), (Some(x), Some(y)) if x != y)
+}
+
 /// A `Drop` impl (its header imp) against the definition of its struct, enum or union (adt): its self type's arguments
 /// are its own parameters, each once (E0366), and what its header and where clauses require of them is what the
 /// definition requires, or what its fields imply (E0367, as rustc's `ensure_drop_predicates_are_implied_by_item_defn`).
@@ -1457,7 +1506,7 @@ pub fn drop_impl_unmet(src: &str, imp: &SrcItem, adt: &SrcItem, supers: &crate::
                                 let same = match x.2.iter().find(|e| e.0 == bn) {
                                     None => false,
                                     Some((_, None)) => true,
-                                    Some((_, Some(ak))) => *ak == bk,
+                                    Some((_, Some(ak))) => *ak == bk || !eq_values_apart(src, ak, &bk, &a_lts, &a_rest),
                                 };
                                 if !same {
                                     return Some((at_line, unmet(format!("<{n} as {t}>::{bn} == {}", bv.unwrap_or(bk)))));
