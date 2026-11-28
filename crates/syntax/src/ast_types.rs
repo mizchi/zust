@@ -86,6 +86,11 @@ pub(crate) fn const_expr_text(e: &Expr) -> Option<String> {
         Expr::Binary(op, l, r, _) => format!("({} {op} {})", const_expr_text(l)?, const_expr_text(r)?),
         Expr::Unary(op, x, _) if op == "-" => format!("(-{})", const_expr_text(x)?),
         Expr::Paren(x) => const_expr_text(x)?,
+        // (`u8::max_value()`: the type's constant, `u8::MAX` (#265))
+        Expr::Call(f, args) if crate::parse::int_bound_call(f, args).is_some() => {
+            let (Expr::Path(None, p), Some((_, k))) = (&**f, crate::parse::int_bound_call(f, args)) else { return None };
+            format!("{}::{k}", p.segs[0].name)
+        }
         // (`size_of::<c_long>()` / `mem::align_of::<T>()`: Program::eval_const knows primitives, pointers and aliases
         // of them; libc 0.2's `[u8; 128 - 2 * size_of::<c_int>()]`)
         Expr::Call(f, args)
@@ -456,6 +461,13 @@ fn path_ty(p: &Path, self_ty: Option<&TySyn>) -> R<TySyn> {
             return Err("`io::Result` needs a type argument".to_string());
         };
         return Ok(TySyn::App("Result".into(), vec![tysyn(a, self_ty)?, io_err]));
+    }
+    // `thread::Result<T>` (a join's result: Err is the panic's payload, the prelude's __ThreadPanic)
+    if n >= 2 && p.segs[n - 2].name == "thread" && last.name == "Result" {
+        let Some(GArg::Ty(a)) = last.args.first() else {
+            return Err("`thread::Result` needs a type argument".to_string());
+        };
+        return Ok(TySyn::App("Result".into(), vec![tysyn(a, self_ty)?, TySyn::Named("__ThreadPanic".into())]));
     }
     // (`Result<T>` with one argument: `std::io::Result` imported by name (`use std::io::{self, Result};`), which is
     // the only way a one-argument `Result` names a type)

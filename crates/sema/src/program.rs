@@ -522,6 +522,8 @@ pub fn prim_assoc_const(t: Ty, name: &str) -> Option<i128> {
     let bits = t.bits();
     Some(match (name, t.signed()) {
         ("BITS", _) => bits as i128,
+        // (`char::REPLACEMENT_CHARACTER`, U+FFFD, and `core::char::REPLACEMENT_CHARACTER` (its deprecated module's))
+        ("REPLACEMENT_CHARACTER", _) if t == Ty::Char => 0xFFFD,
         // (u128::MAX is held as its bit pattern: -1)
         ("MAX", true) => (u128::MAX >> (129 - bits)) as i128,
         ("MIN", true) => -((u128::MAX >> (129 - bits)) as i128) - 1,
@@ -2815,22 +2817,9 @@ impl Program {
                 && sm.impl_generics.iter().any(|g| g.0 == *sn);
             if ref_of_param {
                 // (its methods are not called: a call on the reference reaches T's through the deref, which is what
-                // one that forwards to T's does (the driver reports one that does more). A default method it leaves out
-                // would run with Self = &T, not T's: not supported)
-                // (the impl's members: the items that name this header)
-                let defined: Vec<&String> = items
-                    .iter()
-                    .zip(sums)
-                    .skip(ii + 1)
-                    .take_while(|(m, _)| matches!(m.kind, crate::lexer::ItemKind::ImplMember(h) if h as usize == ii))
-                    .flat_map(|(_, s)| s.ref_impl_fns.iter())
-                    .collect();
-                let left_out = p.traits.get(tr).and_then(|ids| {
-                    ids.iter().filter(|&&id| p.sigs[id as usize].has_body).map(|&id| p.names[id as usize].rsplit("::").next().unwrap_or("")).find(|m| !defined.iter().any(|f| f == m))
-                });
-                if let Some(m) = left_out {
-                    return Err(format!("{}:1: impls for references to a type parameter (`impl<T> {tr} for &T`) are supported only when they define each default method of the trait, forwarding to T's: `{m}` is left out", it.line));
-                }
+                // one that forwards to T's does. One that does more, and a default method it leaves out (which would run
+                // with Self = &T, not T's), the driver reports where the program may call it through a bound
+                // (first_called_ref_impl_fn))
                 // (`impl<T> Foo for T` covers `&U` too; `&T` and `&mut T` are two types)
                 let m = matches!(&sm.impl_self_ty, Some(TySyn::Ref(true, _)));
                 if bare_blankets.contains(tr) || !ref_blankets.insert((tr.clone(), m)) {
@@ -4106,6 +4095,8 @@ impl Program {
                 // Mutex is Sync when T is Send, an Arc or RwLock when T is Send and Sync)
                 let args = &self.structs[sid as usize].args;
                 match name {
+                    // (std's atomics, AtomicPtr<T> too, are Send and Sync whatever they point to)
+                    n if ours && n.starts_with("Atomic") => return true,
                     "Rc" | "Ref" | "RefMut" if ours => return false,
                     "MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard" | "StdoutLock" if !sync && ours => return false,
                     "Cell" | "RefCell" | "LazyCell" | "OnceCell" | "UnsafeCell" | "__Rcvr__" if sync && ours => return false,
@@ -4894,6 +4885,11 @@ impl Program {
                 r
             }
             Expr::Path(None, p) if p.segs.len() == 1 && (p.segs[0].name == "true" || p.segs[0].name == "false") => un((p.segs[0].name == "true") as i128),
+            // (`usize::max_value()`: the type's `MAX`, getrandom's `const FD_UNINIT: usize = usize::max_value();` (#265))
+            Expr::Call(f, args) if crate::parse::int_bound_call(f, args).is_some() => {
+                let (t, k) = crate::parse::int_bound_call(f, args).unwrap();
+                self.prim_const_t(t, k)
+            }
             // (`size_of::<T>()` / `align_of::<T>()` of a primitive, a pointer or an alias of one: an array length in
             //  libc 0.2, `[u8; 128 - 2 * size_of::<c_int>()]`. Other types are not known here)
             Expr::Call(f, args)
@@ -5341,6 +5337,8 @@ impl Program {
             Expr::Paren(x) | Expr::Ref(_, x) => self.static_ty(x),
             Expr::Unary(op, x, _) if op == "-" || op == "!" => self.static_ty(x),
             Expr::Cast(_, t) => It::of_name(&self.cast_prim(t)),
+            // (`u32::max_value()`, as `u32::MAX`)
+            Expr::Call(f, args) if crate::parse::int_bound_call(f, args).is_some() => It::of_ty(crate::parse::int_bound_call(f, args)?.0),
             Expr::Binary(op, l, r, _) => match op.as_str() {
                 "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||" => None,
                 "<<" | ">>" => self.static_ty(l),

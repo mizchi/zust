@@ -4478,6 +4478,11 @@ impl Cx<'_> {
 
     fn call_inner(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Call(func, cargs) = c else { return err(SP, "internal: expected a call") };
+        // (`u32::max_value()` / `i8::min_value()`: the integer type's `MAX` / `MIN`, as `u32::MAX` (#265))
+        if let Some((t, k)) = crate::parse::int_bound_call(func, cargs) {
+            let v = crate::program::prim_assoc_const(t, k).unwrap_or(0);
+            return Ok((Some(self.int_const(t, v)), t));
+        }
         // (E0040: `Drop::drop(&mut x)`, `<S as Drop>::drop(..)`)
         if let (true, Expr::Path(_, p)) = (self.user_code, &**func) {
             if p.segs.len() >= 2 && p.segs[p.segs.len() - 1].name == "drop" && p.segs[p.segs.len() - 2].name == "Drop" {
