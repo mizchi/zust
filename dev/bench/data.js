@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795854516534,
+  "lastUpdate": 1795854519206,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -156713,6 +156713,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui check-pass passing",
             "value": 1563,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 73.95,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5462,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2e69ffd1bb70e491228f87ccc2e1d6d688dab800",
+          "message": "acg: dispatch to impls for references to a type parameter (#328)\n\nCalls through a type parameter's bound now dispatch to a non-forwarding `impl<T: Tr> Tr for &T` (and `&mut T`) as rustc does, instead of the stopgap that refused such impls. Receivers zustc cannot trace to a type parameter or an opaque value (a closure's result, a pattern's binding, an index) whose two readings would call different methods are reported as unsupported rather than run as T's method.\n\nPart of #144\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-28T08:22:06Z",
+          "tree_id": "36b984fa392978da3c78df84db90ebc6f0905824",
+          "url": "https://github.com/mizchi/zust/commit/2e69ffd1bb70e491228f87ccc2e1d6d688dab800"
+        },
+        "date": 1795854518766,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 80.65,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1938,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 86.27,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1564,
             "unit": "tests"
           },
           {
