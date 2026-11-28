@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795855640493,
+  "lastUpdate": 1795856634651,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -67574,6 +67574,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 62.168,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ef3469ee3df97c18d7ddc995b6f8bc4bff049f1b",
+          "message": "syntax, sema, typeck: `fmt::Result` and defaulted const parameters used without arguments (#346)\n\n`missing generics for Result` / `ObjectIdentifier` (bytes, const-oid, time-core): `fmt::Result` / `io::Result` / `thread::Result` imported by name now name std's aliases rather than the prelude's generic `Result`, and a type with defaulted const parameters (`struct B<const N: usize = 3>`) can be used without arguments, as rustc allows. Explicit arguments before `::default()` are kept, a const default may name an earlier parameter, and an import of `Result` stays in the type namespace.\n\nThe KPI ceilings of `edit one fn` and `traits edit` are raised to this head: main's base was already above them, and this change costs +0.40% / +0.14% against its base.\n\nFixes #260\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-28T08:57:52Z",
+          "tree_id": "3969f2411f4cf0f231890d92862e3c301a3e0303",
+          "url": "https://github.com/mizchi/zust/commit/ef3469ee3df97c18d7ddc995b6f8bc4bff049f1b"
+        },
+        "date": 1795856634358,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 128.493,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.725,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 18.291,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 42.001,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 23.062,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 324.086,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.557,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.548,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 125.331,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 796.14,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 589.283,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.722,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 69.507,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 197.099,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.906,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.445,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1903.182,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.548,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 597.762,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3923.953,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.519,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 91.508,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 42.943,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 53.005,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 95.877,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 148.746,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 37.987,
             "unit": "ms"
           }
         ]
