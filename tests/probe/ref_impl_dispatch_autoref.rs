@@ -2,7 +2,7 @@
 // probe's autoref at the first step makes Self = `&a` before a slice's method at the unsized step (`a.len()` of an
 // array is the impl's), a number's name is not a str's (`"abc".abs()` is the impl's), and a struct's own method
 // comes first where its receiver is the try's (`self` by value, `&self` at the `&` autoref), not one taking
-// `&mut self`
+// `&mut self`; a scalar's builtins are its type's own (`is_ascii` a u8's, not an i32's; `abs` not a u32's)
 trait Tr {
     fn abs(self) -> u32;
 }
@@ -27,6 +27,14 @@ impl<T: ?Sized> Val for &T {
         5
     }
 }
+trait Asc {
+    fn is_ascii(self) -> bool;
+}
+impl<T> Asc for &T {
+    fn is_ascii(self) -> bool {
+        false
+    }
+}
 struct Own;
 impl Own {
     fn val(&self) -> u32 {
@@ -48,4 +56,6 @@ fn main() {
     let s: &[i32] = &a;
     println!("{}", s.len());
     println!("{} {} {}", Own.val(), Bare.val(), MutOwn.val());
+    let (x, c, u) = (65i32, 65u8, 5u32);
+    println!("{} {} {} {}", (&x).is_ascii(), (&c).is_ascii(), (&u).abs(), u.abs());
 }

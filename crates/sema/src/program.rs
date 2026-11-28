@@ -4607,10 +4607,21 @@ impl Program {
                 _ => ARRAY.contains(&m).then(by_ref).flatten(),
             },
             u if u.is_int() || u.is_float() || matches!(u, Ty::Bool | Ty::Char) => {
-                if !((crate::ast_infer::is_builtin_scalar_method(m) && !NOT_NUM.contains(&m)) || helper("__exr_char_")) {
-                    return None;
-                }
-                Some((m.starts_with("is_ascii") || NUM_BY_REF.contains(&m)).then(|| m.starts_with("make_ascii")))
+                // (each scalar type's own: the ASCII ones a u8's and a char's, `abs` a signed number's, the bit ones
+                // an integer's; a char's others the prelude's `__exr_char_` helpers)
+                let ascii = m.starts_with("is_ascii") || NUM_BY_REF.contains(&m);
+                let known = match u {
+                    _ if ascii => matches!(u, Ty::U8 | Ty::Char),
+                    Ty::Bool => false,
+                    Ty::Char => helper("__exr_char_"),
+                    u if u.is_float() => matches!(m, "abs" | "signum" | "rem_euclid" | "div_euclid" | "to_le_bytes" | "to_be_bytes" | "to_ne_bytes"),
+                    u => {
+                        let signed_only = matches!(m, "abs" | "signum" | "is_positive" | "is_negative" | "checked_abs" | "wrapping_abs" | "saturating_abs" | "overflowing_abs" | "unsigned_abs" | "saturating_neg");
+                        let unsigned_only = matches!(m, "is_power_of_two" | "next_power_of_two" | "next_multiple_of" | "wrapping_add_signed");
+                        crate::ast_infer::is_builtin_scalar_method(m) && !NOT_NUM.contains(&m) && !(signed_only && !u.signed()) && !(unsigned_only && u.signed())
+                    }
+                };
+                known.then(|| ascii.then(|| m.starts_with("make_ascii")))
             }
             _ => None,
         }
