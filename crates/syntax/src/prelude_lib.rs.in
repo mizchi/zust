@@ -4100,8 +4100,8 @@ pub trait Debug {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
 }
 
-// (`fmt::Pointer` and the radix traits: zustc formats `{:p}` / `{:x}` itself; the traits are here for code that
-// implements or names them)
+// (`fmt::Pointer`: zustc formats `{:p}` of a reference / pointer itself; `{:p}` of a type of the program's calls its
+// impl)
 pub trait Pointer {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
 }
@@ -4326,13 +4326,111 @@ fn __exr_fmt_ptr<G>(f: &mut Formatter, a: usize) {
             break;
         }
     }
-    let mut s = String::from("0x");
+    let mut s = String::from(if f.plus { "+0x" } else { "0x" });
+    let lead = s.len();
     let mut i = d.len();
     while i > 0 {
         i -= 1;
         s.push(d[i] as char);
     }
-    __exr_pad::<()>(f, &s, 2);
+    // (`{:#p}` / `{:#?}`: zero-extended to the pointer's width, as std writes it; `{:010p}`: the zeros after `0x` (and
+    // `+`))
+    if f.alt {
+        let (w, z) = (f.width, f.zero);
+        if w == 0 {
+            f.width = 2 + 2 * core::mem::size_of::<usize>();
+        }
+        f.zero = true;
+        __exr_pad_lead::<()>(f, &s, lead);
+        f.width = w;
+        f.zero = z;
+        return;
+    }
+    __exr_pad_lead::<()>(f, &s, lead);
+}
+
+// a number's text with `{:0w}`: the zeros after its first `lead` bytes (`0x`), as std pads a pointer; without the 0
+// flag, __exr_pad's fill and alignment
+fn __exr_pad_lead<G>(f: &mut Formatter, s: &str, lead: usize) {
+    let sb = s.as_bytes();
+    if !f.zero || f.width <= sb.len() {
+        __exr_pad::<()>(f, s, 2);
+        return;
+    }
+    f.buf.push_str(&s[..lead]);
+    let mut z = f.width - sb.len();
+    while z > 0 {
+        f.buf.push('0');
+        z -= 1;
+    }
+    f.buf.push_str(&s[lead..]);
+}
+
+// `{:p}` of a pointer to a `dyn`: `Pointer { addr: 0x.., metadata: DynMetadata(0x..) }`, the address and the vtable's
+// each with the spec's width and flags, as std writes it (`{:#p}`: on lines)
+fn __exr_fmt_dyn_ptr<G>(f: &mut Formatter, a: usize, vt: usize) {
+    if f.alt {
+        f.buf.push_str("Pointer {\n");
+        f.indent += 1;
+        __exr_indent::<()>(f);
+        f.buf.push_str("addr: ");
+        __exr_fmt_ptr::<()>(f, a);
+        f.buf.push_str(",\n");
+        __exr_indent::<()>(f);
+        f.buf.push_str("metadata: DynMetadata(\n");
+        f.indent += 1;
+        __exr_indent::<()>(f);
+        __exr_fmt_ptr::<()>(f, vt);
+        f.buf.push_str(",\n");
+        f.indent -= 1;
+        __exr_indent::<()>(f);
+        f.buf.push_str("),\n");
+        f.indent -= 1;
+        __exr_indent::<()>(f);
+        f.buf.push('}');
+    } else {
+        f.buf.push_str("Pointer { addr: ");
+        __exr_fmt_ptr::<()>(f, a);
+        f.buf.push_str(", metadata: DynMetadata(");
+        __exr_fmt_ptr::<()>(f, vt);
+        f.buf.push_str(") }");
+    }
+}
+
+// `{:p}` of a pointer to a slice / str: `Pointer { addr: 0x.., metadata: 5 }`, its address and length each with the
+// spec's width and flags, as std writes it (`{:#p}`: on lines, the address zero-extended)
+fn __exr_fmt_fat_ptr<G>(f: &mut Formatter, a: usize, n: usize) {
+    let r = f.radix;
+    let alt = f.alt;
+    if alt {
+        f.buf.push_str("Pointer {\n");
+        f.indent += 1;
+        __exr_indent::<()>(f);
+        f.buf.push_str("addr: ");
+    } else {
+        f.buf.push_str("Pointer { addr: ");
+    }
+    __exr_fmt_ptr::<()>(f, a);
+    if alt {
+        f.buf.push_str(",\n");
+        __exr_indent::<()>(f);
+        f.buf.push_str("metadata: ");
+    } else {
+        f.buf.push_str(", metadata: ");
+    }
+    f.radix = 0;
+    f.alt = false;
+    __exr_fmt_int::<()>(f, n as u64, false);
+    f.radix = r;
+    f.alt = alt;
+    if alt {
+        f.buf.push_str(",\n");
+        f.indent -= 1;
+        __exr_indent::<()>(f);
+        f.buf.push('}');
+    } else {
+        f.buf.push_str(" }");
+    }
 }
 
 // 幅に足りない分を fill で埋める (既定の寄せは def_align)
@@ -17168,6 +17266,26 @@ pub trait LowerExp {
 pub trait UpperExp {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
 }
+// (std's Pointer of a reference / raw pointer / Box: its address, which the compiler writes itself (`{:p}`, and
+// `fmt::Pointer::fmt(&r, f)` through these); `{:p}` of a type of the program's calls its impl, __exr_fmt_pointer)
+fn __exr_pointer_fmt<G>(a: usize, f: &mut Formatter) -> Result<(), __FmtError> {
+    __exr_fmt_ptr::<()>(f, a);
+    Ok(())
+}
+fn __exr_fat_pointer_fmt<G>(a: usize, n: usize, f: &mut Formatter) -> Result<(), __FmtError> {
+    __exr_fmt_fat_ptr::<()>(f, a, n);
+    Ok(())
+}
+fn __exr_dyn_pointer_fmt<G>(a: usize, vt: usize, f: &mut Formatter) -> Result<(), __FmtError> {
+    __exr_fmt_dyn_ptr::<()>(f, a, vt);
+    Ok(())
+}
+// (the two words of a fat pointer x points to: its address and its length or vtable, as `Pointer::fmt(&p, f)` of a
+// `*const [u8]` / `&dyn Tr` writes them)
+fn __exr_fat_words<T>(x: &T) -> (usize, usize) {
+    let w = x as *const T as *const usize;
+    unsafe { (*w, *w.add(1)) }
+}
 // (a number in the radix of the trait whose fmt is called, whatever spec the Formatter was given: 1 x, 2 X, 3 b, 4 o. A
 // signed one is given as the unsigned type of its width, whose value its bits are: `-1i8` is `ff`, as std's)
 fn __exr_radix_fmt<T>(x: &T, f: &mut Formatter, radix: u8) -> Result<(), __FmtError> {
@@ -17615,6 +17733,122 @@ fn __exr_fmt_lowerexp<T: LowerExp>(x: &T, f: &mut Formatter) {
 }
 fn __exr_fmt_upperexp<T: UpperExp>(x: &T, f: &mut Formatter) {
     let _ = UpperExp::fmt(x, f);
+}
+fn __exr_fmt_pointer<T: Pointer>(x: &T, f: &mut Formatter) {
+    let _ = Pointer::fmt(x, f);
+}
+
+// `std::time::Instant`: CLOCK_MONOTONIC's time (through the threads' `__exr_clock_gettime`)
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Instant {
+    // (CLOCK_MONOTONIC's time plus __EXR_INSTANT_BASE: an Instant before the clock's origin, `now - 1 day` on a
+    // machine up for an hour, as std's signed seconds can)
+    __in_d: Duration,
+}
+
+const __EXR_INSTANT_BASE: u64 = 4294967296;
+
+impl Instant {
+    pub fn now() -> Instant {
+        let mut ts = [0i64, 0i64];
+        if unsafe { __exr_clock_gettime(1, &mut ts) } != 0 {
+            panic!("clock_gettime(CLOCK_MONOTONIC) failed");
+        }
+        Instant { __in_d: Duration::new(ts[0] as u64 + __EXR_INSTANT_BASE, ts[1] as u32) }
+    }
+    pub fn duration_since(&self, earlier: Instant) -> Duration {
+        self.__in_d.checked_sub(earlier.__in_d).unwrap_or(Duration::ZERO)
+    }
+    pub fn checked_duration_since(&self, earlier: Instant) -> Option<Duration> {
+        self.__in_d.checked_sub(earlier.__in_d)
+    }
+    pub fn saturating_duration_since(&self, earlier: Instant) -> Duration {
+        self.duration_since(earlier)
+    }
+    pub fn elapsed(&self) -> Duration {
+        Instant::now().duration_since(*self)
+    }
+    pub fn checked_add(&self, d: Duration) -> Option<Instant> {
+        match self.__in_d.checked_add(d) {
+            Some(t) => Some(Instant { __in_d: t }),
+            None => None,
+        }
+    }
+    pub fn checked_sub(&self, d: Duration) -> Option<Instant> {
+        match self.__in_d.checked_sub(d) {
+            Some(t) => Some(Instant { __in_d: t }),
+            None => None,
+        }
+    }
+}
+
+impl Add<Duration> for Instant {
+    type Output = Instant;
+    fn add(self, d: Duration) -> Instant {
+        Instant { __in_d: self.__in_d + d }
+    }
+}
+impl AddAssign<Duration> for Instant {
+    fn add_assign(&mut self, d: Duration) {
+        self.__in_d = self.__in_d + d;
+    }
+}
+impl SubAssign<Duration> for Instant {
+    fn sub_assign(&mut self, rhs: Duration) {
+        *self = *self - rhs;
+    }
+}
+impl Sub<Duration> for Instant {
+    type Output = Instant;
+    fn sub(self, d: Duration) -> Instant {
+        Instant { __in_d: self.__in_d - d }
+    }
+}
+impl Sub<Instant> for Instant {
+    type Output = Duration;
+    fn sub(self, earlier: Instant) -> Duration {
+        self.duration_since(earlier)
+    }
+}
+
+impl Debug for Instant {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        // (the seconds less the base, as a sign and a u64: an Instant moved far ahead is past i64 before the base is
+        // taken off)
+        let t = self.__in_d.as_secs();
+        let (sign, mag) = if t < __EXR_INSTANT_BASE { ("-", __EXR_INSTANT_BASE - t) } else { ("", t - __EXR_INSTANT_BASE) };
+        let s = format!("Instant {{ tv_sec: {}{}, tv_nsec: {} }}", sign, mag, self.__in_d.subsec_nanos());
+        f.pad(&s)
+    }
+}
+
+
+/// `std::any::Any`: every type's TypeId (`dyn Any`'s `is`; a panic's payload, `Box<dyn Any + Send>`). `'static`, as
+/// std's: `T: Any` gives `T: 'static`, and `dyn Any + 'a` is E0478
+pub trait Any: 'static {
+    fn type_id(&self) -> TypeId;
+}
+impl<T: 'static + ?Sized> Any for T {
+    fn type_id(&self) -> TypeId {
+        TypeId::of::<T>()
+    }
+}
+// (for any object lifetime: std's `dyn Any` is always `'static`, as Any is, which `&dyn Any` takes here as `'_`)
+impl<'a> dyn Any + 'a {
+    pub fn is<T: 'static>(&self) -> bool {
+        self.type_id() == TypeId::of::<T>()
+    }
+}
+// (std's three inherent impls: an object's auto traits make it another type, so `dyn Any + Send`'s `is` is its own)
+impl<'a> dyn Any + Send + 'a {
+    pub fn is<T: 'static>(&self) -> bool {
+        self.type_id() == TypeId::of::<T>()
+    }
+}
+impl<'a> dyn Any + Send + Sync + 'a {
+    pub fn is<T: 'static>(&self) -> bool {
+        self.type_id() == TypeId::of::<T>()
+    }
 }
 
 // `std::sync::LockResult` / `TryLockResult` / `TryLockError`: what lock / read / write and their try_ forms give. No

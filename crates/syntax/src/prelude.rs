@@ -280,7 +280,7 @@ fn gated_trait(h: usize) -> Option<&'static str> {
                     matches!(*w, "Hasher" | "Hash" | "__BoolThen" | "__AsBytes" | "__PathExt" | "__AsPathStr" | "BufRead" | "Read" | "Seek" | "Write" | "__FWr" | "ExactSizeIterator" | "BuildHasher"
                         // (std::os::unix's: `size()` / `mode()` / `as_raw_fd()` of a program's own are no reason for them)
                         | "MetadataExt" | "OpenOptionsExt" | "PermissionsExt" | "AsRawFd" | "FromRawFd" | "IntoRawFd")
-                        || matches!(*w, "Binary" | "Octal" | "LowerHex" | "UpperHex" | "LowerExp" | "UpperExp")
+                        || matches!(*w, "Binary" | "Octal" | "LowerHex" | "UpperHex" | "LowerExp" | "UpperExp" | "Pointer")
                 })
             })
             .collect()
@@ -596,7 +596,7 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError"
                         | "SplitNStr" | "SliceSplitN" | "PoisonError"
                         | "File" | "OpenOptions" | "Metadata" | "FileType" | "Permissions" | "FpCategory"
-                        | "TryLockError" => Some(w),
+                        | "Instant" | "TryLockError" => Some(w),
                         // (std::num's NonZero types: their impls only with them)
                         w if w.starts_with("NonZero") => Some(w),
                         // HashMap's iterators (HmIter and so on) only when HashMap is used
@@ -640,7 +640,8 @@ const SHADOWABLE: &[&str] = &[
     "Once", "OnceState", "Layout", "LayoutError", "Condvar", "ControlFlow", "Repeat",
     "File", "OpenOptions", "Metadata", "FileType", "Permissions", "RawFd", "AsRawFd", "FromRawFd", "IntoRawFd",
     "MetadataExt", "OpenOptionsExt", "PermissionsExt", "FpCategory",
-    "Binary", "Octal", "LowerHex", "UpperHex", "LowerExp", "UpperExp",
+    "Instant", "Any",
+    "Binary", "Octal", "LowerHex", "UpperHex", "LowerExp", "UpperExp", "Pointer",
     "LockResult", "TryLockResult", "TryLockError",
 ];
 
@@ -1149,6 +1150,32 @@ impl<'a> PreludeScan<'a> {
 
 /// Whether src writes a C string literal, `c"..."` / `cr"..."`: a `c` that starts a token (not the end of `"abc"` or of a
 /// name)
+/// Whether the source has a format spec ending in `p`: `:` with fill / flags / width (`#`, `018`, `*>20`, `>w$`) between
+/// it and the `p`, then `}` (`{:p}`, `{pointer:#p}`), as a format string writes one. Only at the source's `p}`s, looked
+/// up first (the byte index of a large source): most sources have none
+fn has_ptr_spec(sc: &mut PreludeScan) -> bool {
+    if !sc.has("p}") {
+        return false;
+    }
+    let b = sc.src.as_bytes();
+    sc.src.match_indices("p}").any(|(at, _)| {
+        // (back to the spec's `:`, over what a spec may hold; a `{` / `}` / quote / line break first means it is not
+        // one. A `:` with another before it is the fill of `{::>8p}` when an alignment follows it, else a path's `::`)
+        let lo = at.saturating_sub(128);
+        let mut j = at;
+        while j > lo {
+            j -= 1;
+            match b[j] {
+                b'{' | b'}' | b'"' | b'\n' => return false,
+                b':' if j > 0 && b[j - 1] == b':' && !matches!(b.get(j + 1), Some(b'<' | b'^' | b'>')) => return false,
+                b':' => return j > 0 && (matches!(b[j - 1], b'{' | b':' | b'_') || b[j - 1].is_ascii_alphanumeric()),
+                _ => {}
+            }
+        }
+        false
+    })
+}
+
 fn has_cstr_literal(src: &str) -> bool {
     let b = src.as_bytes();
     let mut i = 0;
@@ -1162,6 +1189,44 @@ fn has_cstr_literal(src: &str) -> bool {
         i = at + 1;
     }
     false
+}
+
+/// A float literal such as `1.5` (a `.` between digits) outside string literals: the `.` and `"` of the source are
+/// gone through with memchr (`str::find` of a char), not byte by byte, as a large program has none of the one and few
+/// of the other (a quote after `\\` or `'` does not open or close a string)
+fn float_lit_in(src: &str) -> bool {
+    let b = src.as_bytes();
+    if b.len() < 3 {
+        return false;
+    }
+    // (the byte at 0 and the last are not looked at, as by the byte loop this replaces. `from` is 0 or just after an
+    // ASCII `"` / `.`: a char boundary)
+    let end = b.len() - 1;
+    let next = |from: usize, c: char| match src[from..].find(c) {
+        Some(k) if from + k < end => from + k,
+        _ => usize::MAX,
+    };
+    let first = |c: char| match next(0, c) {
+        0 => next(1, c),
+        k => k,
+    };
+    let mut in_str = false;
+    let (mut q, mut d) = (first('"'), first('.'));
+    loop {
+        if q < d {
+            if b[q - 1] != b'\\' && b[q - 1] != b'\'' {
+                in_str = !in_str;
+            }
+            q = next(q + 1, '"');
+        } else if d != usize::MAX {
+            if !in_str && b[d - 1].is_ascii_digit() && b[d + 1].is_ascii_digit() {
+                return true;
+            }
+            d = next(d + 1, '.');
+        } else {
+            return false;
+        }
+    }
 }
 
 pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCache) -> String {
@@ -1184,8 +1249,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             "clamp", "from_u32", "char", "join", "concat", "drain", "default", "f64", "f32", "i128", "u128", "Iterator", "into", "split_at_mut",
             "copy_from_slice", "clone_from_slice", "BufRead", "Read", "Seek", "SeekFrom", "Write", "__FWr", "Cursor", "ExactSizeIterator", "BuildHasher", "split_first_chunk", "first_chunk", "chunks_exact", "chunks_mut", "chunks_exact_mut", "is_sorted", "is_sorted_by", "is_sorted_by_key",
             "split_first", "split_last", "splitn",
+            // (the trait `Any`, a TraitHeader and so with no name of its own: `Box<dyn Any + Send>` alone needs it)
+            "Any",
             // (the fmt traits of `{:b}` / `{:x}` / `{:e}` .., TraitHeaders and so with no names of their own)
-            "Binary", "Octal", "LowerHex", "UpperHex", "LowerExp", "UpperExp",
+            "Binary", "Octal", "LowerHex", "UpperHex", "LowerExp", "UpperExp", "Pointer",
         ]);
         // Candidates per (first byte, length): however many prelude names there are, 0 or 1 comparisons per identifier
         let mut t: Vec<Vec<&'static str>> = vec![vec![]; 256 * 32];
@@ -1307,6 +1374,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         // (`{:?}` of a raw pointer)
         if sc.has("*const") || sc.has("*mut") {
             need.insert("__exr_fmt_ptr");
+        }
+        // (`{:p}`, `{pointer:p}`: a thin pointer's address, a slice's / dyn's `Pointer { addr, metadata }`)
+        if has_ptr_spec(&mut sc) {
+            need.extend(["__exr_fmt_ptr", "__exr_fmt_fat_ptr", "__exr_fmt_dyn_ptr"]);
         }
     }
     // `vec![..]` becomes Vec::with_capacity + push, and `"..".to_string()` becomes String::from
@@ -1749,25 +1820,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             })
         })
     });
-    let float_lit = !float_named && sc.any("float_lit", &|user_src: &str| {
-        let b = user_src.as_bytes();
-        // (not inside a string literal (`"{:8.3}"` and so on))
-        let mut in_str = false;
-        let mut found = false;
-        for i in 1..b.len().saturating_sub(1) {
-            match b[i] {
-                b'"' if b[i - 1] != b'\\' && b[i - 1] != b'\'' => in_str = !in_str,
-                b'.' if !in_str && b[i - 1].is_ascii_digit() && b[i + 1].is_ascii_digit() => {
-                    found = true;
-                    break;
-                }
-                _ => {}
-            }
-        }
-        found
-    });
+    let float_lit = !float_named && sc.any("float_lit", &|user_src: &str| float_lit_in(user_src));
     // (`d.as_secs_f64()`: the float comes from the prelude's Duration)
-    let float_dur = need.contains("Duration") && (sc.has("_f64") || sc.has("_f32"));
+    let float_dur = (need.contains("Duration") || need.contains("Instant")) && (sc.has("_f64") || sc.has("_f32"));
     if float_named || float_lit || float_dur {
         need.extend(["__exr_fmt_float", "__exr_powi", "__exr_powif", "__exr_ordering"]);
         // (`x.classify()`: the prelude's classifier, which codegen calls, and its FpCategory)
@@ -1974,6 +2029,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     let mut dur_ops = false;
     let mut fmt_write = false;
+    let mut any_trait = false;
     // (the fmt traits of `{:b}` / `{:x}` / `{:e}` .. that the program names: the helper codegen calls for each)
     let mut fmt_radix = 0u8;
     let mut as_mut_gate = false;
@@ -1998,7 +2054,19 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         // program that names the trait only in a bound, or calls `write!(w, ..)` on a generic `W`, never names
         // `write_str`. Every impl has it and the trait's defaults call it, so it comes with the trait (#148). In the
         // loop, as the trait can come in through another prelude item too)
-        if fmt_radix != 0x3f {
+        // (`dyn Any` (a panic's payload): the trait, whose one member is type_id, which the name alone would not bring)
+        if !any_trait && need.contains("Any") {
+            any_trait = true;
+            changed = true;
+            need.extend(["type_id", "TypeId"]);
+        }
+        // (std's Pointer: `{:p}` of a type of the program's, and `fmt::Pointer::fmt(&r, f)` of a reference)
+        if fmt_radix & 0x40 == 0 && need.contains("Pointer") {
+            fmt_radix |= 0x40;
+            changed = true;
+            need.extend(["__exr_fmt_pointer", "__exr_pointer_fmt", "__exr_fat_pointer_fmt", "__exr_dyn_pointer_fmt", "__exr_fat_words", "__exr_fmt_ptr", "__exr_fmt_fat_ptr", "__exr_fmt_dyn_ptr"]);
+        }
+        if fmt_radix & 0x3f != 0x3f {
             const RADIX: [(&str, &str); 6] = [
                 ("Binary", "__exr_fmt_binary"),
                 ("Octal", "__exr_fmt_octal"),

@@ -3236,6 +3236,11 @@ impl Cx<'_> {
     }
 
     pub(crate) fn to_dyn(&mut self, v: Value, t: Ty, tr: &str, span: Sp) -> R<Value> {
+        // (a `str` / `[T]` has no size for a vtable to give: `"test" as &dyn Any`, a `&[u8]` as a `&dyn Debug` (E0277,
+        // cast/trait-object-size-error-14366.rs); a `dyn` itself is an upcast)
+        if matches!(t, Ty::Str | Ty::Slice(_)) {
+            return err(span, format!("the size for values of type `{}` cannot be known at compilation time (E0277)", self.prog.tn(t)));
+        }
         // (`dyn Tr + Send` / `+ Sync`: the value's type must have them (E0277), as the object says it does; the vtable
         // is the trait's)
         let (tr, mut send, mut sync) = crate::types::dyn_autos(tr);

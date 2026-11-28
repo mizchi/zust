@@ -17,46 +17,45 @@ needs one filed first (then add it to [cratebench/survey/issues.tsv](cratebench/
 
 <!-- crate-priorities -->
 
-Survey of 2026-11-27 17:08 UTC on `1b74ff2`: 45 of 273 crates build (16.4% of their downloads); 941 errors in 177 packages.
+Survey of 2026-11-27 20:44 UTC on `f63b1d3`: 45 of 273 crates build (16.4% of their downloads); 942 errors in 177 packages.
 
 | # | fix | issue | holds back | crates it alone unblocks |
 |---:|---|---|---:|---:|
-| 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | [#254](https://github.com/mizchi/zust/issues/254) | 7.5% | 8 |
+| 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | [#254](https://github.com/mizchi/zust/issues/254) | 7.4% | 8 |
 | 2 | `impl<T: Tr> Tr for &T` | [#144](https://github.com/mizchi/zust/issues/144) | 7.2% | 12 |
 | 3 | mismatched types (to sort by cause) | [#259](https://github.com/mizchi/zust/issues/259) | 6.9% | 4 |
-| 4 | parser: syntax zustc does not parse | [#257](https://github.com/mizchi/zust/issues/257) | 4.5% | 3 |
+| 4 | parser: syntax zustc does not parse | [#257](https://github.com/mizchi/zust/issues/257) | 5.0% | 4 |
 | 5 | duplicate definition of `…` | none yet | 4.2% | 6 |
 | 6 | false E0277: a bound zustc does not see | [#261](https://github.com/mizchi/zust/issues/261) | 2.7% | 2 |
-| 7 | `missing generics for` a type used without its parameters | [#260](https://github.com/mizchi/zust/issues/260) | 2.4% | 1 |
-| 8 | value paths zustc cannot resolve | [#265](https://github.com/mizchi/zust/issues/265) | 2.3% | 0 |
-| 9 | macro expansion too deep at a crate's first line | [#252](https://github.com/mizchi/zust/issues/252) | 2.2% | 5 |
-| 10 | prelude: type `Instant` | [#250](https://github.com/mizchi/zust/issues/250) | 2.1% | 6 |
-| 11 | cannot infer an `impl Trait` return type | [#262](https://github.com/mizchi/zust/issues/262) | 2.0% | 5 |
-| 12 | prelude: `impl Error for fmt::Error` | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 2 |
+| 7 | false E0276 in bitflags' impls | [#264](https://github.com/mizchi/zust/issues/264) | 2.7% | 4 |
+| 8 | `missing generics for` a type used without its parameters | [#260](https://github.com/mizchi/zust/issues/260) | 2.4% | 1 |
+| 9 | value paths zustc cannot resolve | [#265](https://github.com/mizchi/zust/issues/265) | 2.2% | 0 |
+| 10 | cannot infer an `impl Trait` return type | [#262](https://github.com/mizchi/zust/issues/262) | 2.0% | 5 |
+| 11 | prelude: `impl Error for fmt::Error` | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 2 |
+| 12 | cannot evaluate `…` in a constant | none yet | 1.8% | 3 |
 
 By issue, with its tier (the issue's label: **T0** holds back 2% or more of the surveyed downloads with all its fixes, **T1** 1% or more, **T2** less; relabel an issue when its tier here changes):
 
 | tier | issue | holds back | fixes | the largest |
 |---|---|---:|---:|---|
-| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 7.6% | 25 | prelude: type `Instant` |
-| T0 | [#254](https://github.com/mizchi/zust/issues/254) | 7.5% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
+| T0 | [#254](https://github.com/mizchi/zust/issues/254) | 7.4% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
 | T0 | [#144](https://github.com/mizchi/zust/issues/144) | 7.2% | 1 | `impl<T: Tr> Tr for &T` |
+| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 7.1% | 27 | prelude: type `LockResult` |
 | T0 | [#259](https://github.com/mizchi/zust/issues/259) | 6.9% | 1 | mismatched types (to sort by cause) |
-| T0 | [#257](https://github.com/mizchi/zust/issues/257) | 4.5% | 1 | parser: syntax zustc does not parse |
+| T0 | [#257](https://github.com/mizchi/zust/issues/257) | 5.0% | 1 | parser: syntax zustc does not parse |
 | T0 | [#261](https://github.com/mizchi/zust/issues/261) | 2.7% | 1 | false E0277: a bound zustc does not see |
+| T0 | [#264](https://github.com/mizchi/zust/issues/264) | 2.7% | 1 | false E0276 in bitflags' impls |
 | T0 | [#260](https://github.com/mizchi/zust/issues/260) | 2.4% | 1 | `missing generics for` a type used without its parameters |
-| T0 | [#265](https://github.com/mizchi/zust/issues/265) | 2.3% | 1 | value paths zustc cannot resolve |
-| T0 | [#252](https://github.com/mizchi/zust/issues/252) | 2.2% | 1 | macro expansion too deep at a crate's first line |
+| T0 | [#265](https://github.com/mizchi/zust/issues/265) | 2.2% | 1 | value paths zustc cannot resolve |
 | T0 | [#262](https://github.com/mizchi/zust/issues/262) | 2.0% | 1 | cannot infer an `impl Trait` return type |
 | T1 | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 1 | prelude: `impl Error for fmt::Error` |
+| T1 | [#266](https://github.com/mizchi/zust/issues/266) | 1.7% | 1 | std iterator adapters' arity (`Copied`, `Cloned`, `Map`) |
 | T1 | [#256](https://github.com/mizchi/zust/issues/256) | 1.7% | 1 | methods zustc does not find (std methods the prelude lacks; lookup) |
-| T1 | [#264](https://github.com/mizchi/zust/issues/264) | 1.5% | 1 | false E0276 in bitflags' impls |
-| T1 | [#266](https://github.com/mizchi/zust/issues/266) | 1.4% | 1 | std iterator adapters' arity (`Copied`, `Cloned`, `Map`) |
 | T2 | [#28](https://github.com/mizchi/zust/issues/28) | 0.7% | 1 | zurgo: two versions of one crate in a graph |
 | T2 | [#253](https://github.com/mizchi/zust/issues/253) | 0.7% | 1 | a fn pointer cast to `*mut ()` in a static |
 | T2 | [#258](https://github.com/mizchi/zust/issues/258) | 0.4% | 1 | macro_rules: calls zustc's matcher rejects |
 
-No issue yet, the next to file: duplicate definition of `…` (4.2%); cannot evaluate `…` in a constant (1.8%); inherent impls cannot be unsafe (E0197) (1.7%); cannot infer the return type of this closure; annotate it (`… (1.2%); cannot move out of a shared reference: `…` takes `…` by valu… (1.1%).
+No issue yet, the next to file: duplicate definition of `…` (4.2%); cannot evaluate `…` in a constant (1.8%); inherent impls cannot be unsafe (E0197) (1.7%); cannot infer the return type of this closure; annotate it (`… (1.2%); unsupported item (1.2%).
 
 <!-- /crate-priorities -->
 
@@ -368,9 +367,10 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
 test by test (`cratebench/test_result.md`). fnv, rustc-hash, cfg-if and adler2 match, and CI keeps them so
 (`--check`). Tracking issue for the rest: #200.
 
-- either does not build under zurgo yet. The first error is `cannot find trait Binary` (lib.rs's
-  `impl_fmt_traits!(Binary, Display, LowerExp, ..)`: the prelude has no `fmt::Binary` / `LowerExp` / `Octal` /
-  `Pointer` / `UpperExp` traits). Then serde_core, through the dev-dependency serde_json: #197, #198, and std types
+- either does not build under zurgo yet. The first error is the deref coercion of its `deref` test,
+  `is_str(&value)` with `value: Either<String, &str>` (`impl Deref for Either<L, R> where L: Deref, R: Deref<Target
+  = L::Target>`): `expected &str, found &Either<String, &str>`. Its `fmt_traits` test (Binary / LowerHex / LowerExp
+  / Pointer ..) is right in a single file (tests/probe/fmt_radix_traits.rs). Then serde_core, through the dev-dependency serde_json: #197, #198, and std types
   the prelude lacks (`CString` / `CStr`, net addresses, `SystemTime`, `LinkedList`, `RwLock`, `Weak`, `Bound`).
 - A method of a trait with several impls for one type that differ only in the trait's arguments is not chosen by a
   bound: `fn f<T: AsMut<[u8]>>(t: &mut T) { t.as_mut() }` with `T = Either<..>` (either's `AsMut<str>` /
