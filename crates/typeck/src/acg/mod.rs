@@ -501,6 +501,9 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         fake_reads: prog.closures.get(&body_id).map(|cd| cd.fake_reads.clone()).unwrap_or_default(),
         root,
         generic_args: generic_args_of(prog, &f.sig.params, root),
+        gen_params: gen_params_of(prog, f, root, root == body_id),
+        gen_lets: vec![],
+        gen_pending: None,
         closure_ix,
         explicit_traits: HashMap::default(),
         explicit_trait: None,
@@ -1228,6 +1231,14 @@ pub struct Cx<'p> {
     pub root: u32,
     /// The fn's parameters declared as one of its type parameters (`x: T` / `x: &T`): (name, type parameter)
     pub generic_args: Vec<(String, String)>,
+    /// The fn's parameters (`self` too) with their types as its generic signature has them (`n: N` → Param), when the
+    /// program has impls whose methods a call on a reference dispatches to (Program::ref_dispatch, #144); else empty
+    pub gen_params: Vec<(String, Ty)>,
+    /// The `let` bindings of such a fn whose initializer (or annotation) has a type gen_ty reads: by the binding's
+    /// place, that type (`let b = buf;` of `buf: B` is a B)
+    pub gen_lets: Vec<(Loc, Ty)>,
+    /// The `let` being lowered and the scope it binds in, with that type: bind takes it
+    pub gen_pending: Option<(String, usize, Ty)>,
     /// クロージャ式 (Debug の文字列) → 番号
     pub closure_ix: HashMap<String, u32>,
     /// `a::M::m(&x)` rewritten as `x.m()`: the kept method call (by address) -> the trait it named, so the call takes
@@ -1827,6 +1838,11 @@ impl Cx<'_> {
             },
         };
         self.bk_local(loc, &name, ty);
+        if self.gen_pending.as_ref().is_some_and(|p| p.0 == name && p.1 == self.scopes.len()) {
+            if let Some((_, _, g)) = self.gen_pending.take() {
+                self.gen_lets.push((loc, g));
+            }
+        }
         self.scopes.last_mut().unwrap().push((name, loc, ty));
         if self.needs_drop(ty) {
             self.owned_binds += 1;
@@ -2376,6 +2392,10 @@ impl Cx<'_> {
             let last = k + 1 == n;
             let t0 = self.temps.len();
             self.stmt_i = i;
+            // (a `let` before this one that bound no name: its gen_pending is no other binding's)
+            if self.gen_pending.is_some() {
+                self.gen_pending = None;
+            }
             match st {
                 // (`let None = x;`: a unit variant or a constant, a pattern to test (E0005), not a new name)
                 Stmt::Let(pat, ann_ty, init, els, let_at) if !is_simple_let(pat) || els.is_some() || self.names_variant_or_const(pat) => {
@@ -2601,6 +2621,14 @@ impl Cx<'_> {
                     let name = pat_name(pat)?;
                     if let Some(t) = ann_ty {
                         self.body_lifetimes(t, *let_at)?;
+                    }
+                    // (#144: the binding's type as the generic body has it, for gen_ty)
+                    if !self.prog.ref_dispatch.is_empty() {
+                        let g = match ann_ty {
+                            Some(t) => self.gen_ann(t),
+                            None => init.as_ref().and_then(|i| self.gen_ty(i, 0)),
+                        };
+                        self.gen_pending = g.map(|g| (name.clone(), self.scopes.len(), g));
                     }
                     let ann = match ann_ty {
                         // (`let v: Vec<Box<_>> = Vec::new();`: the holes are what inference found, when it did)
@@ -3715,6 +3743,29 @@ pub(crate) fn generic_args_of(prog: &Program, params: &[(crate::parse::Pat, crat
             (tp.segs.len() == 1 && tp.segs[0].args.is_empty() && rs.generics.iter().any(|g| g.0 == tp.segs[0].name)).then(|| (n.clone(), tp.segs[0].name.clone()))
         })
         .collect()
+}
+
+/// The parameters of fn root's body f (`self` first) with the types root's signature gives them, type parameters as
+/// Param, for the method lookup of #144 (Cx::gen_params): only when the program has such impls, and not of a closure's
+/// body (own: f is root's own body), whose parameters are not root's
+pub(crate) fn gen_params_of(prog: &Program, f: &ItemFn, root: u32, own: bool) -> Vec<(String, Ty)> {
+    if prog.ref_dispatch.is_empty() || !own {
+        return vec![];
+    }
+    let Some(rs) = prog.sigs.get(root as usize).filter(|rs| !rs.generics.is_empty()) else { return vec![] };
+    let skip = f.sig.recv.is_some() as usize;
+    let mut out = vec![];
+    if skip == 1 {
+        if let Some(&t) = rs.params.first() {
+            out.push(("self".to_string(), t));
+        }
+    }
+    for (i, (p, _)) in f.sig.params.iter().enumerate() {
+        if let (crate::parse::Pat::Ident(_, _, n, None), Some(&t)) = (p, rs.params.get(i + skip)) {
+            out.push((n.clone(), t));
+        }
+    }
+    out
 }
 
 /// A pattern of bindings, `_` and tuples of them, which matches any value (no exhaustiveness check needed: a parameter

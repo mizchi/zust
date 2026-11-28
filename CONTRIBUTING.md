@@ -234,6 +234,10 @@ Every change that touches the compiler or the analyzer is measured before it is 
   In a pull request, use `--dry-run` and do not commit rows to the log: the `KPI` workflow measures the pull request
   against its base and keeps the result in a comment on it (see CI below). Rows go in with commits made on main;
   rows added in a branch would conflict with every row main gets in the meantime.
+  `bench/kpi_ratchet.txt` holds a ceiling for each KPI: a pull request whose head is above one by more than its
+  tolerance fails the `KPI` workflow. Take the cost out, or raise the ceiling in the pull request (the KPI comment
+  gives the line) and say in its description why the cost is worth it. Every push to main lowers the ceilings that
+  main measures below; nothing but such an edit raises one.
 - `bench/rust_ui.py --check` must report 0 regressions. When tests start passing, rewrite the baseline
   (`--write-baseline`).
   - Look at what a newly passing compile-fail test is rejected for: one rejected at its line for another reason than
@@ -318,7 +322,11 @@ Mutants the tests miss are written to `mutants.out/missed.txt`; add tests to kil
   Only the job that comments may write to the pull request. An instruction count is the same on any runner of the
   image. The base's numbers are cached, so a base measured before is not measured again.
   `bench/kpi_pr.py` then keeps one comment on the pull request up to date: the change of each KPI against
-  the base, and one row per push with the change against the push before. A KPI that grows by more than 1% is marked and gives a warning; the job does not fail.
+  the base, and one row per push with the change against the push before. A KPI that grows by more than 1% is marked and gives a warning.
+  A head above a ceiling of `bench/kpi_ratchet.txt` by more than its tolerance fails the job (`bench/kpi_ratchet.py`),
+  and on every push to main the `ratchet` job lowers the ceilings that main measures below, in a commit of its own that
+  skips CI. The ceilings hold in the environment they were measured in: in another one nothing is checked, and the
+  next push to main measures them anew.
 - `.github/workflows/bench.yml` runs `bench/ci_bench.py` on every push to main and stores the results in `dev/bench/`
   on the gh-pages branch with
   [github-action-benchmark](https://github.com/benchmark-action/github-action-benchmark). The dashboard is at

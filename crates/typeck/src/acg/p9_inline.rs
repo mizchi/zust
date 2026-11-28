@@ -121,6 +121,9 @@ impl<'p> Cx<'p> {
         let s_root = std::mem::replace(&mut self.root, root);
         // (the callee's own: its parameters declared as its type parameters)
         let s_gargs = std::mem::replace(&mut self.generic_args, generic_args_of(self.prog, &f.sig.params, root));
+        let s_gparams = std::mem::replace(&mut self.gen_params, gen_params_of(self.prog, f, root, root == body_id));
+        let s_glets = std::mem::take(&mut self.gen_lets);
+        let s_gpend = self.gen_pending.take();
         let s_cix = std::mem::take(&mut self.closure_ix);
         let s_hint = self.closure_hint.take();
         let s_seg = self.seg_self.take();
@@ -159,6 +162,9 @@ impl<'p> Cx<'p> {
         self.caps = s_caps;
         self.root = s_root;
         self.generic_args = s_gargs;
+        self.gen_params = s_gparams;
+        self.gen_lets = s_glets;
+        self.gen_pending = s_gpend;
         self.closure_ix = s_cix;
         self.closure_hint = s_hint;
         self.seg_self = s_seg;

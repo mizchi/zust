@@ -4706,6 +4706,13 @@ impl Cx<'_> {
                 }
             }
         }
+        // (#144: `Tr::m(&&s)` of an impl for references to a type parameter: Self is `&S` as the argument has it, no
+        // autoderef, which the method call the rewrite below makes would do)
+        if !self.prog.ref_dispatch.is_empty() {
+            if let Some(r) = self.ref_impl_ufcs(c, expected)? {
+                return Ok(r);
+            }
+        }
         if let Some(e) = self.prim_method_call(c) {
             let e = self.keep_expr(e);
             // (`crate::a::M::m(&x)`: the trait the path names, which a trait in scope must not replace)
