@@ -3228,7 +3228,6 @@ compile-fail	generic-associated-types/gat-trait-path-parenthesised-args.rs
 compile-fail	generic-associated-types/generic_associated_type_undeclared_lifetimes.rs
 check-pass	generic-associated-types/higher-ranked-self-impl-requirement.rs
 check-pass	generic-associated-types/ice-add-outlives-bounds-unexpected-regions-113793.rs
-compile-fail	generic-associated-types/issue-101020.rs
 check-pass	generic-associated-types/issue-102333.rs
 compile-fail	generic-associated-types/issue-47206-where-clause.rs
 check-pass	generic-associated-types/issue-58694-parameter-out-of-range.rs
