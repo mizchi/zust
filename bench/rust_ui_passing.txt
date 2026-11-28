@@ -1724,6 +1724,7 @@ compile-fail	const-generics/ban-self-when-feature-not-enabled.rs
 run-pass	const-generics/broken-mir-1.rs
 run-pass	const-generics/broken-mir-2.rs
 check-pass	const-generics/cannot-infer-type-for-const-param.rs
+run-pass	const-generics/coerce_unsized_array.rs
 run-pass	const-generics/concrete-const-as-fn-arg.rs
 run-pass	const-generics/concrete-const-impl-method.rs
 run-pass	const-generics/const-arg-in-fn.rs
@@ -4581,7 +4582,9 @@ run-pass	loops/unreachable-while-loop-5741.rs
 compile-fail	lowering/issue-121108.rs
 compile-fail	lub-glb/old-lub-glb-object.rs
 run-pass	macros/assert-eq-macro-success.rs
+run-pass	macros/assert-eq-macro-unsized.rs
 run-pass	macros/assert-ne-macro-success.rs
+run-pass	macros/assert-ne-macro-unsized.rs
 run-pass	macros/assign-to-expr-metavar.rs
 compile-fail	macros/bad-concat.rs
 compile-fail	macros/bad_hello.rs

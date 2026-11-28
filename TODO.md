@@ -365,11 +365,12 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
 test by test (`cratebench/test_result.md`). fnv, rustc-hash, cfg-if and adler2 match, and CI keeps them so
 (`--check`). Tracking issue for the rest: #200.
 
-- either does not build under zurgo yet. The first error is the empty array of its `seek` test,
-  `Left(io::Cursor::new([]))` (`type annotations needed for an empty array`): rustc takes the element type from the
-  other arm's `Right(io::Cursor::new(&mockdata[..]))` and the `Read` the reader is used as. Its `deref` test (the deref
-  coercion of `is_str(&value)` through `impl Deref for Either<L, R>`, tests/probe/deref_either.rs) and its `fmt_traits`
-  test (tests/probe/fmt_radix_traits.rs) are right in a single file. Then serde_core, through the dev-dependency serde_json: #197, #198, and std types
+- either does not build under zurgo yet. The first error is its `read_write` test's `Left(io::stdin())` read as a
+  Read: `the trait bound \`Stdin: Read\` is not satisfied` (the prelude's Stdin / Stdout have no Read / Write impls; the
+  test writes to `Left(io::stdout())` too). Its `seek` test (the empty array `Left(io::Cursor::new([]))` typed by the
+  one Read impl of Cursor that fits, tests/probe/empty_array_by_impl.rs), its `deref` test
+  (tests/probe/deref_either.rs) and its `fmt_traits` test (tests/probe/fmt_radix_traits.rs) are right in a single
+  file. Then serde_core, through the dev-dependency serde_json: #197, #198, and std types
   the prelude lacks (`CString` / `CStr`, net addresses, `SystemTime`, `LinkedList`, `RwLock`, `Weak`, `Bound`).
 - A method of a trait with several impls for one type that differ only in the trait's arguments is not chosen by a
   bound: `fn f<T: AsMut<[u8]>>(t: &mut T) { t.as_mut() }` with `T = Either<..>` (either's `AsMut<str>` /

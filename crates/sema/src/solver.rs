@@ -75,6 +75,9 @@ pub struct Solver<'p> {
     pub clo_info: crate::fxhash::FxMap<u32, (u32, Vec<u32>, Vec<usize>)>,
     /// 後でもう一度見る関連型の境界 (呼び先, 型パラメータの型変数)
     pub late: Vec<(u32, Vec<Option<u32>>)>,
+    /// a call's callee and its generics' type variables, whose trait bounds may pick the one impl that fits a type not
+    /// known yet (finish_bound_hints)
+    pub bound_hints: Vec<(u32, Vec<Option<u32>>)>,
     /// the callee's type parameters a turbofish gives (index, variable), for the next apply_self (`tr::<u16>()`)
     pub pre_pv: Vec<(usize, u32)>,
     /// (a type argument of `S<..>` passed where `S<[T]>` is expected (a coercion), the `T`): the argument may be
@@ -112,6 +115,7 @@ impl<'p> Solver<'p> {
             clo_ctx: None,
             clo_info: Default::default(),
             late: vec![],
+            bound_hints: vec![],
             pre_pv: vec![],
             unsize_later: vec![],
         }
@@ -441,6 +445,20 @@ impl Solver<'_> {
             (Some(Shape::Known(x)), Some(Shape::Known(y))) if x == y => self.link(a, b),
             (Some(Shape::Arr(x, n)), Some(Shape::Arr(y, m))) if n == m => {
                 self.link(a, b);
+                self.unify(x, y);
+            }
+            // (a const parameter's length (`[u8; N]` of a generic impl's self type) and a known one: N is that one. Only of
+            // a known element type, as there: `fn foo<F: FnOnce(&str) -> usize, const N: usize>(x: [F; N])` given a
+            // `[|s| s.len()]` is rustc's E0282, the closure's signature not inferred through `[F; N]`)
+            (Some(Shape::Arr(x, n)), Some(Shape::Arr(y, m)))
+                if (n >= crate::types::CONST_LEN_BASE && m < crate::types::CONST_LEN_BASE && self.resolve(x).is_some())
+                    || (m >= crate::types::CONST_LEN_BASE && n < crate::types::CONST_LEN_BASE && self.resolve(y).is_some()) =>
+            {
+                if n >= crate::types::CONST_LEN_BASE {
+                    self.link(a, b);
+                } else {
+                    self.link(b, a);
+                }
                 self.unify(x, y);
             }
             (Some(Shape::Slc(x)), Some(Shape::Slc(y)))
@@ -1089,6 +1107,9 @@ impl Solver<'_> {
                     }
                 }
                 let r = self.known_g(ret, &mut pv);
+                if prog.sigs[id as usize].generics.iter().any(|g| !g.1.is_empty()) {
+                    self.bound_hints.push((id, pv.clone()));
+                }
                 self.late_bounds(id, pv);
                 r
             }
@@ -1255,6 +1276,108 @@ impl Solver<'_> {
                 let s = self.with(Shape::Slc(k));
                 self.unify(p, s);
             }
+        }
+    }
+
+    /// The trait bounds of the calls' generics on a type not known yet: where one impl of the trait alone fits it, its
+    /// self type, as rustc selects it (`L: Read` of an `Either<Cursor<[_; 0]>, ..>`: the `Cursor<[u8; N]>` impl, so
+    /// the empty array is a `[u8; 0]`), and that impl's own bounds after it
+    pub fn finish_bound_hints(&mut self) {
+        let hs = std::mem::take(&mut self.bound_hints);
+        let prog = self.prog;
+        for (id, pv) in hs {
+            for (g, (_, bounds)) in prog.sigs[id as usize].generics.iter().enumerate() {
+                let Some(Some(v)) = pv.get(g).copied() else { continue };
+                for b in bounds {
+                    self.hint_impl(v, b.split('<').next().unwrap_or(b).trim(), 0);
+                }
+            }
+        }
+    }
+
+    fn hint_impl(&mut self, v: u32, tr: &str, depth: u32) {
+        if depth > 4 || self.resolve(v).is_some() {
+            return;
+        }
+        let r = self.find(v);
+        let Some(Shape::Adt(base, ..)) = self.shape[r as usize] else { return };
+        let prog = self.prog;
+        // (the impls of tr for that type: their self types, each once, with the impl's generics and bounds)
+        let mut cands: Vec<(Ty, usize)> = vec![];
+        for (i, sig) in prog.sigs.iter().enumerate() {
+            let (Some(it), Some(st @ Ty::Struct(sid))) = (sig.impl_trait.as_deref(), sig.self_ty) else { continue };
+            if prog.base_of(sid) != base || it.split('<').next().unwrap_or(it).trim() != tr || cands.iter().any(|c| c.0 == st) {
+                continue;
+            }
+            if self.fits(r, st, 0) {
+                cands.push((st, i));
+            }
+        }
+        let [(st, i)] = cands[..] else { return };
+        let gs = &prog.sigs[i].generics;
+        let mut pv: Vec<Option<u32>> = vec![None; gs.len()];
+        self.unify_pat(r, st, &mut pv, 0);
+        for (g, (_, bounds)) in gs.iter().enumerate() {
+            let Some(Some(gv)) = pv.get(g).copied() else { continue };
+            for b in bounds {
+                self.hint_impl(gv, b.split('<').next().unwrap_or(b).trim(), depth + 1);
+            }
+        }
+    }
+
+    /// v made the instance of pat that it fits (fits): pat's concrete parts unified, its type parameters bound to what
+    /// v has there (into pv), a const length left as v's
+    fn unify_pat(&mut self, v: u32, pat: Ty, pv: &mut Vec<Option<u32>>, depth: u32) {
+        if depth > 8 {
+            return;
+        }
+        let r = self.find(v);
+        match (self.shape[r as usize], pat) {
+            (_, Ty::Param(g)) => match pv.get(g as usize).copied() {
+                Some(Some(x)) => self.unify(x, r),
+                Some(None) => pv[g as usize] = Some(r),
+                None => {}
+            },
+            (Some(Shape::Adt(_, st, l)), Ty::Struct(sid)) => {
+                let args = self.prog.structs[sid as usize].args.clone();
+                for (x, a) in self.adt_vars_of(st, l).into_iter().zip(args) {
+                    self.unify_pat(x, a, pv, depth + 1);
+                }
+            }
+            (Some(Shape::Arr(x, _)), Ty::Array(e, _)) | (Some(Shape::Slc(x)), Ty::Slice(e)) | (Some(Shape::Bx(x)), Ty::Box(e)) | (Some(Shape::Ref(_, x)), Ty::Ref(_, e)) | (Some(Shape::Ptr(_, x)), Ty::Ptr(_, e)) => {
+                self.unify_pat(x, *e, pv, depth + 1)
+            }
+            (None, t) if !self.prog.has_param(t) && !matches!(t, Ty::Array(_, n) if n >= crate::types::CONST_LEN_BASE) => {
+                let k = self.known(t);
+                self.unify(r, k);
+            }
+            _ => {}
+        }
+    }
+
+    /// Whether type variable v may be an instance of pat (its type parameters and const lengths any): what is not
+    /// known yet fits
+    pub fn fits(&mut self, v: u32, pat: Ty, depth: u32) -> bool {
+        if depth > 8 {
+            return true;
+        }
+        let r = self.find(v);
+        let prog = self.prog;
+        match (self.shape[r as usize], pat) {
+            (_, Ty::Param(_)) | (None, _) => true,
+            (Some(Shape::Known(t)), p) => prog.match_ty(p, t, &mut vec![None; 64]),
+            (Some(Shape::Adt(b, st, l)), Ty::Struct(sid)) => {
+                if prog.base_of(sid) != b {
+                    return false;
+                }
+                let args = prog.structs[sid as usize].args.clone();
+                let vars = self.adt_vars_of(st, l);
+                args.len() == vars.len() && vars.into_iter().zip(args).all(|(x, a)| self.fits(x, a, depth + 1))
+            }
+            (Some(Shape::Arr(x, n)), Ty::Array(e, m)) => (m >= crate::types::CONST_LEN_BASE || n == m) && self.fits(x, *e, depth + 1),
+            (Some(Shape::Slc(x)), Ty::Slice(e)) | (Some(Shape::Bx(x)), Ty::Box(e)) => self.fits(x, *e, depth + 1),
+            (Some(Shape::Ref(m, x)), Ty::Ref(n, e)) | (Some(Shape::Ptr(m, x)), Ty::Ptr(n, e)) => m == n && self.fits(x, *e, depth + 1),
+            _ => false,
         }
     }
 

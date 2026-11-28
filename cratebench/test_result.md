@@ -6,7 +6,7 @@
 |---|---|---:|---|
 | adler2 | match | 6 / 0 / 0 | テスト 6 個 |
 | cfg-if | match | 3 / 0 / 0 | テスト 3 個 |
-| either | zurgo-fails | 8 / 0 / 0 | error: crate `either`: src/lib.rs:1810:14: type annotations needed for an empty array |
+| either | zurgo-fails | 8 / 0 / 0 | error: crate `either`: src/lib.rs:1843:23: the trait bound `Stdin: Read` is not satisfied (for `L`) |
 | fnv | match | 1 / 0 / 0 | テスト 1 個 |
 | hex | zurgo-fails | 16 / 0 / 0 | error: two packages give the library `bitflags`: `bitflags v1.3.2` and `bitflags v2.13.2`. Two versions of one crate are not supported yet (mizchi/zust#28) |
 | itoa | zurgo-fails | 11 / 0 / 0 | error: two packages give the library `itoa`: `itoa v1.0.19` and `itoa v1.0.19`. Two versions of one crate are not supported yet (mizchi/zust#28) |
