@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795851112577,
+  "lastUpdate": 1795851115443,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -155951,6 +155951,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/d5b174749f149b609904cad77f460efc6289f9f8"
         },
         "date": 1795850692451,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 80.65,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1938,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 86.21,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1563,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 73.95,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5462,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e73e31d76b64e0fd5cd06060c405f98638b9ebf3",
+          "message": "prelude: no per-build lexing or copying of the prelude's items (#343)\n\n* prelude: the selection's items come with its text, not from splitting it again\n\nEvery build split the selected prelude text with the lexer (front.rs,\nlexer::split(&extra)), though build.rs has split the whole prelude\nalready: each selected item is a prelude item, copied into the text.\nbuild.rs now hashes the items with zust-base's key.rs (the stub gave 0)\nand keeps the hash in PRELUDE_ITEMS (two u64 halves, which the self-host\ncompiles), and select_with builds the text's items as it writes the text:\neach item moved to its place, its idents shifted, an impl member's header\nby its index in the text. with_prelude_in appends them; it still splits\nwhen rename_shadowed renames the text (a program that defines a prelude\ntype's name), or when a member's header is not in the selection.\n\nAn item's hash is that of its tokens (and its header's for a member):\nthe same in the whole prelude and in the selection, so the build cache's\nkeys do not change. ZUSTC_SPLIT_VERIFY compares the items with a split\nof the text (no difference on tests/acg and tests/compile_errors, 261\nprograms); front::tests::selection_items_are_its_split checks it on\ntests/acg.\n\ncallgrind, the build after an edit: hex (cratebench) 128.07M -> 122.28M\n(-4.5%); gen5000 572.28M -> 572.14M (it selects little of the prelude).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* prelude: its items borrow their identifiers from build.rs's table; names worked out by build.rs\n\nEvery build began by turning build.rs's table into SrcItems: each of the\nprelude's items' identifiers copied into a Vec, its name worked out (a\nString), its identifiers searched for `__core_` (3.5M of a small crate's\nbuild, and more with every item the prelude gets). Now a prelude item\n(PItem) holds its table's identifiers (&'static), and build.rs works out\nthe name (lexer::prelude_item_name, moved from prelude::defined_name so\nthat build.rs can call it) and the core-only flag into the table.\n\ncallgrind, the build after an edit (with the commit before): hex\n122.28M -> 118.85M (-2.8%), gen5000 572.14M -> 567.81M (-0.76%).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-28T16:19:18+09:00",
+          "tree_id": "f406124c394a48662acbe2616de0a471ffd7a06f",
+          "url": "https://github.com/mizchi/zust/commit/e73e31d76b64e0fd5cd06060c405f98638b9ebf3"
+        },
+        "date": 1795851114910,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
