@@ -17,17 +17,17 @@ needs one filed first (then add it to [cratebench/survey/issues.tsv](cratebench/
 
 <!-- crate-priorities -->
 
-Survey of 2026-11-28 07:09 UTC on `8e4e02d`: 49 of 273 crates build (17.3% of their downloads); 1040 errors in 179 packages.
+Survey of 2026-11-28 07:26 UTC on `d5b1747`: 49 of 273 crates build (17.3% of their downloads); 1016 errors in 179 packages.
 
 | # | fix | issue | holds back | crates it alone unblocks |
 |---:|---|---|---:|---:|
 | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | [#254](https://github.com/mizchi/zust/issues/254) | 11.4% | 13 |
-| 2 | mismatched types (to sort by cause) | [#259](https://github.com/mizchi/zust/issues/259) | 7.6% | 5 |
+| 2 | mismatched types (to sort by cause) | [#259](https://github.com/mizchi/zust/issues/259) | 5.9% | 2 |
 | 3 | `impl<T: Tr> Tr for &T` | [#144](https://github.com/mizchi/zust/issues/144) | 5.8% | 10 |
-| 4 | methods zustc does not find (std methods the prelude lacks; lookup) | [#256](https://github.com/mizchi/zust/issues/256) | 2.8% | 1 |
-| 5 | false E0277: a bound zustc does not see | [#261](https://github.com/mizchi/zust/issues/261) | 2.7% | 3 |
-| 6 | false E0276 in bitflags' impls | [#264](https://github.com/mizchi/zust/issues/264) | 2.4% | 4 |
-| 7 | conflicting implementations of trait `…` for type `…` (E0119) | none yet | 2.4% | 4 |
+| 4 | methods zustc does not find (std methods the prelude lacks; lookup) | [#256](https://github.com/mizchi/zust/issues/256) | 2.9% | 2 |
+| 5 | false E0276 in bitflags' impls | [#264](https://github.com/mizchi/zust/issues/264) | 2.4% | 4 |
+| 6 | conflicting implementations of trait `…` for type `…` (E0119) | none yet | 2.4% | 4 |
+| 7 | false E0277: a bound zustc does not see | [#261](https://github.com/mizchi/zust/issues/261) | 2.3% | 2 |
 | 8 | cannot infer an `impl Trait` return type | [#262](https://github.com/mizchi/zust/issues/262) | 2.0% | 5 |
 | 9 | build: the trait bound `…` is not satisfied (for `…`) (E0277) | none yet | 1.9% | 5 |
 | 10 | value paths zustc cannot resolve | [#265](https://github.com/mizchi/zust/issues/265) | 1.9% | 0 |
@@ -39,12 +39,12 @@ By issue, with its tier (the issue's label: **T0** holds back 2% or more of the 
 | tier | issue | holds back | fixes | the largest |
 |---|---|---:|---:|---|
 | T0 | [#254](https://github.com/mizchi/zust/issues/254) | 11.4% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
-| T0 | [#259](https://github.com/mizchi/zust/issues/259) | 7.6% | 1 | mismatched types (to sort by cause) |
-| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 7.6% | 32 | prelude: type `Weak` |
+| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 7.7% | 32 | prelude: type `Weak` |
+| T0 | [#259](https://github.com/mizchi/zust/issues/259) | 5.9% | 1 | mismatched types (to sort by cause) |
 | T0 | [#144](https://github.com/mizchi/zust/issues/144) | 5.8% | 1 | `impl<T: Tr> Tr for &T` |
-| T0 | [#256](https://github.com/mizchi/zust/issues/256) | 2.8% | 1 | methods zustc does not find (std methods the prelude lacks; lookup) |
-| T0 | [#261](https://github.com/mizchi/zust/issues/261) | 2.7% | 1 | false E0277: a bound zustc does not see |
+| T0 | [#256](https://github.com/mizchi/zust/issues/256) | 2.9% | 1 | methods zustc does not find (std methods the prelude lacks; lookup) |
 | T0 | [#264](https://github.com/mizchi/zust/issues/264) | 2.4% | 1 | false E0276 in bitflags' impls |
+| T0 | [#261](https://github.com/mizchi/zust/issues/261) | 2.3% | 1 | false E0277: a bound zustc does not see |
 | T1 | [#262](https://github.com/mizchi/zust/issues/262) | 2.0% | 1 | cannot infer an `impl Trait` return type |
 | T1 | [#265](https://github.com/mizchi/zust/issues/265) | 1.9% | 1 | value paths zustc cannot resolve |
 | T1 | [#266](https://github.com/mizchi/zust/issues/266) | 1.8% | 1 | std iterator adapters' arity (`Copied`, `Cloned`, `Map`) |
