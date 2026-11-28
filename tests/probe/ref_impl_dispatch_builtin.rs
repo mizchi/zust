@@ -48,6 +48,9 @@ trait Asc { fn is_ascii(self) -> bool; }
 impl<T> Asc for &T { fn is_ascii(self) -> bool { false } }
 trait Mp { fn as_mut_ptr(self) -> *mut u8; }
 impl<T: ?Sized> Mp for &mut T { fn as_mut_ptr(self) -> *mut u8 { std::ptr::null_mut() } }
+// a number's `abs(self)` by value: not at `&i32`, where the impl for `&T` comes first (`(&x).abs()` is 99)
+trait Ab { fn abs(self) -> i32; }
+impl<T> Ab for &T { fn abs(self) -> i32 { 99 } }
 // a `&mut self` default with Self = `&S` whose argument reads the receiver (`r.write(r.read())`, two-phase), and
 // the same through a bound (`b.advance(b.remaining())` of `B = &mut Bf`)
 trait Rw { fn read(&self) -> u32; fn write(&mut self, v: u32) -> u32 { v + 100 } fn put(&mut self, p: &mut u32, v: u32) { *p += v } }
@@ -97,6 +100,8 @@ fn main() {
     let mut buf = [1u8, 2, 3];
     let sl: &mut [u8] = &mut buf;
     println!("{} {}", (&x).is_ascii(), sl.as_mut_ptr().is_null());
+    let n = -3i32;
+    println!("{} {}", (&n).abs(), n.abs());
     let sr = Sr;
     let mut r = &sr;
     let mut c = Cur(1, 5);

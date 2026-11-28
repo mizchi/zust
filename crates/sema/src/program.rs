@@ -4407,9 +4407,16 @@ impl Program {
             }
         }
         let (mut cur, mut depth, mut s) = (rt, k, 0usize);
-        // (a str's, a slice's or a number's own method of the name at a step, the value or a reference to it: the
-        // compiler's, which comes first there, `s.len()` of `s: &str` beside `impl<T: ?Sized> Tr for &T`'s `len(self)`)
-        let builtin = |t: Ty| param.is_none() && self.builtin_method(if let Ty::Ref(_, u) = t { *u } else { t }, method);
+        // (a str's, a slice's or a number's own method of the name at a step, which comes first there: a `&self` one at
+        // a reference to the value or the value, `s.len()` of `s: &str` beside `impl<T: ?Sized> Tr for &T`'s
+        // `len(self)`; a `self` one at the value only)
+        let builtin = |t: Ty| {
+            param.is_none()
+                && match t {
+                    Ty::Ref(_, u) => self.builtin_method(*u, method) == Some(true),
+                    u => self.builtin_method(u, method).is_some(),
+                }
+        };
         // (`self` by value: Self is the type at the first step, or P's)
         if kind == 0 {
             if builtin(rt) {
@@ -4523,20 +4530,30 @@ impl Program {
     }
 
     /// Whether u, a str, a slice, an array or a number, has a method m of the compiler's own (`"abc".len()`,
-    /// `x.is_ascii()`), or an inherent one of the program's prelude: which rustc's probe takes at the step of u (or of a
-    /// reference to it) before an impl's method of a trait (#144)
-    pub fn builtin_method(&self, u: Ty, m: &str) -> bool {
+    /// `x.is_ascii()`), or an inherent one of the program's prelude, and how it takes self: Some(true) by reference
+    /// (rustc's probe takes it at the step of a reference to u, by value, and at u by the autoref), Some(false) by value
+    /// (at u only: `(&x).abs()` of `x: i32` is not i32's `abs(self)` but an impl's for `&T`), before an impl's method
+    /// of a trait at that step (#144)
+    pub fn builtin_method(&self, u: Ty, m: &str) -> Option<bool> {
+        // (a number's methods that take `&self`; its others take self by value)
+        const NUM_BY_REF: &[&str] = &[
+            "to_string", "eq_ignore_ascii_case", "to_ascii_uppercase", "to_ascii_lowercase", "make_ascii_uppercase", "make_ascii_lowercase", "fmt", "clone", "cmp", "partial_cmp", "eq", "ne", "lt", "le", "gt", "ge", "hash",
+        ];
         const SEQ: &[&str] = &[
             "len", "is_empty", "as_bytes", "as_ptr", "as_mut_ptr", "iter", "iter_mut", "first", "last", "get", "get_mut", "contains", "to_vec", "to_owned", "starts_with", "ends_with", "split_at", "chunks", "windows", "join", "concat", "sort", "sort_unstable", "reverse", "swap", "fill", "first_mut", "last_mut", "binary_search", "to_string", "chars", "bytes", "lines", "trim", "split",
         ];
         let helper = |pre: &str| self.index.contains_key(&format!("{pre}{m}"));
         match u {
-            Ty::Str => SEQ.contains(&m) || helper("__exr_str_") || crate::ast_infer::is_builtin_scalar_method(m),
-            Ty::Slice(_) | Ty::Array(..) => SEQ.contains(&m) || helper("__exr_slice_") || m.starts_with("sort_"),
+            Ty::Str => (SEQ.contains(&m) || helper("__exr_str_") || crate::ast_infer::is_builtin_scalar_method(m)).then_some(true),
+            Ty::Slice(_) | Ty::Array(..) => (SEQ.contains(&m) || helper("__exr_slice_") || m.starts_with("sort_")).then_some(true),
             u if u.is_int() || u.is_float() || matches!(u, Ty::Bool | Ty::Char) => {
-                crate::ast_infer::is_builtin_scalar_method(m) || helper("__exr_char_") || self.prim_method(u, m).is_some_and(|i| self.sigs[i as usize].impl_trait.is_none())
+                // (the prelude's own method: as its signature takes self)
+                if let Some(i) = self.prim_method(u, m).filter(|&i| self.sigs[i as usize].impl_trait.is_none()) {
+                    return Some(matches!(self.sigs[i as usize].params.first(), Some(Ty::Ref(..))));
+                }
+                (crate::ast_infer::is_builtin_scalar_method(m) || helper("__exr_char_")).then(|| m.starts_with("is_ascii") || NUM_BY_REF.contains(&m))
             }
-            _ => false,
+            _ => None,
         }
     }
 
