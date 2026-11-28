@@ -537,13 +537,13 @@ pub struct Summary {
     /// The concrete (non-parameter, non-primitive) types bounded in the item's where clauses (`where Local: Any`):
     /// Program checks that they exist
     pub where_types: Vec<String>,
-    /// A member of `impl<T> Tr for &T` / `&mut T`: the method it defines (the impl's methods are not called: a call on
-    /// the reference reaches T's through the deref)
+    /// A member of `impl<T> Tr for &T` / `&mut T`: the method it defines
     pub ref_impl_fns: Vec<String>,
-    /// That method, when T is bounded by Tr and it does more than forward to T's method (ast_summary::forwards_to_referent)
+    /// That method, when it has a receiver and does more than forward to T's method (ast_summary::forwards_to_referent),
+    /// or T is bounded by another trait than Tr: a call on the reference that takes the impl runs it (Program::ref_dispatch)
     pub ref_impl_bad: Vec<String>,
     /// A forwarding method's `_` parameter given the path of its type as a value, (method, the path's last segment):
-    /// a forward only when that is a unit struct, not a const or static of the same name (the driver checks)
+    /// a forward only when that is a unit struct, not a const or static of the same name (Program::note_ref_impl checks)
     pub ref_impl_unit_args: Vec<(String, String)>,
 }
 
