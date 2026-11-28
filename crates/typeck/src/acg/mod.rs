@@ -3111,7 +3111,7 @@ impl Cx<'_> {
             }
             // (std's Borrow, by the function's bound `K: Borrow<Q>`: `&Q`)
             if m == "borrow" && a.is_empty() {
-                if let Some((_, t)) = self.borrow_rewrite(r, None) {
+                if let Some((_, t)) = self.borrow_rewrite(r, None, false) {
                     return Some(t);
                 }
             }

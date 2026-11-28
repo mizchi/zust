@@ -1,0 +1,1 @@
+6:1: conflicting implementations of trait `Tr` for type `[OsString; 2]` (E0119)

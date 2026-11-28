@@ -644,6 +644,10 @@ pub struct Program {
     /// scope's): 1 Display, 2 Debug (`use std::fmt::Debug;`, `use core::fmt::{self, Display as _}`; a glob `fmt::*`
     /// both). Which one `x.fmt(f)` calls where x's type has both (#256)
     pub fmt_imports: u8,
+    /// the program's `use` declarations bring std's Borrow into scope (`use std::borrow::Borrow;`, a glob of
+    /// `borrow::*`; fn bodies' too; of the whole program, not each scope's): `x.borrow()` by std's impls of it
+    /// (borrow_rewrite), else rustc's E0599 where no bound of the receiver's type parameter names it
+    pub borrow_imported: bool,
     /// a constant with a lowercase name exists (`const or: usize`): an identifier pattern of any case may name one;
     /// without, only an uppercase one is looked up
     pub lower_consts: bool,
@@ -1716,6 +1720,7 @@ impl Program {
             unbounded_blankets: FxSet::default(),
             use_names: FxSet::default(),
             fmt_imports: 0,
+            borrow_imported: false,
             impl_selfs: FxMap::default(),
             user_traits: FxSet::default(),
             tdb: Default::default(),

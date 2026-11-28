@@ -960,7 +960,7 @@ impl Cx<'_> {
         }
         // `x.borrow()` (std's Borrow impls): the target by the function's bound `K: Borrow<Q>` or the expected type
         if method == "borrow" && margs.is_empty() {
-            if let Some((ne, _)) = self.borrow_rewrite(recv, expected) {
+            if let Some((ne, _)) = self.borrow_rewrite(recv, expected, false) {
                 let ne = self.keep_expr(ne);
                 return self.expr(ne, expected);
             }
@@ -2526,14 +2526,36 @@ impl Cx<'_> {
     /// type `&Q` says, or the bound `K: Borrow<Q>` of the function on the type parameter the receiver is declared with
     /// (equivalent's `PartialEq::eq(self, key.borrow())` of `key: &K`, with `K = String` and `Q = str`). None where a
     /// `borrow` of the program's own may be the one called (a RefCell's, `impl MyBorrow for u32`), or a Q none of these
-    /// give: as before
-    pub(crate) fn borrow_rewrite(&self, recv: &Expr, expected: Option<Ty>) -> Option<(Expr, Ty)> {
+    /// give: as before. Only where std's Borrow is in scope (rustc's E0599 else, no method `borrow`): imported
+    /// (Program::borrow_imported), named by the call (`named`: `Borrow::borrow(&s)`), or by a bound of the type
+    /// parameter the receiver is declared with (`K: std::borrow::Borrow<str>`, which rustc's lookup takes whatever is
+    /// imported)
+    pub(crate) fn borrow_rewrite(&self, recv: &Expr, expected: Option<Ty>, named: bool) -> Option<(Expr, Ty)> {
         // (a local's type as it is bound, `key: &K`: a copy of the path made by a rewrite (`PartialEq::eq(self,
         // key.borrow())` as `==`) is not one peek knows in an inlined body)
         let name = match strip_paren(recv) {
             Expr::Path(None, rp) => ident_of(rp),
             _ => None,
         };
+        // (the type parameter the receiver is declared with, `key: &K`: the fn's own parameter, its binding the
+        // outermost one, not a `let key = ..` shadowing it (bound_method_call's check))
+        let declared = name
+            .filter(|&n| self.scopes.iter().rposition(|s| s.iter().any(|b| b.0 == n)) == Some(0))
+            .and_then(|n| self.generic_args.iter().find(|a| a.0 == n))
+            .map(|a| a.1.as_str());
+        // (its bounds' Borrow, by the trait's last segment: `K: Borrow<str>`, `K: std::borrow::Borrow<str>`; the
+        // argument's text)
+        let borrow_bound = declared.and_then(|dn| {
+            let (_, bs) = self.prog.sigs.get(self.root as usize)?.generics.iter().find(|(pn, _)| pn == dn)?;
+            bs.iter().find_map(|b| {
+                let b: String = b.chars().filter(|c| !c.is_whitespace()).collect();
+                let (tr, rest) = b.split_once('<')?;
+                (tr.rsplit("::").next() == Some("Borrow")).then(|| rest.strip_suffix('>').map(str::to_string)).flatten()
+            })
+        });
+        if self.user_code && !named && !self.prog.borrow_imported && borrow_bound.is_none() {
+            return None;
+        }
         let t = name.and_then(|n| self.lookup(n)).map(|x| x.1).or_else(|| self.peek(recv))?;
         let base = self.strip_refs(t);
         if let Ty::Struct(sid) = base {
@@ -2565,16 +2587,8 @@ impl Cx<'_> {
         }
         // (the bound of the type parameter the receiver is declared with, `key: &K` with `K: Borrow<Q>`: not another
         // parameter's that has the same type in this instance)
-        let declared = name.and_then(|n| self.generic_args.iter().find(|a| a.0 == n)).map(|a| a.1.as_str());
         let inst = |pn: &str| self.env.params.iter().find(|(n, _)| n == pn).map(|p| p.1);
-        let bound = declared.and_then(|dn| {
-            let (_, bs) = self.prog.sigs[self.root as usize].generics.iter().find(|(pn, _)| pn == dn)?;
-            bs.iter().find_map(|b| {
-                let b: String = b.chars().filter(|c| !c.is_whitespace()).collect();
-                let x = b.strip_prefix("Borrow<")?.strip_suffix('>')?.to_string();
-                inst(&x).or_else(|| self.prog.resolve_g(&crate::ast_summary::ty_of_text(&x, None)?, &[]).ok())
-            })
-        });
+        let bound = borrow_bound.as_deref().and_then(|x| inst(x).or_else(|| self.prog.resolve_g(&crate::ast_summary::ty_of_text(x, None)?, &[]).ok()));
         let wanted = match expected {
             Some(Ty::Ref(false, q)) => Some(*q),
             _ => None,
