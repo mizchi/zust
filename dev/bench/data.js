@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795832477016,
+  "lastUpdate": 1795832480001,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -94780,6 +94780,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 140.211,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "854295530bdd5a4ebd1d2b312512abc37d2ba430",
+          "message": "File::open / fs::metadata / fs::set_permissions with a &str or String path (#330)\n\nThe NUL check of a path (std's InvalidInput) was `p.iter().any(..)`: the\nslice's iterator is codegen's, which selection does not follow from a\nprelude body, so `File::open(\"/dev/null\")` and `File::open(s)` with a\nString failed to compile (\"`.iter()` is only supported directly in a\n`for` loop\"); only a `Path::new(..)` argument, which brought the iterator\nin by another way, compiled. The check is now `__exr_has_nul`, a loop.\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-28T11:09:06+09:00",
+          "tree_id": "d8d436c13f9d6292d92e8a15b1bf6d4276e2ac2d",
+          "url": "https://github.com/mizchi/zust/commit/854295530bdd5a4ebd1d2b312512abc37d2ba430"
+        },
+        "date": 1795832479444,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.06,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.814,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.883,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 14.409,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.989,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.051,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 2.201,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 325.793,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 139.98,
             "unit": "MiB"
           }
         ]
