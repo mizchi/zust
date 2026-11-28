@@ -3429,6 +3429,7 @@ compile-fail	higher-ranked/trait-bounds/issue-58451.rs
 check-pass	higher-ranked/trait-bounds/issue-60283.rs
 check-pass	higher-ranked/trait-bounds/issue-88586-hr-self-outlives-in-trait-def.rs
 check-pass	higher-ranked/trait-bounds/issue-90177.rs
+check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-56556.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-62529-4.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-62529-5.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-70120.rs
