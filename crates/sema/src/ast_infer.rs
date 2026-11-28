@@ -456,7 +456,9 @@ impl Inf<'_> {
     }
 
     fn fn_by(&self, p: &Path) -> Option<u32> {
-        self.prog.fn_by_p(&PPath::of(p), self.self_sid)
+        let id = self.prog.fn_by_p(&PPath::of(p), self.self_sid)?;
+        // (of inherent functions in impls for disjoint instances, the one of the self type the path names)
+        Some(self.prog.fn_of_path_self(id, p, self.env))
     }
 
     /// 自前の構文木のノードを keep に移して推論する (アドレスでは記録しない)
@@ -1436,7 +1438,7 @@ impl Inf<'_> {
                             Some(_) if segs.len() == 2 && segs[1] == "BITS" => self.known(Ty::U32),
                             Some(t) if segs.len() == 2 => self.known(t),
                             // (`std::marker::PhantomData` / `m::S`: a unit struct through a module path)
-                            _ => match self.prog.struct_index.get(*segs.last().unwrap()).copied() {
+                            _ => match self.prog.struct_index.get(crate::types::std_unit_name(&segs)).copied() {
                                 Some(sid)
                                     if !self.prog.structs[sid as usize].is_enum
                                         && self.prog.structs[sid as usize].fields.is_empty()
@@ -1881,6 +1883,10 @@ impl Inf<'_> {
     }
 
     fn call(&mut self, f: &Expr, args: &[Expr]) -> u32 {
+        // (`u32::max_value()`: the integer type's `MAX`, #265)
+        if let Some((t, _)) = crate::parse::int_bound_call(f, args) {
+            return self.known(t);
+        }
         // (`std::clone::Clone::clone(&x)`, `std::fmt::Write::write_str(&mut s, ..)`: as the call its last two segments
         // make, `Clone::clone(&x)` (#153))
         if let Expr::Path(None, p) = f {

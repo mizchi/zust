@@ -4062,9 +4062,8 @@ fn __exr_str_chars<G>(s: &str) -> Chars {
 // マクロは codegen が展開し、値ごとに `__exr_display::<T>` / `__exr_debug::<T>` (型ごとに codegen が
 // 本体を作る) を呼ぶ。数値・文字列の書き出しとパディング、Debug の整形はここの関数が行う
 
-pub struct __FmtError {
-    _p: u8,
-}
+// `std::fmt::Error`: a unit struct, as std's (`Err(fmt::Error)`)
+pub struct __FmtError;
 
 pub struct Formatter {
     buf: &mut String,
@@ -10210,6 +10209,28 @@ impl<T> JoinHandle<T> {
     }
 }
 
+// `std::os::unix::thread::RawPthread` / `JoinHandleExt`: a JoinHandle's pthread_t (an unsigned long on Linux)
+pub type RawPthread = u64;
+
+pub trait JoinHandleExt {
+    fn as_pthread_t(&self) -> RawPthread;
+    fn into_pthread_t(self) -> RawPthread;
+}
+
+impl<T> JoinHandleExt for JoinHandle<T> {
+    fn as_pthread_t(&self) -> RawPthread {
+        self.pt
+    }
+    // (as std's: the handle is given up, neither joined nor detached, so the caller may join the pthread_t)
+    fn into_pthread_t(self) -> RawPthread {
+        let (pt, pk, th) = (self.pt, self.pk, self.th.__th);
+        __core_forget(self);
+        __exr_thread_release(th);
+        __exr_packet_release(pk);
+        pt
+    }
+}
+
 // (a handle dropped without join: the thread is detached, and runs on alone)
 impl<T> Drop for JoinHandle<T> {
     fn drop(&mut self) {
@@ -11714,14 +11735,14 @@ impl Condvar {
     fn __p(&self) -> *mut u32 {
         &self.__cv_n as *const u32 as *mut u32
     }
-    pub fn wait<T>(&self, guard: MutexGuard<T>) -> Result<MutexGuard<T>, ()> {
+    pub fn wait<T>(&self, guard: MutexGuard<T>) -> Result<MutexGuard<T>, PoisonError<MutexGuard<T>>> {
         let n = __exr_atomic_load(self.__p());
         __exr_unlock(guard.m);
         __exr_futex_wait(self.__p(), n);
         __exr_lock(guard.m);
         Ok(guard)
     }
-    pub fn wait_while<T, F: FnMut(&mut T) -> bool>(&self, guard: MutexGuard<T>, condition: F) -> Result<MutexGuard<T>, ()> {
+    pub fn wait_while<T, F: FnMut(&mut T) -> bool>(&self, guard: MutexGuard<T>, condition: F) -> Result<MutexGuard<T>, PoisonError<MutexGuard<T>>> {
         let mut g = guard;
         let mut condition = condition;
         while condition(unsafe { &mut *g.p }) {
@@ -11862,7 +11883,7 @@ impl<T> RwLock<T> {
     fn __l(&self) -> *mut __RwState {
         &self.__rw as *const __RwState as *mut __RwState
     }
-    pub fn read(&self) -> Result<RwLockReadGuard<T>, ()> {
+    pub fn read(&self) -> Result<RwLockReadGuard<T>, PoisonError<RwLockReadGuard<T>>> {
         let l = self.__l();
         let st = unsafe { &mut (*l).st as *mut u32 };
         loop {
@@ -11877,7 +11898,7 @@ impl<T> RwLock<T> {
         }
         Ok(RwLockReadGuard { p: &self.val as *const T, l: l })
     }
-    pub fn write(&self) -> Result<RwLockWriteGuard<T>, ()> {
+    pub fn write(&self) -> Result<RwLockWriteGuard<T>, PoisonError<RwLockWriteGuard<T>>> {
         let l = self.__l();
         let st = unsafe { &mut (*l).st as *mut u32 };
         while __exr_atomic_cas(st, 0, 4294967295) != 0 {
@@ -11885,10 +11906,10 @@ impl<T> RwLock<T> {
         }
         Ok(RwLockWriteGuard { p: &self.val as *const T as *mut T, l: l })
     }
-    pub fn into_inner(self) -> Result<T, ()> {
+    pub fn into_inner(self) -> Result<T, PoisonError<T>> {
         Ok(self.val)
     }
-    pub fn get_mut(&mut self) -> Result<&mut T, ()> {
+    pub fn get_mut(&mut self) -> Result<&mut T, PoisonError<&mut T>> {
         Ok(&mut self.val)
     }
 }
@@ -12291,6 +12312,15 @@ impl Error for LayoutError {
 impl Error for Infallible {
     fn __err_mark(&self) {}
 }
+impl Error for __FmtError {
+    fn __err_mark(&self) {}
+}
+impl<T> Error for PoisonError<T> {
+    fn __err_mark(&self) {}
+}
+impl<T> Error for TryLockError<T> {
+    fn __err_mark(&self) {}
+}
 
 // `Box<dyn Error>`: 変換した時点で表示 ({}) と Debug ({:?}) の文字列にしておく
 pub struct __DynError {
@@ -12301,6 +12331,14 @@ pub struct __DynError {
 impl Display for __DynError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
         __exr_fmt_str::<()>(f, self.msg.as_str());
+        Ok(())
+    }
+}
+
+// (std's text for `fmt::Error`)
+impl Display for __FmtError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_str::<()>(f, "an error occurred when formatting an argument");
         Ok(())
     }
 }
@@ -16766,7 +16804,7 @@ pub struct File {
 // (open(2) of a path with the flags and the mode a new file gets, retried when a signal interrupts it)
 fn __exr_file_open<G>(p: &[u8], flags: i32, mode: i32) -> Result<File, IoError> {
     // (a NUL inside the path would end it there: std's InvalidInput)
-    if p.iter().any(|&b| b == 0) {
+    if __exr_has_nul::<()>(p) {
         return Err(IoError { code: -8, os: false });
     }
     let c = __exr_c_path::<()>(p);
@@ -17162,7 +17200,7 @@ unsafe extern "C" {
 
 // `fs::set_permissions(p, perm)`: chmod(2)
 pub fn __core_set_permissions<P>(path: P, perm: Permissions) -> Result<(), IoError> {
-    if path.__as_bytes().iter().any(|&b| b == 0) {
+    if __exr_has_nul::<()>(path.__as_bytes()) {
         return Err(IoError { code: -8, os: false });
     }
     let c = __exr_c_path::<()>(path.__as_bytes());
@@ -17174,7 +17212,7 @@ pub fn __core_set_permissions<P>(path: P, perm: Permissions) -> Result<(), IoErr
 
 // `fs::metadata(p)`: stat(2), which follows a symlink
 pub fn __core_metadata<P>(path: P) -> Result<Metadata, IoError> {
-    if path.__as_bytes().iter().any(|&b| b == 0) {
+    if __exr_has_nul::<()>(path.__as_bytes()) {
         return Err(IoError { code: -8, os: false });
     }
     let c = __exr_c_path::<()>(path.__as_bytes());
@@ -17817,7 +17855,8 @@ impl Debug for Instant {
         // taken off)
         let t = self.__in_d.as_secs();
         let (sign, mag) = if t < __EXR_INSTANT_BASE { ("-", __EXR_INSTANT_BASE - t) } else { ("", t - __EXR_INSTANT_BASE) };
-        let s = format!("Instant {{ tv_sec: {}{}, tv_nsec: {} }}", sign, mag, self.__in_d.subsec_nanos());
+        // (`\x49` for the `I`: a program's own `Instant` renames this one, word by word, as in Layout's and Thread's)
+        let s = format!("\x49nstant {{ tv_sec: {}{}, tv_nsec: {} }}", sign, mag, self.__in_d.subsec_nanos());
         f.pad(&s)
     }
 }
@@ -17849,4 +17888,99 @@ impl<'a> dyn Any + Send + Sync + 'a {
     pub fn is<T: 'static>(&self) -> bool {
         self.type_id() == TypeId::of::<T>()
     }
+}
+
+// `std::sync::LockResult` / `TryLockResult` / `TryLockError`: what lock / read / write and their try_ forms give. No
+// lock is ever poisoned here (a panic does not unwind), so the Err of a try_ form is WouldBlock: the lock is held
+pub type LockResult<Guard> = Result<Guard, PoisonError<Guard>>;
+pub type TryLockResult<Guard> = Result<Guard, TryLockError<Guard>>;
+
+pub enum TryLockError<T> {
+    Poisoned(PoisonError<T>),
+    WouldBlock,
+}
+
+impl<T> Debug for TryLockError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        match self {
+            // (std writes the name as a str's Debug, quoted)
+            TryLockError::Poisoned(_) => __exr_fmt_str_debug::<()>(f, "Poisoned(..)"),
+            TryLockError::WouldBlock => __exr_fmt_str_debug::<()>(f, "WouldBlock"),
+        }
+        Ok(())
+    }
+}
+
+impl<T> Display for TryLockError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        match self {
+            TryLockError::Poisoned(_) => __exr_fmt_str::<()>(f, "poisoned lock: another task failed inside"),
+            TryLockError::WouldBlock => __exr_fmt_str::<()>(f, "try_lock failed because the operation would block"),
+        }
+        Ok(())
+    }
+}
+
+impl<T> From<PoisonError<T>> for TryLockError<T> {
+    fn from(e: PoisonError<T>) -> TryLockError<T> {
+        TryLockError::Poisoned(e)
+    }
+}
+
+impl<T> Mutex<T> {
+    pub fn try_lock(&self) -> Result<MutexGuard<T>, TryLockError<MutexGuard<T>>> {
+        let m = self.__m();
+        if __exr_atomic_cas(m, 0, 1) != 0 {
+            return Err(TryLockError::WouldBlock);
+        }
+        Ok(MutexGuard { p: &self.val as *const T as *mut T, m: m })
+    }
+    pub fn is_poisoned(&self) -> bool {
+        false
+    }
+    pub fn clear_poison(&self) {}
+}
+
+impl<T> RwLock<T> {
+    // (a writer holds it: WouldBlock, never a wait)
+    pub fn try_read(&self) -> Result<RwLockReadGuard<T>, TryLockError<RwLockReadGuard<T>>> {
+        let l = self.__l();
+        let st = unsafe { &mut (*l).st as *mut u32 };
+        loop {
+            let s = __exr_atomic_load(st);
+            if s >= 4294967294 {
+                return Err(TryLockError::WouldBlock);
+            }
+            if __exr_atomic_cas(st, s, s + 1) == s {
+                break;
+            }
+        }
+        Ok(RwLockReadGuard { p: &self.val as *const T, l: l })
+    }
+    // (a writer or a reader holds it: WouldBlock)
+    pub fn try_write(&self) -> Result<RwLockWriteGuard<T>, TryLockError<RwLockWriteGuard<T>>> {
+        let l = self.__l();
+        let st = unsafe { &mut (*l).st as *mut u32 };
+        if __exr_atomic_cas(st, 0, 4294967295) != 0 {
+            return Err(TryLockError::WouldBlock);
+        }
+        Ok(RwLockWriteGuard { p: &self.val as *const T as *mut T, l: l })
+    }
+    pub fn is_poisoned(&self) -> bool {
+        false
+    }
+    pub fn clear_poison(&self) {}
+}
+
+// (a NUL inside a path would end it there: std's InvalidInput. A loop, not `p.iter().any(..)`: the slice's iterator is
+// codegen's, which selection does not follow from a prelude body, so `File::open("..")` failed to compile)
+fn __exr_has_nul<G>(p: &[u8]) -> bool {
+    let mut k = 0;
+    while k < p.len() {
+        if p[k] == 0 {
+            return true;
+        }
+        k += 1;
+    }
+    false
 }

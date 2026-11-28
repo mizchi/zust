@@ -180,21 +180,44 @@ fn thing_end(s: &[u8], toks: &[Tok], mut i: usize) -> usize {
     let semi_item = matches!(t(j), b"const" | b"static" | b"use" | b"let" | b"type") && t(j + 1) != b"fn";
     // (an item with a keyword ends at its `;` or its block, not at a `,` of `<T, F>` or of its where clause)
     let keyword_item = matches!(t(j), b"fn" | b"struct" | b"enum" | b"union" | b"impl" | b"trait" | b"mod" | b"const" | b"static" | b"type" | b"use");
+    // (a `:` that is not half of a `::` was passed: the type of a field or a parameter follows, `a: Map<K, V>,`)
+    let mut typed = false;
     let mut k = i;
     while k < toks.len() {
         let b = t(k);
-        if toks[k].0 == 1 && is_close(b) {
+        if toks[k].0 != 1 {
+            k += 1;
+            continue;
+        }
+        if is_close(b) {
             // (The end of what encloses it: up to just before that)
             return k - 1;
         }
-        if toks[k].0 == 1 && (b == b";" || (b == b"," && !keyword_item)) {
+        if b == b";" || (b == b"," && !keyword_item) {
             return k;
         }
-        if toks[k].0 == 1 && is_open(b) {
+        if b == b":" && !joint(s, toks, k.wrapping_sub(1), b':') && !joint(s, toks, k, b':') {
+            typed = true;
+        }
+        // (generic arguments hold `,`s: a field's or a parameter's type, a turbofish `f::<A, B>()`, and a `<` right after
+        //  a name, `Map<K, V>` of a tuple field. Only a `<..>` that closes: `a < b, c` is a comparison)
+        if b == b"<" && k > i && (typed || joint(s, toks, k - 1, b'<') && t(k - 1) == b":" || toks[k - 1].0 == 0 && toks[k - 1].2 == toks[k].1) {
+            if let Some(e) = angle_close(s, toks, k) {
+                k = e + 1;
+                continue;
+            }
+        }
+        if is_open(b) {
             let m = matching(s, toks, k);
-            // (`#[cfg(x)] if a { .. } else if b { .. } else { .. }`: the whole `if`)
-            if b == b"{" && !semi_item && t(j) == b"if" && t(m + 1) == b"else" {
+            // (`#[cfg(x)] if a { .. } else if b { .. } else { .. }`: the whole `if`, also as an arm's body)
+            if b == b"{" && !semi_item && t(m + 1) == b"else" {
                 k = m + 2;
+                continue;
+            }
+            // (a match arm's struct pattern, `S { .. } => ..`, `S { a } | T { a } => ..`, `S { a } if a > 0 => ..`: the
+            //  arm goes on to its body)
+            if b == b"{" && !semi_item && !keyword_item && pattern_goes_on(s, toks, m + 1) {
+                k = m + 1;
                 continue;
             }
             if b == b"{" && !semi_item {
@@ -207,6 +230,74 @@ fn thing_end(s: &[u8], toks: &[Tok], mut i: usize) -> usize {
         k += 1;
     }
     toks.len() - 1
+}
+
+/// Whether toks[k] is a symbol and the token after it is the symbol `next`, starting where toks[k] ends (`::`, `=>`,
+/// `->`)
+fn joint(s: &[u8], toks: &[Tok], k: usize, next: u8) -> bool {
+    match (toks.get(k), toks.get(k.wrapping_add(1))) {
+        (Some(&(1, _, a)), Some(&(1, b, c))) => a == b && c == b + 1 && s[b] == next,
+        _ => false,
+    }
+}
+
+/// Where the `<..>` that opens at toks[k] closes (its `>`), at that depth: groups inside are passed, and the `>` of a
+/// `->` closes nothing (`Box<dyn Fn() -> u8>`). None when it does not close before a `;`, a block or the end of what
+/// encloses it (`a < b { .. }`), or when toks[k] is half of `<=` / `<-`
+fn angle_close(s: &[u8], toks: &[Tok], k: usize) -> Option<usize> {
+    if joint(s, toks, k, b'=') || joint(s, toks, k, b'-') {
+        return None;
+    }
+    let mut d = 0u32;
+    let mut j = k;
+    while j < toks.len() {
+        if toks[j].0 == 1 {
+            match s[toks[j].1] {
+                b'<' => d += 1,
+                b'>' if !joint(s, toks, j - 1, b'>') || s[toks[j - 1].1] != b'-' => {
+                    d -= 1;
+                    if d == 0 {
+                        return Some(j);
+                    }
+                }
+                b'(' | b'[' => j = matching(s, toks, j),
+                // (a const argument's block, `A<{ N + 1 }>`, `A<T, { N }>`)
+                b'{' if matches!(s[toks[j - 1].1], b'<' | b',') => j = matching(s, toks, j),
+                b';' | b')' | b']' | b'{' | b'}' => return None,
+                _ => {}
+            }
+        }
+        j += 1;
+    }
+    None
+}
+
+/// Whether a match arm's pattern goes on at toks[k], after a `{ .. }` of its (a struct pattern's): `=>`, an
+/// or-pattern's `|`, or a guard `if ..` with its `=>` after it. A block statement ends at its `}` (`{ .. } if a { .. }`)
+fn pattern_goes_on(s: &[u8], toks: &[Tok], k: usize) -> bool {
+    let sym = |k: usize, c: u8| matches!(toks.get(k), Some(&(1, a, _)) if s[a] == c);
+    if joint(s, toks, k, b'>') && sym(k, b'=') {
+        return true;
+    }
+    if sym(k, b'|') {
+        return !joint(s, toks, k, b'|') && !joint(s, toks, k, b'=');
+    }
+    if !matches!(toks.get(k), Some(&(0, a, b)) if &s[a..b] == b"if") {
+        return false;
+    }
+    let mut j = k + 1;
+    while j < toks.len() {
+        if toks[j].0 == 1 {
+            match s[toks[j].1] {
+                b'=' if joint(s, toks, j, b'>') => return true,
+                b'(' | b'[' | b'{' => j = matching(s, toks, j),
+                b';' | b',' | b')' | b']' | b'}' => return false,
+                _ => {}
+            }
+        }
+        j += 1;
+    }
+    false
 }
 
 /// std's macros whose arguments are expressions zustc reads as they are (no macro_rules expansion follows): their
@@ -768,6 +859,25 @@ mod tests {
         assert_eq!(run("struct S { #[cfg(test)] a: u8, b: u8 }", &[]), "struct S { b: u8 }");
         assert_eq!(run("enum E { #[cfg(not(unix))] A { x: u8 }, B }", &[]), "enum E { B }");
         assert_eq!(run("match x { #[cfg(any(test, doc))] 1 => {} _ => 2 }", &[]), "match x { _ => 2 }");
+        // (an arm whose pattern has braces goes on to its body: serde_json, proc-macro2, der)
+        assert_eq!(run("match x { #[cfg(test)] S::N { .. } => unreachable!(), _ => 2 }", &[]), "match x { _ => 2 }");
+        assert_eq!(run("match x { #[cfg(test)] S { a, .. } => f(*a), _ => 2 }", &[]), "match x { _ => 2 }");
+        assert_eq!(run("match x { #[cfg(test)] S { a } => { a } _ => 2 }", &[]), "match x { _ => 2 }");
+        assert_eq!(run("match x { #[cfg(test)] S { a } | T { a } => a, _ => 2 }", &[]), "match x { _ => 2 }");
+        assert_eq!(run("match x { #[cfg(test)] S { a } if a > 0 => a, _ => 2 }", &[]), "match x { _ => 2 }");
+        assert_eq!(run("match x { #[cfg(test)] A => if a { 1 } else { 2 }, _ => 2 }", &[]), "match x { _ => 2 }");
+        // (a block statement is not a pattern: the `if` after it stays)
+        assert_eq!(run("fn f() { #[cfg(test)] { g(); } if a { h(); } i(); }", &[]), "fn f() { if a { h(); } i(); }");
+        // (a type's generic arguments hold `,`s: a field's (anstyle-parse), a parameter's, a turbofish's (zerovec))
+        assert_eq!(run("struct S { #[cfg(test)] a: A<u8, N>, b: u8 }", &[]), "struct S { b: u8 }");
+        assert_eq!(run("struct S { #[cfg(test)] a: A<B<u8, C>, Box<dyn Fn(u8, u8) -> u8>>, b: u8 }", &[]), "struct S { b: u8 }");
+        assert_eq!(run("struct S(#[cfg(test)] Map<K, V>, u8);", &[]), "struct S( u8);");
+        assert_eq!(run("fn f(#[cfg(test)] a: Map<K, V>, b: u8) {}", &[]), "fn f( b: u8) {}");
+        assert_eq!(run("fn f() { #[cfg(test)] g::<\n  A<u8, B<C, _>>,\n>(&x); h(); }", &[]), "fn f() { h(); }");
+        assert_eq!(run("struct S { #[cfg(test)] a: A<{ N + 1 }, 2>, b: u8 }", &[]), "struct S { b: u8 }");
+        // (a `<` that does not close is a comparison)
+        assert_eq!(run("S { #[cfg(test)] a: b < c, d: 1 }", &[]), "S { d: 1 }");
+        assert_eq!(run("[#[cfg(test)] a < b, c]", &[]), "[ c]");
         assert_eq!(run("#[cfg(test)] const X: S = S { a: 1 }; fn f() {}", &[]), "fn f() {}");
         assert_eq!(run("#[cfg(test)] use a::{b, c}; fn f() {}", &[]), "fn f() {}");
         // (a value with an escape: compared as the literal's value)
