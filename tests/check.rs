@@ -2291,6 +2291,31 @@ fn stricter_bounds_than_the_trait() {
     // (the trait's bounds' supertraits, and fewer bounds than the trait's)
     assert_eq!(first("trait Foo {\n    fn f<T: Ord + Copy>(&self);\n}\nimpl Foo for u8 {\n    fn f<T: Eq + Clone + PartialOrd>(&self) {}\n}\nfn main() {}\n"), None, "supertraits");
     assert_eq!(first("trait A {}\ntrait B: A {}\ntrait Foo {\n    fn f<T: B>(&self);\n}\nimpl Foo for u8 {\n    fn f<T: A>(&self) {}\n}\nfn main() {}\n"), None, "a supertrait of the program's");
+    // (#264: a parameter the impl leaves Sized where the trait's is `?Sized`, at the parameter, or at its `Sized`
+    // bound, after a bound of another trait; not where the impl's `?Sized` is in its where clause, nor where a bound
+    // of the trait's has Sized for a supertrait. Each expected line and column is rustc 1.97's)
+    let w = "use std::fmt;\ntrait Foo {\n    fn f<W: fmt::Write + ?Sized>(&self, w: &mut W);\n}\nimpl Foo for u8 {\n";
+    assert_eq!(first(&format!("{w}    fn f<W: fmt::Write>(&self, w: &mut W) {{}}\n}}\nfn main() {{}}\n")), e(6, 10), "left Sized");
+    assert_eq!(first(&format!("{w}    fn f<W: std::fmt::Write + Sized>(&self, w: &mut W) {{}}\n}}\nfn main() {{}}\n")), e(6, 31), "a Sized bound");
+    assert_eq!(first(&format!("{w}    fn f<W: fmt::Debug>(&self, w: &mut W) {{}}\n}}\nfn main() {{}}\n")), e(6, 13), "another bound first");
+    assert_eq!(
+        first("trait Foo {\n    fn f<'a, T: ?Sized, const N: usize, U: ?Sized>(&self, t: &'a T, u: &U);\n}\nimpl Foo for u8 {\n    fn f<'a, T: ?Sized, const N: usize, U>(&self, t: &'a T, u: &U) {}\n}\nfn main() {}\n"),
+        e(5, 41),
+        "past a lifetime and a const"
+    );
+    assert_eq!(
+        first("use std::fmt;\ntrait Foo {\n    fn f<W>(&self, w: &mut W) where W: ?Sized + fmt::Write;\n    fn g<T: Clone + ?Sized>(&self, t: &T);\n}\nimpl Foo for u8 {\n    fn f<W: ?Sized>(&self, w: &mut W) where W: core::fmt::Write {}\n    fn g<T: Clone>(&self, t: &T) {}\n}\nfn main() {}\n"),
+        None,
+        "where clauses, and Clone's Sized"
+    );
+    assert_eq!(first("trait B: Sized {}\ntrait Foo {\n    fn f<T: B + ?Sized>(&self, t: &T);\n}\nimpl Foo for u8 {\n    fn f<T: B>(&self, t: &T) {}\n}\nfn main() {}\n"), None, "a supertrait Sized");
+    // (a trait's where clause's `Self: ..` bounds are its supertraits too; its parameters' are not)
+    assert_eq!(first("trait B: Send where Self: Sized {}\ntrait Foo {\n    fn f<T: B + ?Sized>(&self, t: &T);\n}\nimpl Foo for u8 {\n    fn f<T: B>(&self, t: &T) {}\n}\nfn main() {}\n"), None, "Sized by `where Self: Sized`");
+    assert_eq!(first("trait A {}\ntrait B where Self: A + Clone {}\ntrait Foo {\n    fn f<U: B>(&self);\n}\nimpl Foo for u8 {\n    fn f<U: Clone + A>(&self) {}\n}\nfn main() {}\n"), None, "supertraits by `where Self:`");
+    assert_eq!(first("trait C<T>: Send where T: Sized {}\ntrait Foo {\n    fn f<U: C<u8> + ?Sized>(&self, u: &U);\n}\nimpl Foo for u8 {\n    fn f<U: C<u8>>(&self, u: &U) {}\n}\nfn main() {}\n"), e(6, 10), "a parameter's Sized");
+    assert_eq!(first("trait B<T> where T: Clone {}\ntrait Foo {\n    fn f<U: B<u8>>(&self);\n}\nimpl Foo for u8 {\n    fn f<U: B<u8> + Clone>(&self) {}\n}\nfn main() {}\n"), e(6, 21), "a parameter's bound");
+    // (#264: by the trait a path names: `io::Write` is not `fmt::Write`)
+    assert_eq!(first("use std::fmt;\ntrait Foo {\n    fn f<W: fmt::Write>(&self, w: W);\n}\nimpl Foo for u8 {\n    fn f<W: std::io::Write>(&self, w: W) {}\n}\nfn main() {}\n"), e(6, 13), "io's Write");
 }
 
 #[test]

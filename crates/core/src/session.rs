@@ -11460,8 +11460,10 @@ fn sig_type_pieces(t: &str) -> Vec<&str> {
 /// E0276 "impl has stricter requirements than trait", at the bound: a method of an impl of a trait of the program's
 /// whose own type parameter (by its place) has a trait bound, inline or in the method's where clause, that the trait's
 /// method's parameter does not have, nor one of the bounds it has as a supertrait (`T: Ord` where the trait says
-/// `T: Eq`; `T: Eq` where it says `T: Ord` is fine). Bounds are told by their trait's name, not its arguments; not
-/// lifetimes, nor the impl's own parameters. Only read for a program with a trait with a generic method
+/// `T: Eq`; `T: Eq` where it says `T: Ord` is fine). Bounds are told by the trait their path names (bound_trait_name:
+/// `fmt::Write` and a macro's `core :: fmt :: Write` are one trait, `io::Write` another), not its arguments; not
+/// lifetimes, nor the impl's own parameters. Then a parameter the impl leaves Sized where the trait's is `?Sized`.
+/// Only read for a program with a trait with a generic method
 fn stricter_impl_bound(src: &str, items: &[SrcItem]) -> Option<String> {
     let text = |it: &SrcItem| src.get(it.start..it.end).unwrap_or("");
     // (a trait member with type parameters of its own: `fn f<T` before its `(`)
@@ -11480,8 +11482,10 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
     let text = |it: &SrcItem| src.get(it.start..it.end).unwrap_or("");
     let generic_fn = |t: &str| t.find('(').is_some_and(|p| t[..p].contains('<') && t[..p].contains("fn "));
     use crate::parse::{Bound, GParam, Ty as PTy};
-    // (a header's name after its keyword, and the names after a `:` before its `{` / `where`: `trait B: A + Sized {`)
+    // (a header's name after its keyword)
     let words = |t: &str| -> Vec<String> { crate::lexer::tokenize(t.as_bytes()).iter().filter(|x| x.0 == 0).map(|x| t[x.1..x.2].to_string()).collect() };
+    // (a type that is `Self`: a where clause's `Self: Sized`)
+    let is_self = |t: &PTy| matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "Self" && p.segs[0].args.is_empty());
     let mut supers: crate::fxhash::FxMap<String, Vec<String>> = Default::default();
     let mut trait_of: crate::fxhash::FxMap<u32, String> = Default::default();
     for (i, it) in items.iter().enumerate() {
@@ -11493,13 +11497,37 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
         let w = words(head);
         let Some(k) = w.iter().position(|x| x == "trait") else { continue };
         let Some(name) = w.get(k + 1) else { continue };
-        let sup: Vec<String> = match head.find(':') {
-            Some(c) => {
+        // (its supertraits: the bounds after its `:` and those of its where clause's `Self: ..`, which are supertraits
+        // too (`trait B: Send where Self: Sized`), by the trait each names (bound_trait_name); not its parameters'
+        // (`trait B<T: Clone>`, `where T: Clone`). From the header parsed alone; where that fails, the names after a
+        // `:` before its `where`)
+        let parsed = crate::parse::parse_file(&format!("{head}{{}}")).ok().and_then(|f| match f.items.into_iter().next()?.kind {
+            crate::parse::ItemKind::Trait(_, g, sup, _) => Some((g, sup)),
+            _ => None,
+        });
+        let sup: Vec<String> = match (parsed, head.find(':')) {
+            (Some((g, sup)), _) => sup
+                .iter()
+                .chain(g.preds.iter().filter(|(t, _)| is_self(t)).flat_map(|(_, bs)| bs))
+                .filter_map(|b| match b {
+                    Bound::Trait(false, p) => bound_trait_name(p),
+                    _ => None,
+                })
+                .collect(),
+            (None, Some(c)) => {
                 let r = &head[c + 1..];
                 let r = &r[..r.find("where").unwrap_or(r.len())];
-                words(r).into_iter().filter(|x| x.starts_with(|c: char| c.is_ascii_uppercase())).collect()
+                // (by the trait each path names, as bound_trait_name: `fmt::__FWr` and a macro's `fmt :: Write`)
+                let w = words(r);
+                w.iter()
+                    .enumerate()
+                    .filter_map(|(j, x)| match j.checked_sub(1).and_then(|p| crate::prep::std_rename_of(&w[p], x)) {
+                        Some(to) => Some(to.to_string()),
+                        None => (x.starts_with(|c: char| c.is_ascii_uppercase()) || x.starts_with("__")).then(|| x.clone()),
+                    })
+                    .collect()
             }
-            None => vec![],
+            (None, None) => vec![],
         };
         supers.insert(name.clone(), sup);
         trait_of.insert(i as u32, name.clone());
@@ -11539,18 +11567,32 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
         }
         out
     };
-    // (a method's own type parameters with their bounds: inline, and its where clause's `T: B`)
-    let params = |g: &crate::parse::Generics| -> Vec<Vec<(String, crate::parse::Pos)>> {
+    // (a method's own type parameters: each one's trait bounds, inline and its where clause's `T: B`, by the trait
+    // each names (bound_trait_name); whether it is `?Sized`, inline or there; and its first `Sized` bound, if it has
+    // one)
+    struct Own {
+        bounds: Vec<(String, crate::parse::Pos)>,
+        relaxed: bool,
+        sized: Option<crate::parse::Pos>,
+    }
+    let params = |g: &crate::parse::Generics| -> Vec<Own> {
         g.params
             .iter()
             .filter_map(|q| match q {
                 GParam::Ty(n, bs, _) => {
-                    let mut v: Vec<(String, crate::parse::Pos)> = vec![];
+                    let mut v = Own { bounds: vec![], relaxed: false, sized: None };
                     let mut add = |bs: &[Bound]| {
                         for b in bs {
-                            if let Bound::Trait(false, p) = b {
-                                if let Some(s) = p.segs.last() {
-                                    v.push((s.name.clone(), p.pos));
+                            let Bound::Trait(maybe, p) = b else { continue };
+                            let Some(t) = bound_trait_name(p) else { continue };
+                            match (*maybe, t == "Sized") {
+                                (true, true) => v.relaxed = true,
+                                (true, false) => {}
+                                (false, sized) => {
+                                    if sized && v.sized.is_none() {
+                                        v.sized = Some(p.pos);
+                                    }
+                                    v.bounds.push((t, p.pos));
                                 }
                             }
                         }
@@ -11686,8 +11728,8 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
                 return Some(Err((mp.len(), dp.len(), ms.recv.is_some())));
             }
             let by_trait = mp.iter().zip(&dp).find_map(|(mb, db)| {
-                let allowed = close(db.iter().map(|x| x.0.clone()).collect());
-                mb.iter().find(|(n, _)| n != "Sized" && !allowed.contains(n)).map(|x| Ok(x.1))
+                let allowed = close(db.bounds.iter().map(|x| x.0.clone()).collect());
+                mb.bounds.iter().find(|(n, _)| n != "Sized" && !allowed.contains(n)).map(|x| Ok(x.1))
             });
             if by_trait.is_some() {
                 return by_trait;
@@ -11706,6 +11748,25 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
             let implied = |n: &str| ds.params.iter().map(|p| &p.1).chain(ds.ret.as_ref()).any(|t| static_implies(t, n));
             if ms_st.iter().zip(&ds_st).zip(&names).any(|((m, d), n)| *m && !*d && !implied(n)) && !header_static {
                 let off = key.find("'static")?;
+                let line = key[..off].matches('\n').count() + 1;
+                let col = off - key[..off].rfind('\n').map_or(0, |k| k + 1);
+                return Some(Ok(crate::parse::Pos { line: line as u32, col: col as u32 }));
+            }
+            // (a type parameter the impl's method leaves Sized where the trait's is `?Sized` (`W: fmt::Write` for the
+            // trait's `W: fmt::Write + ?Sized`): rustc's "extra requirement `W: Sized`", unless a bound of the trait's
+            // parameter has Sized for a supertrait (`W: Clone + ?Sized`; a trait of the program's `trait B: Sized`, or
+            // `trait B: Send where Self: Sized`). After the other bounds, as rustc reports them: at the impl's `Sized`
+            // bound if it writes one, else at the parameter's name)
+            const SIZED_BY: [&str; 12] = ["Sized", "Clone", "Copy", "Default", "From", "Into", "TryFrom", "TryInto", "FromStr", "FromIterator", "Sum", "Product"];
+            let unsized_at = mp.iter().zip(&dp).position(|(mb, db)| {
+                db.relaxed && !mb.relaxed && !close(db.bounds.iter().map(|x| x.0.clone()).collect()).iter().any(|n| SIZED_BY.contains(&n.as_str()))
+            });
+            if let Some(k) = unsized_at {
+                if let Some(p) = mp[k].sized {
+                    return Some(Ok(p));
+                }
+                let offs = own_type_param_offsets(key, name);
+                let off = *offs.get(k).filter(|_| offs.len() == mp.len())?;
                 let line = key[..off].matches('\n').count() + 1;
                 let col = off - key[..off].rfind('\n').map_or(0, |k| k + 1);
                 return Some(Ok(crate::parse::Pos { line: line as u32, col: col as u32 }));
@@ -11729,6 +11790,76 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
         }
     }
     None
+}
+
+/// The trait a bound's path names, as the program's items and the prelude name it: its last segment, or the prelude's
+/// name of a std trait that prep::std_renames renames by its module. `fmt::Write`, `core::fmt::Write`,
+/// `std::fmt::Write` and `fmt::__FWr` are `__FWr`, `io::Write` is `Write`, whether the rename reached the path or not
+/// (#264: it did not reach a crate's macro expansions, which build_workspace makes before it and writes spaced,
+/// `core :: fmt :: Write`, where the trait's own text said `fmt::__FWr`)
+fn bound_trait_name(p: &crate::parse::Path) -> Option<String> {
+    let last = &p.segs.last()?.name;
+    let module = p.segs.len().checked_sub(2).map(|k| p.segs[k].name.as_str());
+    Some(module.and_then(|m| crate::prep::std_rename_of(m, last)).unwrap_or(last).to_string())
+}
+
+/// The byte offsets in a fn's text of its own type parameters' names, in order: `fn f<'a, T: Tr, const N: usize, U>`
+/// gives T's and U's. After the `fn name` followed by `<`; none without one
+fn own_type_param_offsets(t: &str, name: &str) -> Vec<usize> {
+    let b = t.as_bytes();
+    let id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let mut from = 0;
+    let open = loop {
+        let Some(k) = t[from..].find("fn ") else { return vec![] };
+        let at = from + k;
+        from = at + 3;
+        let r = t[at + 3..].trim_start();
+        let Some(rest) = r.strip_prefix(name) else { continue };
+        if (at > 0 && id(b[at - 1])) || rest.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+            continue;
+        }
+        let rest = rest.trim_start();
+        if !rest.starts_with('<') {
+            return vec![];
+        }
+        break t.len() - rest.len();
+    };
+    let (mut out, mut depth, mut start, mut i) = (vec![], 0i32, false, open);
+    while i < b.len() {
+        let c = b[i];
+        match c {
+            // (the `->` of a bound `F: Fn() -> u8`)
+            b'>' if i > 0 && b[i - 1] == b'-' => {}
+            b'<' | b'(' | b'[' | b'{' => {
+                depth += 1;
+                start = depth == 1;
+            }
+            b'>' | b')' | b']' | b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            b',' if depth == 1 => start = true,
+            _ if depth == 1 && start && !c.is_ascii_whitespace() => {
+                start = false;
+                if id(c) {
+                    let mut e = i;
+                    while e < b.len() && id(b[e]) {
+                        e += 1;
+                    }
+                    if &t[i..e] != "const" {
+                        out.push(i);
+                    }
+                    i = e;
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out
 }
 
 /// Two items of one name in one impl block, in one namespace (a fn's and a const's are values, a type's is a type):

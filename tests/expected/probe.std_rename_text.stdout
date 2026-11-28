@@ -1,0 +1,11 @@
+fmt :: Write
+io :: Write
+fmt::Write
+std::fmt::Write core :: fmt :: Write
+fmt::Write 1
+fmt :: Write "2"
+[102, 109, 116, 58, 58, 87, 114, 105, 116, 101]
+fmt::Write [fmt :: Write]
+mpsc::Sender, Sender mpsc :: Receiver
+3 atomic::Ordering
+['W', 'r'] W
