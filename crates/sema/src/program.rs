@@ -532,8 +532,12 @@ pub struct RefImplFn {
     pub f: Option<u32>,
     /// how the method takes self: 0 `self`, 1 `&self`, 2 `&mut self`
     pub recv: u8,
-    /// T's bounds in the impl's header (`Display`, `?Sized`)
+    /// T's bounds in the impl's header (`Display`, `?Sized`); of a blanket impl's (`blanket`), Self's
     pub bounds: Vec<String>,
+    /// A blanket impl's method (`impl<T: Name> Loud for T`, its own or the trait's default), whose bounds name a trait
+    /// with such methods: Self is any reference that meets them (`(&&s).loud()` runs it with Self = &S, and its
+    /// `self.name()` is the impl's for `&S`), not only one of `mutable`
+    pub blanket: bool,
 }
 
 /// A Mutex that clones its content (Program's caches)
@@ -2835,6 +2839,9 @@ impl Program {
                 ));
             }
         }
+        if !p.ref_dispatch.is_empty() {
+            p.note_ref_blankets();
+        }
         // (an unbounded blanket impl and any other impl of its trait in the program)
         for (tr, bl) in &unbounded_blankets {
             if let Some(line) = other_impls.iter().filter(|(t, l)| t == tr && l != bl).map(|(_, l)| *l).min() {
@@ -3489,8 +3496,47 @@ impl Program {
             } else {
                 continue;
             };
-            let e = RefImplFn { tr: tr.to_string(), mutable, f, recv, bounds: bounds.clone() };
+            let e = RefImplFn { tr: tr.to_string(), mutable, f, recv, bounds: bounds.clone(), blanket: false };
             self.ref_dispatch.entry(m.to_string()).or_default().push(e);
+        }
+    }
+
+    /// The methods of blanket impls (Program::blanket) whose bounds name a trait with methods in ref_dispatch, into it
+    /// (RefImplFn::blanket): with Self = `&X` their bodies' calls through Self reach those methods, with Self = X the
+    /// referent's
+    #[cold]
+    #[inline(never)]
+    fn note_ref_blankets(&mut self) {
+        let dispatched: HashSet<&str> = self.ref_dispatch.values().flatten().map(|c| c.tr.as_str()).collect();
+        let mut add = vec![];
+        for (m, &bid) in &self.blanket {
+            // (not an impl for references' own `T::__ref_m`, which the blanket table also has)
+            if m.starts_with("__ref_") {
+                continue;
+            }
+            let sg = &self.sigs[bid as usize];
+            let Some(tr) = sg.trait_of.as_deref().or(sg.impl_trait.as_deref()) else { continue };
+            let tr = tr.split('<').next().unwrap_or(tr).trim();
+            let recv = match sg.params.first() {
+                Some(Ty::Param(_)) => 0,
+                Some(Ty::Ref(false, Ty::Param(_))) => 1,
+                Some(Ty::Ref(true, Ty::Param(_))) => 2,
+                _ => continue,
+            };
+            for bs in self.blanket_bounds.get(tr).map(|v| v.as_slice()).unwrap_or(&[]) {
+                let names = |b: &String| {
+                    let b = b.trim();
+                    let b = b.split('<').next().unwrap_or(b).trim();
+                    b.rsplit("::").next().unwrap_or(b).to_string()
+                };
+                if bs.iter().any(|b| dispatched.contains(names(b).as_str())) {
+                    add.push((m.clone(), RefImplFn { tr: tr.to_string(), mutable: false, f: Some(bid), recv, bounds: bs.clone(), blanket: true }));
+                    break;
+                }
+            }
+        }
+        for (m, e) in add {
+            self.ref_dispatch.entry(m).or_default().push(e);
         }
     }
 

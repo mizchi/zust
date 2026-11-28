@@ -75,6 +75,9 @@ pub(crate) fn vec_of(es: &[Expr]) -> Expr {
     Expr::Block(None, false, PBlock { stmts: lets, spos: Default::default() })
 }
 
+/// gen_ty's type parameter for a value of an opaque type (`-> impl Name`): its bound's methods are called through it
+const OPAQUE: u8 = u8::MAX;
+
 impl Cx<'_> {
     /// `recv.m(args)`: レシーバを自動 deref して struct を見つけ、
     /// メソッドの self 型に合わせて自動参照 (`&self` / `&mut self`) かコピー (`self`) で渡す
@@ -4867,6 +4870,20 @@ impl Cx<'_> {
                 Some(t) => Some(Ty::Ref(*m, intern(t))),
                 None => self.peek(e).filter(|t| matches!(t, Ty::Ref(..))),
             },
+            // (the result of a fn that returns an opaque type, `make(&s)` of `fn make(s: &S) -> impl Name`: as a value of
+            // a type parameter, whose bound's method rustc calls whatever type the fn returns (OPAQUE))
+            Expr::Call(f, _) if !self.prog.opaque.is_empty() => {
+                let (id, _) = self.callee(f)?;
+                self.prog.opaque.contains(&id).then_some(Ty::Param(OPAQUE))
+            }
+            Expr::MethodCall(r, m, ..) if !self.prog.opaque.is_empty() => {
+                let sid = match self.peek(r).map(|t| self.strip_refs(t)) {
+                    Some(Ty::Struct(sid)) => sid,
+                    _ => return None,
+                };
+                let id = self.prog.method(sid, m)?;
+                self.prog.opaque.contains(&id).then_some(Ty::Param(OPAQUE))
+            }
             Expr::Field(b, f, _) => {
                 let mut t = self.gen_ty(b, depth + 1)?;
                 while let Ty::Ref(_, i) = t {
@@ -4979,7 +4996,8 @@ impl Cx<'_> {
     /// bounds of T hold of X: the impl's method, or the trait's default it leaves out
     fn ref_impl_fn(&self, cs: &[&crate::program::RefImplFn], method: &str, st: Ty) -> Option<u32> {
         let Ty::Ref(ms, x) = st else { return None };
-        let c = cs.iter().find(|c| c.mutable == ms && self.ref_bounds_hold(*x, &c.bounds, 0))?;
+        // (a blanket impl's method: Self is the reference itself, when it meets the impl's bounds)
+        let c = cs.iter().find(|c| if c.blanket { self.ref_bounds_hold(st, &c.bounds, 0) } else { c.mutable == ms && self.ref_bounds_hold(*x, &c.bounds, 0) })?;
         c.f.or_else(|| {
             self.prog.traits.get(&c.tr)?.iter().copied().find(|&d| self.prog.sigs[d as usize].has_body && self.prog.names[d as usize].rsplit("::").next() == Some(method))
         })
@@ -5063,14 +5081,14 @@ impl Cx<'_> {
             false
         };
         let bound = |tr: &str| {
-            param.is_none_or(|i| gens.get(i).is_some_and(|g| g.1.iter().any(|b| {
+            param.is_none_or(|i| i == OPAQUE as usize || gens.get(i).is_some_and(|g| g.1.iter().any(|b| {
                 let b = b.trim();
                 let b = b.split('<').next().unwrap_or(b).trim();
                 supers(b.rsplit("::").next().unwrap_or(b), tr)
             })))
         };
         let named = |tr: &str| self.explicit_trait.as_ref().is_none_or(|(m, t)| m != method || t == tr);
-        let cs: Vec<&crate::program::RefImplFn> = all.iter().filter(|c| bound(&c.tr) && named(&c.tr)).collect();
+        let cs: Vec<&crate::program::RefImplFn> = all.iter().filter(|c| (c.blanket || bound(&c.tr)) && named(&c.tr)).collect();
         // (one trait's: two traits' impls for references with the method are left to the lookup)
         let first = cs.first()?;
         if cs.iter().any(|c| c.tr != first.tr) {
