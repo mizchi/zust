@@ -3715,7 +3715,10 @@ impl Cx<'_> {
     /// call; `targs`: the trees of its type arguments
     pub(crate) fn rg_obligations(&mut self, id: u32, sol: &[Option<Ty>], lts: &[u32], targs: &[Option<RT>], sp: Sp) {
         let prog = self.prog;
-        if prog.tdb.lt_traits.is_empty() {
+        // (not in a generic function's instance: rustc proves the bounds of its body's calls once, from its where
+        // clauses, whatever its parameters are; an impl of the instance's types is no proof there
+        // (implied-bounds-on-trait-hierarchy-2.rs, a check-pass test, with `S: for<'a, 'b> Subtrait<..>`))
+        if prog.tdb.lt_traits.is_empty() || !self.rg.inst_args.is_empty() {
             return;
         }
         let sig0 = &prog.sigs[id as usize];
