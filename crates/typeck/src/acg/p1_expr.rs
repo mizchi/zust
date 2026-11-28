@@ -1045,6 +1045,19 @@ impl Cx<'_> {
                 return Ok((Some(fat), want));
             }
         }
+        // `&W` → `&Target` through W's Deref (`deref_mut` for a `&mut`), as many as reach the type wanted (deref
+        // coercion: `is_str(&value)` of an `Either<String, &str>`, whose Deref gives the str through String's). Last,
+        // after the coercions above, and never to a `dyn`, which `&W` itself coerces to
+        if let (Some(want @ Ty::Ref(m2, wi)), Some(v0), Ty::Ref(m1, Ty::Struct(sid0))) = (expected, v, t) {
+            // (a program's type's Deref only: the prelude's (`PathBuf` → `Path`, `Rc<T>` → `T`) are not taken here, as
+            // `ToolA::from(&path_buf)` with impls of `From<&Path>` and `From<&str>` is rustc's E0277, no coercion)
+            let user = self.prog.struct_item.get(self.prog.base_of(*sid0) as usize).is_some_and(|&i| i < self.prog.prelude_from);
+            if user && (m1 || !m2) && !matches!(wi, Ty::Dyn(_)) && *wi != Ty::Struct(*sid0) && !self.prog.has_param(*wi) && self.prog.method(*sid0, "deref").is_some() {
+                if let Some(r) = self.deref_coerce_user(v0, *sid0, *wi, m2)? {
+                    return Ok((Some(r), want));
+                }
+            }
+        }
         // `&T` → `*const dyn Trait` (the same fat value as `&dyn Trait`)
         if let (Some(want @ Ty::Ptr(m2, Ty::Dyn(tr))), Some(v), Ty::Ref(m1, inner)) = (expected, v, t) {
             if m1 || !m2 {
@@ -1058,6 +1071,38 @@ impl Cx<'_> {
             }
         }
         Ok((v, t))
+    }
+
+    /// The address of what `&W`'s derefs reach where a `&want` is wanted: W's `deref` (`deref_mut` for a `&mut`), then the
+    /// target's, up to 8, and a String's / Vec's str / slice last. None where they do not reach it
+    fn deref_coerce_user(&mut self, v: Value, sid: u32, want: Ty, m: bool) -> R<Option<Value>> {
+        let (mut cur, mut s) = (v, sid);
+        for _ in 0..8 {
+            let name = if m && self.prog.method(s, "deref_mut").is_some() { "deref_mut" } else { "deref" };
+            if m && name == "deref" {
+                return Ok(None);
+            }
+            let Some(did) = self.prog.method(s, name) else { return Ok(None) };
+            let (r, rt) = self.call_fn_vals(did, &[(cur, Ty::Ref(m, intern(Ty::Struct(s))))], SP)?;
+            let (Some(r), Ty::Ref(_, inner)) = (r, rt) else { return Ok(None) };
+            if *inner == want {
+                return Ok(Some(r));
+            }
+            let Ty::Struct(s2) = *inner else { return Ok(None) };
+            if matches!(want, Ty::Str | Ty::Slice(_)) {
+                if let Some((fat, ft)) = self.deref_to_slice(r, s2, m) {
+                    if matches!(ft, Ty::Ref(_, i) if *i == want) {
+                        return Ok(Some(fat));
+                    }
+                }
+            }
+            if self.prog.method(s2, "deref").is_none() {
+                return Ok(None);
+            }
+            cur = r;
+            s = s2;
+        }
+        Ok(None)
     }
 
     pub(crate) fn expr_inner(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {

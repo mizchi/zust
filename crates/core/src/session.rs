@@ -1566,11 +1566,10 @@ impl Session {
                     if let Some(t) = sm.trait_decl.as_deref() {
                         let e = supers.entry(short(t)).or_default();
                         e.push("#?".to_string());
-                        let head = src.get(it.start..it.end).map(|x| x.split('{').next().unwrap_or(x)).unwrap_or("");
-                        let words: Vec<&str> = head.split(|c: char| !(c.is_alphanumeric() || c == '_')).collect();
-                        for m in ["Sized", "Clone", "Copy", "Default"] {
-                            if words.contains(&m) && !e.iter().any(|x| x == m) {
-                                e.push(m.to_string());
+                        // (its parsed header: the supertraits and `where Self: ..`, not a parameter's `?Sized`)
+                        for m in crate::ast_summary::trait_sized_supers(&src, it) {
+                            if !e.iter().any(|x| *x == m) {
+                                e.push(m);
                             }
                         }
                     }

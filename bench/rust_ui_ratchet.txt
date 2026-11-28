@@ -4,3 +4,7 @@ run-pass	1960
 check-pass	1590
 build-pass	105
 compile-fail	5414
+run-pass	1938
+check-pass	1563
+build-pass	104
+compile-fail	5401
