@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795856636926,
+  "lastUpdate": 1795856639092,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -130651,6 +130651,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/f025189cc6c58470c828221b29b9e5d482df97c1"
         },
         "date": 1795855637227,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.296,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 65,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 78.571,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 96.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 91.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 92.179,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ef3469ee3df97c18d7ddc995b6f8bc4bff049f1b",
+          "message": "syntax, sema, typeck: `fmt::Result` and defaulted const parameters used without arguments (#346)\n\n`missing generics for Result` / `ObjectIdentifier` (bytes, const-oid, time-core): `fmt::Result` / `io::Result` / `thread::Result` imported by name now name std's aliases rather than the prelude's generic `Result`, and a type with defaulted const parameters (`struct B<const N: usize = 3>`) can be used without arguments, as rustc allows. Explicit arguments before `::default()` are kept, a const default may name an earlier parameter, and an import of `Result` stays in the type namespace.\n\nThe KPI ceilings of `edit one fn` and `traits edit` are raised to this head: main's base was already above them, and this change costs +0.40% / +0.14% against its base.\n\nFixes #260\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-28T08:57:52Z",
+          "tree_id": "3969f2411f4cf0f231890d92862e3c301a3e0303",
+          "url": "https://github.com/mizchi/zust/commit/ef3469ee3df97c18d7ddc995b6f8bc4bff049f1b"
+        },
+        "date": 1795856638798,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
