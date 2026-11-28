@@ -4690,6 +4690,13 @@ impl Cx<'_> {
                 }
             }
         }
+        // (#144: `Tr::m(&&s)` of an impl for references to a type parameter: Self is `&S` as the argument has it, no
+        // autoderef, which the method call the rewrite below makes would do)
+        if !self.prog.ref_dispatch.is_empty() {
+            if let Some(r) = self.ref_impl_ufcs(c, expected)? {
+                return Ok(r);
+            }
+        }
         if let Some(e) = self.prim_method_call(c) {
             let e = self.keep_expr(e);
             // (`crate::a::M::m(&x)`: the trait the path names, which a trait in scope must not replace)
@@ -4875,8 +4882,12 @@ impl Cx<'_> {
                         }
                     }
                 }
-            } else if n == 2 && self.prog.sigs[id as usize].self_ty.is_some_and(|t| self.prog.has_param(t)) {
-                // `T::dec(r)` (T a concrete type in the instance): the generic impl's type arguments from Self
+            } else if n == 2
+                && self.prog.sigs[id as usize].self_ty.is_some_and(|t| self.prog.has_param(t))
+                && !(p.segs[0].args.is_empty() && self.prog.bare_by_defaults(&p.segs[0].name))
+            {
+                // `T::dec(r)` (T a concrete type in the instance): the generic impl's type arguments from Self (not
+                // from a struct's defaults: `W::new(5u64)` of `struct W<T = u8>` infers them)
                 let seg = p.segs[0].clone();
                 let ty = crate::parse::Ty::Path(None, Path { global: false, segs: vec![seg], pos: Default::default() });
                 self.seg_self = self.parse_ty(&ty).ok().filter(|&t| !self.prog.has_param(t));
@@ -4885,8 +4896,11 @@ impl Cx<'_> {
         // (a trait's default fn called through a type (`S::f()` / `<S as Tr>::f()`): Self is that type)
         if self.seg_self.is_none() && self.prog.sigs[id as usize].trait_of.is_some() && matches!(self.prog.sigs[id as usize].self_ty, None | Some(Ty::Param(0))) && !self.prog.sigs[id as usize].generics.is_empty() {
             if let Expr::Path(q, p) = &**func {
+                // (a struct's defaults only without an expected type: `let b: Buf<5> = Buf::default();` is a Buf<5>)
+                let by_defaults = || expected.is_some() && p.segs.len() == 2 && p.segs[0].args.is_empty() && self.prog.bare_by_defaults(&p.segs[0].name);
                 self.seg_self = match q {
                     Some(q) => self.parse_ty(q).ok(),
+                    None if by_defaults() => None,
                     None => self.path_self_ty(p),
                 }
                 .filter(|&t| !self.prog.has_param(t));

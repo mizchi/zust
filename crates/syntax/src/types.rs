@@ -378,6 +378,23 @@ pub struct RSigSyn {
     pub derived_ty: Vec<(String, String, u8)>,
 }
 
+/// The regions of an impl header of a trait, as a trait obligation selecting the impl relates them to its goal's
+/// (the head: its self type and its trait's arguments; the where clause's outlives). Codes are of `lts`; an elided
+/// region of the header is one of its own (a fresh one), a region a fn pointer type binds is R_BOUND
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub struct RHeadSyn {
+    /// The impl's lifetime parameters, then one `'_k` for each `'_` of its self type
+    pub lts: Vec<String>,
+    /// The region slots of the self type
+    pub self_slots: Vec<u8>,
+    /// The codes of the lifetimes the trait path writes as its arguments, in order
+    pub trait_lts: Vec<u8>,
+    /// The region slots of each type argument the trait path writes, in order
+    pub trait_args: Vec<Vec<u8>>,
+    /// Declared `'a: 'b`, inline or in the where clause
+    pub outlives: Vec<(u8, u8)>,
+}
+
 /// The regions of a struct / enum definition
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct RAdtSyn {
@@ -479,6 +496,9 @@ pub struct Summary {
     pub adt_defaults: Vec<Option<TySyn>>,
     /// The regions of an impl / trait header (None: it names no lifetime)
     pub hdr_regions: Option<Box<RImplSyn>>,
+    /// The regions of a trait impl's head, where it names a lifetime (`'static` too), binds one in a fn pointer type
+    /// or declares an outlives (None otherwise: its regions are all its own, any goal's)
+    pub impl_head: Option<Box<RHeadSyn>>,
     /// The regions of the struct / enum defined (None: it names no lifetime, so it has no region of its own)
     pub adt_regions: Option<Box<RAdtSyn>>,
     /// The type parameters and self type of an impl header (`impl<T> Option<T>`)
@@ -517,13 +537,13 @@ pub struct Summary {
     /// The concrete (non-parameter, non-primitive) types bounded in the item's where clauses (`where Local: Any`):
     /// Program checks that they exist
     pub where_types: Vec<String>,
-    /// A member of `impl<T> Tr for &T` / `&mut T`: the method it defines (the impl's methods are not called: a call on
-    /// the reference reaches T's through the deref)
+    /// A member of `impl<T> Tr for &T` / `&mut T`: the method it defines
     pub ref_impl_fns: Vec<String>,
-    /// That method, when T is bounded by Tr and it does more than forward to T's method (ast_summary::forwards_to_referent)
+    /// That method, when it has a receiver and does more than forward to T's method (ast_summary::forwards_to_referent),
+    /// or T is bounded by another trait than Tr: a call on the reference that takes the impl runs it (Program::ref_dispatch)
     pub ref_impl_bad: Vec<String>,
     /// A forwarding method's `_` parameter given the path of its type as a value, (method, the path's last segment):
-    /// a forward only when that is a unit struct, not a const or static of the same name (the driver checks)
+    /// a forward only when that is a unit struct, not a const or static of the same name (Program::note_ref_impl checks)
     pub ref_impl_unit_args: Vec<(String, String)>,
 }
 

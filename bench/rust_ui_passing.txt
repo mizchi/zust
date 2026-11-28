@@ -1737,6 +1737,8 @@ check-pass	const-generics/const-param-in-async.rs
 compile-fail	const-generics/const-param-type-depends-on-type-param-ungated.rs
 check-pass	const-generics/const_eval_unchecked_doesnt_fire_patterns.rs
 compile-fail	const-generics/default-ty-closure.rs
+run-pass	const-generics/defaults/const-default.rs
+run-pass	const-generics/defaults/const-param-as-default-value.rs
 compile-fail	const-generics/defaults/const-param-default-body-param-env-ice.rs
 compile-fail	const-generics/defaults/default-on-impl.rs
 compile-fail	const-generics/defaults/doesnt_infer.rs
@@ -2247,6 +2249,7 @@ compile-fail	derives/deriving-no-inner-impl-error-message.rs
 compile-fail	derives/deriving-non-type.rs
 compile-fail	derives/deriving-with-repr-packed-2.rs
 run-pass	derives/deriving-with-repr-packed-3.rs
+compile-fail	derives/deriving-with-repr-packed-move-errors.rs
 compile-fail	derives/eq-ord/derive-eq-check-all-variants.rs
 run-pass	derives/eq-ord/derive-partial-ord-discriminant-64bit.rs
 run-pass	derives/eq-ord/derive-partial-ord-discriminant.rs
@@ -3402,11 +3405,14 @@ check-pass	higher-ranked/trait-bounds/complex.rs
 compile-fail	higher-ranked/trait-bounds/hang-on-deeply-nested-dyn.rs
 compile-fail	higher-ranked/trait-bounds/higher-trait-bounds-ice-60218.rs
 run-pass	higher-ranked/trait-bounds/hrtb-binder-levels-in-object-types.rs
+compile-fail	higher-ranked/trait-bounds/hrtb-cache-issue-54302.rs
 run-pass	higher-ranked/trait-bounds/hrtb-closure-lifetime-infer.rs
+compile-fail	higher-ranked/trait-bounds/hrtb-conflate-regions.rs
 compile-fail	higher-ranked/trait-bounds/hrtb-debruijn-in-receiver.rs
 run-pass	higher-ranked/trait-bounds/hrtb-debruijn-object-types-in-closures.rs
 run-pass	higher-ranked/trait-bounds/hrtb-fn-like-trait.rs
 compile-fail	higher-ranked/trait-bounds/hrtb-identity-fn-borrows.rs
+compile-fail	higher-ranked/trait-bounds/hrtb-just-for-static.rs
 compile-fail	higher-ranked/trait-bounds/hrtb-malformed-lifetime-generics.rs
 run-pass	higher-ranked/trait-bounds/hrtb-opt-in-copy.rs
 run-pass	higher-ranked/trait-bounds/hrtb-parse.rs
@@ -3428,6 +3434,7 @@ compile-fail	higher-ranked/trait-bounds/issue-58451.rs
 check-pass	higher-ranked/trait-bounds/issue-60283.rs
 check-pass	higher-ranked/trait-bounds/issue-88586-hr-self-outlives-in-trait-def.rs
 check-pass	higher-ranked/trait-bounds/issue-90177.rs
+check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-44005.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-56556.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-62529-4.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-62529-5.rs
@@ -4082,6 +4089,7 @@ compile-fail	lifetimes/issue-105227.rs
 compile-fail	lifetimes/issue-105675.rs
 compile-fail	lifetimes/issue-107492-default-value-for-lifetime.rs
 compile-fail	lifetimes/issue-107988.rs
+compile-fail	lifetimes/issue-17728.rs
 compile-fail	lifetimes/issue-19707.rs
 compile-fail	lifetimes/issue-26638.rs
 build-pass	lifetimes/issue-36744-without-calls.rs
@@ -5269,6 +5277,7 @@ check-pass	nll/issue-53570.rs
 compile-fail	nll/issue-53773.rs
 compile-fail	nll/issue-53807.rs
 compile-fail	nll/issue-54189.rs
+compile-fail	nll/issue-54302.rs
 compile-fail	nll/issue-54382-use-span-of-tail-of-block.rs
 compile-fail	nll/issue-54556-stephaneyfx.rs
 compile-fail	nll/issue-54556-temps-in-tail-diagnostic.rs
@@ -6884,6 +6893,7 @@ compile-fail	resolve/closure-suggestion-in-impl.rs
 run-pass	resolve/const-iter-no-conflict-for-loop.rs
 compile-fail	resolve/const-with-typo-in-pattern-binding.rs
 compile-fail	resolve/crate-called-as-function.rs
+compile-fail	resolve/disambiguate-identical-names.rs
 compile-fail	resolve/dot-notation-type-namespace-suggest-path-sep.rs
 compile-fail	resolve/duplicate-name-in-module-6936.rs
 compile-fail	resolve/duplicated-enum-variant.rs
@@ -7094,6 +7104,8 @@ run-pass	rfcs/rfc-1623-static/rfc1623.rs
 compile-fail	rfcs/rfc-1937-termination-trait/issue-103052-1.rs
 run-pass	rfcs/rfc-1937-termination-trait/termination-trait-for-box-dyn-error-ok.rs
 run-pass	rfcs/rfc-1937-termination-trait/termination-trait-for-empty.rs
+run-pass	rfcs/rfc-1937-termination-trait/termination-trait-for-result-box-error_ok.rs
+run-pass	rfcs/rfc-1937-termination-trait/termination-trait-for-result.rs
 run-pass	rfcs/rfc-1937-termination-trait/termination-trait-for-str-ok.rs
 compile-fail	rfcs/rfc-1937-termination-trait/termination-trait-impl-trait.rs
 compile-fail	rfcs/rfc-1937-termination-trait/termination-trait-main-i32.rs
