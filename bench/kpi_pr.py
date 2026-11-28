@@ -7,8 +7,12 @@ usage (from .github/workflows/kpi.yml):
 
 base.txt / head.txt are what `python3 bench/kpi_track.py <label> --lsp --dry-run` printed (or its parts, `--only`, put together) for the base (the merge base of
 the PR) and for the PR head, measured on runners of the same image. The instruction counts are deterministic to about 0.1%,
-so a difference past --threshold (in %, default 1.0) is reported as a regression (a ::warning:: line; the job does not
-fail).
+so a difference past --threshold (in %, default 1.0) is reported as a regression (a ::warning:: line).
+
+With --ratchet (bench/kpi_ratchet.txt, and --env, the environment of the measurements), the head is checked against
+the ceilings there (bench/kpi_ratchet.py): a KPI above its ceiling by more than its tolerance fails the job (exit 1,
+after the comment is written), and the comment gives the line that would raise the ceiling. --ratchet-base is the
+file at the base, to show a ceiling the pull request raises.
 
 With --pr, the comment on the PR that carries the marker below is updated (or created): it keeps the result of every
 push (the history is embedded in it as JSON), newest last, with the change against the base and against the push
@@ -66,20 +70,64 @@ def history_of(body):
     return json.loads(m.group(1)) if m else []
 
 
-def render(hist, threshold):
+def ceil_cell(row, ratchet):
+    if not row or row["ceil"] is None:
+        return "-"
+    over = fmt_pct(row["over"])
+    cell = {"ok": f"{fmt_val(row['ceil'])} ({over})",
+            "fail": f"{fmt_val(row['ceil'])} ({over} > {row['tol']:g}%) ❌",
+            "main over": f"{fmt_val(row['ceil'])} ({over}; the base is over) ⚠️",
+            "env": f"{fmt_val(row['ceil'])} (another environment)"}[row["status"]]
+    was = ratchet["base_ceil"].get(row["kpi"])
+    if was is not None and was[0] != row["ceil"]:
+        cell += f" (raised from {fmt_val(was[0])})" if row["ceil"] > was[0] else f" (lowered from {fmt_val(was[0])})"
+    return cell
+
+
+def ratchet_notes(ratchet, last):
+    """What the ratchet asks of the pull request, below the table"""
+    rows = ratchet["rows"]
+    out = []
+    def lines_of(side, ks):
+        vals, sha = last[side], last[f"{side}_sha"][:8]
+        return ["", "```", *[ratchet["line_of"](r["kpi"], vals[r["kpi"]], r["tol"], sha) for r in rows if r["kpi"] in ks and r["kpi"] in vals], "```"]
+    fail = [r["kpi"] for r in rows if r["status"] == "fail"]
+    over = [r["kpi"] for r in rows if r["status"] == "main over"]
+    if fail:
+        out += ["", f"❌ Above its ceiling by more than the tolerance: {', '.join(fail)}. Take the cost out, or raise the "
+                "ceiling in this pull request, in `bench/kpi_ratchet.txt`, and say in its description why the cost is worth it:"]
+        out += lines_of("head", fail)
+    if over:
+        out += ["", f"⚠️ The base is above the ceiling already: {', '.join(over)} (this pull request does not add to it). "
+                "Take main's cost out, or raise the ceiling on purpose."]
+    if any(r["status"] == "env" for r in rows):
+        out += ["", f"The ceilings were measured in `{ratchet['env_file']}`, this run in `{ratchet['env']}`: not checked. "
+                "The next push to main measures them anew."]
+    if all(r["status"] == "none" for r in rows):
+        out += ["", "`bench/kpi_ratchet.txt` has no ceilings yet: the next push to main measures them. From the base they would be:"]
+        block = lines_of("base", KPIS)
+        out += block[:2] + [f"env\t{ratchet['env']}"] + block[2:]
+    return out
+
+
+def render(hist, threshold, ratchet=None):
     last = hist[-1]
     lines = [MARKER, "## KPI: this PR against its base", ""]
     lines.append(
         f"Measured by the `KPI` workflow on runners of one image: the merge base `{last['base_sha'][:7]}` and the head "
         f"`{last['head_sha'][:7]}`, each with `bench/kpi_track.py --dry-run --only <sections>` in parts side by side (instruction counts of zustc, M = millions; "
-        f"of one zust-analyzer session, G = billions; deterministic to about 0.1%). A change past +{threshold:g}% is marked ⚠️. This comment is updated on every push.")
-    lines += ["", "| KPI | base | head | change |", "|---|---:|---:|---:|"]
+        f"of one zust-analyzer session, G = billions; deterministic to about 0.1%). A change past +{threshold:g}% is marked ⚠️. "
+        f"The last column is the head against its ceiling in `bench/kpi_ratchet.txt` (with the tolerance): above it, the job fails. This comment is updated on every push.")
+    rows = {r["kpi"]: r for r in (ratchet or {}).get("rows", [])}
+    lines += ["", "| KPI | base | head | change | ceiling |", "|---|---:|---:|---:|---:|"]
     for k in KPIS:
         b, h = last["base"].get(k), last["head"].get(k)
         p = pct(h, b)
         mark = " ⚠️" if p is not None and p > threshold else ""
         unit = UNITS.get(k, "M")
-        lines.append(f"| {k} ({unit}) | {fmt_val(b)} | {fmt_val(h)} | {fmt_pct(p)}{mark} |")
+        lines.append(f"| {k} ({unit}) | {fmt_val(b)} | {fmt_val(h)} | {fmt_pct(p)}{mark} | {ceil_cell(rows.get(k), ratchet)} |")
+    if ratchet:
+        lines += ratchet_notes(ratchet, last)
     if len(hist) > 1:
         lines += ["", "### Every push", "",
                   "Change of the head against its base, and (in parentheses) against the push before.", "",
@@ -109,6 +157,9 @@ def main():
     ap.add_argument("--repo")
     ap.add_argument("--threshold", type=float, default=1.0)
     ap.add_argument("--out")
+    ap.add_argument("--ratchet")
+    ap.add_argument("--ratchet-base")
+    ap.add_argument("--env")
     a = ap.parse_args()
     row = {"base_sha": a.base_sha, "head_sha": a.head_sha, "base": parse(a.base), "head": parse(a.head)}
     if not row["base"] or not row["head"]:
@@ -121,16 +172,27 @@ def main():
             print(f"::warning::cannot read the PR comments: {e}")
     hist = [r for r in history_of(comment["body"] if comment else "") if r["head_sha"] != a.head_sha]
     hist.append(row)
-    body = render(hist, a.threshold)
+    ratchet = None
+    if a.ratchet:
+        import kpi_ratchet
+        r = kpi_ratchet.read(a.ratchet)
+        was = kpi_ratchet.read(a.ratchet_base) if a.ratchet_base else {"ceil": {}}
+        ratchet = {"rows": kpi_ratchet.check(r, a.env, row["base"], row["head"]), "base_ceil": was["ceil"],
+                   "env": a.env, "env_file": r["env"], "line_of": kpi_ratchet.line_of}
+    body = render(hist, a.threshold, ratchet)
     for k in KPIS:
         p = pct(row["head"].get(k), row["base"].get(k))
         if p is not None and p > a.threshold:
             print(f"::warning::KPI {k}: {fmt_pct(p)} against the base ({fmt_val(row['base'][k])} -> {fmt_val(row['head'][k])})")
+    failed = [r for r in (ratchet or {}).get("rows", []) if r["status"] == "fail"]
+    for r in failed:
+        print(f"::error::KPI {r['kpi']}: {fmt_val(row['head'][r['kpi']])}, {fmt_pct(r['over'])} above its ceiling "
+              f"{fmt_val(r['ceil'])} in bench/kpi_ratchet.txt (tolerance {r['tol']:g}%)")
     if a.out:
         open(a.out, "w").write(body + "\n")
     if not a.pr:
         print(body)
-        return
+        sys.exit(1 if failed else 0)
     try:
         if comment:
             gh("-X", "PATCH", f"repos/{a.repo}/issues/comments/{comment['id']}", "-F", "body=@-", input=body)
@@ -139,6 +201,8 @@ def main():
     except RuntimeError as e:
         # (a pull request from a fork gets a read-only token: the result is still in the job summary)
         print(f"::warning::cannot write the PR comment: {e}")
+    if failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

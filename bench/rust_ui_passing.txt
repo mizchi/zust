@@ -3427,6 +3427,8 @@ compile-fail	higher-ranked/trait-bounds/issue-58451.rs
 check-pass	higher-ranked/trait-bounds/issue-60283.rs
 check-pass	higher-ranked/trait-bounds/issue-88586-hr-self-outlives-in-trait-def.rs
 check-pass	higher-ranked/trait-bounds/issue-90177.rs
+check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-44005.rs
+check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-56556.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-62529-4.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-62529-5.rs
 check-pass	higher-ranked/trait-bounds/normalize-under-binder/issue-70120.rs
@@ -8921,6 +8923,7 @@ compile-fail	use/use-super-in-middle.rs
 compile-fail	variance/leaking-unnameables.rs
 check-pass	variance/smart-pointers-covariant.rs
 compile-fail	variance/type-resolve-error-two-structs-deep.rs
+compile-fail	variance/variance-associated-types2.rs
 compile-fail	variance/variance-cell-is-invariant.rs
 compile-fail	variance/variance-contravariant-arg-object.rs
 compile-fail	variance/variance-contravariant-arg-trait-match.rs

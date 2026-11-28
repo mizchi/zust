@@ -1178,6 +1178,142 @@ fn unsized_elem(t: &PTy) -> Option<String> {
 /// program that bounds that parameter by 'static (`bar: Bar<U>` with `struct Bar<T: 'static>`). Unlike `T: 'a`,
 /// rustc does not infer `U: 'static` from the fields: the item must declare it (E0310). statics: the short names of
 /// such structs and enums, and the indexes of their type and const parameters that must be 'static. (line, col, msg)
+/// The markers among a trait header's supertraits and `where Self: ..` bounds (not `?` ones, nor a generic
+/// parameter's bounds or another type's where clause) that make an implementing type Sized: `trait Tr: Clone`,
+/// `trait Tr where Self: Sized`
+pub fn trait_sized_supers(src: &str, it: &SrcItem) -> Vec<String> {
+    let Some(text) = src.get(it.start..it.end) else { return vec![] };
+    let text = match it.kind {
+        LexKind::TraitHeader => format!("{text}}}"),
+        _ => text.to_string(),
+    };
+    let Ok(f) = parse_file(&text) else { return vec![] };
+    let Some(ItemKind::Trait(_, g, sups, _)) = f.items.first().map(|i| &i.kind) else { return vec![] };
+    let of_self = g.preds.iter().filter(|(t, _)| matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "Self" && p.segs[0].args.is_empty())).flat_map(|(_, bs)| bs.iter());
+    let mut out: Vec<String> = vec![];
+    for b in sups.iter().chain(of_self) {
+        if let Bound::Trait(false, p) = b {
+            if let Some(n) = p.segs.last().map(|s| s.name.as_str()).filter(|n| matches!(*n, "Sized" | "Clone" | "Copy" | "Default")) {
+                if !out.iter().any(|x| x == n) {
+                    out.push(n.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// A trait bound's equations (`Iterator<Item = u8>`: ("Item", "u8")), their values as text with the names rename
+/// gives (None where a name has none, or the value is not one eq_ty_text writes)
+fn bound_eqs(p: &Path, rename: &dyn Fn(&str) -> Option<String>) -> Vec<(String, Option<String>)> {
+    let Some(s) = p.segs.last() else { return vec![] };
+    s.args.iter().filter_map(|a| if let crate::parse::GArg::Bind(n, t) = a { Some((n.clone(), eq_ty_text(t, rename, 0))) } else { None }).collect()
+}
+
+/// A written type as text, without positions, its one-segment names through rename (a type parameter's to another
+/// item's): None for one not written here (fn pointers, arrays, `dyn` and `impl` types, qualified paths)
+fn eq_ty_text(t: &PTy, rename: &dyn Fn(&str) -> Option<String>, depth: u32) -> Option<String> {
+    use crate::parse::GArg;
+    if depth > 12 {
+        return None;
+    }
+    Some(match t {
+        PTy::Path(None, p) => {
+            if let [s] = p.segs.as_slice() {
+                if s.args.is_empty() && s.fn_args.is_none() {
+                    return rename(&s.name);
+                }
+            }
+            let mut out = vec![];
+            for s in &p.segs {
+                if s.fn_args.is_some() {
+                    return None;
+                }
+                let mut seg = s.name.clone();
+                if !s.args.is_empty() {
+                    let mut args = vec![];
+                    for a in &s.args {
+                        args.push(match a {
+                            GArg::Ty(t) => eq_ty_text(t, rename, depth + 1)?,
+                            GArg::Lifetime(l) => rename(l)?,
+                            GArg::Bind(n, t) => format!("{n} = {}", eq_ty_text(t, rename, depth + 1)?),
+                            GArg::Const(_) => return None,
+                        });
+                    }
+                    seg = format!("{seg}<{}>", args.join(", "));
+                }
+                out.push(seg);
+            }
+            out.join("::")
+        }
+        PTy::Ref(l, m, i) => {
+            let l = match l {
+                Some(l) => format!("{} ", rename(l)?),
+                None => String::new(),
+            };
+            format!("&{l}{}{}", if *m { "mut " } else { "" }, eq_ty_text(i, rename, depth + 1)?)
+        }
+        PTy::Ptr(m, i) => format!("*{} {}", if *m { "mut" } else { "const" }, eq_ty_text(i, rename, depth + 1)?),
+        PTy::Slice(i) => format!("[{}]", eq_ty_text(i, rename, depth + 1)?),
+        PTy::Tuple(ts) => {
+            let v: Option<Vec<String>> = ts.iter().map(|t| eq_ty_text(t, rename, depth + 1)).collect();
+            let v = v?;
+            if v.len() == 1 { format!("({},)", v[0]) } else { format!("({})", v.join(", ")) }
+        }
+        PTy::Never => "!".to_string(),
+        _ => return None,
+    })
+}
+
+/// Whether two equations' values (eq_ty_text's, in the definition's names) are surely of different types: apart with
+/// each path taken by its last segment (`std::string::String` is `String`), and naming only primitives, std's
+/// nominal types, the program's structs, enums and unions and the definition's parameters (lts, tys), none of which
+/// the program declares an alias of (another name may be an alias of the other side's: `type B = u8`)
+fn eq_values_apart(src: &str, a: &str, b: &str, lts: &[&str], tys: &[&str]) -> bool {
+    // (`struct Foo` in the program's text, a whole name: a nominal type of its own)
+    let declares = |pat: &str| src.match_indices(pat).any(|(i, _)| !src[i + pat.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_'));
+    let norm = |s: &str| -> Option<String> {
+        let cs: Vec<char> = s.chars().collect();
+        let mut out = String::new();
+        let mut i = 0;
+        while i < cs.len() {
+            let c = cs[i];
+            if c.is_alphabetic() || c == '_' || c == '\'' {
+                let st = i;
+                i += 1;
+                while i < cs.len() && (cs[i].is_alphanumeric() || cs[i] == '_') {
+                    i += 1;
+                }
+                let w: String = cs[st..i].iter().collect();
+                // (a path's prefix: dropped)
+                if cs.get(i) == Some(&':') && cs.get(i + 1) == Some(&':') {
+                    i += 2;
+                    continue;
+                }
+                if w.starts_with('\'') {
+                    if w != "'static" && !lts.contains(&w.as_str()) {
+                        return None;
+                    }
+                } else if !matches!(w.as_str(), "mut" | "const") {
+                    let known = matches!(w.as_str(), "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "f32" | "f64" | "bool" | "char" | "str"
+                        | "String" | "Vec" | "Option" | "Box" | "Rc" | "Arc" | "Cell" | "RefCell" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "VecDeque")
+                        || tys.contains(&w.as_str())
+                        || ["struct ", "enum ", "union "].iter().any(|k| declares(&format!("{k}{w}")));
+                    if !known || src.contains(&format!("type {w} ")) || src.contains(&format!("type {w}<")) || src.contains(&format!("type {w}=")) {
+                        return None;
+                    }
+                }
+                out.push_str(&w);
+            } else {
+                out.push(c);
+                i += 1;
+            }
+        }
+        Some(out)
+    };
+    matches!((norm(a), norm(b)), (Some(x), Some(y)) if x != y)
+}
+
 /// A `Drop` impl (its header imp) against the definition of its struct, enum or union (adt): its self type's arguments
 /// are its own parameters, each once (E0366), and what its header and where clauses require of them is what the
 /// definition requires, or what its fields imply (E0367, as rustc's `ensure_drop_predicates_are_implied_by_item_defn`).
@@ -1260,26 +1396,31 @@ pub fn drop_impl_unmet(src: &str, imp: &SrcItem, adt: &SrcItem, supers: &crate::
     }
     // (each parameter's trait bounds there, with their supertraits)
     let short = |p: &Path| p.segs.last().map(|s| s.name.clone()).unwrap_or_default();
-    let mut a_traits: Vec<(String, String, bool)> = vec![];
+    // (each parameter's traits there, with the equations the bound writes: (name, the value's text, None where it is
+    // not compared))
+    type Eqs = Vec<(String, Option<String>)>;
+    let mut a_traits: Vec<(String, String, Eqs)> = vec![];
     let mut a_unsized: Vec<String> = vec![];
-    let note = |n: &str, bs: &[Bound], a_traits: &mut Vec<(String, String, bool)>, a_unsized: &mut Vec<String>| {
+    let note = |n: &str, bs: &[Bound], a_traits: &mut Vec<(String, String, Eqs)>, a_unsized: &mut Vec<String>| {
         for b in bs {
             if let Bound::Trait(maybe, p) = b {
                 if *maybe {
                     a_unsized.push(n.to_string());
                     continue;
                 }
-                let binds = p.segs.last().is_some_and(|s| s.args.iter().any(|a| matches!(a, GArg::Bind(..))));
+                let eqs = bound_eqs(p, &|x: &str| Some(x.to_string()));
                 let mut todo = vec![short(p)];
                 let first = short(p);
                 while let Some(t) = todo.pop() {
                     // (the same trait again (`T: Iterator` and `where T: Iterator<Item = u8>`): its equations too)
                     if let Some(x) = a_traits.iter_mut().find(|x| x.0 == n && x.1 == t) {
-                        x.2 |= binds && t == first;
+                        if t == first {
+                            x.2.extend(eqs.iter().cloned());
+                        }
                         continue;
                     }
                     todo.extend(supers.get(&t).into_iter().flatten().cloned());
-                    a_traits.push((n.to_string(), t.clone(), binds && t == first));
+                    a_traits.push((n.to_string(), t.clone(), if t == first { eqs.clone() } else { vec![] }));
                 }
             }
         }
@@ -1348,27 +1489,30 @@ pub fn drop_impl_unmet(src: &str, imp: &SrcItem, adt: &SrcItem, supers: &crate::
                     if matches!(t.as_str(), "Sized") {
                         continue;
                     }
-                    let binds = p.segs.last().is_some_and(|s| s.args.iter().any(|a| matches!(a, GArg::Bind(..))));
                     match a_traits.iter().find(|x| x.0 == an && x.1 == t) {
                         // (a parameter bounded by one of the program's traits, whose supertraits are not all known:
                         // a trait not found is not reported)
                         None if a_traits.iter().any(|x| x.0 == an && x.1 == "#?") => {}
                         None => return Some((at_line, unmet(format!("{n}: {t}")))),
-                        // (an equation whose value is a parameter of the impl not in the self type may hold:
-                        // `impl<T: Trait<Assoc = U>, U> Drop for Foo<T>`)
-                        Some(x) if binds && !x.2 && !p.segs.last().is_some_and(|s| s.args.iter().all(|a| match a {
-                            GArg::Bind(_, PTy::Path(None, v)) => v.segs.len() == 1 && v.segs[0].args.is_empty() && i_rest.contains(&v.segs[0].name.as_str()) && to_adt(&v.segs[0].name).is_none(),
-                            GArg::Bind(..) => false,
-                            _ => true,
-                        })) => {
-                            let bind = p.segs.last().and_then(|s| s.args.iter().find_map(|a| if let GArg::Bind(an, PTy::Path(None, v)) = a { Some((an.clone(), v.segs.last().map(|s| s.name.clone()).unwrap_or_default())) } else { None }));
-                            let m = match bind {
-                                Some((an, v)) => format!("<{n} as {t}>::{an} == {v}"),
-                                None => format!("{n}: {t}"),
-                            };
-                            return Some((at_line, unmet(m)));
+                        Some(x) => {
+                            // (each equation the impl writes is the definition's, its value the same, in the
+                            // definition's names. One whose value names a parameter of the impl not in the self type
+                            // may hold (`impl<T: Trait<Assoc = U>, U> Drop for Foo<T>`), and one not compared is not
+                            // reported)
+                            let rename = |x: &str| if i_rest.contains(&x) || i_lts.contains(&x) { to_adt(x) } else { Some(x.to_string()) };
+                            let shown = bound_eqs(p, &|x: &str| Some(x.to_string()));
+                            for ((bn, bk), (_, bv)) in bound_eqs(p, &rename).into_iter().zip(shown) {
+                                let Some(bk) = bk else { continue };
+                                let same = match x.2.iter().find(|e| e.0 == bn) {
+                                    None => false,
+                                    Some((_, None)) => true,
+                                    Some((_, Some(ak))) => *ak == bk || !eq_values_apart(src, ak, &bk, &a_lts, &a_rest),
+                                };
+                                if !same {
+                                    return Some((at_line, unmet(format!("<{n} as {t}>::{bn} == {}", bv.unwrap_or(bk)))));
+                                }
+                            }
                         }
-                        Some(_) => {}
                     }
                 }
             }
@@ -3007,11 +3151,10 @@ fn summarize_assoc_type(owner: Option<&Owner>, sm: &mut Summary, n: &String, g: 
 /// [`summarize`] of a fn with a body in a trait or an impl: its signature with the owner's generics, and the closures in it
 fn summarize_assoc_fn(owner: Option<&Owner>, sm: &mut Summary, fs: &PSig, body: &Block) -> R<()> {
     let ow = owner.unwrap();
-    // (a method of `impl<T> Tr for &T` / `&mut T`: noted for Program, which asks the impl to define each default
-    // method of the trait. Its methods are not called: where T is bounded by the trait itself, a call on `&X`
-    // reaches X's impl through the deref, which is what a method that forwards to T's does. One that does
-    // more is noted too: the driver reports it where the program calls a method of that name. (With another
-    // bound, thiserror's `impl<T: Display> AsDisplay for &T`, X has no impl of its own to reach)
+    // (a method of `impl<T> Tr for &T` / `&mut T`: noted for Program (ref_dispatch), which has a call on `&X` that
+    // rustc's probe takes the impl for run it (#144). Not one that only forwards to T's, where T is bounded by the
+    // trait itself: a call on `&X` that reaches X's impl through the deref runs the same code. (With another bound,
+    // thiserror's `impl<T: Display> AsDisplay for &T`, X has no impl of its own to reach: each method is run)
     if let (false, Some(trn), TySyn::Ref(_, inner)) = (ow.is_trait, ow.impl_trait.as_deref(), &ow.self_ty) {
         let trn = trn.split('<').next().unwrap_or(trn);
         if let TySyn::Named(param) = &**inner {
@@ -3019,16 +3162,14 @@ fn summarize_assoc_fn(owner: Option<&Owner>, sm: &mut Summary, fs: &PSig, body: 
                 sm.ref_impl_fns.push(fs.name.clone());
                 let bounded = ow.generics.iter().any(|g| g.0 == *param && g.1.iter().any(|b| b.split('<').next().unwrap_or(b).trim() == trn));
                 let mut_ref = matches!(&ow.self_ty, TySyn::Ref(true, _));
-                if bounded && fs.recv.is_some() {
-                    if !forwards_to_referent(fs, body, param, trn, mut_ref) {
-                        sm.ref_impl_bad.push(fs.name.clone());
-                    } else {
-                        // (a `_` parameter it gives the path of its type: a forward if that names a unit struct)
-                        for (p, t) in &fs.params {
-                            if let (Pat::Wild, PTy::Path(None, tp)) = (p, t) {
-                                if let Some(l) = tp.segs.last() {
-                                    sm.ref_impl_unit_args.push((fs.name.clone(), l.name.clone()));
-                                }
+                if fs.recv.is_some() && !(bounded && forwards_to_referent(fs, body, param, trn, mut_ref)) {
+                    sm.ref_impl_bad.push(fs.name.clone());
+                } else if fs.recv.is_some() {
+                    // (a `_` parameter it gives the path of its type: a forward if that names a unit struct)
+                    for (p, t) in &fs.params {
+                        if let (Pat::Wild, PTy::Path(None, tp)) = (p, t) {
+                            if let Some(l) = tp.segs.last() {
+                                sm.ref_impl_unit_args.push((fs.name.clone(), l.name.clone()));
                             }
                         }
                     }
