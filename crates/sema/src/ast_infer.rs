@@ -22,7 +22,7 @@ pub fn stmt_key(st: &Stmt) -> usize {
 pub type Full = (LetTypes, Option<Ty>, Vec<Option<Ty>>);
 
 /// 整数 / &str / 生ポインタの組み込みメソッド名 (infer.rs と同じ)
-fn is_builtin_scalar_method(n: &str) -> bool {
+pub(crate) fn is_builtin_scalar_method(n: &str) -> bool {
     matches!(
         n,
         "wrapping_add"

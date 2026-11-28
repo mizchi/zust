@@ -5761,37 +5761,40 @@ impl Program {
                 _ => None,
             })
         };
-        // (and the compiler's own methods of a str, a slice or an array (`"abc".len()`), which take it by reference)
-        let builtin = |u: Ty| -> Option<Option<bool>> {
-            let pre = match u {
-                Ty::Str => "__exr_str_",
-                Ty::Slice(_) | Ty::Array(..) => "__exr_slice_",
-                _ => return None,
-            };
+        // (and the compiler's own methods of a str, a slice, an array or a number (`"abc".len()`, `x.is_ascii()`))
+        let builtin = |u: Ty| -> bool {
             const SEQ: &[&str] = &["len", "is_empty", "as_bytes", "as_ptr", "as_mut_ptr", "iter", "iter_mut", "first", "last", "get", "get_mut", "contains", "to_vec", "to_owned", "starts_with", "ends_with", "split_at", "chunks", "windows", "join", "concat", "sort", "sort_unstable", "reverse", "swap", "fill", "first_mut", "last_mut", "binary_search", "to_string", "chars", "bytes", "lines", "trim", "split"];
-            (SEQ.contains(&m) || self.index.contains_key(&format!("{pre}{m}"))).then(|| {
-                Some(m.ends_with("_mut") || matches!(m, "sort" | "sort_unstable" | "reverse" | "swap" | "fill") || m.starts_with("sort_"))
-            })
-        };
-        let inherent = |u: Ty| -> Option<Option<bool>> {
+            let helper = |pre: &str| self.index.contains_key(&format!("{pre}{m}"));
             match u {
-                Ty::Struct(sid) => inherent_of(sid),
-                u => builtin(u),
+                Ty::Str => SEQ.contains(&m) || helper("__exr_str_") || crate::ast_infer::is_builtin_scalar_method(m),
+                Ty::Slice(_) | Ty::Array(..) => SEQ.contains(&m) || helper("__exr_slice_") || m.starts_with("sort_"),
+                u if u.is_int() || u.is_float() || matches!(u, Ty::Bool | Ty::Char) => {
+                    crate::ast_infer::is_builtin_scalar_method(m) || helper("__exr_char_") || self.prim_method(u, m).is_some_and(|i| self.sigs[i as usize].impl_trait.is_none())
+                }
+                _ => false,
             }
         };
+        let inherent = |sid: u32| inherent_of(sid);
         let (mut s, mut n) = (t, 0usize);
         loop {
             if opaque(s) {
                 return covered(s).then_some((s, n, kind));
+            }
+            // (a number's, a str's, a slice's own method of the name, at the step that is the value or a reference to
+            // it, whichever way it takes self: the ordinary lookup's, which knows how)
+            let base = if let Ty::Ref(_, &u) = s { u } else { s };
+            if builtin(base) {
+                return None;
             }
             // (the tries at this step: by value (None), then `&` and `&mut` (Some(mutable)))
             for adj in [None, Some(false), Some(true)] {
                 // (an inherent method whose receiver this try makes: `x.m()` of `S::m(&self)` with x a `&S` by value,
                 // or an `S` borrowed)
                 let inh = match (adj, s) {
-                    (None, Ty::Ref(rm, u)) => inherent(*u) == Some(Some(rm)),
-                    (None, u) => inherent(u) == Some(None),
-                    (Some(am), u) => inherent(u) == Some(Some(am)),
+                    (None, Ty::Struct(sid)) => inherent(sid) == Some(None),
+                    (None, Ty::Ref(rm, &Ty::Struct(sid))) => inherent(sid) == Some(Some(rm)),
+                    (Some(am), Ty::Struct(sid)) => inherent(sid) == Some(Some(am)),
+                    _ => false,
                 };
                 if inh {
                     return None;
