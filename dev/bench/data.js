@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795832480001,
+  "lastUpdate": 1795832482994,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -127581,6 +127581,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/94a89b977bf365e088adfb60cb644d3599eac596"
         },
         "date": 1795832053215,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 77.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 71.875,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 92.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.106,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "854295530bdd5a4ebd1d2b312512abc37d2ba430",
+          "message": "File::open / fs::metadata / fs::set_permissions with a &str or String path (#330)\n\nThe NUL check of a path (std's InvalidInput) was `p.iter().any(..)`: the\nslice's iterator is codegen's, which selection does not follow from a\nprelude body, so `File::open(\"/dev/null\")` and `File::open(s)` with a\nString failed to compile (\"`.iter()` is only supported directly in a\n`for` loop\"); only a `Path::new(..)` argument, which brought the iterator\nin by another way, compiled. The check is now `__exr_has_nul`, a loop.\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-28T11:09:06+09:00",
+          "tree_id": "d8d436c13f9d6292d92e8a15b1bf6d4276e2ac2d",
+          "url": "https://github.com/mizchi/zust/commit/854295530bdd5a4ebd1d2b312512abc37d2ba430"
+        },
+        "date": 1795832482446,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
