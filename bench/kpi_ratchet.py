@@ -108,6 +108,9 @@ def tighten(r, env, head, sha):
     for k in kpi_pr.KPIS:
         h = head.get(k)
         if h is None:
+            # (a ceiling of the other environment that this run did not measure anew holds nowhere now)
+            if reset and k in r["ceil"]:
+                changed.append(f"{k}: {r['ceil'].pop(k)[0]!r} -> - (not measured in this environment)")
             continue
         tol = tolerance(r, k)
         old = r["ceil"].get(k)
