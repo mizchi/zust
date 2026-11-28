@@ -3401,11 +3401,14 @@ check-pass	higher-ranked/trait-bounds/complex.rs
 compile-fail	higher-ranked/trait-bounds/hang-on-deeply-nested-dyn.rs
 compile-fail	higher-ranked/trait-bounds/higher-trait-bounds-ice-60218.rs
 run-pass	higher-ranked/trait-bounds/hrtb-binder-levels-in-object-types.rs
+compile-fail	higher-ranked/trait-bounds/hrtb-cache-issue-54302.rs
 run-pass	higher-ranked/trait-bounds/hrtb-closure-lifetime-infer.rs
+compile-fail	higher-ranked/trait-bounds/hrtb-conflate-regions.rs
 compile-fail	higher-ranked/trait-bounds/hrtb-debruijn-in-receiver.rs
 run-pass	higher-ranked/trait-bounds/hrtb-debruijn-object-types-in-closures.rs
 run-pass	higher-ranked/trait-bounds/hrtb-fn-like-trait.rs
 compile-fail	higher-ranked/trait-bounds/hrtb-identity-fn-borrows.rs
+compile-fail	higher-ranked/trait-bounds/hrtb-just-for-static.rs
 compile-fail	higher-ranked/trait-bounds/hrtb-malformed-lifetime-generics.rs
 run-pass	higher-ranked/trait-bounds/hrtb-opt-in-copy.rs
 run-pass	higher-ranked/trait-bounds/hrtb-parse.rs
@@ -5266,6 +5269,7 @@ check-pass	nll/issue-53570.rs
 compile-fail	nll/issue-53773.rs
 compile-fail	nll/issue-53807.rs
 compile-fail	nll/issue-54189.rs
+compile-fail	nll/issue-54302.rs
 compile-fail	nll/issue-54382-use-span-of-tail-of-block.rs
 compile-fail	nll/issue-54556-stephaneyfx.rs
 compile-fail	nll/issue-54556-temps-in-tail-diagnostic.rs
