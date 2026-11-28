@@ -91,6 +91,9 @@ pub struct Clause {
     /// the head as written (the self type, then the trait's arguments, as Rust writes each), when it names a std type
     /// the prelude makes an alias of another (`OsString`, `Path`, `OsStr`): aliased_head
     pub alias: Option<Vec<String>>,
+    /// the regions of the impl's head, where it names some (Summary::impl_head): a goal that selects the impl
+    /// relates its own to them (regionck's trait obligations)
+    pub head: Option<Box<crate::types::RHeadSyn>>,
 }
 
 /// The program's impls of its own traits, by trait name
@@ -107,6 +110,10 @@ pub struct TraitDb {
     /// the names of associated types that impls zustc has no clauses of define (the prelude's, and the program's impls
     /// of std's traits): a projection by such a name alone (`T::Item`, no trait) is not normalized here
     pub other_assoc: crate::fxhash::FxSet<String>,
+    /// the program's traits a goal of which has regions to relate: some impl's head names a lifetime or binds one in a
+    /// fn pointer type, or one of its where clauses is of such a trait (regionck's trait obligations look only at
+    /// bounds of these)
+    pub lt_traits: crate::fxhash::FxSet<String>,
 }
 
 /// A bound as text with an instance's types for the item's parameters (`AsRef<T>` with T = str: `AsRef<str>`) and
@@ -346,7 +353,28 @@ impl TraitDb {
                 exact = false;
             }
             let alias = aliased_head(p, s, &gn, user, &own);
-            db.clauses.entry(tr).or_default().push(Clause { n: gn.len(), self_ty, args, body, item: ii, exact, where_ok: s.where_types.is_empty(), assocs, alias });
+            let head = s.impl_head.clone();
+            if head.is_some() {
+                db.lt_traits.insert(tr.clone());
+            }
+            db.clauses.entry(tr).or_default().push(Clause { n: gn.len(), self_ty, args, body, item: ii, exact, where_ok: s.where_types.is_empty(), assocs, alias, head });
+        }
+        // (and a trait an impl of which has a where clause of such a trait (`impl<T> DeserializeOwned for T where T:
+        // for<'de> Deserialize<'de>`), or one with a lifetime (`T: Tr<'a>`), to a fixed point)
+        loop {
+            let mut more = vec![];
+            for (tr, cs) in &db.clauses {
+                if db.lt_traits.contains(tr) {
+                    continue;
+                }
+                if cs.iter().any(|c| c.body.iter().any(|w| db.lt_traits.contains(&w.tr) || (db.user.contains(&w.tr) && w.raw.contains('\'')))) {
+                    more.push(tr.clone());
+                }
+            }
+            if more.is_empty() {
+                break;
+            }
+            db.lt_traits.extend(more);
         }
         db
     }
@@ -527,6 +555,42 @@ impl TraitDb {
         let Some(pr) = pred_of(p, t, b, &[]) else { return Ans::Overflow };
         let mut cx = Cx { db: self, p, stack: vec![], steps: 0, strict: false, rigid_env: true, norm_depth: 0 };
         cx.solve_pred(FUEL, &pr)
+    }
+
+    /// The impl a ground goal `t: tr<args..>` selects, by types alone: its clause and what its parameters are. None
+    /// unless exactly one impl's head matches and its where clauses hold, and zustc read all of that impl (a goal
+    /// may hold by another impl, or by one whose parts were left out)
+    pub fn select(&self, p: &Program, t: Ty, tr: &str, args: Option<&[Ty]>) -> Option<(&Clause, Vec<Option<Ty>>)> {
+        if !ground(p, t, 0) || args.is_some_and(|a| a.iter().any(|&x| !ground(p, x, 0))) {
+            return None;
+        }
+        let cs = self.clauses.get(tr)?;
+        let mut cx = Cx { db: self, p, stack: vec![], steps: 0, strict: false, rigid_env: false, norm_depth: 0 };
+        let mut found = None;
+        for c in cs {
+            let mut sol: Vec<Option<Ty>> = vec![None; c.n];
+            let Some(st) = c.self_ty else { return None };
+            if !mtch(p, st, t, &mut sol, false, 0) {
+                continue;
+            }
+            match (&c.args, args) {
+                (Some(ha), Some(ga)) if ha.len() == ga.len() => {
+                    if !ha.iter().zip(ga).all(|(&h, &g)| mtch(p, h, g, &mut sol, false, 0)) {
+                        continue;
+                    }
+                }
+                (Some(ha), None) if ha.is_empty() => {}
+                _ => return None,
+            }
+            if cx.body(FUEL, c, &sol) != Ans::Yes {
+                continue;
+            }
+            if found.is_some() || !c.exact || !c.where_ok {
+                return None;
+            }
+            found = Some((c, sol));
+        }
+        found
     }
 
     pub fn holds_in(&self, p: &Program, t: Ty, b: &str, gn: &[&str], inst: &[Ty]) -> Ans {
