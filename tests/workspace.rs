@@ -633,3 +633,50 @@ fn main() {
     assert_eq!((got.as_str(), code), ("A Ok(4294967295) 'c' 6\nOk(Plus) true Minus\nSome(3) None 8\n", Some(0)), "{err}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A library's impls whose method bounds name the trait's by other paths (#264). zustc expands a crate's macros before
+/// it renames std's `fmt::Write` (`__FWr`), so a macro's `core :: fmt :: Write` kept its name where the trait's became
+/// `fmt::__FWr`: writeable 0.6.4's `core::fmt::Write + ?Sized` and bitflags 2.13.2's `impl_bits!` were "stricter".
+/// The probe tests/probe/impl_bound_paths.rs as a library (also `std::fmt::Write`, an imported `Write`, `$crate::`
+/// paths, where clauses for inline bounds), and its output is rustc's. A macro's bound of another trait of that name
+/// (`std::io::Write`), or a parameter it leaves Sized where the trait's is `?Sized`, is still E0276 (rustc 1.97: at
+/// 10:21 and 9:18, in the macro's body)
+#[test]
+fn macro_written_impl_bounds_by_the_trait_they_name() {
+    let lib = include_str!("probe/impl_bound_paths.rs").replace("fn main() {", "pub fn demo() {");
+    let (got, want) = zustc_and_rustc(
+        "impl_bounds",
+        &[("wr.rs", &lib), ("app.rs", "fn main() {\n    wr::demo();\n}\n"), ("ws.txt", "lib wr wr.rs\nbin app app.rs wr\n")],
+    );
+    assert_eq!(want, "7 <-3> ab[cd]n!\nff 1000 6869\n");
+    assert_eq!(got, want);
+    let dir = std::env::temp_dir().join(format!("zustc_ws_impl_bounds_e0276_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let head = "use core::fmt;\npub trait Tr {\n    fn f<W: fmt::Write + ?Sized>(&self, w: &mut W) -> fmt::Result;\n    fn g<W: fmt::Write>(&self, w: W);\n}\nmacro_rules! imp {\n    ($u:ty) => {\n        impl $crate::Tr for $u {\n";
+    for (name, f, g) in [
+        ("io_write", "fn f<W: core::fmt::Write + ?Sized>(&self, w: &mut W) -> core::fmt::Result { write!(w, \"\") }", "fn g<W: std::io::Write>(&self, _w: W) {}"),
+        ("sized", "fn f<W: core::fmt::Write>(&self, w: &mut W) -> core::fmt::Result { write!(w, \"\") }", "fn g<W: fmt::Write>(&self, _w: W) {}"),
+    ] {
+        std::fs::write(dir.join(format!("{name}.rs")), format!("{head}            {f}\n            {g}\n        }}\n    }};\n}}\nimp!(u8);\n")).unwrap();
+        let spec = zustc::session::CrateSpec {
+            name: name.to_string(),
+            root: dir.join(format!("{name}.rs")),
+            display: format!("{name}.rs"),
+            lib: true,
+            deps: vec![],
+            aliases: vec![],
+            features: vec![],
+            exe: None,
+            cfgs: vec![],
+            env: vec![],
+            proc_macro: None,
+            test: false,
+        };
+        let mut s = zustc::session::Session::new(zustc::session::Options { jobs: 1, ..Default::default() });
+        let e = s.build_workspace(&[spec], &dir.join("t")).err().unwrap_or_default();
+        // (on the line of the macro's call, where zustc puts its expansion; rustc points into the macro's body)
+        assert!(e.contains(&format!("{name}.rs:14:")) && e.contains("impl has stricter requirements than trait (E0276)"), "{name}: {e}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

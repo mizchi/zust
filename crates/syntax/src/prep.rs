@@ -1223,6 +1223,12 @@ const STD_RENAMES: &[(&str, &str, &str)] = &[
     ("fmt", "Write", "__FWr"),
 ];
 
+/// The prelude's name for std's `module::name` that std_renames renames (`fmt`, `Write`: `__FWr`): the trait a bound's
+/// path names, for a path written either way (session's stricter_impl_bound)
+pub fn std_rename_of(module: &str, name: &str) -> Option<&'static str> {
+    STD_RENAMES.iter().find(|r| r.0 == module && r.1 == name).map(|r| r.2)
+}
+
 /// Rename them where they come from that module: `module::Name`, or `Name` imported by a `use` of that module (and
 /// neither imported from elsewhere nor defined in the file)
 pub fn std_renames(src: &str) -> Option<String> {
@@ -1243,8 +1249,10 @@ pub fn std_renames(src: &str) -> Option<String> {
         }
         // (nothing is renamed without a `m::name` path or a `use` that may import the name from m (imports_from
         // holds for every one the scans below take): those read the whole source several times, for a program that
-        // has the name only otherwise (`Write` a variant, and `fmt` a module))
-        if !src.contains(&format!("{m}::{name}")) && !imports_from(src, m, name) {
+        // has the name only otherwise (`Write` a variant, and `fmt` a module). A macro's expansion writes the path
+        // spaced, `core :: fmt :: Write`: a crate's (build_workspace) is expanded before this rename (#264))
+        let (m_path, m_spaced) = (format!("{m}::"), format!("{m} :: "));
+        if !src.contains(&format!("{m_path}{name}")) && !src.contains(&format!("{m_spaced}{name}")) && !imports_from(src, m, name) {
             continue;
         }
         let (mut imported, mut other) = (false, false);
@@ -1280,8 +1288,8 @@ pub fn std_renames(src: &str) -> Option<String> {
             let at = i + k;
             let end = at + name.len();
             let word = (at == 0 || !is_id(cb[at - 1])) && (end == cb.len() || !is_id(cb[end]));
-            let after_m = cur[..at].ends_with(&format!("{m}::"));
-            let qualified = at >= 2 && &cb[at - 2..at] == b"::";
+            let after_m = cur[..at].ends_with(&m_path) || cur[..at].ends_with(&m_spaced);
+            let qualified = cur[..at].ends_with("::") || cur[..at].ends_with(":: ");
             out.push_str(&cur[i..at]);
             // (not inside a string: `"Write"` is text)
             let bare = match &scoped {
