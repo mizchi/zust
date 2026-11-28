@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795839760451,
+  "lastUpdate": 1795839763901,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -95464,6 +95464,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 141.055,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "dc7ef1fb09b59b66b06868b7ec7f9de2fe65db5f",
+          "message": "Value paths: name the path in the error; char::REPLACEMENT_CHARACTER, u32::max_value() (#265) (#338)\n\n- \"cannot find value (unsupported path)\" names the path as written, as\n  rustc's E0425 / E0599 name theirs: ``cannot find value `u32::NOPE`\n  (unsupported path)``, `<T as Tr>::C` with its qualified self. The text\n  is made only on that error (a cold fn), so the readings before it pay\n  nothing. The survey's rule for #265 (issues.tsv) takes both forms.\n- `char::REPLACEMENT_CHARACTER` (U+FFFD), and through char's deprecated\n  module `core::char::REPLACEMENT_CHARACTER`: a primitive's associated\n  constant, in fns, consts and const blocks (base64, utf8_iter,\n  utf16_iter).\n- `u32::max_value()` / `i8::min_value()`, the integer types' deprecated\n  associated fns: their `MAX` / `MIN`, read so by type inference, acg,\n  the integer constant evaluator and an array length's text. The syntax\n  tree keeps the call, as syn's (tests/parse.rs). Only a primitive's\n  name: rustc takes the inherent fn before a trait's (getrandom 0.2's\n  `const UNINIT: usize = usize::max_value();`, ipnet, minimal-lexical).\n- tests: probes char_replacement_character and int_max_value_fn (rustc\n  1.97's output), compile error value_path_named, and check.rs's\n  std-trait-path case with the named message.\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-28T13:12:06+09:00",
+          "tree_id": "2c53ade173f2d86309d6f3f9d4f4611f9f7e78f5",
+          "url": "https://github.com/mizchi/zust/commit/dc7ef1fb09b59b66b06868b7ec7f9de2fe65db5f"
+        },
+        "date": 1795839763135,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.003,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.873,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 2.039,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 14.947,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.833,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.359,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 4.298,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 327.914,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 140.789,
             "unit": "MiB"
           }
         ]
