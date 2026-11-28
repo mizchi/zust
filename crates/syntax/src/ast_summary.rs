@@ -219,6 +219,13 @@ pub fn bound_names(bs: &[Bound]) -> R<Vec<String>> {
     Ok(v)
 }
 
+/// Whether the text writes the keyword `impl` (a whole word; not the raw identifier `r#impl`)
+fn impl_keyword_in(t: &str) -> bool {
+    let b = t.as_bytes();
+    let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+    t.match_indices("impl").any(|(i, _)| (i == 0 || !(id(b[i - 1]) || b[i - 1] == b'#')) && b.get(i + 4).is_none_or(|&c| !id(c)))
+}
+
 fn collect_generics(g: &Generics, out: &mut Vec<(String, Vec<String>)>) -> R<()> {
     // (`T: Iterator<Item = impl Foo>`)
     for p in &g.params {
@@ -229,7 +236,7 @@ fn collect_generics(g: &Generics, out: &mut Vec<(String, Vec<String>)>) -> R<()>
                     // and is allowed there)
                     if bp.segs.iter().any(|s| {
                         s.args.iter().any(|a| matches!(a, crate::parse::GArg::Bind(_, PTy::Impl(_)) | crate::parse::GArg::Ty(PTy::Impl(_))))
-                            && s.text.split(|c: char| !(c == '_' || c.is_ascii_alphanumeric())).any(|w| w == "impl")
+                            && impl_keyword_in(&s.text)
                     }) {
                         return err("`impl Trait` is not allowed in generics");
                     }
