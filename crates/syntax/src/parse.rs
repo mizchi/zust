@@ -1158,6 +1158,33 @@ impl Parser {
         }
         Ok(v)
     }
+    /// The outer attributes on an expression of a list (a call's argument, an array's element), the ones rustc takes
+    /// there: lint levels, `doc`, `must_use` / `deprecated` (warnings), and `inline` / `cold` on a closure (itertools'
+    /// `self.try_fold(init, #[inline(always)] |acc, v| ..)`). Another is an error at it: `#[track_caller]` on a closure
+    /// is unstable, `#[target_feature]` / `#[no_mangle]` cannot be used on closures, `#[inline]` not on other expressions
+    #[cold]
+    fn expr_attrs(&mut self) -> R<()> {
+        let mut names = Vec::new();
+        while self.is_punct("#") && !self.peek_is(1, "!") {
+            let at = self.i;
+            let a = self.attr()?;
+            let name: String = a[1..].trim_start_matches('[').trim_start().chars().take_while(|c| c.is_alphanumeric() || *c == '_' || *c == ':').collect();
+            names.push((at, name));
+        }
+        let closure = self.is_punct("|") || self.is_ident("move") || (self.is_ident("async") && (self.peek_is(1, "|") || self.peek_is(1, "||") || self.peek_is(1, "move")));
+        for (at, name) in names {
+            let ok = matches!(name.as_str(), "allow" | "warn" | "deny" | "forbid" | "expect" | "doc" | "must_use" | "deprecated")
+                || (closure && matches!(name.as_str(), "inline" | "cold"));
+            if !ok {
+                self.i = at;
+                if closure && name == "track_caller" {
+                    return Err(self.err_plain("`#[track_caller]` on closures is currently unstable (E0658)"));
+                }
+                return Err(self.err_plain(&format!("`#[{name}]` attribute cannot be used on {}", if closure { "closures" } else { "expressions" })));
+            }
+        }
+        Ok(())
+    }
 
     // ------------------------------------------------ Paths, types
 
@@ -2086,6 +2113,10 @@ impl Parser {
         self.expect_open("(")?;
         let mut v = Vec::new();
         while !self.is_close() {
+            // (an argument's outer attributes, `f(x, #[inline] |a| a)`: rustc takes them in a list of expressions)
+            if self.is_punct("#") {
+                self.expr_attrs()?;
+            }
             v.push(self.expr(true)?);
             if !self.eat_punct(",") {
                 break;
@@ -2383,6 +2414,10 @@ impl Parser {
                         self.expect_close("]")?;
                         return Ok(Expr::Array(Vec::new()));
                     }
+                    // (an element's outer attributes, `[#[allow(x)] a, b]`, as in a call's arguments)
+                    if self.is_punct("#") {
+                        self.expr_attrs()?;
+                    }
                     let first = self.expr(true)?;
                     if self.eat_punct(";") {
                         let n = self.const_expr()?;
@@ -2393,6 +2428,9 @@ impl Parser {
                     while self.eat_punct(",") {
                         if self.is_close() {
                             break;
+                        }
+                        if self.is_punct("#") {
+                            self.expr_attrs()?;
                         }
                         v.push(self.expr(true)?);
                     }
@@ -3317,8 +3355,8 @@ impl Parser {
                 if !self.gdefaults.is_empty() {
                     self.misplaced_default(&g, false);
                 }
-                // (`impl<> T<> for S<>`: empty generics)
-                if self.punct_at(0, "<>") {
+                // (`impl<> T<> for S<>`: empty generics; also `impl< >`, as a macro's `impl< $($t,)* >` gives them for no `$t`)
+                if self.is_punct("<") && self.punct_at(1, ">") {
                     self.i += 2;
                 }
                 let neg = self.eat_punct("!");
