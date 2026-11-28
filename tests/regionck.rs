@@ -6309,6 +6309,9 @@ fn test<'a, F>(_data: &'a mut u32) where F: for<'b> Foo<'b> {}
     errors_at("trait Foo {}\nimpl<A> Foo for fn(A) {}\nfn assert_foo<T: Foo>() {}\nfn main() { assert_foo::<fn(&i32)>(); }\n", &[(4, "implementation of `Foo` is not general enough")], "fn(A)");
     errors_at("trait X {}\nimpl X for fn(&()) {}\nfn indirect<T: X>() {}\nfn f<'a>() { indirect::<fn(&'a ())>(); }\nfn main() {}\n", &[(4, "implementation of `X` is not general enough")], "head binds");
     errors_at("trait Trait<T> {}\nfn foo<T>() where T: Trait<for<'b> fn(fn(&'b u32))> {}\nimpl<'a> Trait<fn(fn(&'a u32))> for () {}\nfn main() { foo::<()>(); }\n", &[(4, "implementation of `Trait` is not general enough")], "bound's fn");
+    errors_at("trait Foo {}\nimpl<A> Foo for Vec<fn(A)> {}\nimpl<'a> Foo for &'a u8 {}\nfn f<T: Foo>() {}\nfn main() { f::<Vec<fn(&u8)>>(); }\n", &[(5, "implementation of `Foo` is not general enough")], "Vec<fn(A)>");
+    // (a type parameter of the impl that stands for the whole fn pointer type has its binder in it: fine)
+    errors_at("trait Foo {}\nimpl<T> Foo for Box<T> {}\nimpl<T> Foo for Vec<T> {}\nimpl<T> Foo for (T, u8) {}\nimpl<'a, T> Foo for &'a [T] {}\nimpl<'a> Foo for &'a u8 {}\nfn f<T: Foo>() {}\nfn main() {\n    f::<Box<fn(&u8)>>();\n    f::<Vec<fn(&u8)>>();\n    f::<(fn(&u8), u8)>();\n    f::<&[fn(&u8)]>();\n}\n", &[], "T around fn");
     // (and impls general enough for them are fine; a region inference makes is either)
     errors_at(r#"trait X {}
 impl X for fn(&()) {}

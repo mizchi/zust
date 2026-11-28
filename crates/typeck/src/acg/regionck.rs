@@ -628,6 +628,32 @@ fn bound_targ_ptys(prog: &Program, sid: u32, tr: &str) -> Option<(Vec<PTy>, Vec<
     Some((args, lts))
 }
 
+/// The type parameters t has within a fn pointer type (`fn(A)`: A); `inside`: within one
+fn params_in_fn(prog: &Program, t: Ty, inside: bool, out: &mut [bool], depth: u32) {
+    if depth > 24 {
+        return;
+    }
+    match t {
+        Ty::Param(i) if inside => {
+            if let Some(x) = out.get_mut(i as usize) {
+                *x = true;
+            }
+        }
+        Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => params_in_fn(prog, *i, inside, out, depth + 1),
+        Ty::Struct(s) => {
+            for &a in &prog.structs[s as usize].args {
+                params_in_fn(prog, a, inside, out, depth + 1);
+            }
+        }
+        Ty::Fn(ft) => {
+            for &p in ft.params.iter().chain(std::iter::once(&ft.ret)) {
+                params_in_fn(prog, p, true, out, depth + 1);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// A bound's trait, by its last name (`a::Foo<&'x u8>`: `Foo`)
 pub(crate) fn bound_trait(b: &str) -> &str {
     let n = b.split('<').next().unwrap_or(b).split('(').next().unwrap_or(b).trim();
@@ -3839,20 +3865,29 @@ impl Cx<'_> {
                 scope.push((l, v));
             }
         }
+        let h = c.head.as_deref();
+        let hl: Vec<u32> = h.map(|h| h.lts.iter().map(|_| rg.var()).collect()).unwrap_or_default();
+        let ptrees: Vec<Option<RT>> = isol.iter().map(|x| x.and_then(|t| rg.fresh(prog, t))).collect();
+        let var_of = |c: u8| if c == R_STATIC { Some(STATIC) } else { hl.get(c as usize).copied() };
         // (a region a fn pointer type of the goal binds (`indirect::<fn(&())>()`, `T: Trait<for<'b> fn(&'b u32)>`) is
         // none of the impl's but one its head binds there too: `impl<'a> X for fn(&'a ())`, `impl<A> Foo for fn(A)`
         // are not general enough for it. Nor is a region the goal does not bind (a lifetime it names, 'static) one the
         // head binds. A region of the goal that inference made is either)
         let known: Vec<u32> = scope.iter().map(|x| x.1).collect();
+        // (an impl's type parameter's regions are its own only where the head writes it within a fn pointer type
+        // (`fn(A)`): one that stands for the whole of such a type (`impl<T> Foo for Box<T>` and `Box<fn(&u8)>`) has
+        // its binder in it)
+        let mut in_fn = vec![false; c.n];
+        params_in_fn(prog, st, false, &mut in_fn, 0);
+        for &a in c.args.iter().flatten() {
+            params_in_fn(prog, a, false, &mut in_fn, 0);
+        }
+        let outside: Vec<u32> = ptrees.iter().enumerate().filter(|(i, _)| !in_fn.get(*i).copied().unwrap_or(false)).flat_map(|(_, t)| t.iter().flatten().copied()).collect();
         let not_general = |rg: &RgSt, g: u32, h: u32| {
             let (gb, hb) = (rg.late_bound.contains(&g), rg.late_bound.contains(&h));
-            (gb && !hb) || (hb && !gb && (g == STATIC || known.contains(&g) || rg.univ.iter().any(|u| u.0 == g)))
+            (gb && !hb && !outside.contains(&h)) || (hb && !gb && (g == STATIC || known.contains(&g) || rg.univ.iter().any(|u| u.0 == g)))
         };
         let msg = format!("implementation of `{tr}` is not general enough");
-        let h = c.head.as_deref();
-        let hl: Vec<u32> = h.map(|h| h.lts.iter().map(|_| rg.var()).collect()).unwrap_or_default();
-        let ptrees: Vec<Option<RT>> = isol.iter().map(|x| x.and_then(|t| rg.fresh(prog, t))).collect();
-        let var_of = |c: u8| if c == R_STATIC { Some(STATIC) } else { hl.get(c as usize).copied() };
         // (the self type: the goal's regions are the head's)
         if let Some(ht) = rg.instantiate(prog, st, h.map(|h| h.self_slots.as_slice()), &hl, &ptrees, &mut |me| me.var()) {
             if ht.len() == tree.len() {
