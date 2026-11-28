@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795855634588,
+  "lastUpdate": 1795855637734,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -130344,6 +130344,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/2e69ffd1bb70e491228f87ccc2e1d6d688dab800"
         },
         "date": 1795854516152,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.296,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 65,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 78.571,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 96.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 91.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 92.179,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f025189cc6c58470c828221b29b9e5d482df97c1",
+          "message": "Region check part 43: trait obligations of calls and the placeholders of their binders (higher-ranked bounds, 1) (#350)\n\nRegion check part 43: trait obligations of calls and the placeholders of their binders (higher-ranked bounds, 1)",
+          "timestamp": "2026-11-28T17:39:24+09:00",
+          "tree_id": "57ac214bbfc62096c8f5fe645049efad9532648f",
+          "url": "https://github.com/mizchi/zust/commit/f025189cc6c58470c828221b29b9e5d482df97c1"
+        },
+        "date": 1795855637227,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
