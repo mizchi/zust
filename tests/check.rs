@@ -4009,6 +4009,20 @@ fn or_pattern_missing_bindings() {
     assert_eq!(first(src), Some((5, 19, "mismatched types: expected `String`, found `Vec<u8>`".to_string())), "types of a local");
 }
 
+/// The checked / wrapping / overflowing Euclidean division of a 128-bit integer, which codegen does not build in: a
+/// method zustc does not have, not a crash (CodeRabbit on #224)
+#[test]
+fn euclidean_division_of_a_128_bit_integer_is_a_diagnostic() {
+    for m in ["checked_div_euclid", "checked_rem_euclid", "wrapping_div_euclid", "wrapping_rem_euclid", "overflowing_div_euclid", "overflowing_rem_euclid"] {
+        for t in ["u128", "i128"] {
+            let src = format!("fn main() {{\n    let a: {t} = 7;\n    let _ = a.{m}(2);\n}}\n");
+            let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+            let d = s.check(&src);
+            assert!(d.first().is_some_and(|d| d.msg.contains(m)), "{t}::{m}: {:?}", d.first().map(|d| &d.msg));
+        }
+    }
+}
+
 #[test]
 fn a_use_of_a_lowercase_enum_brings_only_the_variants_it_names_and_or_bindings_of_two_modes() {
     let first = |src: &str| {
