@@ -128,6 +128,14 @@
     "docs_reports_2026-11-28-02-region-check-43.ja": {
       "path": "docs/ja/reports/2026-11-28-02-region-check-43.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-28-03-region-check-44.en": {
+      "path": "docs/reports/2026-11-28-03-region-check-44.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-28-03-region-check-44.ja": {
+      "path": "docs/ja/reports/2026-11-28-03-region-check-44.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -305,6 +313,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-28-02-region-check-43.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-28-03-region-check-44",
+      "topic": "The Japanese file docs/ja/reports/2026-11-28-03-region-check-44.md is a faithful translation of docs/reports/2026-11-28-03-region-check-44.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-28-03-region-check-44.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-28-03-region-check-44.ja"
       }
     }
   ]
