@@ -853,7 +853,7 @@ fn lex_to(b: &[u8], k: &mut usize, st: &mut LexAt, i: usize) -> LexAt {
 /// The prelude's type names (SHADOWABLE) the program defines for itself: one pass over the bytes, the name after
 /// `struct ` / `enum ` / `trait ` / `type ` / `union ` (it replaces a search for each name: those were most of the cost
 /// of a no-op build of a large program)
-fn shadowed_defs(user_src: &str) -> Vec<&str> {
+pub fn shadowed_defs(user_src: &str) -> Vec<&str> {
     let mut defined: Vec<&str> = vec![];
     let b = user_src.as_bytes();
     let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
@@ -889,14 +889,14 @@ fn shadowed_defs(user_src: &str) -> Vec<&str> {
     defined
 }
 
-pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
-    let defined = shadowed_defs(user_src);
+/// `defined`: shadowed_defs of the program's source
+pub fn rename_shadowed(defined: &[&str], prelude: String) -> String {
     let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
     if defined.is_empty() {
         return prelude;
     }
     let mut out = prelude;
-    for n in defined {
+    for &n in defined {
         if !out.contains(n) {
             continue;
         }
@@ -925,12 +925,9 @@ pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
 /// renamed `__p_Duration`. Such a path becomes the renamed name, padded with spaces in front to the path's length, so
 /// no column moves (`std::` alone is longer than `__p_`); in a `use`, and an item of a `use std::m::{..}` group, the
 /// name is renamed in place, which moves that line's later columns by 4. Comments and strings are left alone
-pub fn std_paths_to_shadowed(user_src: &str) -> Option<String> {
-    if !(user_src.contains("std::") || user_src.contains("core::") || user_src.contains("alloc::")) {
-        return None;
-    }
-    let defined = shadowed_defs(user_src);
-    if defined.is_empty() {
+/// `defined`: shadowed_defs of the source (the caller's, which rename_shadowed takes as well: one scan)
+pub fn std_paths_to_shadowed(user_src: &str, defined: &[&str]) -> Option<String> {
+    if defined.is_empty() || !(user_src.contains("std::") || user_src.contains("core::") || user_src.contains("alloc::")) {
         return None;
     }
     let b = user_src.as_bytes();

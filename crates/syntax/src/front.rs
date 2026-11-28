@@ -151,9 +151,6 @@ pub fn with_prelude_in(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i3
     let mut tm = Timer { on: std::env::var_os("ZUSTC_PROF").is_some(), last: now_ns(), start: now_ns() };
     let renamed = crate::prep::std_renames(src);
     let src: &str = renamed.as_deref().unwrap_or(src);
-    // (std paths to a prelude type the program shadows: the prelude's, renamed below)
-    let to_shadowed = crate::prelude::std_paths_to_shadowed(src);
-    let src: &str = to_shadowed.as_deref().unwrap_or(src);
     let pre = crate::prep::prep(src, crates, fix, cfg, &mut cache.prep)?;
     tm.lap("prep", String::new());
     let mut items = split_inc(&pre, &mut cache.split)?;
@@ -165,11 +162,18 @@ pub fn with_prelude_in(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i3
         }
         None => pre,
     };
-    let src: &str = &pre;
+    // (the prelude's types the program defines for itself, renamed in the prelude below; the program's std paths to
+    // one name the prelude's: rewritten, and split again (rare: a type of the program's named as one, and a std path))
+    let defined = crate::prelude::shadowed_defs(&pre);
+    let to_shadowed = crate::prelude::std_paths_to_shadowed(&pre, &defined);
+    if let Some(r) = &to_shadowed {
+        items = split_inc(r, &mut cache.split)?;
+    }
+    let src: &str = to_shadowed.as_deref().unwrap_or(&pre);
     let user = items.len();
     tm.lap("split", String::new());
     let extra = crate::prelude::select_with(src, &items, &mut cache.sel);
-    let extra = crate::prelude::rename_shadowed(src, extra);
+    let extra = crate::prelude::rename_shadowed(&defined, extra);
     tm.lap("prelude", String::new());
     if extra.is_empty() {
         return Ok((src.to_string(), items, user, 0));
