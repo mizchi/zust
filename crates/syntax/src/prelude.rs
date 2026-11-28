@@ -594,7 +594,7 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList" | "Thread" | "Builder" | "__ThreadPanic" | "__TlsKey" | "AccessError" | "SendError" | "RecvError" | "TryRecvError" | "RecvTimeoutError" | "__RecvIntoIter" | "Barrier" | "BarrierWaitResult" | "Once" | "OnceState"
                         | "Layout" | "LayoutError" | "__LayoutAlign" | "Infallible" | "Condvar" | "ControlFlow"
                         | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError"
-                        | "SplitNStr" | "SliceSplitN" | "PoisonError" | "TryLockError"
+                        | "SplitNStr" | "SliceSplitN" | "PoisonError"
                         | "File" | "OpenOptions" | "Metadata" | "FileType" | "Permissions" | "FpCategory"
                         | "Instant" | "TryLockError" => Some(w),
                         // (std::num's NonZero types: their impls only with them)
