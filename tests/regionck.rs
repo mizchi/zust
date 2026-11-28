@@ -6140,4 +6140,16 @@ struct Q<T: ?Sized + Tr>(Box<T>);
 impl<T: Tr> Drop for Q<T> { fn drop(&mut self) {} }
 fn main() {}
 "#, &[], "r19");
+    // (a trait of the program's makes the parameter Sized only through its header (`: Sized`, `where Self: Sized`,
+    // a supertrait that is Clone): an empty one does not, E0367)
+    errors_at("trait Tr {}\nstruct S<T: ?Sized + Tr>(Box<T>);\nimpl<T: Tr> Drop for S<T> { fn drop(&mut self) {} }\nfn main() {}\n", &[(3, "requires `T: Sized`")], "r20");
+    errors_at(r#"trait B: Clone {}
+trait Tr: B {}
+struct S<T: ?Sized + Tr>(Box<T>);
+impl<T: Tr> Drop for S<T> { fn drop(&mut self) {} }
+trait W where Self: Sized {}
+struct V<T: ?Sized + W>(Box<T>);
+impl<T: W> Drop for V<T> { fn drop(&mut self) {} }
+fn main() {}
+"#, &[], "r21");
 }

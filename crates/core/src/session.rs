@@ -1560,9 +1560,19 @@ impl Session {
                     .collect();
                 // (the program's own traits: their supertraits are not all recorded (`#supers` leaves out Debug, Clone
                 // ..), so a parameter bounded by one is not checked for the trait bounds a Drop impl adds: "#?")
-                for sm in &sums[..user_src] {
+                // (and the markers its header names before its body, which `#supers` leaves out: `trait Tr: Sized`,
+                // `trait Tr: Clone`, `where Self: Sized`, so that a Sized one is known)
+                for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
                     if let Some(t) = sm.trait_decl.as_deref() {
-                        supers.entry(short(t)).or_default().push("#?".to_string());
+                        let e = supers.entry(short(t)).or_default();
+                        e.push("#?".to_string());
+                        let head = src.get(it.start..it.end).map(|x| x.split('{').next().unwrap_or(x)).unwrap_or("");
+                        let words: Vec<&str> = head.split(|c: char| !(c.is_alphanumeric() || c == '_')).collect();
+                        for m in ["Sized", "Clone", "Copy", "Default"] {
+                            if words.contains(&m) && !e.iter().any(|x| x == m) {
+                                e.push(m.to_string());
+                            }
+                        }
                     }
                 }
                 // (std's supertraits, which the prelude's declarations leave out: `T: Ord` gives `T: PartialOrd`)

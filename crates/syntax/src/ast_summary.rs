@@ -1378,9 +1378,9 @@ pub fn drop_impl_unmet(src: &str, imp: &SrcItem, adt: &SrcItem, supers: &crate::
     for p in &ig.params {
         if let GParam::Ty(n, ..) = p {
             if let Some(an) = to_adt(n) {
-                // (unless a bound there makes it Sized: `T: ?Sized + Clone`; one of the program's traits may (`trait
-                // Tr: Sized`): not reported)
-                let sized_by_bound = a_traits.iter().any(|x| x.0 == an && matches!(x.1.as_str(), "Clone" | "Copy" | "Default" | "Sized" | "#?"));
+                // (unless a bound there makes it Sized: `T: ?Sized + Clone`, or one of the program's traits whose header
+                // names Sized or such a trait (`trait Tr: Sized`), through the supertraits)
+                let sized_by_bound = a_traits.iter().any(|x| x.0 == an && matches!(x.1.as_str(), "Clone" | "Copy" | "Default" | "Sized"));
                 if a_unsized.contains(&an) && !i_unsized.contains(&n.as_str()) && !sized_by_bound {
                     return Some((1, unmet(format!("{n}: Sized"))));
                 }
