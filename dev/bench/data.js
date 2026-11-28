@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795839359884,
+  "lastUpdate": 1795839760451,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -66461,6 +66461,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 37.61,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "dc7ef1fb09b59b66b06868b7ec7f9de2fe65db5f",
+          "message": "Value paths: name the path in the error; char::REPLACEMENT_CHARACTER, u32::max_value() (#265) (#338)\n\n- \"cannot find value (unsupported path)\" names the path as written, as\n  rustc's E0425 / E0599 name theirs: ``cannot find value `u32::NOPE`\n  (unsupported path)``, `<T as Tr>::C` with its qualified self. The text\n  is made only on that error (a cold fn), so the readings before it pay\n  nothing. The survey's rule for #265 (issues.tsv) takes both forms.\n- `char::REPLACEMENT_CHARACTER` (U+FFFD), and through char's deprecated\n  module `core::char::REPLACEMENT_CHARACTER`: a primitive's associated\n  constant, in fns, consts and const blocks (base64, utf8_iter,\n  utf16_iter).\n- `u32::max_value()` / `i8::min_value()`, the integer types' deprecated\n  associated fns: their `MAX` / `MIN`, read so by type inference, acg,\n  the integer constant evaluator and an array length's text. The syntax\n  tree keeps the call, as syn's (tests/parse.rs). Only a primitive's\n  name: rustc takes the inherent fn before a trait's (getrandom 0.2's\n  `const UNINIT: usize = usize::max_value();`, ipnet, minimal-lexical).\n- tests: probes char_replacement_character and int_max_value_fn (rustc\n  1.97's output), compile error value_path_named, and check.rs's\n  std-trait-path case with the named message.\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-28T13:12:06+09:00",
+          "tree_id": "2c53ade173f2d86309d6f3f9d4f4611f9f7e78f5",
+          "url": "https://github.com/mizchi/zust/commit/dc7ef1fb09b59b66b06868b7ec7f9de2fe65db5f"
+        },
+        "date": 1795839759788,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 126.813,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.685,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 17.652,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 40.57,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 23.168,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 324.086,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.557,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.548,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 128.362,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 798.932,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 580.068,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.675,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 67.662,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 188.707,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.996,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.445,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1903.182,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.548,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 593.968,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3923.856,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.155,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 86.407,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 41.689,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 52.437,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 92.232,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 143.438,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 37.593,
             "unit": "ms"
           }
         ]
