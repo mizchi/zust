@@ -65,6 +65,17 @@ fn closure_and_dyn_errors() {
 /// Keeps adding and removing statements that do / do not cause type errors in the bodies of the examples' fns (generic fns too)
 #[test]
 fn check_memo_matches_fresh_check() {
+    edits_match_fresh_check(false);
+}
+
+/// And so does a session kept for edits (zust-analyzer's: the summaries, the items' refs and the program built are
+/// kept from one analysis to the next, the program while no edit changes what its build reads)
+#[test]
+fn kept_session_matches_fresh_check() {
+    edits_match_fresh_check(true);
+}
+
+fn edits_match_fresh_check(keep: bool) {
     let root = env!("CARGO_MANIFEST_DIR");
     let mut ps: Vec<_> = std::fs::read_dir(format!("{root}/examples")).unwrap().map(|e| e.unwrap().path()).collect();
     ps.sort();
@@ -80,6 +91,9 @@ fn check_memo_matches_fresh_check() {
     for p in ps.iter().filter(|p| p.extension().is_some_and(|e| e == "rs")).take(20) {
         let src = std::fs::read_to_string(p).unwrap();
         let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        if keep {
+            s.keep_for_edits();
+        }
         let mut cur = src.clone();
         for _ in 0..8 {
             let d1 = s.check(&cur);
@@ -101,6 +115,25 @@ fn check_memo_matches_fresh_check() {
         }
     }
     assert!(compared > 50, "{compared}");
+}
+
+/// A kept program is built again when an impl moves to the line of another: the build reports an unbounded blanket
+/// impl and another impl of its trait (E0119) unless they are on one line (a macro's expansion; a later check finds
+/// that one)
+#[test]
+fn kept_program_follows_the_lines_of_impls() {
+    let one = "trait Tr {}\nimpl<T> Tr for T {} impl Tr for u8 {}\nfn main() {\n    let _a = 1;\n}\n";
+    let two = one.replace("{} impl", "{}\nimpl");
+    let f = |d: Vec<zustc::Diagnostic>| d.into_iter().map(|x| (x.line, x.col, x.msg)).collect::<Vec<_>>();
+    let fresh = |src: &str| f(Session::new(Options { jobs: 1, ..Options::default() }).check(src));
+    assert_eq!(fresh(&two).iter().map(|d| (d.0, d.2.as_str())).collect::<Vec<_>>(), [(3, "conflicting implementations of trait `Tr` (E0119)")]);
+    assert_ne!(fresh(one), fresh(&two));
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+    s.keep_for_edits();
+    // (the second and third analyses read what the first built: the program is kept, then used)
+    for src in [one.to_string(), one.replace("_a = 1", "_a = 2"), one.replace("_a = 1", "_a = 3"), two.clone(), one.to_string(), two] {
+        assert_eq!(f(s.check(&src)), fresh(&src), "{src}");
+    }
 }
 
 /// Each constant and static is checked against its type where it is defined, used or not (as rustc does), with the
@@ -3078,7 +3111,7 @@ fn std_trait_path_beside_a_program_trait_of_its_name() {
     let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
     let src = "trait ToString {\n    fn to_string(&self) -> String;\n}\nimpl ToString for u8 {\n    fn to_string(&self) -> String {\n        \"local\".into()\n    }\n}\nfn main() {\n    println!(\"{}\", std::string::ToString::to_string(&42u8));\n    println!(\"{}\", ToString::to_string(&42u8));\n}\n";
     let d = s.check(src);
-    assert_eq!(d.first().map(|d| (d.line, d.col, d.msg.clone())), Some((10, 20, "cannot find value (unsupported path)".to_string())));
+    assert_eq!(d.first().map(|d| (d.line, d.col, d.msg.clone())), Some((10, 20, "cannot find value `std::string::ToString::to_string` (unsupported path)".to_string())));
     assert_eq!(d.len(), 1, "{:?}", d.iter().map(|d| &d.msg).collect::<Vec<_>>());
 }
 

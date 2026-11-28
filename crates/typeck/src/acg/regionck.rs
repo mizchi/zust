@@ -2140,7 +2140,13 @@ impl RgSt {
                 }
             }
             match ret_at {
-                Some(sp) if bad => errs.push((sp, if name.is_empty() { "cannot return value referencing temporary value (E0515)".to_string() } else { format!("cannot return value referencing local variable `{name}` (E0515)") })),
+                Some(sp) if bad => errs.push((sp, if name.is_empty() {
+                    "cannot return value referencing temporary value (E0515)".to_string()
+                } else if super::borrowck::synthetic_param(name) {
+                    "cannot return value referencing function parameter (E0515)".to_string()
+                } else {
+                    format!("cannot return value referencing local variable `{name}` (E0515)")
+                })),
                 _ if bad => errs.push((*lsp, if name.is_empty() { "temporary value dropped while borrowed (it must outlive the function)".to_string() } else { format!("`{name}` does not live long enough (borrowed value must outlive the function)") })),
                 _ => {}
             }
@@ -2983,6 +2989,8 @@ impl Cx<'_> {
     /// A call through `dyn Fn(..)` whose bound writes lifetimes (s: the bound's text): the arguments flow into its
     /// parameters' types, with the regions written there (those it elides are its own)
     pub(crate) fn rg_dyn_fn_args(&mut self, s: &str, args: &[&Expr]) {
+        // (the object's trait: `+ Send` after it would read as an addition to the cast below)
+        let s = crate::types::dyn_autos(s).0;
         if !self.rg_on() || !s.contains('\'') {
             return;
         }
@@ -5096,10 +5104,22 @@ impl Cx<'_> {
         let Some((_, tr)) = self.rg.pat.clone() else { return };
         let Some((loc, t)) = self.lookup(name) else { return };
         let tree = if by_ref {
-            // (by the reference matched through, or a `ref` binding's own borrow: a region of its own)
+            // (by the reference matched through, or a `ref` binding's own borrow: a region of its own, a loan of the
+            // place matched when the function owns it (`|ref line: String| ..`, `let ref r = s;`))
             let r = match self.rg.pat_ref {
                 Some(r) => r,
-                None => self.rg.var(),
+                None => {
+                    let r = self.rg.var();
+                    // (the place the borrow check has the pattern at: one the function owns, through no reference
+                    // (it drops the place where a pattern matches through one: `|&ref x| ..`, `match self { S(ref
+                    // x) => .. }` of `self: &S`))
+                    if let Some(pp) = self.bk.pat_path.as_ref().filter(|pp| pp.proj.iter().all(|x| matches!(x, super::borrowck::Proj::Field(_) | super::borrowck::Proj::Deref(true)))) {
+                        let n = super::borrowck::path_str(&self.bk.locals, pp);
+                        let sp = self.bk.locals.get(pp.local as usize).map(|l| l.decl).unwrap_or(super::SP);
+                        self.rg.loans.push((r, n, sp));
+                    }
+                    r
+                }
             };
             let mut v = vec![r];
             v.extend(tr);

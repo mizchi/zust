@@ -39,7 +39,7 @@ pub type FMap<K, V> = std::collections::HashMap<K, V, std::hash::BuildHasherDefa
 pub type FSet<K> = std::collections::HashSet<K, std::hash::BuildHasherDefault<FxHasher>>;
 
 /// Value types
-pub use zust_ir::{Block, FloatCC, FuncRef, IntCC, Lane, Op, Reloc, Shape, StackSlot, Type, VBits, VOp, Value, Variable};
+pub use zust_ir::{AtomicOp, Block, FloatCC, FuncRef, IntCC, Lane, Op, Reloc, Shape, StackSlot, Type, VBits, VOp, Value, Variable};
 
 /// Assembling one fn's machine code (FunctionBuilder uses it twice: analysis (track), and the real run using the allocation)
 pub struct Emitter {
@@ -2035,6 +2035,96 @@ impl Emitter {
         self.result(t)
     }
 
+    // --- Atomics (all sequentially consistent: x86-64 loads are acquire, and xchg / lock-prefixed instructions are
+    // full barriers) -------------------------------------------------------------------------------------------------
+
+    /// The operand-size prefix and REX.W of an integer of the type (the 8-bit forms are separate opcodes)
+    fn atomic_width(t: Type) -> (&'static [u8], &'static [u8]) {
+        match t {
+            Type::I64 => (&[], &[0x48]),
+            Type::I16 => (&[0x66], &[]),
+            _ => (&[], &[]),
+        }
+    }
+
+    /// Loads [addr] (mov: an aligned load is atomic)
+    pub fn atomic_load(&mut self, t: Type, addr: Value) -> Value {
+        self.load_rax(addr);
+        match t {
+            Type::I64 => self.emit(&[0x48, 0x8B, 0x00]),
+            Type::I32 => self.emit(&[0x8B, 0x00]),
+            Type::I16 => self.emit(&[0x48, 0x0F, 0xB7, 0x00]),
+            _ => self.emit(&[0x48, 0x0F, 0xB6, 0x00]),
+        }
+        self.result(t)
+    }
+
+    /// rax = addr, rcx = x (in an order that keeps a value rax holds)
+    fn atomic_args(&mut self, addr: Value, x: Value) {
+        if self.rax_is(x) && x != addr {
+            self.load_rcx(x);
+            self.load_rax(addr);
+        } else {
+            self.load_rax(addr);
+            self.load_rcx(x);
+        }
+    }
+
+    /// xchg [rax], rcx (implicitly locked)
+    fn xchg_rax_rcx(&mut self, t: Type) {
+        let (p, w) = Self::atomic_width(t);
+        self.emit(p);
+        self.emit(w);
+        self.emit(if t == Type::I8 { &[0x86, 0x08] } else { &[0x87, 0x08] });
+    }
+
+    /// Writes v to [addr] (xchg, a store that is also a full barrier)
+    pub fn atomic_store(&mut self, v: Value, addr: Value) {
+        let t = self.value_type(v);
+        self.atomic_args(addr, v);
+        self.xchg_rax_rcx(t);
+        self.rax_holds = None;
+    }
+
+    /// The old value of [addr], replaced by `op(old, x)`
+    pub fn atomic_rmw(&mut self, op: AtomicOp, addr: Value, x: Value) -> Value {
+        let t = self.value_type(x);
+        self.atomic_args(addr, x);
+        match op {
+            AtomicOp::Xchg => self.xchg_rax_rcx(t),
+            AtomicOp::Add => {
+                // lock xadd [rax], rcx
+                let (p, w) = Self::atomic_width(t);
+                self.emit(p);
+                self.emit(&[0xF0]);
+                self.emit(w);
+                self.emit(if t == Type::I8 { &[0x0F, 0xC0, 0x08] } else { &[0x0F, 0xC1, 0x08] });
+            }
+        }
+        self.emit(&[0x48, 0x89, 0xC8]); // mov rax, rcx
+        self.result(t)
+    }
+
+    /// The old value of [addr], which is replaced by new when it is expected
+    pub fn atomic_cas(&mut self, addr: Value, expected: Value, new: Value) -> Value {
+        let t = self.value_type(new);
+        // (rdx = addr, rcx = new, rax = expected: each from its own place, which loading another does not touch)
+        self.load_reg(2, addr);
+        self.load_reg(1, new);
+        self.load_reg(0, expected);
+        // lock cmpxchg [rdx], rcx
+        let (p, w) = Self::atomic_width(t);
+        self.emit(p);
+        self.emit(&[0xF0]);
+        self.emit(w);
+        self.emit(if t == Type::I8 { &[0x0F, 0xB0, 0x0A] } else { &[0x0F, 0xB1, 0x0A] });
+        self.result(t)
+    }
+
+    pub fn fence(&mut self) {
+        self.emit(&[0x0F, 0xAE, 0xF0]); // mfence
+    }
+
     fn rot(&mut self, a: Value, b: Value, ext: u8) -> Value {
         let t = self.value_type(a);
         self.load_rax(a);
@@ -3099,6 +3189,39 @@ impl FunctionBuilder {
         self.dry.trap();
         self.res.push(vec![]);
     }
+    pub fn atomic_load(&mut self, t: Type, addr: Value) -> Value {
+        self.dry.op = self.ops.len() as u32;
+        self.ops.push(Op::AtomicLoad(t, addr));
+        let r = self.dry.atomic_load(t, addr);
+        self.res.push(vec![r.0]);
+        r
+    }
+    pub fn atomic_store(&mut self, v: Value, addr: Value) {
+        self.dry.op = self.ops.len() as u32;
+        self.ops.push(Op::AtomicStore(v, addr));
+        self.dry.atomic_store(v, addr);
+        self.res.push(vec![]);
+    }
+    pub fn atomic_rmw(&mut self, op: AtomicOp, addr: Value, x: Value) -> Value {
+        self.dry.op = self.ops.len() as u32;
+        self.ops.push(Op::AtomicRmw(op, addr, x));
+        let r = self.dry.atomic_rmw(op, addr, x);
+        self.res.push(vec![r.0]);
+        r
+    }
+    pub fn atomic_cas(&mut self, addr: Value, expected: Value, new: Value) -> Value {
+        self.dry.op = self.ops.len() as u32;
+        self.ops.push(Op::AtomicCas(addr, expected, new));
+        let r = self.dry.atomic_cas(addr, expected, new);
+        self.res.push(vec![r.0]);
+        r
+    }
+    pub fn fence(&mut self) {
+        self.dry.op = self.ops.len() as u32;
+        self.ops.push(Op::Fence);
+        self.dry.fence();
+        self.res.push(vec![]);
+    }
     pub fn call(&mut self, f: FuncRef, args: &[Value], rets: &[Type]) -> Vec<Value> {
         self.dry.op = self.ops.len() as u32;
         self.ops.push(Op::Call(f, args.to_vec(), rets.to_vec()));
@@ -3753,6 +3876,24 @@ pub fn from_recording(rec: &zust_ir::Recorder) -> (FunctionBuilder, Vec<u32>) {
             Op::Trap => {
                 fb.trap();
             }
+            Op::AtomicLoad(f0, f1) => {
+                let r = fb.atomic_load(*f0, mv(&vm, *f1));
+                put(&mut vm, out[0], r.0);
+            }
+            Op::AtomicStore(f0, f1) => {
+                fb.atomic_store(mv(&vm, *f0), mv(&vm, *f1));
+            }
+            Op::AtomicRmw(f0, f1, f2) => {
+                let r = fb.atomic_rmw(*f0, mv(&vm, *f1), mv(&vm, *f2));
+                put(&mut vm, out[0], r.0);
+            }
+            Op::AtomicCas(f0, f1, f2) => {
+                let r = fb.atomic_cas(mv(&vm, *f0), mv(&vm, *f1), mv(&vm, *f2));
+                put(&mut vm, out[0], r.0);
+            }
+            Op::Fence => {
+                fb.fence();
+            }
             Op::Call(f0, f1, f2) => {
                 let r = fb.call(FuncRef(fm[f0.0 as usize]), &f1.iter().map(|x| mv(&vm, *x)).collect::<Vec<Value>>(), &f2[..]);
                 for (k, x) in r.iter().enumerate() {
@@ -4160,6 +4301,21 @@ fn replay(e: &mut Emitter, op: &Op) {
         }
         Op::Trap => {
             let _ = e.trap();
+        }
+        Op::AtomicLoad(f0, f1) => {
+            let _ = e.atomic_load(*f0, *f1);
+        }
+        Op::AtomicStore(f0, f1) => {
+            e.atomic_store(*f0, *f1);
+        }
+        Op::AtomicRmw(f0, f1, f2) => {
+            let _ = e.atomic_rmw(*f0, *f1, *f2);
+        }
+        Op::AtomicCas(f0, f1, f2) => {
+            let _ = e.atomic_cas(*f0, *f1, *f2);
+        }
+        Op::Fence => {
+            e.fence();
         }
         Op::Call(f0, f1, f2) => {
             let _ = e.call(*f0, f1.as_slice(), f2.as_slice());

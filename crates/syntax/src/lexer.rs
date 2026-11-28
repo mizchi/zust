@@ -2599,7 +2599,7 @@ fn hoist_plain(s: &[u8], moves: &[(usize, usize)]) -> Option<(String, Vec<(usize
     Some((String::from_utf8(out).ok()?, parts))
 }
 
-/// `thread_local! { static N: T = init; }` を、遅延初期化する `static mut` と `N.with(|v| ..)` を持つ unit struct にする
+/// `thread_local! { static N: T = init; }` を、スレッドごとの値 (`__exr_tls_slot`、遅延初期化) を指す鍵と `N.with(|v| ..)` を持つ unit struct にする
 /// (zustc の生成するプログラムはスレッドを作らないので、スレッドごとの値は 1 つでよい)。
 /// 展開は 1 行に収め、後ろの行番号は変えない
 pub fn expand_thread_local(src: &str) -> Option<String> {
@@ -2701,7 +2701,10 @@ pub fn expand_thread_local(src: &str) -> Option<String> {
             let init = text(i0, i1);
             // (std's LocalKey<Cell<T>> / LocalKey<RefCell<T>> helpers, on the slot once `with` has filled it)
             let tt = ty.trim();
-            let slot = format!("{{ self.with(|_| ()); #[allow(static_mut_refs)] unsafe {{ {name}__slot.as_ref().unwrap() }} }}");
+            let slot = format!("{{ self.with(|_| ()); unsafe {{ (*__exr_tls_slot::<{ty}>(&{name}__tk)).as_ref().unwrap() }} }}");
+            // (null: the thread's value is being dropped, or was (std's AccessError). An initializer that made the value
+            // itself first (it called `with` again) is outlived by its own: that one replaces it, and the other is
+            // dropped after, seeing the new value, as std's)
             let extra = if let Some(inner) = tt.strip_prefix("Cell<").and_then(|r| r.strip_suffix('>')) {
                 format!(
                     "{vis} fn set(&'static self, v: {inner}) {{ {slot}.set(v) }} \
@@ -2721,10 +2724,10 @@ pub fn expand_thread_local(src: &str) -> Option<String> {
                 String::new()
             };
             expanded.push_str(&format!(
-                "#[allow(non_camel_case_types)] {vis} struct {name}__Key; static mut {name}__slot: Option<{ty}> = None; \
-                 {vis} static {name}: {name}__Key = {name}__Key; impl {name}__Key {{ #[allow(static_mut_refs)] {vis} fn with<R, F: FnOnce(&{ty}) -> R>(&'static self, f: F) -> R \
-                 {{ unsafe {{ if {name}__slot.is_none() {{ {name}__slot = Some({init}); }} f({name}__slot.as_ref().unwrap()) }} }} \
-                 {vis} fn try_with<R, F: FnOnce(&{ty}) -> R>(&'static self, f: F) -> Result<R, ()> {{ Ok(self.with(f)) }} {extra}}} "
+                "#[allow(non_camel_case_types)] {vis} struct {name}__Key; static {name}__tk: __TlsKey = __TlsKey::new(); \
+                 {vis} static {name}: {name}__Key = {name}__Key; impl {name}__Key {{ {vis} fn with<R, F: FnOnce(&{ty}) -> R>(&'static self, f: F) -> R \
+                 {{ let s = __exr_tls_slot::<{ty}>(&{name}__tk); if s.is_null() {{ __exr_tls_destroyed() }} unsafe {{ if (*s).is_none() {{ let v = {init}; let old = core::mem::replace(&mut *s, Some(v)); __exr_tls_made::<{ty}>(&{name}__tk); core::mem::drop(old); }} f((*s).as_ref().unwrap()) }} }} \
+                 {vis} fn try_with<R, F: FnOnce(&{ty}) -> R>(&'static self, f: F) -> Result<R, __TlsAccessError> {{ if __exr_tls_slot::<{ty}>(&{name}__tk).is_null() {{ return Err(__exr_access_error()); }} Ok(self.with(f)) }} {extra}}} "
             ));
             j = i1 + 1;
         }

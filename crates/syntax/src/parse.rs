@@ -1229,6 +1229,33 @@ impl Parser {
         }
         Ok(v)
     }
+    /// The outer attributes on an expression of a list (a call's argument, an array's element), the ones rustc takes
+    /// there: lint levels, `doc`, `must_use` / `deprecated` (warnings), and `inline` / `cold` on a closure (itertools'
+    /// `self.try_fold(init, #[inline(always)] |acc, v| ..)`). Another is an error at it: `#[track_caller]` on a closure
+    /// is unstable, `#[target_feature]` / `#[no_mangle]` cannot be used on closures, `#[inline]` not on other expressions
+    #[cold]
+    fn expr_attrs(&mut self) -> R<()> {
+        let mut names = Vec::new();
+        while self.is_punct("#") && !self.peek_is(1, "!") {
+            let at = self.i;
+            let a = self.attr()?;
+            let name: String = a[1..].trim_start_matches('[').trim_start().chars().take_while(|c| c.is_alphanumeric() || *c == '_' || *c == ':').collect();
+            names.push((at, name));
+        }
+        let closure = self.is_punct("|") || self.is_ident("move") || (self.is_ident("async") && (self.peek_is(1, "|") || self.peek_is(1, "||") || self.peek_is(1, "move")));
+        for (at, name) in names {
+            let ok = matches!(name.as_str(), "allow" | "warn" | "deny" | "forbid" | "expect" | "doc" | "must_use" | "deprecated")
+                || (closure && matches!(name.as_str(), "inline" | "cold"));
+            if !ok {
+                self.i = at;
+                if closure && name == "track_caller" {
+                    return Err(self.err_plain("`#[track_caller]` on closures is currently unstable (E0658)"));
+                }
+                return Err(self.err_plain(&format!("`#[{name}]` attribute cannot be used on {}", if closure { "closures" } else { "expressions" })));
+            }
+        }
+        Ok(())
+    }
 
     // ------------------------------------------------ Paths, types
 
@@ -2157,6 +2184,10 @@ impl Parser {
         self.expect_open("(")?;
         let mut v = Vec::new();
         while !self.is_close() {
+            // (an argument's outer attributes, `f(x, #[inline] |a| a)`: rustc takes them in a list of expressions)
+            if self.is_punct("#") {
+                self.expr_attrs()?;
+            }
             v.push(self.expr(true)?);
             if !self.eat_punct(",") {
                 break;
@@ -2454,6 +2485,10 @@ impl Parser {
                         self.expect_close("]")?;
                         return Ok(Expr::Array(Vec::new()));
                     }
+                    // (an element's outer attributes, `[#[allow(x)] a, b]`, as in a call's arguments)
+                    if self.is_punct("#") {
+                        self.expr_attrs()?;
+                    }
                     let first = self.expr(true)?;
                     if self.eat_punct(";") {
                         let n = self.const_expr()?;
@@ -2464,6 +2499,9 @@ impl Parser {
                     while self.eat_punct(",") {
                         if self.is_close() {
                             break;
+                        }
+                        if self.is_punct("#") {
+                            self.expr_attrs()?;
                         }
                         v.push(self.expr(true)?);
                     }
@@ -3388,8 +3426,8 @@ impl Parser {
                 if !self.gdefaults.is_empty() {
                     self.misplaced_default(&g, false);
                 }
-                // (`impl<> T<> for S<>`: empty generics)
-                if self.punct_at(0, "<>") {
+                // (`impl<> T<> for S<>`: empty generics; also `impl< >`, as a macro's `impl< $($t,)* >` gives them for no `$t`)
+                if self.is_punct("<") && self.punct_at(1, ">") {
                     self.i += 2;
                 }
                 let neg = self.eat_punct("!");
@@ -3625,6 +3663,27 @@ fn constraint_err(toks: &[Tok], st: usize) -> String {
         Some(t) => format!("{}:{}: associated item constraints are not allowed here (E0229)", t.line, t.col + 1),
         None => "associated item constraints are not allowed here (E0229)".to_string(),
     }
+}
+
+/// `u32::max_value()` / `i8::min_value()`, a call of an integer type's deprecated associated fn
+/// (`#[deprecated(since = "TBD")]`, which warns of nothing): its type and the constant it is, `MAX` / `MIN` (#265:
+/// getrandom's `const UNINIT: usize = usize::max_value();`, ipnet's netmasks). Type inference, the constant evaluator
+/// and acg each read the call as that constant (`u32::MAX`); the syntax tree keeps the call, as syn's has it. The
+/// type by a primitive's name only: rustc takes the inherent fn before any trait's (num-traits' `Bounded`), and an
+/// alias (`type W = u64;`) is not one
+pub fn int_bound_call(f: &Expr, args: &[Expr]) -> Option<(crate::types::Ty, &'static str)> {
+    let Expr::Path(None, p) = f else { return None };
+    let [t, f] = p.segs.as_slice() else { return None };
+    let c = match f.name.as_str() {
+        "max_value" => "MAX",
+        "min_value" => "MIN",
+        _ => return None,
+    };
+    if !args.is_empty() || p.global || !t.args.is_empty() || !f.args.is_empty() {
+        return None;
+    }
+    let t = crate::types::Ty::from_suffix(&t.name).filter(|t| t.is_int())?;
+    Some((t, c))
 }
 
 pub fn path_text(p: &Path) -> String {

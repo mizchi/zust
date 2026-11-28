@@ -111,6 +111,20 @@ pub const DST_TAG: u32 = 1 << 31;
 
 /// The intern table of strings (the trait bounds of `dyn`)
 /// (holds a `&String` rather than a fat `&str`, to keep `Ty` at 16 bytes)
+/// A trait object's text without the auto traits it keeps (`Fn() + Send + Sync` is `Fn()`), and whether it is Send,
+/// and Sync (ast_types::tysyn writes them last, in that order)
+pub fn dyn_autos(s: &str) -> (&str, bool, bool) {
+    let (s, sync) = match s.strip_suffix(" + Sync") {
+        Some(r) => (r, true),
+        None => (s, false),
+    };
+    let (s, send) = match s.strip_suffix(" + Send") {
+        Some(r) => (r, true),
+        None => (s, false),
+    };
+    (s, send, sync)
+}
+
 pub fn intern_str(s: &str) -> &'static String {
     static TABLE: OnceLock<Mutex<HashSet<&'static String>>> = OnceLock::new();
     let mut tab = TABLE.get_or_init(|| Mutex::new(HashSet::default())).lock().unwrap();
@@ -511,6 +525,9 @@ pub struct Summary {
     pub ref_impl_fns: Vec<String>,
     /// That method, when T is bounded by Tr and it does more than forward to T's method (ast_summary::forwards_to_referent)
     pub ref_impl_bad: Vec<String>,
+    /// A forwarding method's `_` parameter given the path of its type as a value, (method, the path's last segment):
+    /// a forward only when that is a unit struct, not a const or static of the same name (the driver checks)
+    pub ref_impl_unit_args: Vec<(String, String)>,
 }
 
 /// A trait's declaration: the lifetimes Self must outlive (`trait Wedding<'t>: 't`) are the item `#outlives` of
@@ -563,6 +580,10 @@ pub struct ClosureSyn {
     /// Per capture: a parameter of the fn that is a shared reference (`h: &T`, `&self`), used in the body only through
     /// a deref of it (ast_closure::deref_uses_only). From edition 2021 it is held by value: the closure captures `*h`
     pub deref: Vec<bool>,
+    /// Per capture: the body assigns to it, through it or borrows it mutably (`x = ..`, `x.f += ..`, `*x = ..`,
+    /// `&mut x`; ast_closure::mutates_capture). Held by reference, it is then a `&mut T` (or a unique borrow): Send when
+    /// T is. The others held by reference may be either kind (a method's `&mut self` is not seen here)
+    pub mutated: Vec<bool>,
 }
 
 /// The owner of the members of an impl / trait
@@ -621,3 +642,13 @@ pub const TYS: [Ty; 18] = [
     Ty::I128,
     Ty::U128,
 ];
+
+/// The prelude's name of a std unit struct a value path names by another (`fmt::Error`, std's unit struct, is the
+/// prelude's `__FmtError`), else the path's last segment
+pub fn std_unit_name<'a>(segs: &[&'a str]) -> &'a str {
+    match segs {
+        [.., "fmt", "Error"] => "__FmtError",
+        [.., last] => last,
+        [] => "",
+    }
+}

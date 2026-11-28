@@ -1011,7 +1011,7 @@ fn natural_loops<'s>(n: usize, succ: &dyn Fn(usize) -> &'s [usize]) -> Vec<Vec<b
     out.into_iter().map(|x| x.1).collect()
 }
 
-fn path_str(locals: &[Local], p: &BPlace) -> String {
+pub(crate) fn path_str(locals: &[Local], p: &BPlace) -> String {
     let mut s = locals[p.local as usize].name.clone();
     // (a closure's capture held by reference is shown as the variable: `this.x`, not `*this.x`)
     let skip = (locals[p.local as usize].via_ref && p.proj.first() == Some(&Proj::Deref(false))) as usize;
@@ -2129,7 +2129,11 @@ impl Bk {
                                     } else if lo.capture {
                                         BkError { sp: lo.sp, msg: format!("closure may outlive the current function, but it borrows `{name}`, which is owned by the current function (E0373)") }
                                     } else {
-                                        BkError { sp: *sp, msg: format!("cannot return a reference to {what}: `{name}` is dropped when the function returns (E0515)") }
+                                        if synthetic_param(&name) {
+                                            BkError { sp: *sp, msg: "cannot return value referencing function parameter (E0515)".to_string() }
+                                        } else {
+                                            BkError { sp: *sp, msg: format!("cannot return a reference to {what}: `{name}` is dropped when the function returns (E0515)") }
+                                        }
                                     });
                                     break;
                                 }
@@ -5229,4 +5233,10 @@ impl Cx<'_> {
             None => Ok(()),
         }
     }
+}
+
+/// A closure's parameter that a pattern binds from (`__p0` for `|(a, ref b)| ..`, closure_synth), or a place in it
+/// (`__p0.0`)
+pub(crate) fn synthetic_param(name: &str) -> bool {
+    name.strip_prefix("__p").is_some_and(|r| r.starts_with(|c: char| c.is_ascii_digit()) && r.trim_start_matches(|c: char| c.is_ascii_digit()).chars().next().is_none_or(|c| c == '.'))
 }

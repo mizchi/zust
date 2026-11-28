@@ -1,0 +1,8 @@
+drop n = 7
+drop s = text
+[1, 2, 3]
+sorted drop of 3 items
+["log 2", "log 1"]
+pair drop
+[2, 3]
+5

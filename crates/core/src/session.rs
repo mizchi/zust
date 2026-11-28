@@ -256,7 +256,8 @@ fn use_end(sb: &[u8], b: usize, stop: usize) -> usize {
 }
 
 /// The fmt traits the items' `use` declarations import (fn bodies' too), by each declaration's use tree, its comments
-/// left out (use_tree_fmt): 1 Display, 2 Debug; a glob of a `fmt` path both. Only a name under a `fmt` path: a trait
+/// left out (use_tree_fmt): 1 Display, 2 Debug, then 4 LowerHex, 8 UpperHex, 16 Binary, 32 Octal, 64 LowerExp, 128
+/// UpperExp; a glob of a `fmt` path all. Only a name under a `fmt` path: a trait
 /// of the program's named Debug is not std's (Program::fmt_imports)
 fn fmt_imports(src: &str, items: &[SrcItem]) -> u8 {
     let sb = src.as_bytes();
@@ -337,7 +338,7 @@ fn use_tree_fmt(toks: &[&str], k: &mut usize, prefix: &mut Vec<String>, mask: &m
             "*" => {
                 *k += 1;
                 if prefix.last().is_some_and(|p| p == "fmt") {
-                    *mask |= 3;
+                    *mask = !0;
                 }
                 break;
             }
@@ -357,6 +358,12 @@ fn use_tree_fmt(toks: &[&str], k: &mut usize, prefix: &mut Vec<String>, mask: &m
                     match name {
                         "Display" => *mask |= 1,
                         "Debug" => *mask |= 2,
+                        "LowerHex" => *mask |= 4,
+                        "UpperHex" => *mask |= 8,
+                        "Binary" => *mask |= 16,
+                        "Octal" => *mask |= 32,
+                        "LowerExp" => *mask |= 64,
+                        "UpperExp" => *mask |= 128,
                         _ => {}
                     }
                 }
@@ -951,11 +958,21 @@ pub struct Session {
     /// (keep_for_edits) Each item's refs (Program::refs_in) by its hash, for the program's name tables of the
     /// fingerprint (Program::ref_tables_fp): an edit that adds or renames nothing reads only the changed items again
     refs_memo: Option<(Key, FxMap<Key, (Vec<u32>, Vec<u32>, Vec<u32>)>)>,
+    /// (keep_for_edits) A program as its build made it (before the analysis changed it), with the fingerprint of what
+    /// the build read (prog_fp), and the last analysis's fingerprint: a program is kept when two analyses in a row
+    /// build the same, so opening a file pays nothing for it
+    prog_keep: Option<ProgKeep>,
+}
+
+#[derive(Default)]
+struct ProgKeep {
+    last: Key,
+    prog: Option<(Key, Program)>,
 }
 
 impl Session {
     pub fn new(opts: Options) -> Session {
-        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new(), #[cfg(feature = "build")] ws_diags: None, sum_keep: None, dyn_memo: Default::default(), refs_memo: None }
+        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new(), #[cfg(feature = "build")] ws_diags: None, sum_keep: None, dyn_memo: Default::default(), refs_memo: None, prog_keep: None }
     }
 
     /// For a session whose document will be edited (zust-analyzer): the preprocessing keeps its chunks from the first
@@ -965,6 +982,7 @@ impl Session {
         // (and the item summaries, decoded, from one analysis to the next, and the items' refs)
         self.sum_keep = Some(FxMap::default());
         self.refs_memo = Some((0, FxMap::default()));
+        self.prog_keep = Some(ProgKeep::default());
     }
 
     pub fn load_cache(&mut self, path: &std::path::Path) {
@@ -1518,6 +1536,79 @@ impl Session {
                 }
             }
         }
+        // (a `Drop` impl of one of the program's structs, enums or unions: its self type's arguments are its own
+        // parameters (E0366), and it requires of them only what the definition does (E0367): the definitions are known
+        // now. Only the program's `impl Drop for` headers are read again)
+        {
+            let short = |n: &str| n.rsplit("::").next().unwrap_or(n).to_string();
+            let drops: Vec<usize> = (0..user_src).filter(|&i| sums[i].impl_trait.as_deref() == Some("Drop") && sums[i].impl_self.is_some()).collect();
+            if !drops.is_empty() {
+                let mut adts: crate::fxhash::FxMap<String, (usize, u32)> = Default::default();
+                for (i, sm) in sums[..user_src].iter().enumerate() {
+                    for n in sm.structs.iter().map(|s| s.0.as_str()).chain(sm.enums.iter().map(|e| e.0.as_str())) {
+                        let e = adts.entry(short(n)).or_insert((i, 0));
+                        e.1 += 1;
+                    }
+                }
+                let mut supers: crate::fxhash::FxMap<String, Vec<String>> = sums
+                    .iter()
+                    .filter_map(|sm| {
+                        let t = sm.trait_decl.as_deref()?;
+                        let s = sm.trait_generics.iter().find(|(n, _)| n == "#supers")?;
+                        Some((short(t), s.1.iter().map(|x| short(x.split('<').next().unwrap_or(x).trim())).collect()))
+                    })
+                    .collect();
+                // (the program's own traits: their supertraits are not all recorded (`#supers` leaves out Debug, Clone
+                // ..), so a parameter bounded by one is not checked for the trait bounds a Drop impl adds: "#?")
+                // (and the markers its header names before its body, which `#supers` leaves out: `trait Tr: Sized`,
+                // `trait Tr: Clone`, `where Self: Sized`, so that a Sized one is known)
+                for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
+                    if let Some(t) = sm.trait_decl.as_deref() {
+                        let e = supers.entry(short(t)).or_default();
+                        e.push("#?".to_string());
+                        let head = src.get(it.start..it.end).map(|x| x.split('{').next().unwrap_or(x)).unwrap_or("");
+                        let words: Vec<&str> = head.split(|c: char| !(c.is_alphanumeric() || c == '_')).collect();
+                        for m in ["Sized", "Clone", "Copy", "Default"] {
+                            if words.contains(&m) && !e.iter().any(|x| x == m) {
+                                e.push(m.to_string());
+                            }
+                        }
+                    }
+                }
+                // (std's supertraits, which the prelude's declarations leave out: `T: Ord` gives `T: PartialOrd`)
+                for (t, sup) in [
+                    ("Ord", &["Eq", "PartialOrd"][..]),
+                    ("Eq", &["PartialEq"]),
+                    ("PartialOrd", &["PartialEq"]),
+                    ("Copy", &["Clone"]),
+                    ("Fn", &["FnMut"]),
+                    ("FnMut", &["FnOnce"]),
+                    ("Error", &["Debug", "Display"]),
+                    ("DoubleEndedIterator", &["Iterator"]),
+                    ("ExactSizeIterator", &["Iterator"]),
+                    ("FusedIterator", &["Iterator"]),
+                    ("DerefMut", &["Deref"]),
+                    ("IndexMut", &["Index"]),
+                    ("BufRead", &["Read"]),
+                ] {
+                    let e = supers.entry(t.to_string()).or_default();
+                    for x in sup {
+                        if !e.iter().any(|y| y == x) {
+                            e.push(x.to_string());
+                        }
+                    }
+                }
+                for &i in &drops {
+                    // (a name two of the program's types have is not followed: which one the impl means is not known here)
+                    let Some(&(ai, 1)) = sums[i].impl_self.as_deref().and_then(|n| adts.get(&short(n))) else { continue };
+                    if let Some((rel, m)) = crate::ast_summary::drop_impl_unmet(&src, &items[i], &items[ai], &supers) {
+                        let line = items[i].line + rel.max(1) - 1;
+                        let line = crate::prep::hoisted_at(&crate::prep::hoist_marks(&src), line).unwrap_or(line);
+                        return Err(format!("{line}:1: {m}"));
+                    }
+                }
+            }
+        }
         // (what the program's types require of traits' `Self: 'x` bounds (E0478, E0310): the traits are known now)
         {
             let mut so: crate::fxhash::FxMap<&str, &[String]> = sums
@@ -2067,7 +2158,12 @@ impl Session {
         }
         // (a method of `impl<T: Tr> Tr for &T` that does more than forward to T's (Summary::ref_impl_bad): a call through
         // a bound would reach T's method through the deref, so it is reported where the program may make one)
-        if sums[..user_src].iter().any(|sm| !sm.ref_impl_bad.is_empty()) {
+        // (an impl for a reference to its parameter, one without members too: it may leave out each default method)
+        let ref_of_param = |sm: &Summary| {
+            matches!(&sm.impl_self_ty, Some(crate::types::TySyn::Ref(_, i))
+                if matches!(&**i, crate::types::TySyn::Named(n) if sm.impl_generics.iter().any(|g| g.0 == *n)))
+        };
+        if sums[..user_src].iter().any(|sm| !sm.ref_impl_fns.is_empty() || ref_of_param(sm)) {
             if let Some(e) = first_called_ref_impl_fn(&src, &items[..user_src], &sums[..user_src]) {
                 return Err(e);
             }
@@ -2176,7 +2272,23 @@ impl Session {
             }
         }
         unsafe_impls(&src, &items[..user_src])?;
-        let mut prog = Program::build_with_edition(&items, &mut sums, self.ctx.lib.is_none() && !lib_attr, user, self.opts.edition, deny_bare).map_err(|e| name_line(&e, &src, &items))?;
+        let need_main = self.ctx.lib.is_none() && !lib_attr;
+        // (keep_for_edits: a build that reads the same as one kept builds the same program; the copy is the kept one's)
+        let prog_fp = self.prog_keep.as_ref().map(|_| prog_fp(iface_fp, &items, need_main, user, self.opts.edition, deny_bare));
+        let kept = match (&self.prog_keep, prog_fp) {
+            (Some(ProgKeep { prog: Some((fp, p)), .. }), Some(f)) if *fp == f => Some(p.clone()),
+            _ => None,
+        };
+        let mut prog = match kept {
+            Some(p) => p,
+            None => Program::build_with_edition(&items, &mut sums, need_main, user, self.opts.edition, deny_bare).map_err(|e| name_line(&e, &src, &items))?,
+        };
+        if let (Some(k), Some(f)) = (&mut self.prog_keep, prog_fp) {
+            if k.last == f && k.prog.as_ref().is_none_or(|(fp, _)| *fp != f) {
+                k.prog = Some((f, prog.clone()));
+            }
+            k.last = f;
+        }
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
         if !prog.variant_shadowed.is_empty() {
@@ -2206,11 +2318,6 @@ impl Session {
         if let Some(e) = (self.checking && has_dyn).then(|| dyn_in_signature(&prog, &src, &items)).flatten() {
             // (the program's own `dyn` scan, when it found one: at the `dyn`, naming the trait rustc names)
             return Err(late_err.take().filter(|l| l.ends_with("is not dyn compatible (E0038)")).unwrap_or(e));
-        }
-        // (E0277: a static is reachable from every thread, so its type must be Sync)
-        if let Some((ci, tn)) = crate::acg::static_not_sync(&prog) {
-            let line = items.get(prog.consts[ci].item as usize).map_or(0, |it| it.line);
-            return Err(format!("{line}:1: `{tn}` cannot be shared between threads safely: the type of a `static` must be Sync (E0277)"));
         }
         // (E0080: a const's or a static's value that reads an extern static, `static X: u32 = symbol;`, which constant
         // evaluation cannot; rustc's E0133 is on the same line)
@@ -2470,6 +2577,12 @@ impl Session {
                     prog.tdb.auto_supers.insert(tr.to_string(), autos);
                 }
             }
+        }
+        // (E0277: a static is reachable from every thread, so its type must be Sync. After the auto traits of the
+        // program's traits' supertraits are known: a `&dyn Stage` of `trait Stage: Sync` is Sync)
+        if let Some((ci, tn)) = crate::acg::static_not_sync(&prog) {
+            let line = items.get(prog.consts[ci].item as usize).map_or(0, |it| it.line);
+            return Err(format!("{line}:1: `{tn}` cannot be shared between threads safely: the type of a `static` must be Sync (E0277)"));
         }
         // (E0277: an impl of a trait of the program's needs its supertraits, all the way up, of its self type, with the
         // impl's parameters as placeholders whose bounds are all the impl assumes (`impl<T> Complete for T` with `trait
@@ -5738,6 +5851,35 @@ fn imported_prelude_variants(prog: &mut Program, src: &str, items: &[SrcItem]) {
     prog.variant_shadowed = shadowed;
 }
 
+/// What Program::build_with_edition reads, as a fingerprint: the declarations (Analysis::iface_fp: each item's hash,
+/// or its summary's for an fn, whose body the build does not read), the items' kinds, and which items are on the same
+/// line (an item's line is read only for an error's place, and to tell impls of a trait on one line apart:
+/// `unbounded_blankets`); and the build's options
+fn prog_fp(iface_fp: u64, items: &[SrcItem], need_main: bool, user: usize, edition: u16, deny_bare: bool) -> Key {
+    let mut h = KeyHasher::new();
+    h.add(&iface_fp);
+    h.add(&items.len());
+    h.add(&need_main);
+    h.add(&user);
+    h.add(&edition);
+    h.add(&deny_bare);
+    let mut first: FxMap<usize, u32> = FxMap::default();
+    for (i, it) in items.iter().enumerate() {
+        let (k, of) = match it.kind {
+            ItemKind::Normal => (0u8, 0),
+            ItemKind::ImplHeader => (1, 0),
+            ItemKind::ImplMember(o) => (2, o),
+            ItemKind::TraitHeader => (3, 0),
+            ItemKind::TraitMember(o) => (4, o),
+            ItemKind::InnerAttr => (5, 0),
+        };
+        h.add(&k);
+        h.add(&of);
+        h.add(first.entry(it.line).or_insert(i as u32));
+    }
+    h.finish()
+}
+
 fn cross_kind_duplicate<'p>(prog: &'p Program, src: &str, items: &[SrcItem], sums: &'p [Summary], user: usize) -> Option<String> {
     let user = user.min(sums.len());
     let mut first: Option<(usize, &'p str)> = None;
@@ -8273,40 +8415,33 @@ fn allows_lint(text: &str, lint: &str) -> bool {
     })
 }
 
-/// The first method of `impl<T: Tr> Tr for &T` that does more than forward to T's, which the program may reach through
-/// a generic parameter: it calls a method of that name (`.m(`, `.m::<`, `::m(`) outside the method, and it uses the
-/// trait as a bound (`N: Tr`, `N: crate::Tr`, `N: for<'a> Tr`, `N: (Tr)`, `+ Tr`, `impl Tr`, `dyn Tr`, `<X as Tr>`)
-/// outside the impl's header. A direct call
-/// `s.m()` reaches X's own method, as rustc's probe takes it first; only a call through a bound would run the impl's
-/// (#144), as an error
+/// The first method of `impl<T: Tr> Tr for &T` that does more than forward to T's that the program may reach through a
+/// generic parameter: it calls a method of that name (`.m(`, `.m::<`, `::m(`) outside the method, and it uses the trait
+/// as a bound (`N: Tr`, `N: crate::Tr`, `N: for<'a> Tr`, `N: (Tr)`, `+ Tr`, `impl Tr`, `dyn Tr`, `<X as Tr>`) outside
+/// the impl's header. A direct call `s.m()` reaches X's own method, as rustc's probe takes it first; only a call through
+/// a bound would run the impl's (#144), as an error. And the first default method of the trait the impl leaves out
+/// (which rustc runs with Self = `&T`) that the program calls by name anywhere outside the impl
 #[cold]
 #[inline(never)]
 fn first_called_ref_impl_fn(src: &str, items: &[SrcItem], sums: &[Summary]) -> Option<String> {
     let toks = crate::lexer::tokenize(src.as_bytes());
     let tk = |k: usize| &src[toks[k].1..toks[k].2];
     let sym = |k: usize, c: &str| k < toks.len() && toks[k].0 == 1 && tk(k) == c;
-    for (it, sm) in items.iter().zip(sums) {
-        if sm.ref_impl_bad.is_empty() {
-            continue;
+    // (`impl Tr for X` heading an impl is not a bound: `impl` counts only outside the impl headers)
+    let in_header = |at: usize| items.iter().any(|i| i.kind == crate::lexer::ItemKind::ImplHeader && (i.start..i.end).contains(&at));
+    // (the token before the path the trait's name ends: `N: crate::Tr` is a bound too)
+    let path_start = |mut k: usize| {
+        while k >= 3 && sym(k - 1, ":") && sym(k - 2, ":") && toks[k - 3].0 == 0 {
+            k -= 3;
         }
-        let crate::lexer::ItemKind::ImplMember(h) = it.kind else { continue };
-        let Some(hdr) = items.get(h as usize) else { continue };
-        let Some(tr) = sums[h as usize].impl_trait.as_deref() else { continue };
-        let tr = tr.split('<').next().unwrap_or(tr).trim();
-        // (`impl Tr for X` heading an impl is not a bound: `impl` counts only outside the impl headers)
-        let in_header = |at: usize| items.iter().any(|i| i.kind == crate::lexer::ItemKind::ImplHeader && (i.start..i.end).contains(&at));
-        // (the token before the path the trait's name ends: `N: crate::Tr` is a bound too)
-        let path_start = |mut k: usize| {
-            while k >= 3 && sym(k - 1, ":") && sym(k - 2, ":") && toks[k - 3].0 == 0 {
-                k -= 3;
-            }
-            // (a path from the root, `::Tr`)
-            if k >= 2 && sym(k - 1, ":") && sym(k - 2, ":") {
-                k -= 2;
-            }
-            k
-        };
-        let as_bound = (1..toks.len()).any(|k| {
+        // (a path from the root, `::Tr`)
+        if k >= 2 && sym(k - 1, ":") && sym(k - 2, ":") {
+            k -= 2;
+        }
+        k
+    };
+    let as_bound = |tr: &str, hdr: &SrcItem| {
+        (1..toks.len()).any(|k| {
             if toks[k].0 != 0 || tk(k) != tr || (hdr.start..hdr.end).contains(&toks[k].1) {
                 return false;
             }
@@ -8329,22 +8464,72 @@ fn first_called_ref_impl_fn(src: &str, items: &[SrcItem], sums: &[Summary]) -> O
                     || sym(p - 1, "+")
                     || matches!(tk(p - 1), "dyn" | "as")
                     || (tk(p - 1) == "impl" && !in_header(toks[k].1)))
-        });
-        if !as_bound {
+        })
+    };
+    let called = |m: &str, outside: std::ops::Range<usize>| {
+        (1..toks.len()).any(|k| {
+            toks[k].0 == 0
+                && tk(k) == m
+                && !outside.contains(&toks[k].1)
+                && (sym(k - 1, ".") || (k >= 2 && sym(k - 1, ":") && sym(k - 2, ":")))
+                && (sym(k + 1, "(") || (sym(k + 1, ":") && sym(k + 2, ":")))
+        })
+    };
+    let trait_name = |h: usize| sums.get(h).and_then(|s| s.impl_trait.as_deref()).map(|tr| tr.split('<').next().unwrap_or(tr).trim());
+    // (the program's consts and statics: a `_` parameter given one of their names gets its value, not a unit struct's)
+    let values: Vec<&str> = sums.iter().flat_map(|s| s.consts.iter().map(|c| c.0.as_str()).chain(s.statics.iter().map(|c| c.0.as_str()))).map(|n| n.rsplit("::").next().unwrap_or(n)).collect();
+    for (it, sm) in items.iter().zip(sums) {
+        let bad: Vec<&String> = sm
+            .ref_impl_bad
+            .iter()
+            .chain(sm.ref_impl_unit_args.iter().filter(|(_, v)| values.contains(&v.as_str())).map(|(m, _)| m))
+            .collect();
+        if bad.is_empty() {
             continue;
         }
-        for m in &sm.ref_impl_bad {
-            let called = (1..toks.len()).any(|k| {
-                toks[k].0 == 0
-                    && tk(k) == m
-                    && !(it.start..it.end).contains(&toks[k].1)
-                    && (sym(k - 1, ".") || (k >= 2 && sym(k - 1, ":") && sym(k - 2, ":")))
-                    && (sym(k + 1, "(") || (sym(k + 1, ":") && sym(k + 2, ":")))
-            });
-            if called {
+        let crate::lexer::ItemKind::ImplMember(h) = it.kind else { continue };
+        let Some(hdr) = items.get(h as usize) else { continue };
+        let Some(tr) = trait_name(h as usize) else { continue };
+        if !as_bound(tr, hdr) {
+            continue;
+        }
+        for m in bad {
+            if called(m, it.start..it.end) {
                 return Some(format!(
                     "{}:1: impls for references to a type parameter (`impl<T: Tr> Tr for &T`) are supported only with methods that forward to T's (`(**self).{m}(..)`), as calls through a bound reach T's through the deref: `{m}` does not",
                     it.line
+                ));
+            }
+        }
+    }
+    // (a default method the impl leaves out: its members are the items that name its header, its trait's defaults
+    // the members of the program's trait of that name with a body)
+    for (ii, (hdr, hs)) in items.iter().zip(sums).enumerate() {
+        if hdr.kind != crate::lexer::ItemKind::ImplHeader {
+            continue;
+        }
+        // (an impl for a reference to one of its parameters)
+        let ref_of_param = matches!(&hs.impl_self_ty, Some(crate::types::TySyn::Ref(_, i))
+            if matches!(&**i, crate::types::TySyn::Named(n) if hs.impl_generics.iter().any(|g| g.0 == *n)));
+        if !ref_of_param {
+            continue;
+        }
+        let Some(tr) = trait_name(ii) else { continue };
+        let members: Vec<usize> = (ii + 1..items.len()).take_while(|&k| matches!(items[k].kind, crate::lexer::ItemKind::ImplMember(h) if h as usize == ii)).collect();
+        let defined: Vec<&String> = members.iter().flat_map(|&k| sums[k].ref_impl_fns.iter()).collect();
+        let Some(ti) = sums.iter().position(|s| s.trait_decl.as_deref() == Some(tr)) else { continue };
+        let defaults: Vec<&str> = (ti + 1..items.len())
+            .take_while(|&k| matches!(items[k].kind, crate::lexer::ItemKind::TraitMember(h) if h as usize == ti))
+            .flat_map(|k| sums[k].fns.iter().filter(|(_, sg)| sg.has_body).map(|(n, _)| n.rsplit("::").next().unwrap_or(n)))
+            .collect();
+        let end = members.last().map_or(hdr.end, |&k| items[k].end);
+        for m in defaults.into_iter().filter(|m| !defined.iter().any(|f| f == m)) {
+            // (any call of the name: a direct one on `&&X` (a reference to a reference) takes the impl's method too, at
+            // rustc's first probe step, whose receiver type `&&X` is the impl's `&self`)
+            if called(m, hdr.start..end) {
+                return Some(format!(
+                    "{}:1: impls for references to a type parameter (`impl<T> {tr} for &T`) are supported only when they define each default method of the trait, forwarding to T's: `{m}` is left out",
+                    hdr.line
                 ));
             }
         }
@@ -13313,9 +13498,10 @@ impl Session {
 fn const_err_line(e: String, src: &str, prog: &Program) -> String {
     let Some(rest) = e.strip_prefix("0:1: in constant `") else { return e };
     let Some((full, tail)) = rest.split_once("`: ") else { return e };
-    // (what rustc reports at the constant: an overflow, a transmute of sizes, mismatched types; not what zustc does
-    // not evaluate)
-    if !["overflow in constant", "cannot transmute between types of different sizes", "mismatched types"].iter().any(|m| tail.contains(m)) && !tail.ends_with("(E0080)") {
+    // (what rustc reports at the constant: an overflow, a transmute of sizes, mismatched types, a value made a `dyn
+    // Tr + Send` / `+ Sync` whose type is not (E0277); not what zustc does not evaluate)
+    let placed = ["overflow in constant", "cannot transmute between types of different sizes", "mismatched types", "cannot be sent between threads safely", "cannot be shared between threads safely"];
+    if !placed.iter().any(|m| tail.contains(m)) && !tail.ends_with("(E0080)") {
         return e;
     }
     let name = full.rsplit("::").next().unwrap_or(full);

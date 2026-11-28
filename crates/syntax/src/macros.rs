@@ -24,7 +24,9 @@ enum Pt {
 
 #[derive(Clone, Debug)]
 enum Bind {
-    One(Vec<TokenTree>, bool),
+    /// a fragment's tokens, whether they go in parentheses (an expression's, to keep its precedence), and whether it is
+    /// a `ty` fragment (in parentheses before a `<`: rand's `1 as $u << p` shifts, as rustc's nonterminal type ends)
+    One(Vec<TokenTree>, bool, bool),
     Many(Vec<Bind>),
 }
 
@@ -517,6 +519,37 @@ fn is_expr_keyword(s: &str) -> bool {
     )
 }
 
+/// rustc's `Token::can_begin_expr`: whether an expression can start at t[0]. A rule whose `$e:expr` would start at a
+/// token no expression starts with does not match, and the next rule is tried: writeable's `(@internal, $a:expr, ..)`
+/// after `($a:expr, $b:expr, $c:expr, $($arg:tt)+)`, which would take `@internal` as `$a` and call itself without end
+fn expr_may_begin(t: &[TokenTree]) -> bool {
+    match t.first() {
+        // (a punctuation joint with the next is one of rustc's tokens when they glue: `!=`, `*=`, `|=`, `&=`, `-=`, `->`,
+        // `<=`, `<-`, `<<=` start no expression; `!!x`, `&&x`, `||`, `<<T as Tr>::f` do)
+        Some(TokenTree::Punct(p)) => match p.as_char() {
+            // (unary operators, closures, references)
+            c @ ('!' | '*' | '|' | '&') => !pair_at(t, 0, c, '='),
+            '-' => !pair_at(t, 0, '-', '>') && !pair_at(t, 0, '-', '='),
+            // (a qualified path)
+            '<' => !pair_at(t, 0, '<', '=') && !pair_at(t, 0, '<', '-') && !(pair_at(t, 0, '<', '<') && pair_at(t, 1, '<', '=')),
+            // (an attribute, a label)
+            '#' | '\'' => true,
+            // (a range `..x`, a path `::a`; not `.5` or `:x`)
+            '.' => pair_at(t, 0, '.', '.'),
+            ':' => pair_at(t, 0, ':', ':'),
+            _ => false,
+        },
+        // (the reserved words that start no expression in any edition: `pub`, `struct`, `mut` ..)
+        Some(TokenTree::Ident(i)) => !NO_EXPR_WORDS.iter().any(|w| i == w),
+        _ => true,
+    }
+}
+
+const NO_EXPR_WORDS: &[&str] = &[
+    "as", "else", "enum", "extern", "fn", "impl", "in", "mod", "mut", "pub", "ref", "struct", "trait", "type", "use", "where", "abstract", "become",
+    "final", "macro", "override", "priv", "typeof", "unsized", "virtual",
+];
+
 fn punct_at(t: &[TokenTree], i: usize, c: char) -> bool {
     matches!(t.get(i), Some(TokenTree::Punct(p)) if p.as_char() == c)
 }
@@ -893,6 +926,9 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&Stop>) -> Option<(usi
             if m == 0 { None } else { Some((m, false)) }
         }
         _ => {
+            if matches!(kind, "expr" | "expr_2021") && !expr_may_begin(toks) {
+                return None;
+            }
             // expr / pat / stmt / meta: 次の区切りまで (グループの中は見ない)
             let mut n = 0;
             // (式: オペランドの後にオペランドが続いたら式は終わっている: `$($len:expr)+` の `1 2 3`)
@@ -1051,7 +1087,7 @@ fn match_prefix(pat: &[Pt], toks: &[TokenTree], binds: &mut HashMap<String, Bind
                     }
                     return None;
                 };
-                binds.insert(name.clone(), Bind::One(toks[i..i + n].to_vec(), wrap));
+                binds.insert(name.clone(), Bind::One(toks[i..i + n].to_vec(), wrap, kind == "ty"));
                 i += n;
             }
             Pt::Rep(inner, sep, op) => {
@@ -1348,7 +1384,10 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
                         && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Ident(_)) | Pt::Var(..))))
                     && !(k > 0
                         && matches!(&body[k - 1], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '.')
-                        && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '.'))) =>
+                        && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '.')))
+                    // (nor a path's segment, `ptr::read(ptr)` beside `let ptr` (yoke): a module's or a type's name)
+                    && !(matches!(body.get(k + 1), Some(Pt::Tok(TokenTree::Punct(q))) if q.as_char() == ':' && q.spacing() == Spacing::Joint)
+                        && punct(k + 2, ':')) =>
             {
                 out.push_str(&i.to_string());
                 out.push_str("__mh ");
@@ -1407,9 +1446,9 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
                 out.push(' ');
             }
             Pt::Var(name, _) => match binds.get(name) {
-                Some(Bind::One(ts, wrap)) => {
+                Some(Bind::One(ts, wrap, ty)) => {
                     // (`stringify!($e)`: the text of the expression, without the parentheses that keep its precedence)
-                    let wrap = &(*wrap && !{
+                    let wrap = &((*wrap || (*ty && punct(k + 1, '<'))) && !{
                         let tail: String = out[out.len().saturating_sub(40)..].chars().filter(|c| !c.is_whitespace()).collect();
                         tail.ends_with("stringify!(")
                     });
@@ -1789,6 +1828,23 @@ fn item_scope(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], depth: &[u
             }
             continue;
         }
+        // (a bracketed or parenthesized group of the head, `impl<T, const N: usize> Tr for [T; N] {` (yoke), `Fn(u8)`:
+        //  stepped over, back to where it opens; its `;` ends nothing)
+        if toks[k].0 == 1 && (t == b"]" || t == b")") {
+            let mut d = 0i32;
+            while k > 0 {
+                if toks[k].0 == 1 && matches!(tk(k), b"]" | b")") {
+                    d += 1;
+                } else if toks[k].0 == 1 && matches!(tk(k), b"[" | b"(") {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                k -= 1;
+            }
+            continue;
+        }
         if toks[k].0 == 1 && (t == b";" || t == b"{" || t == b"}") {
             return false;
         }
@@ -1924,6 +1980,17 @@ fn split_items(body: &str) -> Option<(String, String)> {
         let is_item = k < n && toks[k].0 == 0 && KW.contains(&tk(k));
         // (`static` / `type` / `use` end at the `;`; the others at it or at their first `{ .. }`)
         let semi_only = k < n && matches!(tk(k), b"static" | b"type" | b"use");
+        // (a braced macro call is a statement by itself, `crate::m! { .. }`, up to its `}`: not on to the items after it)
+        let braced_call = !is_item && {
+            let mut c = k;
+            if sym(c, b':') && sym(c + 1, b':') {
+                c += 2;
+            }
+            while c + 2 < n && toks[c].0 == 0 && sym(c + 1, b':') && sym(c + 2, b':') {
+                c += 3;
+            }
+            c + 2 < n && toks[c].0 == 0 && sym(c + 1, b'!') && sym(c + 2, b'{')
+        };
         // the statement's end
         let mut j = k.max(st);
         let mut d = 0i32;
@@ -1933,7 +2000,7 @@ fn split_items(body: &str) -> Option<(String, String)> {
                 d += 1;
             } else if sym(j, b')') || sym(j, b']') || sym(j, b'}') {
                 d -= 1;
-                if d == 0 && sym(j, b'}') && is_item && !semi_only {
+                if d == 0 && sym(j, b'}') && ((is_item && !semi_only) || braced_call) {
                     end = if sym(j + 1, b';') { j + 2 } else { j + 1 };
                     break;
                 }
@@ -1962,33 +2029,54 @@ fn split_items(body: &str) -> Option<(String, String)> {
 /// (`alone`: `;`, the block's end or nothing after it, or braces, `m! { .. }`, not followed by `.` / `?`), the items
 /// alone when they are all of it, and a lone macro call as it is (a statement there too, expanded next round):
 /// `const _: () = { a! { .. } b! { .. } impl S {} };` (pin-project-lite's) gets no `({ })` between them, which would
-/// need a `;` before the next item. A call an expression goes on after keeps its block: `outer!() * 3` with
-/// `outer!()` giving `inner! {}` is `({ inner! {} }) * 3`
+/// need a `;` before the next item. Macro calls after the items, and an expansion that is only calls or nothing, stay
+/// statements likewise: bitflags' `__impl_internal_bitflags!` gives items and three `$crate::m! { .. }`, and the
+/// `__impl_external_bitflags! { .. }` after it nothing, which as `({ .. }) ({ })` would be a call. A call an expression
+/// goes on after keeps its block: `outer!() * 3` with `outer!()` giving `inner! {}` is `({ inner! {} }) * 3`
 fn stmt_expansion(body: String, alone: bool) -> String {
     match split_items(&body) {
         Some((items, rest)) if alone && rest.trim().is_empty() => items,
+        Some((items, rest)) if alone && calls_only(&rest) => format!("{items} {rest}"),
         Some((items, rest)) => format!("{items} ({{ {rest} }})"),
-        None if alone && lone_call(&body) => body,
+        // (nothing, too: `({ })` before an item would need a `;`)
+        None if alone && calls_only(&body) => body,
         None => format!("({{ {body} }})"),
     }
 }
 
-/// Whether body is one macro call and nothing else: `crate::m! { .. }`, `m!(..);`
-fn lone_call(body: &str) -> bool {
+/// Whether body is macro calls and nothing else, each a statement by itself: `crate::m! { .. } n!(..);`, `m!(..)` (a
+/// call in parentheses or brackets takes a `;`, but the last)
+fn calls_only(body: &str) -> bool {
     let b = body.as_bytes();
     let toks = crate::lexer::tokenize(b);
     let n = toks.len();
     let sym = |k: usize, c: u8| k < n && toks[k].0 == 1 && b[toks[k].1] == c;
-    let mut k = if sym(0, b':') && sym(1, b':') { 2 } else { 0 };
-    while k + 3 < n && toks[k].0 == 0 && sym(k + 1, b':') && sym(k + 2, b':') {
-        k += 3;
+    let mut close = None;
+    let mut k = 0;
+    while k < n {
+        if sym(k, b':') && sym(k + 1, b':') {
+            k += 2;
+        }
+        while k + 3 < n && toks[k].0 == 0 && sym(k + 1, b':') && sym(k + 2, b':') {
+            k += 3;
+        }
+        if !(k + 2 < n && toks[k].0 == 0 && sym(k + 1, b'!') && (sym(k + 2, b'(') || sym(k + 2, b'[') || sym(k + 2, b'{'))) {
+            return false;
+        }
+        let close: &Vec<usize> = close.get_or_insert_with(|| brackets(b, &toks).0);
+        let e = close[k + 2];
+        if e == usize::MAX {
+            return false;
+        }
+        k = if sym(e + 1, b';') {
+            e + 2
+        } else if sym(k + 2, b'{') || e + 1 == n {
+            e + 1
+        } else {
+            return false;
+        };
     }
-    if !(k + 2 < n && toks[k].0 == 0 && sym(k + 1, b'!') && (sym(k + 2, b'(') || sym(k + 2, b'[') || sym(k + 2, b'{'))) {
-        return false;
-    }
-    let (close, _) = brackets(b, &toks);
-    let e = close[k + 2];
-    e != usize::MAX && (e + 1 == n || (e + 2 == n && sym(e + 1, b';')))
+    true
 }
 
 /// 1. `macro_rules!` の定義を集めて消す (関数の本体や `mod m { .. }` の中の定義も)
@@ -2314,6 +2402,19 @@ fn path_seg(t: &[u8]) -> bool {
     )
 }
 
+/// Whether the path of the macro call at toks[i] (its name) starts from `core`, `std` or `alloc`: `::core::assert!`,
+/// `std::println!`
+fn std_path(b: &[u8], toks: &[(u8, usize, usize)], i: usize) -> bool {
+    let tk = |k: usize| -> &[u8] { &b[toks[k].1..toks[k].2] };
+    let colons = |k: usize| toks[k].0 == 1 && b[toks[k].1] == b':' && toks[k + 1].0 == 1 && b[toks[k + 1].1] == b':';
+    let mut k = i;
+    // (a label is no segment: `break 'a ::std::m!()`)
+    while k >= 3 && toks[k - 3].0 == 0 && path_seg(tk(k - 3)) && colons(k - 2) && !(toks[k - 3].1 > 0 && b[toks[k - 3].1 - 1] == b'\'') {
+        k -= 3;
+    }
+    k < i && matches!(tk(k), b"core" | b"std" | b"alloc")
+}
+
 /// The outermost attribute and derive uses of the text, expanded (crate::pm::expand_items) and put in its place with
 /// as many lines as they had; the definitions' places (textual scope) move with the text. Whether one ran
 fn pm_items(text: &mut String, pms: &[crate::pm::Lib], env: &[(String, String)], cfg: Option<&crate::cfg::CfgSet>, first: &mut HashMap<String, usize>) -> Result<bool, String> {
@@ -2448,6 +2549,8 @@ fn expand_joined(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::
     // 2. 呼び出しを展開する (いちばん外側の呼び出しだけ。展開したものの中の呼び出しは次の周)
     let limit = text.len().saturating_mul(64).max(16 << 20);
     let depth_limit = recursion_limit(&text);
+    // (the first call the last round still expands, and its line: the error's, too_deep)
+    let mut deep: Option<(String, usize)> = None;
     // (one more round than the limit: the last one only finds that nothing is left to expand)
     for round in 0..=depth_limit {
         // (definitions an expansion produced: `macro_rules! foo { () => { macro_rules! bar { .. } } }`)
@@ -2479,14 +2582,14 @@ fn expand_joined(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::
             }
             // (the builtin's: `stringify!`, `std::stringify!` / `core::stringify!` and their absolute `::std::` form; not
             // a library's macro of that name, `re::stringify!` / `re::std::stringify!`, which can be another macro
-            // re-exported under it, nor a `macro_rules! stringify` of the crate's own)
+            // re-exported under it, nor a `macro_rules! stringify` of the crate's own, which only the bare name calls:
+            // `core::stringify!` is core's beside it, as std_path makes it)
             let colons = |k: usize| k >= 2 && sym(k - 1, b':') && sym(k - 2, b':');
             // (a label or a lifetime is no path segment: `break 'done ::std::stringify!(..)`. The tokens keep only its
             // name; the quote is the byte before it)
             let label = |k: usize| toks[k].1 > 0 && b[toks[k].1 - 1] == b'\'';
             if tk(i) == b"stringify"
-                && !macros.contains_key("stringify")
-                && (!colons(i)
+                && ((!colons(i) && !macros.contains_key("stringify"))
                     || (i >= 3
                         && toks[i - 3].0 == 0
                         && matches!(tk(i - 3), b"std" | b"core")
@@ -2498,6 +2601,11 @@ fn expand_joined(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::
             // (in `stringify!(..)`: a `macro_rules!` call is kept as written, as rustc does: `stringify!(m!())` is
             // "m!()")
             if i < inert_until {
+                rules = None;
+            }
+            // (a path from `core` / `std` / `alloc` names their macro, not a `macro_rules!` of that name: embassy's
+            // `macro_rules! assert { .. => { ::core::assert!($($x)*); } }`, which would call itself without end)
+            if rules.is_some() && i >= 3 && sym(i - 1, b':') && std_path(b, &toks, i) {
                 rules = None;
             }
             // (a proc macro's function-like call: `name!(..)`, `path::name!(..)`, a name no `macro_rules!` has. A path
@@ -2665,6 +2773,9 @@ fn expand_joined(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::
             if ((top && item_start) || drop_semi) && sym(ge + 1, b';') {
                 e = toks[ge + 1].2;
             }
+            if round == depth_limit && deep.is_none() {
+                deep = Some((String::from_utf8_lossy(tk(i)).into_owned(), pos().0));
+            }
             reps.push((a, e, rep));
             i = ge + 1;
         }
@@ -2721,7 +2832,54 @@ fn expand_joined(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::
             return Ok(Some(text));
         }
     }
-    Err(format!("1:1: macro expansion is too deep (recursion limit {depth_limit})"))
+    Err(too_deep(src, &macros, deep, depth_limit))
+}
+
+/// rustc's "recursion limit reached while expanding `m!`", for the call the last round still expanded (`deep`: its
+/// name and line). Each round puts an expansion on the line of the call it replaces, so that line is the line of
+/// the chain's first call in src: the error is at the first call of a known macro there, and names that macro too
+/// when it is another
+#[cold]
+fn too_deep(src: &str, macros: &HashMap<String, Vec<Rule>>, deep: Option<(String, usize)>, limit: usize) -> String {
+    let Some((name, line)) = deep else {
+        return format!("1:1: macro expansion is too deep (recursion limit {limit})");
+    };
+    // (`m__zm1`, rename_shadowed_macros's name for one of two `macro_rules! m`, is `m`)
+    let shown = |n: &str| -> String {
+        match n.rfind("__zm") {
+            Some(k) if k > 0 && n.len() > k + 4 && n[k + 4..].bytes().all(|c| c.is_ascii_digit()) => n[..k].to_string(),
+            _ => n.to_string(),
+        }
+    };
+    let known = |n: &str| n != "macro_rules" && (macros.contains_key(n) || macros.keys().any(|k| shown(k) == n));
+    let deep_name = shown(&name);
+    let start = src.split('\n').take(line - 1).map(|l| l.len() + 1).sum::<usize>().min(src.len());
+    let text = src[start..].split('\n').next().unwrap_or("");
+    let b = text.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let tk = |k: usize| -> &[u8] { &b[toks[k].1..toks[k].2] };
+    let sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && b[toks[k].1] == c;
+    let call = (0..toks.len()).find(|&k| {
+        toks[k].0 == 0 && sym(k + 1, b'!') && (sym(k + 2, b'(') || sym(k + 2, b'[') || sym(k + 2, b'{')) && known(std::str::from_utf8(tk(k)).unwrap_or(""))
+    });
+    let Some(k) = call else {
+        return format!("{line}:1: recursion limit reached while expanding `{deep_name}!` (recursion limit {limit})");
+    };
+    // (at the start of the call's path: `::core::assert!(..)`)
+    let mut p = k;
+    while p >= 2 && sym(p - 1, b':') && sym(p - 2, b':') {
+        p -= 2;
+        if p >= 1 && toks[p - 1].0 == 0 && path_seg(tk(p - 1)) {
+            p -= 1;
+        }
+    }
+    let col = text[..toks[p].1].chars().count() + 1;
+    let first = String::from_utf8_lossy(tk(k)).into_owned();
+    if first == deep_name {
+        format!("{line}:{col}: recursion limit reached while expanding `{deep_name}!` (recursion limit {limit})")
+    } else {
+        format!("{line}:{col}: recursion limit reached while expanding `{deep_name}!` (recursion limit {limit}), in the expansion of this call of `{first}!`")
+    }
 }
 
 /// 前の版の expand (ソース全体を proc_macro2 で読む)。expand と結果が同じかを確かめるため
@@ -2815,7 +2973,8 @@ pub fn expand_reference(src: &str) -> Result<Option<String>, String> {
     // 2. 呼び出しを展開する (展開したものの中の呼び出しも)
     let limit = text.len().saturating_mul(64).max(16 << 20);
     let depth_limit = recursion_limit(&text);
-    for _round in 0..=depth_limit {
+    let mut deep: Option<(String, usize)> = None;
+    for round in 0..=depth_limit {
         let ts = TokenStream::from_str(&text).map_err(|e| format!("1:1: {e}"))?;
         let mut reps: Vec<(usize, usize, String)> = vec![];
         find_calls(ts, &macros, &text, 0, false, true, &mut reps)?;
@@ -2824,6 +2983,12 @@ pub fn expand_reference(src: &str) -> Result<Option<String>, String> {
         }
         // 後ろから置き換える (1 行に収めるので、置き換えた範囲の改行は残す)
         reps.sort_by_key(|r| std::cmp::Reverse(r.0));
+        // (as expand_joined: the first call of the last round, its name the word before the `!`)
+        if let (true, Some(&(a, _, _))) = (round == depth_limit, reps.last()) {
+            let call = &text[a..];
+            let name = call[..call.find('!').unwrap_or(0)].rsplit(|c: char| !(c.is_alphanumeric() || c == '_')).next().unwrap_or("");
+            deep = Some((name.to_string(), text[..a].matches('\n').count() + 1));
+        }
         // (展開したものの中にマクロの名前が無ければ、もう一周しなくてよい)
         let again = reps.iter().any(|r| r.2.contains("macro_rules") || macros.keys().any(|m| r.2.contains(m.as_str())));
         for (a, e, rep) in reps {
@@ -2843,7 +3008,19 @@ pub fn expand_reference(src: &str) -> Result<Option<String>, String> {
             return Ok(Some(text));
         }
     }
-    Err(format!("1:1: macro expansion is too deep (recursion limit {depth_limit})"))
+    Err(too_deep(src, &macros, deep, depth_limit))
+}
+
+/// std_path for find_calls's token trees: whether the path of the call named at toks[i] starts from `core` / `std` /
+/// `alloc`
+fn std_path_tt(toks: &[TokenTree], i: usize) -> bool {
+    let mut k = i;
+    while k >= 3
+        && matches!((&toks[k - 3], &toks[k - 2], &toks[k - 1]), (TokenTree::Ident(seg), TokenTree::Punct(c1), TokenTree::Punct(c2)) if c1.as_char() == ':' && c2.as_char() == ':' && path_seg(seg.to_string().as_bytes()))
+    {
+        k -= 3;
+    }
+    k < i && matches!(&toks[k], TokenTree::Ident(r) if r == "core" || r == "std" || r == "alloc")
 }
 
 /// `name!(..)` / `name![..]` / `name!{..}` の呼び出し (いちばん外側だけ。中は次の周で展開する)
@@ -2863,7 +3040,8 @@ fn find_calls(
         if i + 2 < toks.len() {
             if let (TokenTree::Ident(name), TokenTree::Punct(p), TokenTree::Group(g)) = (&toks[i], &toks[i + 1], &toks[i + 2]) {
                 if p.as_char() == '!' {
-                    if let Some(rules) = macros.get(&name.to_string()) {
+                    // (as expand_joined: `::core::assert!` is core's, not a `macro_rules! assert`)
+                    if let Some(rules) = macros.get(&name.to_string()).filter(|_| !std_path_tt(&toks, i)) {
                         let args: Vec<TokenTree> = g.stream().into_iter().collect();
                         let mut done = false;
                         FRAG_FATAL.with(|c| c.set(false));
@@ -2972,16 +3150,16 @@ fn find_calls(
         }
         // (中にマクロの名前が無い括弧は辿らない: 括弧ごとに中身を写すと、深く入れ子になったソースで遅い)
         // (nor the arguments of the builtin `stringify!(..)`: they are its text, not calls, as in expand_with. The
-        // builtin's path only, as there: `stringify!`, `std::` / `core::stringify!`, `::std::stringify!`)
+        // builtin's path only, as there: `stringify!` (when no `macro_rules! stringify` takes the bare name),
+        // `std::` / `core::stringify!`, `::std::stringify!`)
         let punct = |k: usize, c: char| matches!(&toks[k], TokenTree::Punct(p) if p.as_char() == c);
         let colons = |k: usize| k >= 2 && punct(k - 1, ':') && punct(k - 2, ':');
         let inert = i >= 2
             && matches!(&toks[i - 2], TokenTree::Ident(x) if x == "stringify")
             && punct(i - 1, '!')
-            && !macros.contains_key("stringify")
             && {
                 let s = i - 2;
-                !colons(s)
+                (!colons(s) && !macros.contains_key("stringify"))
                     || (s >= 3
                         && matches!(&toks[s - 3], TokenTree::Ident(x) if x == "std" || x == "core")
                         && !(colons(s - 3)
@@ -3534,6 +3712,33 @@ mod env_tests {
         assert!(norm.contains("core__mh..core__mh"), "{norm}");
         assert!(norm.contains("r.core()"), "{norm}");
         assert!(norm.contains("fnh(core__mh:u8)->u8{core__mh}"), "{norm}");
+    }
+
+    /// A body's own `let ptr` is renamed for hygiene, but not the path `ptr::read` (yoke's `unsafe_complex_yoke_impl!`);
+    /// a `ty` fragment before `<` goes in parentheses (rand's `1 as $u_scalar << precision`), elsewhere it does not
+    #[test]
+    fn hygiene_keeps_paths_and_ty_fragments_end() {
+        let src = "macro_rules! imp { ($u:ty) => { fn f(p: u32) -> $u { let ptr = &p as *const u32; let _: Vec<$u> = Vec::new(); unsafe { ptr::read(ptr) as $u << 1 } } } }\nimp!(u32);\nfn main() {}\n";
+        let out = expand_cfg(src, Some(&crate::cfg::CfgSet::default())).unwrap().unwrap();
+        let norm: String = out.split_whitespace().collect();
+        assert!(norm.contains("ptr::read(ptr__mh)"), "{norm}");
+        assert!(norm.contains("as(u32)<<1") && norm.contains("Vec<u32>") && norm.contains("->u32{"), "{norm}");
+        assert!(crate::parse::parse_file(&out).is_ok(), "{norm}");
+    }
+
+    /// A call among the items of `impl .. for [T; N]` is an item there (the `;` in the head's brackets ends nothing):
+    /// its `;` goes (yoke, defmt). A statement call's items and the braced calls after them stay statements, and one
+    /// that gives nothing leaves nothing (bitflags): no `({ .. }) ({ })`
+    #[test]
+    fn calls_in_impl_heads_with_brackets_and_in_blocks() {
+        let src = "macro_rules! m { () => { fn n(&self) -> usize { N } } }\ntrait T { fn n(&self) -> usize; }\nimpl<const N: usize> T for [u8; N] { m!(); }\nfn main() {}\n";
+        let out = expand_cfg(src, Some(&crate::cfg::CfgSet::default())).unwrap().unwrap();
+        assert!(crate::parse::parse_file(&out).is_ok(), "{out}");
+        let src = "macro_rules! a { () => { impl S { #[inline] fn a() {} } } }\nmacro_rules! z { () => {} }\nmacro_rules! o { () => { impl S { #[inline] fn c() {} } a! {} impl S { #[inline] fn d() {} } } }\nstruct S;\nconst _: () = { o! {} z! {} impl S { #[inline] fn e() {} } };\nfn main() {}\n";
+        let out = expand_cfg(src, Some(&crate::cfg::CfgSet::default())).unwrap().unwrap();
+        let norm: String = out.split_whitespace().collect();
+        assert!(!norm.contains("({"), "{norm}");
+        assert!(crate::parse::parse_file(&out).is_ok(), "{norm}");
     }
 
     /// A body's `let x: ::std::primitive::u8` binds x (the annotation's `:` stands alone before the type's `::`), so

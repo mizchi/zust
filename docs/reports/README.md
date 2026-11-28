@@ -135,3 +135,7 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-26 | [Region (lifetime) checking, part 38: methods of impls for trait objects, and the `'static` they require](2026-11-26-01-region-check-38.md) |
 | 2026-11-26 | [Region (lifetime) checking, part 39: dyn Error's `is`, lets assigned through a deref, closures held as fn pointers, and trait methods' elided results](2026-11-26-02-region-check-39.md) |
 | 2026-11-26 | [Region (lifetime) checking, part 40: OnceCell, the well-formedness of values built by constructors, generic fns that are called, and elided lifetimes in a receiver's self type](2026-11-26-03-region-check-40.md) |
+| 2026-11-27 | [`std::thread` as OS threads](2026-11-27-01-native-threads.md) |
+| 2026-11-27 | [rustc's thread tests on OS threads: `thread::Builder`, `recv_timeout`, `park_timeout`, `Barrier`, closures that are Sync through what they borrow](2026-11-27-02-threads-ui.md) |
+| 2026-11-27 | [Trait objects keep their auto traits: `dyn Tr + Send` / `+ Sync`](2026-11-27-03-dyn-auto-traits.md) |
+| 2026-11-27 | [Region (lifetime) checking, part 41: Drop impls that specialize or require more than their type, and `ref` bindings of owned places](2026-11-27-04-region-check-41.md) |

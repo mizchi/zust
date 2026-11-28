@@ -1183,6 +1183,218 @@ fn unsized_elem(t: &PTy) -> Option<String> {
 /// program that bounds that parameter by 'static (`bar: Bar<U>` with `struct Bar<T: 'static>`). Unlike `T: 'a`,
 /// rustc does not infer `U: 'static` from the fields: the item must declare it (E0310). statics: the short names of
 /// such structs and enums, and the indexes of their type and const parameters that must be 'static. (line, col, msg)
+/// A `Drop` impl (its header imp) against the definition of its struct, enum or union (adt): its self type's arguments
+/// are its own parameters, each once (E0366), and what its header and where clauses require of them is what the
+/// definition requires, or what its fields imply (E0367, as rustc's `ensure_drop_predicates_are_implied_by_item_defn`).
+/// supers: each of the program's traits' supertraits. The line in imp's text, and the message
+pub fn drop_impl_unmet(src: &str, imp: &SrcItem, adt: &SrcItem, supers: &crate::fxhash::FxMap<String, Vec<String>>) -> Option<(usize, String)> {
+    use crate::parse::GArg;
+    let it = format!("{}}}", src.get(imp.start..imp.end)?);
+    let f = parse_file(&it).ok()?;
+    let ItemKind::Impl(ig, Some((false, tp)), PTy::Path(None, sp), _) = &f.items.first()?.kind else { return None };
+    if tp.segs.last().is_none_or(|s| s.name != "Drop") {
+        return None;
+    }
+    let at = src.get(adt.start..adt.end)?;
+    let af = parse_file(at).ok()?;
+    let ad = af.items.first()?;
+    let (aname, ag, tys, what): (&String, &Generics, Vec<&PTy>, &str) = match &ad.kind {
+        ItemKind::Struct(n, g, fields) | ItemKind::Union(n, g, fields) => (n, g, match fields {
+            Fields::Named(v) => v.iter().map(|x| &x.1).collect(),
+            Fields::Tuple(v) => v.iter().collect(),
+            Fields::Unit => vec![],
+        }, if matches!(ad.kind, ItemKind::Union(..)) { "union" } else { "struct" }),
+        ItemKind::Enum(n, g, vs) => (n, g, vs.iter().flat_map(|v| match &v.1 {
+            Fields::Named(f) => f.iter().map(|x| &x.1).collect::<Vec<_>>(),
+            Fields::Tuple(f) => f.iter().collect(),
+            Fields::Unit => vec![],
+        }).collect(), "enum"),
+        _ => return None,
+    };
+    let seg = sp.segs.last()?;
+    if sp.segs.len() != 1 || seg.name != *aname || seg.fn_args.is_some() {
+        return None;
+    }
+    // (the definition's parameters: lifetimes, then the others in their order, as a path writes its arguments)
+    let a_lts: Vec<&str> = ag.params.iter().filter_map(|p| if let GParam::Lifetime(l) = p { Some(l.as_str()) } else { None }).collect();
+    let a_rest: Vec<&str> = ag.params.iter().filter_map(|p| match p {
+        GParam::Ty(n, ..) | GParam::Const(n, _) => Some(n.as_str()),
+        GParam::Lifetime(_) => None,
+    }).collect();
+    let w_lts: Vec<&str> = seg.args.iter().filter_map(|a| if let GArg::Lifetime(l) = a { Some(l.as_str()) } else { None }).collect();
+    let w_rest: Vec<&GArg> = seg.args.iter().filter(|a| !matches!(a, GArg::Lifetime(_) | GArg::Bind(..))).collect();
+    // (lifetimes left out (`impl Drop for M`) or another count: other errors' (E0726, E0107))
+    if w_lts.len() != a_lts.len() || w_rest.len() != a_rest.len() {
+        return None;
+    }
+    let i_lts: Vec<&str> = ig.params.iter().filter_map(|p| if let GParam::Lifetime(l) = p { Some(l.as_str()) } else { None }).collect();
+    let i_rest: Vec<&str> = ig.params.iter().filter_map(|p| match p {
+        GParam::Ty(n, ..) | GParam::Const(n, _) => Some(n.as_str()),
+        GParam::Lifetime(_) => None,
+    }).collect();
+    // (E0366: each argument one of the impl's parameters, each once; `'_` is one of its own)
+    let mut map: Vec<(String, String)> = vec![];
+    let specialized = "`Drop` impls cannot be specialized (E0366)".to_string();
+    for (w, a) in w_lts.iter().zip(&a_lts) {
+        if *w == "'_" {
+            continue;
+        }
+        if !i_lts.contains(w) || map.iter().any(|(x, _)| x == w) {
+            return Some((1, specialized));
+        }
+        map.push((w.to_string(), a.to_string()));
+    }
+    for (w, a) in w_rest.iter().zip(&a_rest) {
+        let n = match w {
+            GArg::Ty(PTy::Path(None, p)) if p.segs.len() == 1 && p.segs[0].args.is_empty() && p.segs[0].fn_args.is_none() => p.segs[0].name.as_str(),
+            GArg::Const(crate::parse::Expr::Path(_, p)) if p.segs.len() == 1 => p.segs[0].name.as_str(),
+            _ => return Some((1, specialized)),
+        };
+        if !i_rest.contains(&n) || map.iter().any(|(x, _)| x == n) {
+            return Some((1, specialized));
+        }
+        map.push((n.to_string(), a.to_string()));
+    }
+    let to_adt = |n: &str| map.iter().find(|(x, _)| x == n).map(|(_, a)| a.clone());
+    // (what the definition gives: its bounds and where clauses, and what its fields imply (RFC 2093's inferred
+    // outlives: `&'a T` gives T: 'a))
+    let mut k = crate::wf::Known::default();
+    k.add_generics(ag);
+    for t in &tys {
+        k.implied(t, 0);
+    }
+    // (each parameter's trait bounds there, with their supertraits)
+    let short = |p: &Path| p.segs.last().map(|s| s.name.clone()).unwrap_or_default();
+    let mut a_traits: Vec<(String, String, bool)> = vec![];
+    let mut a_unsized: Vec<String> = vec![];
+    let note = |n: &str, bs: &[Bound], a_traits: &mut Vec<(String, String, bool)>, a_unsized: &mut Vec<String>| {
+        for b in bs {
+            if let Bound::Trait(maybe, p) = b {
+                if *maybe {
+                    a_unsized.push(n.to_string());
+                    continue;
+                }
+                let binds = p.segs.last().is_some_and(|s| s.args.iter().any(|a| matches!(a, GArg::Bind(..))));
+                let mut todo = vec![short(p)];
+                let first = short(p);
+                while let Some(t) = todo.pop() {
+                    // (the same trait again (`T: Iterator` and `where T: Iterator<Item = u8>`): its equations too)
+                    if let Some(x) = a_traits.iter_mut().find(|x| x.0 == n && x.1 == t) {
+                        x.2 |= binds && t == first;
+                        continue;
+                    }
+                    todo.extend(supers.get(&t).into_iter().flatten().cloned());
+                    a_traits.push((n.to_string(), t.clone(), binds && t == first));
+                }
+            }
+        }
+    };
+    for p in &ag.params {
+        if let GParam::Ty(n, bs, _) = p {
+            note(n, bs, &mut a_traits, &mut a_unsized);
+        }
+    }
+    for (t, bs) in &ag.preds {
+        if let PTy::Path(None, p) = t {
+            if let [s] = p.segs.as_slice() {
+                if s.args.is_empty() && !s.name.starts_with('\'') {
+                    note(&s.name, bs, &mut a_traits, &mut a_unsized);
+                }
+            }
+        }
+    }
+    let unmet = |pred: String| format!("`Drop` impl requires `{pred}` but the {what} it is implemented for does not (E0367)");
+    // (the impl's requirements, of a parameter of its self type: one not there may be any (`impl<'r, T: 'r> Drop for
+    // R<T>`))
+    let mut preds: Vec<(&str, &[Bound], u32)> = vec![];
+    let mut i_unsized: Vec<&str> = vec![];
+    for p in &ig.params {
+        if let GParam::Ty(n, bs, _) = p {
+            preds.push((n.as_str(), bs.as_slice(), 0));
+        }
+    }
+    for (t, bs) in &ig.preds {
+        if let PTy::Path(None, p) = t {
+            if let [s] = p.segs.as_slice() {
+                if s.args.is_empty() && s.fn_args.is_none() {
+                    preds.push((s.name.as_str(), bs.as_slice(), p.pos.line));
+                }
+            }
+        }
+    }
+    for &(n, bs, _) in &preds {
+        if bs.iter().any(|b| matches!(b, Bound::Trait(true, _))) {
+            i_unsized.push(n);
+        }
+    }
+    for &(n, bs, line) in &preds {
+        let Some(an) = to_adt(n) else { continue };
+        let at_line = if line == 0 { 1 } else { line as usize };
+        for b in bs {
+            match b {
+                Bound::Lifetime(l) => {
+                    if l == "'static" {
+                        if !k.outlives(&an, "'static") {
+                            return Some((at_line, unmet(format!("{n}: {l}"))));
+                        }
+                        continue;
+                    }
+                    let Some(al) = to_adt(l) else { continue };
+                    if !k.outlives(&an, &al) {
+                        // (one lifetime outliving another: at the impl, as rustc has it)
+                        let ln = if n.starts_with('\'') { 1 } else { at_line };
+                        return Some((ln, unmet(format!("{n}: {l}"))));
+                    }
+                }
+                Bound::Trait(true, _) => {}
+                Bound::Trait(false, p) => {
+                    let t = short(p);
+                    // (a marker std gives every type it may (Sized aside, below): not looked at)
+                    if matches!(t.as_str(), "Sized") {
+                        continue;
+                    }
+                    let binds = p.segs.last().is_some_and(|s| s.args.iter().any(|a| matches!(a, GArg::Bind(..))));
+                    match a_traits.iter().find(|x| x.0 == an && x.1 == t) {
+                        // (a parameter bounded by one of the program's traits, whose supertraits are not all known:
+                        // a trait not found is not reported)
+                        None if a_traits.iter().any(|x| x.0 == an && x.1 == "#?") => {}
+                        None => return Some((at_line, unmet(format!("{n}: {t}")))),
+                        // (an equation whose value is a parameter of the impl not in the self type may hold:
+                        // `impl<T: Trait<Assoc = U>, U> Drop for Foo<T>`)
+                        Some(x) if binds && !x.2 && !p.segs.last().is_some_and(|s| s.args.iter().all(|a| match a {
+                            GArg::Bind(_, PTy::Path(None, v)) => v.segs.len() == 1 && v.segs[0].args.is_empty() && i_rest.contains(&v.segs[0].name.as_str()) && to_adt(&v.segs[0].name).is_none(),
+                            GArg::Bind(..) => false,
+                            _ => true,
+                        })) => {
+                            let bind = p.segs.last().and_then(|s| s.args.iter().find_map(|a| if let GArg::Bind(an, PTy::Path(None, v)) = a { Some((an.clone(), v.segs.last().map(|s| s.name.clone()).unwrap_or_default())) } else { None }));
+                            let m = match bind {
+                                Some((an, v)) => format!("<{n} as {t}>::{an} == {v}"),
+                                None => format!("{n}: {t}"),
+                            };
+                            return Some((at_line, unmet(m)));
+                        }
+                        Some(_) => {}
+                    }
+                }
+            }
+        }
+    }
+    // (an impl's type parameter is Sized unless it says `?Sized`: the definition's `?Sized` one is not)
+    for p in &ig.params {
+        if let GParam::Ty(n, ..) = p {
+            if let Some(an) = to_adt(n) {
+                // (unless a bound there makes it Sized: `T: ?Sized + Clone`, or one of the program's traits whose header
+                // names Sized or such a trait (`trait Tr: Sized`), through the supertraits)
+                let sized_by_bound = a_traits.iter().any(|x| x.0 == an && matches!(x.1.as_str(), "Clone" | "Copy" | "Default" | "Sized"));
+                if a_unsized.contains(&an) && !i_unsized.contains(&n.as_str()) && !sized_by_bound {
+                    return Some((1, unmet(format!("{n}: Sized"))));
+                }
+            }
+        }
+    }
+    None
+}
+
 pub fn static_field_unmet(src: &str, it: &SrcItem, statics: &crate::fxhash::FxMap<&str, Vec<usize>>) -> Option<(usize, usize, String)> {
     let text = src.get(it.start..it.end)?;
     let f = parse_file(text).ok()?;
@@ -1848,8 +2060,34 @@ fn opaque_from(sig: &PSig) -> u64 {
     crate::types::OPAQUE_FROM | m24 | m21 << 31
 }
 
+/// A bound's reading, kept by its text for the thread: the readers below parse the bound as a file of its own each
+/// time, and the same bounds are read again and again (each instance of a generic fn reads its parameters' bounds,
+/// `F: Fn(u32) -> u32` once per call). Each reading is a function of the text alone
+fn memo<T: Clone + 'static>(cache: &'static std::thread::LocalKey<std::cell::RefCell<crate::fxhash::FxMap<String, T>>>, s: &str, read: impl FnOnce(&str) -> T) -> T {
+    if let Some(r) = cache.with(|c| c.borrow().get(s).cloned()) {
+        return r;
+    }
+    let r = read(s);
+    cache.with(|c| c.borrow_mut().insert(s.to_string(), r.clone()));
+    r
+}
+
+thread_local! {
+    static FN_BOUNDS: std::cell::RefCell<crate::fxhash::FxMap<String, Option<(String, Vec<TySyn>, TySyn)>>> = Default::default();
+    static BOUND_ARGS: std::cell::RefCell<crate::fxhash::FxMap<String, Option<(String, Vec<TySyn>)>>> = Default::default();
+    static ASSOC_BINDINGS: std::cell::RefCell<crate::fxhash::FxMap<String, Vec<(String, TySyn)>>> = Default::default();
+}
+
 /// (kind, arguments, return value) if it is a bound of the form `Fn(A, B) -> R`
 pub fn parse_fn_bound(s: &str) -> Option<(String, Vec<TySyn>, TySyn)> {
+    // (one that is no Fn bound is told by its first word, before the cache)
+    if !["FnOnce", "FnMut", "Fn"].into_iter().any(|k| s.starts_with(k) && s[k.len()..].trim_start().starts_with('(')) {
+        return None;
+    }
+    memo(&FN_BOUNDS, s, read_fn_bound)
+}
+
+fn read_fn_bound(s: &str) -> Option<(String, Vec<TySyn>, TySyn)> {
     let kind = ["FnOnce", "FnMut", "Fn"].into_iter().find(|k| s.starts_with(k) && s[k.len()..].trim_start().starts_with('('))?;
     let f = parse_file(&format!("type __B = dyn {s};")).ok()?;
     let ItemKind::Type(_, _, _, Some(PTy::Dyn(bs))) = &f.items.first()?.kind else { return None };
@@ -1873,6 +2111,10 @@ pub fn bound_args(s: &str) -> Option<(String, Vec<TySyn>)> {
         let n = s.trim();
         return Some((n.rsplit("::").next().unwrap_or(n).to_string(), vec![]));
     };
+    memo(&BOUND_ARGS, s, |s| read_bound_args(s, lt))
+}
+
+fn read_bound_args(s: &str, lt: usize) -> Option<(String, Vec<TySyn>)> {
     let f = parse_file(&format!("type __B = dyn {s};")).ok()?;
     let ItemKind::Type(_, _, _, Some(PTy::Dyn(bs))) = &f.items.first()?.kind else { return None };
     let Some(Bound::Trait(_, p)) = bs.first() else { return None };
@@ -1955,6 +2197,10 @@ pub fn fn_bound_ret_from(s: &str) -> Vec<usize> {
 
 /// The associated type bindings (name, type) of a bound `Iterator<Item = T>`
 pub fn assoc_bindings(s: &str) -> Vec<(String, TySyn)> {
+    memo(&ASSOC_BINDINGS, s, read_assoc_bindings)
+}
+
+fn read_assoc_bindings(s: &str) -> Vec<(String, TySyn)> {
     let mut out = Vec::new();
     let Ok(f) = parse_file(&format!("type __B = dyn {s};")) else { return out };
     let Some(it) = f.items.first() else { return out };
@@ -2288,6 +2534,7 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
         let assigns = ast_closure::assigns_capture(c, &caps);
         let mut moved: Vec<bool> = Vec::new();
         let mut deref: Vec<bool> = Vec::new();
+        let mutated: Vec<bool> = caps.iter().map(|n| ast_closure::mutates_capture(c, n)).collect();
         for n in &caps {
             moved.push(*mv || (ast_closure::moves_capture(c, &[n.clone()]) && !assigns));
             // (a parameter that is a shared reference (`h: &T`, `&self`), used only through a deref of it: edition 2021
@@ -2314,6 +2561,7 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
             n_parent: n_parent,
             fake_reads: ast_closure::fake_reads(c).into_iter().filter(|n| bound.contains(n)).collect(),
             deref,
+            mutated,
         });
     }
     // `-> impl Fn(A) -> B { move |x| .. }`: the type is the struct of the trailing closure
@@ -2776,8 +3024,19 @@ fn summarize_assoc_fn(owner: Option<&Owner>, sm: &mut Summary, fs: &PSig, body: 
                 sm.ref_impl_fns.push(fs.name.clone());
                 let bounded = ow.generics.iter().any(|g| g.0 == *param && g.1.iter().any(|b| b.split('<').next().unwrap_or(b).trim() == trn));
                 let mut_ref = matches!(&ow.self_ty, TySyn::Ref(true, _));
-                if bounded && fs.recv.is_some() && !forwards_to_referent(fs, body, param, trn, mut_ref) {
-                    sm.ref_impl_bad.push(fs.name.clone());
+                if bounded && fs.recv.is_some() {
+                    if !forwards_to_referent(fs, body, param, trn, mut_ref) {
+                        sm.ref_impl_bad.push(fs.name.clone());
+                    } else {
+                        // (a `_` parameter it gives the path of its type: a forward if that names a unit struct)
+                        for (p, t) in &fs.params {
+                            if let (Pat::Wild, PTy::Path(None, tp)) = (p, t) {
+                                if let Some(l) = tp.segs.last() {
+                                    sm.ref_impl_unit_args.push((fs.name.clone(), l.name.clone()));
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -3634,27 +3893,70 @@ fn const_param_in_op(t: &PTy, consts: &[&str]) -> bool {
 /// `&mut T`: `*self` is the `&mut T`, whose method lookup takes the impl's own `m` (through `&&mut T`) before T's, so
 /// it calls itself (mut_ref: the impl is for `&mut T`)
 fn forwards_to_referent(fs: &PSig, body: &Block, param: &str, tr: &str, mut_ref: bool) -> bool {
-    if !matches!(fs.recv.as_deref(), Some("&self" | "&mut self")) {
-        return false;
+    // (the receiver: `&self` / `&mut self` (with a lifetime, `&'b self`, too), or a pinned one, `self: Pin<&mut Self>`
+    // (futures' and tokio's poll methods), which forwards through `Pin::new(&mut **self)`)
+    #[derive(PartialEq)]
+    enum Recv {
+        Ref(bool),
+        PinMut,
+    }
+    let self_ty = |t: &PTy| matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "Self" && p.segs[0].args.is_empty());
+    let recv = match fs.recv_ty.as_ref() {
+        Some(PTy::Ref(_, m, i)) if self_ty(i) => Recv::Ref(*m),
+        Some(PTy::Path(None, p))
+            if p.segs.last().is_some_and(|s| s.name == "Pin")
+                && matches!(p.segs.last().unwrap().args.as_slice(), [crate::parse::GArg::Ty(PTy::Ref(_, true, i))] if self_ty(i)) =>
+        {
+            Recv::PinMut
+        }
+        _ => return false,
+    };
+    fn strip(mut e: &Expr) -> &Expr {
+        loop {
+            match e {
+                Expr::Paren(i) => e = i,
+                // (`unsafe { (**self).m(..) }`, allocator-api2's: a block of the one expression)
+                Expr::Block(None, _, b) if b.stmts.len() == 1 => match &b.stmts[0] {
+                    Stmt::Expr(i, false) => e = i,
+                    _ => return e,
+                },
+                _ => return e,
+            }
+        }
     }
     let [st] = body.stmts.as_slice() else { return false };
     let e = match st {
         Stmt::Expr(e, semi) if !*semi || fs.ret.is_none() => e,
         _ => return false,
     };
-    fn strip(mut e: &Expr) -> &Expr {
-        while let Expr::Paren(i) = e {
-            e = i;
-        }
-        e
-    }
     let one = |e: &Expr, n: &str| matches!(strip(e), Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == n && p.segs[0].args.is_empty());
     let deref1 = |e: &Expr| matches!(strip(e), Expr::Unary(o, j, _) if o == "*" && one(j, "self"));
     let deref2 = |e: &Expr| matches!(strip(e), Expr::Unary(o, i, _) if o == "*" && deref1(i));
-    let Some(names) = fs.params.iter().map(|(p, _)| if let Pat::Ident(_, false, n, None) = p { Some(n.as_str()) } else { None }).collect::<Option<Vec<&str>>>() else {
+    // (a parameter `_` the impl cannot pass on: in its place the path of its type itself, as a value, is the unit
+    // struct's one value (tokio's `_: sealed::Internal` passed as `(**self).to_socket_addrs(sealed::Internal)`); no
+    // other value is taken (a const, or `Mode::Fast` of an enum, may differ from the caller's))
+    let Some(names) = fs
+        .params
+        .iter()
+        .map(|(p, t)| match (p, t) {
+            (Pat::Ident(_, false, n, None), _) => Some(Ok(n.as_str())),
+            (Pat::Wild, PTy::Path(None, tp)) if tp.segs.iter().all(|s| s.args.is_empty()) => Some(Err(tp)),
+            _ => None,
+        })
+        .collect::<Option<Vec<Result<&str, &crate::parse::Path>>>>()
+    else {
         return false;
     };
-    let args_ok = |args: &[Expr]| args.len() == names.len() && args.iter().zip(&names).all(|(a, n)| one(a, n));
+    let same_path = |e: &Expr, tp: &crate::parse::Path| {
+        matches!(strip(e), Expr::Path(None, p) if p.segs.len() == tp.segs.len() && p.segs.iter().zip(&tp.segs).all(|(a, b)| a.name == b.name && a.args.is_empty()))
+    };
+    let args_ok = |args: &[Expr]| {
+        args.len() == names.len()
+            && args.iter().zip(&names).all(|(a, n)| match n {
+                Ok(n) => one(a, n),
+                Err(tp) => same_path(a, tp),
+            })
+    };
     // (a turbofish passes the method's own type and const parameters, in their order, or there is none)
     let own: Vec<&str> = fs.generics.params.iter().filter_map(|g| match g {
         GParam::Ty(n, ..) | GParam::Const(n, _) => Some(n.as_str()),
@@ -3669,20 +3971,64 @@ fn forwards_to_referent(fs: &PSig, body: &Block, param: &str, tr: &str, mut_ref:
                     _ => false,
                 }))
     };
+    // (`Pin::new(&mut **self)` (or of `self.get_mut()`): the pinned referent, T's own receiver)
+    let pinned = |e: &Expr| {
+        let Expr::Call(f, a) = strip(e) else { return false };
+        let pin_new = matches!(strip(f), Expr::Path(None, p) if p.segs.len() == 2 && p.segs[0].name == "Pin" && p.segs[1].name == "new");
+        let inner = |e: &Expr| {
+            deref2(e)
+                || matches!(strip(e), Expr::Unary(o, i, _) if o == "*"
+                    && matches!(strip(i), Expr::Unary(o2, j, _) if o2 == "*"
+                        && matches!(strip(j), Expr::MethodCall(r, m, t, a, _) if m == "get_mut" && t.is_empty() && a.is_empty() && one(r, "self"))))
+        };
+        pin_new && matches!(a.as_slice(), [x] if matches!(strip(x), Expr::Ref(true, i) if inner(i)))
+    };
+    // (the head of a path call: `T::m`, `Tr::m`, or `<T as Tr>::m` (futures-core's and quote's))
+    let path_head = |f: &Expr| match strip(f) {
+        Expr::Path(None, p) => p.segs.len() == 2 && (p.segs[0].name == param || p.segs[0].name == tr) && p.segs[1].name == fs.name && targs_ok(&p.segs[1].args),
+        Expr::Path(Some(q), p) => {
+            matches!(&**q, PTy::Path(None, qp) if qp.segs.len() == 1 && qp.segs[0].name == param && qp.segs[0].args.is_empty())
+                && p.segs.last().is_some_and(|s| s.name == fs.name && targs_ok(&s.args))
+                && p.segs.iter().rev().nth(1).is_none_or(|s| s.name == tr)
+        }
+        _ => false,
+    };
+    if recv == Recv::PinMut {
+        return match strip(e) {
+            Expr::MethodCall(r, m, targs, args, _) => *m == fs.name && pinned(r) && targs_ok(targs) && args_ok(args),
+            // (`S::poll_next(Pin::new(&mut **self), cx)`, futures-core's)
+            Expr::Call(f, args) => path_head(f) && args.first().is_some_and(pinned) && args_ok(&args[1..]),
+            _ => false,
+        };
+    }
+    // (`Pin::new(&**self).m(..)` of a `&self` method, http-body's: the referent behind a shared pin, whose `&self` method
+    // is T's through Pin's deref)
+    let pinned_shared = |e: &Expr| {
+        let Expr::Call(f, a) = strip(e) else { return false };
+        matches!(strip(f), Expr::Path(None, p) if p.segs.len() == 2 && p.segs[0].name == "Pin" && p.segs[1].name == "new")
+            && matches!(a.as_slice(), [x] if matches!(strip(x), Expr::Ref(false, i) if deref2(i)))
+    };
     // (`(*self).m(..)`: `*self` is the `&T`, whose own method is T's through the deref too; but not the `&mut T` of a
     // `&self` method, see above)
-    let deref1_recv = !(mut_ref && fs.recv.as_deref() == Some("&self"));
+    let deref1_recv = !(mut_ref && recv == Recv::Ref(false));
+    // (the first argument of a path call: `&**self` / `&mut **self`, `*self`, or, where the head names T (`T::m`, `<T
+    // as Tr>::m`), `self` itself, which coerces to T's receiver through the deref (`T::read(self, buf)`, embedded-io's;
+    // `Sp::spawn_obj(self, ..)`, futures-task's). Not after the trait's name: `Tr::m(self)` takes Self = `&T`, this impl
+    // again)
+    let names_param = |f: &Expr| match strip(f) {
+        Expr::Path(None, p) => p.segs.first().is_some_and(|s| s.name == param),
+        Expr::Path(Some(_), _) => true,
+        _ => false,
+    };
+    let first_ok = |f: &Expr, a: &Expr| matches!(strip(a), Expr::Ref(_, i) if deref2(i)) || deref1(a) || (names_param(f) && one(a, "self"));
     match strip(e) {
-        Expr::MethodCall(r, m, targs, args, _) => *m == fs.name && (deref2(r) || (deref1_recv && deref1(r))) && targs_ok(targs) && args_ok(args),
-        Expr::Call(f, args) => {
-            let Expr::Path(None, p) = strip(f) else { return false };
-            p.segs.len() == 2
-                && (p.segs[0].name == param || p.segs[0].name == tr)
-                && p.segs[1].name == fs.name
-                && targs_ok(&p.segs[1].args)
-                && args.first().is_some_and(|a| matches!(strip(a), Expr::Ref(_, i) if deref2(i)) || deref1(a))
-                && args_ok(&args[1..])
+        Expr::MethodCall(r, m, targs, args, _) => {
+            *m == fs.name
+                && (deref2(r) || (deref1_recv && deref1(r)) || (recv == Recv::Ref(false) && pinned_shared(r)))
+                && targs_ok(targs)
+                && args_ok(args)
         }
+        Expr::Call(f, args) => path_head(f) && args.first().is_some_and(|a| first_ok(f, a)) && args_ok(&args[1..]),
         _ => false,
     }
 }

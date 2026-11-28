@@ -2272,9 +2272,13 @@ impl Cx<'_> {
             Ty::Box(_) => true,
             Ty::Array(e, _) => !self.needs_drop(*e) || self.zeroable(*e),
             Ty::Struct(sid) => {
-                // (prelude の Vec / String / Rc / Arc は 0 (null の ptr、長さ 0) でも drop が何もしない)
+                // (prelude の Vec / String / Rc / Arc は 0 (null の ptr、長さ 0) でも drop が何もしない。the threads' handles too:
+                // a channel's ends (an Arc inside), a Thread and a JoinHandle check for null in their drops)
                 let bname = &self.prog.structs[self.prog.base_of(sid) as usize].name;
                 if bname == "Vec" || bname == "String" || bname == "Rc" || bname == "Arc" {
+                    return true;
+                }
+                if matches!(bname.as_str(), "__Sndr" | "__SyncSndr" | "__Rcvr__" | "Thread" | "JoinHandle") && self.prog.struct_item.get(self.prog.base_of(sid) as usize).is_some_and(|&i| i >= self.prog.prelude_from) {
                     return true;
                 }
                 if self.prog.drop_impls.contains(&self.prog.base_of(sid)) {
@@ -2306,7 +2310,12 @@ impl Cx<'_> {
             } else {
                 None
             };
-            if let (Some(fs), false) = (fields, matches!(bname.as_str(), "Vec" | "String" | "Rc" | "Arc")) {
+            // (the threads' handles whole: a Thread's or JoinHandle's pointer needs no drop of its own, but their drops
+            // read it)
+            let whole = matches!(bname.as_str(), "Vec" | "String" | "Rc" | "Arc")
+                || (matches!(bname.as_str(), "__Sndr" | "__SyncSndr" | "__Rcvr__" | "Thread" | "JoinHandle")
+                    && self.prog.struct_item.get(self.prog.base_of(sid) as usize).is_some_and(|&i| i >= self.prog.prelude_from));
+            if let (Some(fs), false) = (fields, whole) {
                 for (_, ft, off) in fs {
                     let d = self.addr_plus(dst, off as i32);
                     self.zero_drop_parts(d, ft);

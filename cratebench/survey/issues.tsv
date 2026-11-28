@@ -6,7 +6,7 @@ renames its dependency	249	zurgo: renamed dependencies
 Two versions of one crate are not supported	28	zurgo: two versions of one crate in a graph
 cannot find derive macro `\w+__\w+`	251	a derive's name resolved to a glob-imported type
 impls for references to a type parameter	144	`impl<T: Tr> Tr for &T`
-macro expansion is too deep	252	macro expansion too deep at a crate's first line
+macro expansion is too deep|recursion limit reached while expanding	252	macro expansion too deep at a crate's first line
 constants of type `\*mut \(\)` are not supported	253	a fn pointer cast to `*mut ()` in a static
 `Infallible: Error`	250	prelude: `impl Error for Infallible`
 `__FmtError: Error`	197	prelude: `impl Error for fmt::Error`
@@ -20,5 +20,7 @@ missing generics for `	260	`missing generics for` a type used without its parame
 the trait bound `[^`]*` is not satisfied \(E0277\)	261	false E0277: a bound zustc does not see
 cannot infer the `[^`]*` return type of	262	cannot infer an `impl Trait` return type
 impl has stricter requirements than trait	264	false E0276 in bitflags' impls
-cannot find value \(unsupported path\)	265	value paths zustc cannot resolve
+cannot find value (`[^`]*` )?\(unsupported path\)	265	value paths zustc cannot resolve
 takes \d+ type arguments?, but \d+ (were|was) given	266	std iterator adapters' arity (`Copied`, `Cloned`, `Map`)
+not all trait items implemented	298	a std trait's default method zustc requires
+duplicate definition of	297	duplicate associated items of two impls

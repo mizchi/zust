@@ -3,7 +3,7 @@ arrays.binary_bytes 15750
 arrays.cache_bytes 16597
 arrays.object_bytes 16363
 assoc_consts.binary_bytes 19362
-assoc_consts.cache_bytes 28532
+assoc_consts.cache_bytes 30024
 assoc_consts.object_bytes 23881
 binary_heap.binary_bytes 62689
 binary_heap.cache_bytes 113260
@@ -39,7 +39,7 @@ enums.binary_bytes 14019
 enums.cache_bytes 13896
 enums.object_bytes 14137
 float_fuzz.binary_bytes 25191
-float_fuzz.cache_bytes 37854
+float_fuzz.cache_bytes 40062
 float_fuzz.object_bytes 30424
 floats.binary_bytes 57061
 floats.cache_bytes 102526
@@ -75,7 +75,7 @@ methods.binary_bytes 12238
 methods.cache_bytes 11517
 methods.object_bytes 12650
 modules.binary_bytes 20941
-modules.cache_bytes 32122
+modules.cache_bytes 33769
 modules.object_bytes 26636
 nostd_calc.binary_bytes 11533
 nostd_calc.cache_bytes 9765
@@ -96,7 +96,7 @@ nostd_panic_unwrap.binary_bytes 6056
 nostd_panic_unwrap.cache_bytes 2397
 nostd_panic_unwrap.object_bytes 2982
 options.binary_bytes 21462
-options.cache_bytes 35325
+options.cache_bytes 37133
 options.object_bytes 26107
 ordering.binary_bytes 73155
 ordering.cache_bytes 120291
@@ -120,7 +120,7 @@ structs.binary_bytes 12339
 structs.cache_bytes 10941
 structs.object_bytes 12415
 text_more.binary_bytes 46863
-text_more.cache_bytes 80747
+text_more.cache_bytes 84874
 text_more.object_bytes 64209
 traits.binary_bytes 12675
 traits.cache_bytes 12965

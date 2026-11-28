@@ -981,15 +981,18 @@ pub fn binds_name(e: &Expr, n: &str, d: u32) -> bool {
     if d > 64 {
         return true;
     }
-    let block = |b: &crate::parse::Block| {
+    // (a `let .. else`'s block is a block too: its lets bind names, as any block's)
+    fn block_binds(b: &crate::parse::Block, n: &str, d: u32) -> bool {
+        if d > 64 {
+            return true;
+        }
         b.stmts.iter().any(|s| match s {
-            Stmt::Let(p, _, init, els, ..) => {
-                pat_binds_name(p, n) || init.as_ref().is_some_and(|x| binds_name(x, n, d + 1)) || els.as_ref().is_some_and(|b| b.stmts.iter().any(|s| matches!(s, Stmt::Expr(x, _) if binds_name(x, n, d + 1))))
-            }
+            Stmt::Let(p, _, init, els, ..) => pat_binds_name(p, n) || init.as_ref().is_some_and(|x| binds_name(x, n, d + 1)) || els.as_ref().is_some_and(|b| block_binds(b, n, d + 1)),
             Stmt::Expr(x, _) => binds_name(x, n, d + 1),
             _ => false,
         })
-    };
+    }
+    let block = |b: &crate::parse::Block| block_binds(b, n, d);
     match e {
         Expr::Closure(_, ps, _, b, _) => ps.iter().any(|(p, _)| pat_binds_name(p, n)) || binds_name(b, n, d + 1),
         Expr::Let(p, x) => pat_binds_name(p, n) || binds_name(x, n, d + 1),
@@ -1033,6 +1036,35 @@ fn assigns_in(e: &Expr, caps: &[String]) -> bool {
         }
     });
     found
+}
+
+// (an assignment to a place rooted at one of caps, or a `&mut` / `&raw mut` of one)
+fn mutates_in(e: &Expr, caps: &[String]) -> bool {
+    match e {
+        Expr::Closure(..) => return false,
+        Expr::Ref(true, x) | Expr::RawRef(true, x) if assign_base(x).is_some_and(|n| caps.iter().any(|c| *c == n)) => return true,
+        _ => {}
+    }
+    if assigns_in(e, caps) {
+        return true;
+    }
+    let mut found = false;
+    each_child(e, &mut |c| {
+        if !found && mutates_in(c, caps) {
+            found = true;
+        }
+    });
+    found
+}
+
+/// Whether the closure body assigns to the captured variable n or borrows it mutably, at its top level (`n = ..`,
+/// `n.f += 1`, `*n = ..`, `&mut n`; not in a nested closure): a closure that holds n by reference holds a `&mut` of
+/// it (or a unique borrow). A call of a `&mut self` method on it is not seen (it needs the type). Never where the body
+/// binds the name again anywhere (`let mut n = ..; n = ..` is another variable's): the answer is then false, which
+/// the auto traits take as "either kind", the rule that holds of both
+pub fn mutates_capture(c: &Expr, n: &str) -> bool {
+    let Expr::Closure(_, _, _, body, _) = c else { return false };
+    !binds_name(body, n, 0) && mutates_in(body, &[n.to_string()])
 }
 
 /// Whether the closure body assigns to a captured variable (`r = ..` / `n += 1` / `v.x = ..`)

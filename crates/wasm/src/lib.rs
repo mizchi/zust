@@ -1222,6 +1222,17 @@ impl<'a> Body<'a> {
         Ok(())
     }
 
+    /// stores the integer on the stack (an address under it) as the type
+    fn store_top(&mut self, t: Type) {
+        self.op(match t {
+            Type::I8 => 0x3A,
+            Type::I16 => 0x3B,
+            Type::I32 => 0x36,
+            _ => 0x37,
+        });
+        self.memarg(0);
+    }
+
     fn store(&mut self, x: Value, a: Value, off: i32) -> Result<(), String> {
         let t = self.ty(x);
         self.addr(a, off)?;
@@ -1901,6 +1912,40 @@ fn lower_op(b: &mut Body, op: &Op, res: &[u32]) -> Result<(), String> {
             b.set_id(res[0])?;
         }
         Op::Store(x, a, off) => b.store(*x, *a, *off)?,
+        // (one thread on wasm32: the atomics are plain accesses)
+        Op::AtomicLoad(t, a) => {
+            b.load(*t, *a, 0)?;
+            b.set_id(res[0])?;
+        }
+        Op::AtomicStore(x, a) => b.store(*x, *a, 0)?,
+        Op::AtomicRmw(op, a, x) => {
+            let t = b.ty(*x);
+            b.load(t, *a, 0)?;
+            b.set_id(res[0])?;
+            match op {
+                minclif::AtomicOp::Xchg => b.store(*x, *a, 0)?,
+                minclif::AtomicOp::Add => {
+                    b.addr(*a, 0)?;
+                    b.binop(Value(res[0]), *x, 0x6A, 0x7C, false)?;
+                    b.store_top(t);
+                }
+            }
+        }
+        Op::AtomicCas(a, e, x) => {
+            let t = b.ty(*x);
+            b.load(t, *a, 0)?;
+            b.set_id(res[0])?;
+            // (*a = old == e ? x : old)
+            b.addr(*a, 0)?;
+            b.get(*x)?;
+            b.get(Value(res[0]))?;
+            b.get(Value(res[0]))?;
+            b.get(*e)?;
+            b.op(if t == Type::I64 { 0x51 } else { 0x46 });
+            b.op(0x1B);
+            b.store_top(t);
+        }
+        Op::Fence => {}
         Op::StackAddr(s, off) => {
             let so = b.slot.get(s.0 as usize).copied().unwrap_or(0) as i64;
             b.lget(b.l_fp);
@@ -2295,7 +2340,24 @@ pub type FuncDef = (String, Vec<u8>, Vec<Reloc>, bool);
 pub type DataDef = (String, Vec<u8>, Vec<(u32, String, i64)>, bool);
 
 /// The functions the module provides itself when the program calls them (instead of importing them)
-const BUILTINS: &[&str] = &["malloc", "free", "realloc", "calloc", "__errno_location", "strerror", "strlen", "memcpy", "memmove", "memset"];
+// (and what the prelude's threads call, for nothing on one thread: a futex (syscall), a yield, the thread-local key)
+const BUILTINS: &[&str] = &[
+    "malloc",
+    "free",
+    "realloc",
+    "calloc",
+    "__errno_location",
+    "strerror",
+    "strlen",
+    "memcpy",
+    "memmove",
+    "memset",
+    "syscall",
+    "sched_yield",
+    "pthread_key_create",
+    "pthread_getspecific",
+    "pthread_setspecific",
+];
 
 /// Where the built-ins keep their state: the free-list heads, errno, strerror's text
 struct Layout {
@@ -2461,6 +2523,27 @@ fn builtin_body(name: &str, lay: &Layout, idx: &dyn Fn(&str) -> u32) -> (Vec<u8>
         "strerror" => {
             a.k(lay.msg);
             (vec![T_I32], vec![T_I64], vec![])
+        }
+        // (one thread: a futex never waits for another, and no thread has a context of its own)
+        "syscall" => {
+            a.k(0);
+            (vec![T_I64, T_I64, T_I32, T_I32, T_I64, T_I64, T_I32], vec![T_I64], vec![])
+        }
+        "pthread_getspecific" => {
+            a.k(0);
+            (vec![T_I32], vec![T_I64], vec![])
+        }
+        "sched_yield" => {
+            a.o(&[0x41, 0]);
+            (vec![], vec![T_I32], vec![])
+        }
+        "pthread_key_create" => {
+            a.o(&[0x41, 0]);
+            (vec![T_I64, T_I64], vec![T_I32], vec![])
+        }
+        "pthread_setspecific" => {
+            a.o(&[0x41, 0]);
+            (vec![T_I32, T_I64], vec![T_I32], vec![])
         }
         // strlen(p) -> n. locals: 0 p, 1 n
         "strlen" => {

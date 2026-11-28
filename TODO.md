@@ -17,46 +17,44 @@ needs one filed first (then add it to [cratebench/survey/issues.tsv](cratebench/
 
 <!-- crate-priorities -->
 
-Survey of 2026-11-27 08:11 UTC on `fdbd948`: 45 of 273 crates build (16.4% of their downloads); 827 errors in 181 packages.
+Survey of 2026-11-28 04:17 UTC on `0f96483`: 49 of 273 crates build (17.3% of their downloads); 1054 errors in 182 packages.
 
 | # | fix | issue | holds back | crates it alone unblocks |
 |---:|---|---|---:|---:|
-| 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | [#254](https://github.com/mizchi/zust/issues/254) | 7.2% | 8 |
-| 2 | `impl<T: Tr> Tr for &T` | [#144](https://github.com/mizchi/zust/issues/144) | 7.2% | 12 |
-| 3 | parser: syntax zustc does not parse | [#257](https://github.com/mizchi/zust/issues/257) | 4.9% | 3 |
-| 4 | mismatched types (to sort by cause) | [#259](https://github.com/mizchi/zust/issues/259) | 4.8% | 1 |
-| 5 | duplicate definition of `…` | none yet | 4.2% | 6 |
-| 6 | `missing generics for` a type used without its parameters | [#260](https://github.com/mizchi/zust/issues/260) | 2.4% | 1 |
-| 7 | value paths zustc cannot resolve | [#265](https://github.com/mizchi/zust/issues/265) | 2.3% | 0 |
-| 8 | macro expansion too deep at a crate's first line | [#252](https://github.com/mizchi/zust/issues/252) | 2.3% | 5 |
-| 9 | false E0277: a bound zustc does not see | [#261](https://github.com/mizchi/zust/issues/261) | 2.2% | 2 |
+| 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | [#254](https://github.com/mizchi/zust/issues/254) | 10.8% | 12 |
+| 2 | mismatched types (to sort by cause) | [#259](https://github.com/mizchi/zust/issues/259) | 7.3% | 4 |
+| 3 | parser: syntax zustc does not parse | [#257](https://github.com/mizchi/zust/issues/257) | 4.9% | 4 |
+| 4 | `impl<T: Tr> Tr for &T` | [#144](https://github.com/mizchi/zust/issues/144) | 4.7% | 8 |
+| 5 | false E0276 in bitflags' impls | [#264](https://github.com/mizchi/zust/issues/264) | 2.7% | 4 |
+| 6 | value paths zustc cannot resolve | [#265](https://github.com/mizchi/zust/issues/265) | 2.7% | 0 |
+| 7 | false E0277: a bound zustc does not see | [#261](https://github.com/mizchi/zust/issues/261) | 2.6% | 2 |
+| 8 | conflicting implementations of trait `…` for type `…` (E0119) | none yet | 2.4% | 4 |
+| 9 | methods zustc does not find (std methods the prelude lacks; lookup) | [#256](https://github.com/mizchi/zust/issues/256) | 2.1% | 0 |
 | 10 | cannot infer an `impl Trait` return type | [#262](https://github.com/mizchi/zust/issues/262) | 2.0% | 5 |
-| 11 | not all trait items implemented, missing: `…` in `…` | none yet | 1.9% | 4 |
-| 12 | prelude: `impl Error for fmt::Error` | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 2 |
+| 11 | cannot evaluate `…` in a constant | none yet | 1.8% | 3 |
+| 12 | inherent impls cannot be unsafe (E0197) | none yet | 1.7% | 4 |
 
 By issue, with its tier (the issue's label: **T0** holds back 2% or more of the surveyed downloads with all its fixes, **T1** 1% or more, **T2** less; relabel an issue when its tier here changes):
 
 | tier | issue | holds back | fixes | the largest |
 |---|---|---:|---:|---|
-| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 9.6% | 28 | prelude: type `Builder` |
-| T0 | [#254](https://github.com/mizchi/zust/issues/254) | 7.2% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
-| T0 | [#144](https://github.com/mizchi/zust/issues/144) | 7.2% | 1 | `impl<T: Tr> Tr for &T` |
+| T0 | [#254](https://github.com/mizchi/zust/issues/254) | 10.8% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
+| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 7.5% | 31 | prelude: type `Weak` |
+| T0 | [#259](https://github.com/mizchi/zust/issues/259) | 7.3% | 1 | mismatched types (to sort by cause) |
 | T0 | [#257](https://github.com/mizchi/zust/issues/257) | 4.9% | 1 | parser: syntax zustc does not parse |
-| T0 | [#259](https://github.com/mizchi/zust/issues/259) | 4.8% | 1 | mismatched types (to sort by cause) |
-| T0 | [#260](https://github.com/mizchi/zust/issues/260) | 2.4% | 1 | `missing generics for` a type used without its parameters |
-| T0 | [#265](https://github.com/mizchi/zust/issues/265) | 2.3% | 1 | value paths zustc cannot resolve |
-| T0 | [#252](https://github.com/mizchi/zust/issues/252) | 2.3% | 1 | macro expansion too deep at a crate's first line |
-| T0 | [#261](https://github.com/mizchi/zust/issues/261) | 2.2% | 1 | false E0277: a bound zustc does not see |
+| T0 | [#144](https://github.com/mizchi/zust/issues/144) | 4.7% | 1 | `impl<T: Tr> Tr for &T` |
+| T0 | [#264](https://github.com/mizchi/zust/issues/264) | 2.7% | 1 | false E0276 in bitflags' impls |
+| T0 | [#265](https://github.com/mizchi/zust/issues/265) | 2.7% | 1 | value paths zustc cannot resolve |
+| T0 | [#261](https://github.com/mizchi/zust/issues/261) | 2.6% | 1 | false E0277: a bound zustc does not see |
+| T0 | [#256](https://github.com/mizchi/zust/issues/256) | 2.1% | 1 | methods zustc does not find (std methods the prelude lacks; lookup) |
 | T0 | [#262](https://github.com/mizchi/zust/issues/262) | 2.0% | 1 | cannot infer an `impl Trait` return type |
-| T1 | [#197](https://github.com/mizchi/zust/issues/197) | 1.9% | 1 | prelude: `impl Error for fmt::Error` |
-| T1 | [#256](https://github.com/mizchi/zust/issues/256) | 1.7% | 1 | methods zustc does not find (std methods the prelude lacks; lookup) |
-| T1 | [#264](https://github.com/mizchi/zust/issues/264) | 1.6% | 1 | false E0276 in bitflags' impls |
-| T1 | [#266](https://github.com/mizchi/zust/issues/266) | 1.3% | 1 | std iterator adapters' arity (`Copied`, `Cloned`, `Map`) |
+| T1 | [#266](https://github.com/mizchi/zust/issues/266) | 1.6% | 1 | std iterator adapters' arity (`Copied`, `Cloned`, `Map`) |
+| T1 | [#260](https://github.com/mizchi/zust/issues/260) | 1.3% | 1 | `missing generics for` a type used without its parameters |
 | T2 | [#28](https://github.com/mizchi/zust/issues/28) | 0.7% | 1 | zurgo: two versions of one crate in a graph |
 | T2 | [#253](https://github.com/mizchi/zust/issues/253) | 0.7% | 1 | a fn pointer cast to `*mut ()` in a static |
 | T2 | [#258](https://github.com/mizchi/zust/issues/258) | 0.4% | 1 | macro_rules: calls zustc's matcher rejects |
 
-No issue yet, the next to file: duplicate definition of `…` (4.2%); not all trait items implemented, missing: `…` in `…` (1.9%); cannot evaluate `…` in a constant (1.7%); inherent impls cannot be unsafe (E0197) (1.7%); cannot infer the return type of this closure; annotate it (`… (1.3%).
+No issue yet, the next to file: conflicting implementations of trait `…` for type `…` (E0119… (2.4%); cannot evaluate `…` in a constant (1.8%); inherent impls cannot be unsafe (E0197) (1.7%); cannot find constant `…` (1.4%); cannot infer the return type of this closure; annotate it (`… (1.2%).
 
 <!-- /crate-priorities -->
 
@@ -81,7 +79,6 @@ invariants.
 | case | what is accepted that rustc rejects |
 |---|---|
 | `unsafe_fn_pointer` | fn pointer types do not record `unsafe`, so calling an `unsafe fn` pointer needs no unsafe block |
-| `send_dyn_thread` | `dyn Trait` types do not keep `+ Send`, so a `Box<dyn Fn()>` (which may hold an `Rc`) moves to a thread |
 | `cve_2019_12083_error_type_id` | an impl may define a method its trait does not declare (E0407). zustc has no downcast, so no type confusion follows |
 | `const_overflow` | overflow in a const (E0080) is found only when it is evaluated at run time (a panic) |
 
@@ -92,6 +89,25 @@ invariants.
 | `rt_box_move_out` | `let x = *b;` moves the value but never frees the Box's block (a leak; valgrind) |
 | `rt_box_move_patterns` | the same leak through patterns (`let Pair { a, b } = *b`, `match *b`); no double free (valgrind) |
 | `rt_pattern_partial_move` | what a pattern leaves to `_` / `..` of a temporary (`let (a, _) = pair();`, `match pair() { (a, _) => .. }`) is never dropped (a leak); a local's parts are, in a loop it outlives too (`rt_partial_move_in_loop`) |
+
+## Threads (`crates/syntax/src/prelude_lib.rs.in`, `tests/threads/`)
+
+OS threads since [report 2026-11-27-01](docs/reports/2026-11-27-01-native-threads.md). Left:
+
+- No poisoning of a Mutex or RwLock: a panic does not unwind, so one a panicking thread holds stays locked, and the
+  threads that wait for it wait forever (std's is unlocked and poisoned; `lock` then gives `Err`). The other values of
+  that thread are not dropped either. Both need unwinding (SUPPORT.md, "Large features"). (A Once or OnceLock the
+  thread was running, and a StdoutLock it held, are let go: the thread's context keeps them.)
+- Not there: `thread::scope`, `Condvar::wait_timeout`, `Mutex::try_lock`, `sync::Weak`,
+  `std::time::Instant`. `JoinHandle::join`'s Err is not a `Box<dyn Any + Send>` (no downcast of the payload).
+  `Builder::spawn_scoped` needs `thread::scope`.
+- A closure's capture held by reference is known to be mutable only when the body assigns to it or takes a `&mut` of
+  it (ast_closure::mutates_capture). One it changes only through a `&mut self` method (`|| v.push(Cell::new(1))`)
+  may be either kind, so the auto traits ask both rules of it (Send needs the value to be Sync and Send): such a
+  closure of a `Vec<Cell<_>>` is not Send, where rustc's is.
+- The main thread's thread_local! values are not dropped at exit (glibc's std runs their drops).
+- The location of an `unwrap` that panics is kept in one static (`__EXR_CALLER`), which another thread may write
+  meanwhile: the message can point at another thread's call. It needs a thread-local of its own (an ELF TLS slot).
 
 ## Trait solving (`crates/sema/src/traits.rs`, `formal/lean/`)
 
@@ -157,7 +173,7 @@ behavior: `cve_2020_36323_join_borrow` (join over a `Borrow<str>` of the program
   Node). A relooper or stackifier, and reuse of locals.
 - Not supported yet:
   - i128 division and i128 to / from float;
-  - threads (green threads need `swapcontext`);
+  - threads (`spawn` needs pthreads; on one thread the atomics, Mutex and the rest work as plain accesses);
   - zustc built as wasm by itself.
 - Traps carry no panic message (the native build prints the location from its trap table).
 
@@ -282,15 +298,16 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   `&Box<S>`, `From`'s bounds, const generic lengths (tests/probe/w1_items5.rs, tests/compile_errors/w1_*). It stops on:
   - `externref.rs:130`: "expected a function".
   - `LocalKey<T>` is a type with `with`, but a `thread_local!` is not one of them yet (each has a key type of its
-    own), so a `&'static LocalKey<T>` cannot point at one.
+    own, over a `__TlsKey`), so a `&'static LocalKey<T>` cannot point at one.
   - a method call on a `Box<[T]>` with the program's `impl Tr for Box<[T]>` derefs to `[T]` and misses it; a
     `Box<str>` cannot be made (`into_boxed_str`, `"x".into()`).
   - the items a macro's `const _: () = { .. };` moves out are visible outside it (rustc scopes its fns to the
     block); the hand-written one in wasm-bindgen's lib.rs (`__wbindgen_skip_interpret_calls`) is not compiled. One
     whose fn, `use`, trait or impl that would go out names a const, static or type that stays in it (`const N` or
     `struct Local<T>` beside an `impl Tr for u8` that names it) is skipped whole, as before this branch.
-  - a trait object's auto traits are not in zustc's types (`dyn Obj + Send` is `dyn Obj`, ast_types::tysyn): an impl
-    for `dyn Obj + Send` is one for `dyn Obj` too, where rustc reports E0277.
+  - an impl for a trait object with auto traits (`impl M for dyn Obj + Send`) is found by the object's trait alone, so
+    a call of its method on a `dyn Obj` is rejected as a mismatched type (E0308), where rustc reports E0599 (no
+    method). The object's types do keep `+ Send` / `+ Sync` (report 2026-11-27-03).
   - a blanket impl's `self`-by-value method on a `&Box<u8>` (`impl<T: Marker> Tr for T` with `impl Marker for
     &Box<u8>`) asks the bound of the Box's content ("`u8: Marker` is not satisfied").
   - impls for trait objects with parameters (`impl<R> Tr for dyn Fn() -> R`) are matched by the object's trait's name;
@@ -349,9 +366,10 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
 test by test (`cratebench/test_result.md`). fnv, rustc-hash, cfg-if and adler2 match, and CI keeps them so
 (`--check`). Tracking issue for the rest: #200.
 
-- either does not build under zurgo yet. The first error is `cannot find trait Binary` (lib.rs's
-  `impl_fmt_traits!(Binary, Display, LowerExp, ..)`: the prelude has no `fmt::Binary` / `LowerExp` / `Octal` /
-  `Pointer` / `UpperExp` traits). Then serde_core, through the dev-dependency serde_json: #197, #198, and std types
+- either does not build under zurgo yet. The first error is the deref coercion of its `deref` test,
+  `is_str(&value)` with `value: Either<String, &str>` (`impl Deref for Either<L, R> where L: Deref, R: Deref<Target
+  = L::Target>`): `expected &str, found &Either<String, &str>`. Its `fmt_traits` test (Binary / LowerHex / LowerExp
+  / Pointer ..) is right in a single file (tests/probe/fmt_radix_traits.rs). Then serde_core, through the dev-dependency serde_json: #197, #198, and std types
   the prelude lacks (`CString` / `CStr`, net addresses, `SystemTime`, `LinkedList`, `RwLock`, `Weak`, `Bound`).
 - A method of a trait with several impls for one type that differ only in the trait's arguments is not chosen by a
   bound: `fn f<T: AsMut<[u8]>>(t: &mut T) { t.as_mut() }` with `T = Either<..>` (either's `AsMut<str>` /

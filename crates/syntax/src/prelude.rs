@@ -41,7 +41,18 @@ fn items() -> &'static [(SrcItem, Option<String>, bool)] {
                 },
             })
             .map(|it| {
-                let name = defined_name(PRELUDE, &it);
+                let mut name = defined_name(PRELUDE, &it);
+                // (a member of an impl of a radix or exponent fmt trait (`impl LowerHex for u8`): looked up by the
+                // trait's name, which a program that uses the impls names, not by `fmt`, which every program that
+                // formats needs: the first lookup of each round then passes over them, not their gate)
+                if let ItemKind::ImplMember(h) = it.kind {
+                    let mut hw = PRELUDE_ITEMS[h as usize].5.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]);
+                    if let (Some("impl"), Some(t), Some("for")) = (hw.next(), hw.next(), hw.next()) {
+                        if matches!(t, "Binary" | "Octal" | "LowerHex" | "UpperHex" | "LowerExp" | "UpperExp") {
+                            name = Some(t.to_string());
+                        }
+                    }
+                }
                 let core_only = it
                     .idents
                     .iter()
@@ -268,7 +279,8 @@ fn gated_trait(h: usize) -> Option<&'static str> {
                 it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).find(|w| {
                     matches!(*w, "Hasher" | "Hash" | "__BoolThen" | "__AsBytes" | "__PathExt" | "__AsPathStr" | "BufRead" | "Read" | "Seek" | "Write" | "__FWr" | "ExactSizeIterator" | "BuildHasher"
                         // (std::os::unix's: `size()` / `mode()` / `as_raw_fd()` of a program's own are no reason for them)
-                        | "MetadataExt" | "OpenOptionsExt" | "PermissionsExt" | "AsRawFd" | "FromRawFd" | "IntoRawFd")
+                        | "MetadataExt" | "OpenOptionsExt" | "PermissionsExt" | "AsRawFd" | "FromRawFd" | "IntoRawFd" | "JoinHandleExt")
+                        || matches!(*w, "Binary" | "Octal" | "LowerHex" | "UpperHex" | "LowerExp" | "UpperExp" | "Pointer")
                 })
             })
             .collect()
@@ -289,6 +301,8 @@ fn gated_impl(h: usize) -> Option<&'static str> {
                 let ws: Vec<&'static str> = it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).collect();
                 match ws.as_slice() {
                     ["impl", t, "for", ..] if matches!(*t, "Read" | "BufRead" | "Seek" | "Write" | "__FWr") => Some(*t),
+                    // (the numbers' impls of the radix and exponent fmt traits, only with the trait)
+                    ["impl", t, "for", ..] if matches!(*t, "Binary" | "Octal" | "LowerHex" | "UpperHex" | "LowerExp" | "UpperExp") => Some(*t),
                     // (`{:?}` of a range: only for a program that formats with Debug)
                     ["impl", "T", "Debug", "for", r, ..] if matches!(*r, "Range" | "RangeInclusive") => Some("__range_debug"),
                     _ => None,
@@ -577,11 +591,12 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "BufWriter" | "BufReader" | "Cursor" | "ChunksMut" | "IoError" | "__DynError" | "Args" | "DefaultHasher" | "VarError"
                         | "PathBuf" | "__PathExt" | "__AsPathStr" | "Command" | "__ExitStatus" | "Cow" | "__CowStr"
                         | "Duration" | "AtomicPtr" | "RangeTo" | "RangeToInclusive" | "Fuse" | "Wrapping" | "Saturating"
-                        | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList" | "Thread" | "Once" | "OnceState"
+                        | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList" | "Thread" | "Builder" | "__ThreadPanic" | "__TlsKey" | "AccessError" | "SendError" | "RecvError" | "TryRecvError" | "RecvTimeoutError" | "__RecvIntoIter" | "Barrier" | "BarrierWaitResult" | "Once" | "OnceState"
                         | "Layout" | "LayoutError" | "__LayoutAlign" | "Infallible" | "Condvar" | "ControlFlow"
                         | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError"
                         | "SplitNStr" | "SliceSplitN" | "PoisonError"
-                        | "File" | "OpenOptions" | "Metadata" | "FileType" | "Permissions" | "FpCategory" => Some(w),
+                        | "File" | "OpenOptions" | "Metadata" | "FileType" | "Permissions" | "FpCategory"
+                        | "Instant" | "TryLockError" => Some(w),
                         // (std::num's NonZero types: their impls only with them)
                         w if w.starts_with("NonZero") => Some(w),
                         // HashMap's iterators (HmIter and so on) only when HashMap is used
@@ -617,7 +632,7 @@ const SHADOWABLE: &[&str] = &[
     "Chain", "Entry", "Enumerate", "Filter", "FilterMap", "Map", "OptIter", "Scan", "Skip", "Take", "TakeWhile", "Zip",
     "Command", "Mutex", "VarError", "Rev", "StepBy", "Peekable", "Cloned", "Flatten", "FlatMap", "Inspect", "SkipWhile",
     "PathBuf", "Args", "BufWriter", "BufReader", "Pin", "Windows", "Bytes", "MatchIndices", "MutexGuard", "Ref", "RefMut", "BorrowError", "BorrowMutError", "Chunks", "Duration", "Fuse", "Empty", "RangeTo", "RangeToInclusive", "RangeFull",
-    "AtomicPtr", "TryReserveError", "c_void", "Infallible", "Cycle", "JoinHandle", "Chars", "Poll", "Waker", "Context", "Future",
+    "AtomicPtr", "TryReserveError", "c_void", "Infallible", "Cycle", "JoinHandle", "Builder", "AccessError", "SendError", "RecvError", "TryRecvError", "RecvTimeoutError", "Barrier", "BarrierWaitResult", "Chars", "Poll", "Waker", "Context", "Future",
     "Wrapping", "Saturating", "NonZeroU8", "NonZeroU16", "NonZeroU32", "NonZeroU64", "NonZeroU128", "NonZeroUsize",
     "NonZeroI8", "NonZeroI16", "NonZeroI32", "NonZeroI64", "NonZeroI128", "NonZeroIsize",
     "FromStr", "CString", "CStr", "NulError", "LinkedList", "Ipv4Addr", "Ipv6Addr", "IpAddr", "SocketAddrV4", "SocketAddrV6",
@@ -625,6 +640,9 @@ const SHADOWABLE: &[&str] = &[
     "Once", "OnceState", "Layout", "LayoutError", "Condvar", "ControlFlow", "Repeat",
     "File", "OpenOptions", "Metadata", "FileType", "Permissions", "RawFd", "AsRawFd", "FromRawFd", "IntoRawFd",
     "MetadataExt", "OpenOptionsExt", "PermissionsExt", "FpCategory",
+    "Instant", "Any",
+    "Binary", "Octal", "LowerHex", "UpperHex", "LowerExp", "UpperExp", "Pointer",
+    "LockResult", "TryLockResult", "TryLockError",
 ];
 
 /// Whether the prelude's item of the name is renamed when the program defines one (SHADOWABLE, hashed: asked for each
@@ -833,9 +851,10 @@ fn lex_to(b: &[u8], k: &mut usize, st: &mut LexAt, i: usize) -> LexAt {
     *st
 }
 
-pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
-    // (one pass over the bytes: the name after `struct ` / `enum ` / `trait ` / `type ` / `union `. It replaces a
-    // search for each name: those were most of the cost of a no-op build of a large program)
+/// The prelude's type names (SHADOWABLE) the program defines for itself: one pass over the bytes, the name after
+/// `struct ` / `enum ` / `trait ` / `type ` / `union ` (it replaces a search for each name: those were most of the cost
+/// of a no-op build of a large program)
+pub fn shadowed_defs(user_src: &str) -> Vec<&str> {
     let mut defined: Vec<&str> = vec![];
     let b = user_src.as_bytes();
     let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
@@ -868,11 +887,17 @@ pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
         }
         i += 1;
     }
+    defined
+}
+
+/// `defined`: shadowed_defs of the program's source
+pub fn rename_shadowed(defined: &[&str], prelude: String) -> String {
+    let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
     if defined.is_empty() {
         return prelude;
     }
     let mut out = prelude;
-    for n in defined {
+    for &n in defined {
         if !out.contains(n) {
             continue;
         }
@@ -930,6 +955,104 @@ fn vec_path_before(b: &[u8], a: usize) -> bool {
         i = ws(j);
     }
     i >= 3 && &b[i - 3..i] == b"Vec" && !(i > 3 && (b[i - 4].is_ascii_alphanumeric() || b[i - 4] == b'_'))
+}
+
+/// The program's std paths to a prelude type it shadows (a type of its own of the name, rename_shadowed):
+/// `std::time::Duration` / `::core::time::Duration` / `use std::time::Duration as StdDuration;` name the prelude's,
+/// renamed `__p_Duration`. Such a path becomes the renamed name, padded with spaces in front to the path's length, so
+/// no column moves (`std::` alone is longer than `__p_`); in a `use`, and an item of a `use std::m::{..}` group, the
+/// name is renamed in place, which moves that line's later columns by 4. Comments and strings are left alone
+/// `defined`: shadowed_defs of the source (the caller's, which rename_shadowed takes as well: one scan)
+pub fn std_paths_to_shadowed(user_src: &str, defined: &[&str]) -> Option<String> {
+    if defined.is_empty() || !(user_src.contains("std::") || user_src.contains("core::") || user_src.contains("alloc::")) {
+        return None;
+    }
+    let b = user_src.as_bytes();
+    let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    // (an identifier at i: its end)
+    let ident_end = |i: usize| {
+        let mut e = i;
+        while e < b.len() && is_id(b[e]) {
+            e += 1;
+        }
+        e
+    };
+    let (mut lk, mut ls) = (0usize, LexAt::Code);
+    // (byte ranges and what replaces them, in order)
+    let mut reps: Vec<(usize, usize, String)> = vec![];
+    let mut i = 0;
+    while i < b.len() {
+        let at_root = matches!(b[i], b's' | b'c' | b'a') && (i == 0 || !is_id(b[i - 1]));
+        let root = if at_root { ["std::", "core::", "alloc::"].into_iter().find(|r| b[i..].starts_with(r.as_bytes())) } else { None };
+        let Some(root) = root else {
+            i += 1;
+            continue;
+        };
+        if lex_to(b, &mut lk, &mut ls, i) != LexAt::Code {
+            i += root.len();
+            continue;
+        }
+        // (a leading `::`, `::std::..`, is part of the path)
+        let start = if i >= 2 && &b[i - 2..i] == b"::" && (i == 2 || !is_id(b[i - 3])) { i - 2 } else { i };
+        // (the modules: lowercase segments, each followed by `::`)
+        let mut k = i + root.len();
+        loop {
+            let e = ident_end(k);
+            if e > k && b[k].is_ascii_lowercase() && b[e..].starts_with(b"::") {
+                k = e + 2;
+            } else {
+                break;
+            }
+        }
+        if k < b.len() && b[k] == b'{' {
+            // (a `use` group: its items that are such a name, `{Duration as StdDuration, Instant}`, one level deep)
+            let mut j = k + 1;
+            while j < b.len() && b[j] != b'}' && b[j] != b'{' && b[j] != b';' {
+                if is_id(b[j]) && !is_id(b[j - 1]) {
+                    let e = ident_end(j);
+                    let item_start = b[k + 1..j].iter().rev().find(|c| !c.is_ascii_whitespace()).is_none_or(|&c| c == b',' || c == b'{');
+                    if item_start && defined.contains(&&user_src[j..e]) && !b[e..].starts_with(b"::") {
+                        reps.push((j, e, format!("__p_{}", &user_src[j..e])));
+                    }
+                    j = e;
+                } else {
+                    j += 1;
+                }
+            }
+            i = j;
+            continue;
+        }
+        let e = ident_end(k);
+        if e > k && defined.contains(&&user_src[k..e]) {
+            let to = format!("__p_{}", &user_src[k..e]);
+            // (an import keeps its path, `use std::time::__p_Duration as StdDuration;`: an alias of a bare name would
+            // not be read as one of the prelude's. It moves the line's later columns by 4)
+            let mut w = start;
+            while w > 0 && b[w - 1].is_ascii_whitespace() {
+                w -= 1;
+            }
+            let in_use = w >= 3 && &b[w - 3..w] == b"use" && (w == 3 || !is_id(b[w - 4]));
+            if in_use {
+                reps.push((k, e, to));
+            } else {
+                let pad = (e - start).saturating_sub(to.len());
+                reps.push((start, e, format!("{}{to}", " ".repeat(pad))));
+            }
+        }
+        i = e.max(k).max(i + 1);
+    }
+    if reps.is_empty() {
+        return None;
+    }
+    let mut out = String::with_capacity(user_src.len() + 16);
+    let mut last = 0;
+    for (a, e, t) in reps {
+        out.push_str(&user_src[last..a]);
+        out.push_str(&t);
+        last = e;
+    }
+    out.push_str(&user_src[last..]);
+    Some(out)
 }
 
 /// Whether the source has a path `Box::from` in any spelling the parser takes: spaces around `::`, a turbofish
@@ -1024,6 +1147,9 @@ pub struct SelectCache {
     scan: crate::fxhash::FxMap<(crate::key::Key, u64), bool>,
     /// The number of user items in the last selection (the items after them are the prelude's)
     pub user_items: usize,
+    /// The source has std paths std_paths_to_shadowed rewrote to `__p_Name`: such identifiers are looked at (asked
+    /// of every identifier only then)
+    pub shadow_paths: bool,
 }
 
 /// Checks each item instead of the whole user source (`contains` and so on), keeping results by item hash.
@@ -1168,6 +1294,32 @@ impl<'a> PreludeScan<'a> {
 
 /// Whether src writes a C string literal, `c"..."` / `cr"..."`: a `c` that starts a token (not the end of `"abc"` or of a
 /// name)
+/// Whether the source has a format spec ending in `p`: `:` with fill / flags / width (`#`, `018`, `*>20`, `>w$`) between
+/// it and the `p`, then `}` (`{:p}`, `{pointer:#p}`), as a format string writes one. Only at the source's `p}`s, looked
+/// up first (the byte index of a large source): most sources have none
+fn has_ptr_spec(sc: &mut PreludeScan) -> bool {
+    if !sc.has("p}") {
+        return false;
+    }
+    let b = sc.src.as_bytes();
+    sc.src.match_indices("p}").any(|(at, _)| {
+        // (back to the spec's `:`, over what a spec may hold; a `{` / `}` / quote / line break first means it is not
+        // one. A `:` with another before it is the fill of `{::>8p}` when an alignment follows it, else a path's `::`)
+        let lo = at.saturating_sub(128);
+        let mut j = at;
+        while j > lo {
+            j -= 1;
+            match b[j] {
+                b'{' | b'}' | b'"' | b'\n' => return false,
+                b':' if j > 0 && b[j - 1] == b':' && !matches!(b.get(j + 1), Some(b'<' | b'^' | b'>')) => return false,
+                b':' => return j > 0 && (matches!(b[j - 1], b'{' | b':' | b'_') || b[j - 1].is_ascii_alphanumeric()),
+                _ => {}
+            }
+        }
+        false
+    })
+}
+
 fn has_cstr_literal(src: &str) -> bool {
     let b = src.as_bytes();
     let mut i = 0;
@@ -1192,6 +1344,44 @@ fn seq_accessor_option(need: &mut crate::fxhash::FxSet<&str>) {
     }
 }
 
+/// A float literal such as `1.5` (a `.` between digits) outside string literals: the `.` and `"` of the source are
+/// gone through with memchr (`str::find` of a char), not byte by byte, as a large program has none of the one and few
+/// of the other (a quote after `\\` or `'` does not open or close a string)
+fn float_lit_in(src: &str) -> bool {
+    let b = src.as_bytes();
+    if b.len() < 3 {
+        return false;
+    }
+    // (the byte at 0 and the last are not looked at, as by the byte loop this replaces. `from` is 0 or just after an
+    // ASCII `"` / `.`: a char boundary)
+    let end = b.len() - 1;
+    let next = |from: usize, c: char| match src[from..].find(c) {
+        Some(k) if from + k < end => from + k,
+        _ => usize::MAX,
+    };
+    let first = |c: char| match next(0, c) {
+        0 => next(1, c),
+        k => k,
+    };
+    let mut in_str = false;
+    let (mut q, mut d) = (first('"'), first('.'));
+    loop {
+        if q < d {
+            if b[q - 1] != b'\\' && b[q - 1] != b'\'' {
+                in_str = !in_str;
+            }
+            q = next(q + 1, '"');
+        } else if d != usize::MAX {
+            if !in_str && b[d - 1].is_ascii_digit() && b[d + 1].is_ascii_digit() {
+                return true;
+            }
+            d = next(d + 1, '.');
+        } else {
+            return false;
+        }
+    }
+}
+
 pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCache) -> String {
     let all = items();
     // Collect only the user's identifiers that match a name the prelude defines (or a related name).
@@ -1212,6 +1402,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             "clamp", "from_u32", "char", "join", "concat", "drain", "default", "f64", "f32", "i128", "u128", "Iterator", "into", "split_at_mut",
             "copy_from_slice", "clone_from_slice", "BufRead", "Read", "Seek", "SeekFrom", "Write", "__FWr", "Cursor", "ExactSizeIterator", "BuildHasher", "split_first_chunk", "first_chunk", "chunks_exact", "chunks_mut", "chunks_exact_mut", "is_sorted", "is_sorted_by", "is_sorted_by_key",
             "split_first", "split_last", "splitn",
+            // (the trait `Any`, a TraitHeader and so with no name of its own: `Box<dyn Any + Send>` alone needs it)
+            "Any",
+            // (the fmt traits of `{:b}` / `{:x}` / `{:e}` .., TraitHeaders and so with no names of their own)
+            "Binary", "Octal", "LowerHex", "UpperHex", "LowerExp", "UpperExp", "Pointer",
         ]);
         // Candidates per (first byte, length): however many prelude names there are, 0 or 1 comparisons per identifier
         let mut t: Vec<Vec<&'static str>> = vec![vec![]; 256 * 32];
@@ -1227,6 +1421,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     let mut need: crate::fxhash::FxSet<&str> = Default::default();
     let bytes = user_src.as_bytes();
     let mut chain = false;
+    let shadow_paths = cache.shadow_paths;
     let old = std::mem::take(&mut cache.map);
     for it in user_items {
         if let Some(r) = old.get(&it.hash) {
@@ -1236,6 +1431,17 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             continue;
         }
         let mut names: Vec<&'static str> = vec![];
+        // (`__p_Duration`, a std path to a prelude type the program shadows (std_paths_to_shadowed): the prelude's
+        // `Duration`, which the program's own name alone does not bring. A loop of its own, only for such a source)
+        if shadow_paths {
+            for &(a, b) in &it.idents {
+                if let Some(w) = user_src[a as usize..b as usize].strip_prefix("__p_").filter(|w| !w.is_empty()) {
+                    if let Some(n) = by_first[bucket(w.as_bytes()[0], w.len())].iter().find(|n| **n == w) {
+                        names.push(n);
+                    }
+                }
+            }
+        }
         for &(a, b) in &it.idents {
             let cands = &by_first[bucket(bytes[a as usize], (b - a) as usize)];
             if cands.is_empty() {
@@ -1283,6 +1489,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         cache.map.insert(it.hash, (names, c));
     }
     let mut sc = PreludeScan::new(user_src, user_items, &mut cache.scan);
+    // (a program's write! into a Formatter, which its impl of a fmt trait names: the Formatter of its own that codegen
+    // gives it. Asked of the program's names alone, before any rule adds the formatting names, Formatter among them)
+    if need.contains("Formatter") {
+        need.insert("__exr_sub_formatter");
+    }
     // (`c"..."`: codegen makes it a call of __exr_cstr_lit, a `&'static CStr`; before the `no_std` return, which a
     //  program needing nothing else takes)
     if has_cstr_literal(user_src) {
@@ -1295,14 +1506,16 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     // (Duration is not in std's prelude: without `time` written (`use std::time::Duration` / `time::Duration`),
     // `Duration` is the program's own or an error)
-    if need.contains("Duration") && !sc.has("time") {
+    // (a std path to it the program's own `Duration` shadows is `__p_Duration` by now (std_paths_to_shadowed): the
+    // prelude's, though `time` is gone from the text)
+    if need.contains("Duration") && !sc.has("time") && !sc.has("__p_Duration") {
         need.remove("Duration");
     }
     // (`iter::Empty` likewise: `Empty` alone is usually a variant of the program's own enum)
-    if need.contains("Empty") && !sc.has("iter::") {
+    if need.contains("Empty") && !sc.has("iter::") && !sc.has("__p_Empty") {
         need.remove("Empty");
     }
-    if need.contains("Repeat") && !sc.has("iter::") {
+    if need.contains("Repeat") && !sc.has("iter::") && !sc.has("__p_Repeat") {
         need.remove("Repeat");
     }
     // (`a.zip(&v)` / `a.chain([x])`: codegen makes Vec / array arguments `.iter()` / `.into_iter()`; `a.zip(dst)` with
@@ -1332,6 +1545,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         // (`{:?}` of a raw pointer)
         if sc.has("*const") || sc.has("*mut") {
             need.insert("__exr_fmt_ptr");
+        }
+        // (`{:p}`, `{pointer:p}`: a thin pointer's address, a slice's / dyn's `Pointer { addr, metadata }`)
+        if has_ptr_spec(&mut sc) {
+            need.extend(["__exr_fmt_ptr", "__exr_fmt_fat_ptr", "__exr_fmt_dyn_ptr"]);
         }
     }
     // `vec![..]` becomes Vec::with_capacity + push, and `"..".to_string()` becomes String::from
@@ -1686,6 +1903,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if sc.has("io::") && (sc.has("io::Error") || sc.has("io::Result")) {
         need.extend(["IoError", "Result"]);
     }
+    // (`thread::Result<T>` is a join's result: the prelude's __ThreadPanic is its Err)
+    if sc.has("thread::Result") {
+        need.extend(["__ThreadPanic", "Result", "Debug"]);
+    }
     // (a FusedIterator impl comes with an Iterator impl: the source is scanned only then)
     if (need.contains("Iterator") || need.contains("next")) && sc.has("FusedIterator") {
         need.insert("__fused_mark");
@@ -1783,25 +2004,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             })
         })
     });
-    let float_lit = !float_named && sc.any("float_lit", &|user_src: &str| {
-        let b = user_src.as_bytes();
-        // (not inside a string literal (`"{:8.3}"` and so on))
-        let mut in_str = false;
-        let mut found = false;
-        for i in 1..b.len().saturating_sub(1) {
-            match b[i] {
-                b'"' if b[i - 1] != b'\\' && b[i - 1] != b'\'' => in_str = !in_str,
-                b'.' if !in_str && b[i - 1].is_ascii_digit() && b[i + 1].is_ascii_digit() => {
-                    found = true;
-                    break;
-                }
-                _ => {}
-            }
-        }
-        found
-    });
+    let float_lit = !float_named && sc.any("float_lit", &|user_src: &str| float_lit_in(user_src));
     // (`d.as_secs_f64()`: the float comes from the prelude's Duration)
-    let float_dur = need.contains("Duration") && (sc.has("_f64") || sc.has("_f32"));
+    let float_dur = (need.contains("Duration") || need.contains("Instant")) && (sc.has("_f64") || sc.has("_f32"));
     if float_named || float_lit || float_dur {
         need.extend(["__exr_fmt_float", "__exr_powi", "__exr_powif", "__exr_ordering"]);
         // (`x.classify()`: the prelude's classifier, which codegen calls, and its FpCategory)
@@ -1893,6 +2098,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     if need.contains("Cow") || need.contains("Mutex") || need.contains("RwLock") {
         op_impls.push("Deref");
+    }
+    // (the prelude's TryLockError impls From<PoisonError<T>>)
+    if need.contains("TryLockError") {
+        op_impls.push("From");
     }
     // (the prelude's Cow impls From: `"x".into()` as a `Cow<str>`)
     if need.contains("Cow") {
@@ -2004,6 +2213,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     let mut dur_ops = false;
     let mut fmt_write = false;
+    let mut any_trait = false;
+    // (the fmt traits of `{:b}` / `{:x}` / `{:e}` .. that the program names: the helper codegen calls for each)
+    let mut fmt_radix = 0u8;
     let mut as_mut_gate = false;
     // (whether the program writes `thread` / `Layout`: asked once one of the functions below is wanted)
     let mut thread_text: Option<bool> = None;
@@ -2026,6 +2238,35 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         // program that names the trait only in a bound, or calls `write!(w, ..)` on a generic `W`, never names
         // `write_str`. Every impl has it and the trait's defaults call it, so it comes with the trait (#148). In the
         // loop, as the trait can come in through another prelude item too)
+        // (`dyn Any` (a panic's payload): the trait, whose one member is type_id, which the name alone would not bring)
+        if !any_trait && need.contains("Any") {
+            any_trait = true;
+            changed = true;
+            need.extend(["type_id", "TypeId"]);
+        }
+        // (std's Pointer: `{:p}` of a type of the program's, and `fmt::Pointer::fmt(&r, f)` of a reference)
+        if fmt_radix & 0x40 == 0 && need.contains("Pointer") {
+            fmt_radix |= 0x40;
+            changed = true;
+            need.extend(["__exr_fmt_pointer", "__exr_pointer_fmt", "__exr_fat_pointer_fmt", "__exr_dyn_pointer_fmt", "__exr_fat_words", "__exr_fmt_ptr", "__exr_fmt_fat_ptr", "__exr_fmt_dyn_ptr"]);
+        }
+        if fmt_radix & 0x3f != 0x3f {
+            const RADIX: [(&str, &str); 6] = [
+                ("Binary", "__exr_fmt_binary"),
+                ("Octal", "__exr_fmt_octal"),
+                ("LowerHex", "__exr_fmt_lowerhex"),
+                ("UpperHex", "__exr_fmt_upperhex"),
+                ("LowerExp", "__exr_fmt_lowerexp"),
+                ("UpperExp", "__exr_fmt_upperexp"),
+            ];
+            for (k, (t, h)) in RADIX.into_iter().enumerate() {
+                if fmt_radix & (1 << k) == 0 && need.contains(t) {
+                    fmt_radix |= 1 << k;
+                    changed = true;
+                    need.insert(h);
+                }
+            }
+        }
         if !fmt_write && need.contains("__FWr") {
             fmt_write = true;
             changed = true;
@@ -2051,7 +2292,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             // come from another prelude item too: HashMap's own `alloc`)
             if matches!(it.kind, ItemKind::Normal) {
                 let ok = match name.as_deref() {
-                    Some("current" | "park") => *thread_text.get_or_insert_with(|| sc.has("thread")),
+                    Some("current" | "park" | "park_timeout") => *thread_text.get_or_insert_with(|| sc.has("thread")),
                     Some("alloc" | "alloc_zeroed" | "dealloc" | "realloc" | "handle_alloc_error") => *layout_text.get_or_insert_with(|| sc.has("Layout")),
                     _ => true,
                 };

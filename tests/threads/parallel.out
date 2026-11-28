@@ -1,0 +1,10 @@
+atomic 800000 arcs 1
+mutex 160000
+channel 40000 6199980000
+sync [0, 1, 2, 3, 4]
+rwlock 400
+condvar 499500
+once 11 [42, 42, 42, 42, 42, 42, 42, 42]
+park unparked
+detached true
+true

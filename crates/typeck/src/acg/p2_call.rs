@@ -389,6 +389,9 @@ impl Cx<'_> {
     #[inline(never)]
     fn fmt_method(&mut self, recv: &Expr, f: &Expr, expected: Option<Ty>) -> R<Option<V>> {
         let Some(t) = self.peek(recv) else { return Ok(None) };
+        if let Some(r) = self.radix_fmt_method(recv, t, f, expected)? {
+            return Ok(Some(r));
+        }
         let base = self.strip_refs(t);
         if matches!(base, Ty::Dyn(_) | Ty::Param(_) | Ty::Box(_)) || self.prog.has_param(base) {
             return Ok(None);
@@ -398,11 +401,55 @@ impl Cx<'_> {
                 return Ok(None);
             }
         }
+        // (`x.fmt(f)` of a number with LowerHex / Binary / LowerExp .. the one fmt trait in scope (imported, or the impl's
+        // own): that one's, `ff` of a u8 under `use std::fmt::LowerHex;`; with another in scope too, rustc's E0034, the
+        // ordinary lookup)
+        if self.explicit_trait.is_none() && (base.is_int() || base.is_float()) && !self.param_has_fmt_bound(recv) {
+            let inside = self.prog.sigs.get(self.root as usize).and_then(|s| s.impl_trait.as_deref()).map(|t| t.split('<').next().unwrap_or(t).trim().rsplit("::").next().unwrap_or(t));
+            const TRS: [&str; 8] = ["Display", "Debug", "LowerHex", "UpperHex", "Binary", "Octal", "LowerExp", "UpperExp"];
+            let imp = self.prog.fmt_imports;
+            let applies = |k: usize| k < 2 || k >= 6 || base.is_int();
+            let scope: Vec<usize> = (0..8).filter(|&k| applies(k) && (imp & (1 << k) != 0 || inside == Some(TRS[k]))).collect();
+            let pick = match inside.and_then(|t| scope.iter().copied().find(|&k| TRS[k] == t)) {
+                Some(k) => Some(k),
+                None if scope.len() == 1 => Some(scope[0]),
+                None if scope.iter().any(|&k| k >= 2) => return Ok(None),
+                None => None,
+            };
+            if let Some(k) = pick.filter(|&k| k >= 2) {
+                // (as the trait's path writes it, the prelude's impl for the number: `LowerHex::fmt(&x, f)`, through x's
+                // references; the prelude's trait under its own name where the program has one of that name)
+                let shadowed = format!("__p_{}", TRS[k]);
+                let tn = if self.prog.traits.contains_key(&shadowed) { shadowed } else { TRS[k].to_string() };
+                let mut refs = 0;
+                let mut u = t;
+                while let Ty::Ref(_, i) = u {
+                    refs += 1;
+                    u = *i;
+                }
+                let (rv, rt) = self.expr(recv, None)?;
+                let Some(rv) = rv else { return Ok(Some((None, Ty::Never))) };
+                let (fv, ft) = self.expr(f, None)?;
+                let Some(fv) = fv else { return Ok(Some((None, Ty::Never))) };
+                self.scopes.push(vec![]);
+                self.bind("__exr_xv".into(), rt, Some(rv));
+                self.bind("__exr_xf".into(), ft, Some(fv));
+                let e = crate::parse::parse_expr(&format!("{tn}::fmt(&{}__exr_xv, __exr_xf)", "*".repeat(refs)))?;
+                let e = self.keep_expr(e);
+                let r = self.expr(e, expected);
+                self.scopes.pop();
+                return r.map(Some);
+            }
+        }
         // (a `fmt` of a trait of the program's that the type implements, `impl Unsigned for u32 { fn fmt(self, buf) }`)
         let user_fmt = |tr: &String| {
             self.prog.traits.get(tr).is_some_and(|ds| ds.iter().any(|&d| self.prog.names[d as usize].rsplit("::").next() == Some("fmt"))) && self.prog.implements(base, tr)
         };
-        if self.prog.prim_method(base, "fmt").is_some() || self.prog.blanket.contains_key("fmt") || self.prog.user_traits.iter().any(user_fmt) {
+        // (not where Display / Debug is named, `fmt::Display::fmt(n, f)` of a number: the compiler's own, whatever `fmt` the
+        // prelude's `impl LowerHex for u32` gives the number)
+        let named_std = (base.is_int() || base.is_float() || matches!(base, Ty::Bool | Ty::Char | Ty::Str))
+            && self.explicit_trait.as_ref().is_some_and(|(m, tr)| m == "fmt" && matches!(tr.as_str(), "Display" | "Debug"));
+        if !named_std && (self.prog.prim_method(base, "fmt").is_some() || self.prog.blanket.contains_key("fmt") || self.prog.user_traits.iter().any(user_fmt)) {
             return Ok(None);
         }
         let tr = match self.explicit_trait.as_ref().filter(|(m, _)| m == "fmt") {
@@ -454,6 +501,107 @@ impl Cx<'_> {
         let call = Expr::Call(Box::new(path_expr(h)), vec![Expr::Ref(false, Box::new(paren(recv.clone()))), f.clone()]);
         let call: &Expr = self.keep_expr(call);
         self.expr(call, expected).map(Some)
+    }
+
+    /// `fmt::Pointer::fmt(p, f)` of a reference / raw pointer / Box: written as `{:p}` writes it, with the formatter's
+    /// width and flags. None for another receiver (a type's own impl: the ordinary lookup)
+    #[cold]
+    #[inline(never)]
+    fn radix_fmt_method(&mut self, recv: &Expr, t: Ty, f: &Expr, expected: Option<Ty>) -> R<Option<V>> {
+        let Some(tr) = self.explicit_trait.as_ref().filter(|(m, _)| m == "fmt").map(|(_, tr)| tr.rsplit("::").next().unwrap_or(tr).to_string()) else {
+            return Ok(None);
+        };
+        // (std's Pointer only: where the program has a Pointer of its own, std's is `__p_Pointer` and the program's
+        // goes through its impls)
+        if tr != if self.prog.traits.contains_key("__p_Pointer") { "__p_Pointer" } else { "Pointer" } {
+            return Ok(None);
+        }
+        // (Pointer's receiver is `&self`: the pointer is what it points to, `&&u8`'s `&u8`)
+        // (the pointer: `*recv` of a `&&u8` receiver, or the receiver itself, `r` of `fmt::Pointer::fmt(&r, f)` as the
+        // method call has it)
+        // (a fat one to a slice / str, `&str` / `&[T]` / `Box<[T]>`, too: `Pointer { addr, metadata }`; not a raw one, nor
+        // one to a `dyn`)
+        let ptr_like = |p: Ty| match p {
+            Ty::Ref(_, i) | Ty::Box(i) => !i.is_unsized() || matches!(*i, Ty::Slice(_) | Ty::Str),
+            Ty::Ptr(..) => !p.is_fat(),
+            _ => false,
+        };
+        // (not `&E` of a type with its own Pointer impl, `Pointer::fmt(e_ref, f)`: E's impl, the ordinary lookup)
+        let own = |p: Ty| matches!(p, Ty::Ref(_, Ty::Struct(_)));
+        // (`&p` of a fat pointer the above does not take, a raw one (`*const [u8]`) or one to a `dyn`: p itself, its two
+        // words read through the reference (never the address of the variable p, the outer reference's))
+        let fat_behind = |p: Ty| {
+            matches!(p, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_)) && !ptr_like(p) && matches!(p, Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) if matches!(*i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)))
+        };
+        let unsupported = |p: Ty| matches!(p, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_)) && !ptr_like(p) && !fat_behind(p);
+        let ptr_at: Option<(Ty, bool)> = match t {
+            Ty::Ref(_, p) if ptr_like(*p) || fat_behind(*p) => Some((*p, true)),
+            Ty::Ref(_, p) if unsupported(*p) => None,
+            p if ptr_like(p) && !own(p) => Some((p, false)),
+            _ => None,
+        };
+        if ptr_at.is_none() {
+            return Ok(None);
+        }
+        self.explicit_trait = None;
+        let (rv, rt) = self.expr(recv, None)?;
+        let Some(rv) = rv else { return Ok(Some((None, Ty::Never))) };
+        let (fv, ft) = self.expr(f, None)?;
+        let Some(fv) = fv else { return Ok(Some((None, Ty::Never))) };
+        self.scopes.push(vec![]);
+        self.bind("__exr_xv".into(), rt, Some(rv));
+        self.bind("__exr_xf".into(), ft, Some(fv));
+        let text = {
+            // (by the evaluated receiver's type, which match ergonomics may give one more reference than peek's)
+            let (pt, through) = match rt {
+                Ty::Ref(_, p) if ptr_like(*p) || fat_behind(*p) => (*p, true),
+                Ty::Ref(_, p) if unsupported(*p) => ptr_at.unwrap(),
+                p if ptr_like(p) && !own(p) => (p, false),
+                _ => ptr_at.unwrap(),
+            };
+            let tn = self.prog.tn(match pt {
+                Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) => *i,
+                _ => unreachable!(),
+            });
+            let p = if through { "*__exr_xv" } else { "__exr_xv" };
+            let star = if matches!(pt, Ty::Box(_)) { format!("&*{p}") } else { p.to_string() };
+            let dyn_pt = matches!(pt, Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) if matches!(*i, Ty::Dyn(_)));
+            if through && fat_behind(pt) || through && dyn_pt {
+                let w = if matches!(rt, Ty::Ref(..)) { "__exr_xv" } else { "&__exr_xv" };
+                let h = if dyn_pt { "__exr_dyn_pointer_fmt" } else { "__exr_fat_pointer_fmt" };
+                format!("{{ let (a, m) = __exr_fat_words({w}); {h}::<()>(a, m, __exr_xf) }}")
+            } else if pt.is_fat() {
+                format!("{{ let s = {star}; __exr_fat_pointer_fmt::<()>(s.as_ptr() as usize, s.len(), __exr_xf) }}")
+            } else {
+                format!("__exr_pointer_fmt::<()>({star} as *const {tn} as usize, __exr_xf)")
+            }
+        };
+        let e = crate::parse::parse_expr(&text)?;
+        let e = self.keep_expr(e);
+        let r = self.expr(e, expected);
+        self.scopes.pop();
+        r.map(Some)
+    }
+
+    /// Whether recv is a parameter of a type parameter with a fmt trait among its bounds (`x: T` with `T: UpperHex`), as
+    /// param_fmt_bound finds it: what its bounds say, not the traits the program imports
+    fn param_has_fmt_bound(&self, recv: &Expr) -> bool {
+        if self.env.params.is_empty() || self.generic_args.is_empty() {
+            return false;
+        }
+        let Expr::Path(None, rp) = strip_paren(recv) else { return false };
+        let Some(rn) = ident_of(rp) else { return false };
+        let Some(declared) = self.generic_args.iter().find(|a| a.0 == rn).map(|a| a.1.clone()) else { return false };
+        if self.scopes.iter().rposition(|s| s.iter().any(|b| b.0 == rn)) != Some(0) {
+            return false;
+        }
+        let Some(g) = self.prog.sigs.get(self.root as usize).and_then(|s| s.generics.iter().find(|g| g.0 == declared)) else { return false };
+        g.1.iter().any(|b| {
+            matches!(
+                b.split('<').next().unwrap_or(b).rsplit("::").next().map(str::trim),
+                Some("Display" | "Debug" | "LowerHex" | "UpperHex" | "Binary" | "Octal" | "LowerExp" | "UpperExp" | "Pointer")
+            )
+        })
     }
 
     /// The fmt trait a value of a type parameter takes from its bounds (`x: T` / `x: &T` with `T: Debug`), as
@@ -2245,8 +2393,46 @@ impl Cx<'_> {
         }).collect())
     }
 
+    /// `thread::spawn`, or the prelude's `Builder::spawn` (not a program's own `Builder`'s): the closure it is given
+    /// runs on another thread, so its captures must be Send and held by value, and its value Send
+    fn spawns(&self, id: u32) -> bool {
+        match self.prog.names.get(id as usize).map(|n| n.as_str()) {
+            Some("__core_spawn") => true,
+            Some("Builder::spawn" | "__p_Builder::spawn") => self.prog.item_of.get(id as usize).copied().flatten().is_some_and(|i| i >= self.prog.prelude_from),
+            _ => false,
+        }
+    }
+
+    /// A spawned closure given as a value, not written in the call (`spawn(f)`, `spawn({ move || .. })`,
+    /// `spawn(if c { f } else { g })`): checked by its type t once the call's arguments are evaluated. Its captures (the
+    /// fields of its type) run on the other thread just the same: one held by reference may be outlived (E0373), and
+    /// each must be Send (E0277)
+    fn check_spawn_value(&self, c: &Expr, t: Ty) -> R<()> {
+        if let Ty::Struct(sid) = t {
+            let cd = self.prog.closure_of_struct.get(&self.prog.base_of(sid)).and_then(|f| self.prog.closures.get(f));
+            if let Some(cd) = cd {
+                if let Some(k) = cd.moved.iter().position(|m| !m) {
+                    let n = &cd.captures[k];
+                    return Err(self.at(value_pos(c), format!("closure may outlive the current function, but it borrows `{n}`, which is owned by the current function")));
+                }
+            }
+        }
+        if not_send(self.prog, t) {
+            let bad = match t {
+                Ty::Struct(sid) => self.prog.structs[sid as usize].fields.iter().map(|f| f.1).find(|&f| not_send(self.prog, f)),
+                _ => None,
+            };
+            return Err(self.at(value_pos(c), format!("`{}` cannot be sent between threads safely", self.prog.tn(bad.unwrap_or(t)))));
+        }
+        Ok(())
+    }
+
+    /// A closure written in a spawn call: its free variables, before the call is evaluated (one given as a value is
+    /// check_spawn_value's, after)
     fn check_spawn_closure(&self, c: &Expr) -> R<()> {
-        let Expr::Closure(mv, _, _, _, cpos) = strip_paren(c) else { return Ok(()) };
+        let Expr::Closure(mv, _, _, _, cpos) = strip_paren(c) else {
+            return Ok(());
+        };
         for n in crate::ast_closure::free_vars(strip_paren(c)) {
             let Some((_, t)) = self.lookup(&n) else { continue };
             if not_send(self.prog, t) {
@@ -3349,6 +3535,17 @@ impl Cx<'_> {
             }
             &same_self
         };
+        // (a function without `self` or arguments in impls of one trait with other arguments for one type (typenum's
+        // `impl ToInt<i8> for Z0 { fn to_int() -> i8 }` beside `ToInt<i16>`'s): the one whose result is the type
+        // expected, from which rustc infers the trait's argument)
+        if recv.is_none() && args.is_empty() && !own.has_self && own.impl_trait.is_some() {
+            if let Some(want) = expected.filter(|&w| !self.prog.has_param(w)) {
+                let by_ret: Vec<u32> = cands.iter().copied().filter(|&c| self.prog.sigs[c as usize].impl_trait.is_some() && self.prog.sigs[c as usize].ret == want).collect();
+                if let [c] = by_ret[..] {
+                    return c;
+                }
+            }
+        }
         let Some(at) = recv.or_else(|| args.first().and_then(|a| self.peek(a))) else {
             return id;
         };
@@ -3680,14 +3877,46 @@ impl Cx<'_> {
         r
     }
 
+    /// `__exr_atomic_{load,store,xchg,xadd,cas,fence}(p, ..)` as one instruction (None: not a type it has one for)
+    fn atomic_intrinsic(&mut self, op: &str, vals: &[(Value, Ty, Sp)]) -> Option<V> {
+        if op == "fence" {
+            self.b.ins().fence();
+            return Some((None, Ty::Unit));
+        }
+        let t = match vals.first()?.1 {
+            Ty::Ptr(_, t) => *t,
+            _ => return None,
+        };
+        let ct = clif_ty(t)?;
+        if !matches!(ct, types::I8 | types::I16 | types::I32 | types::I64) {
+            return None;
+        }
+        let p = vals[0].0;
+        let v = match (op, vals.len()) {
+            ("load", 1) => self.b.ins().atomic_load(ct, p),
+            ("store", 2) => {
+                self.b.ins().atomic_store(vals[1].0, p);
+                return Some((None, Ty::Unit));
+            }
+            ("xchg", 2) => self.b.ins().atomic_rmw(crate::ir::AtomicOp::Xchg, p, vals[1].0),
+            ("xadd", 2) => self.b.ins().atomic_rmw(crate::ir::AtomicOp::Add, p, vals[1].0),
+            ("cas", 3) => self.b.ins().atomic_cas(p, vals[1].0, vals[2].0),
+            _ => return None,
+        };
+        Some((Some(v), t))
+    }
+
     fn call_fn_inner(&mut self, id: u32, recv: Option<(Value, Ty)>, args: &[&Expr], turbofish: Option<&[GArg]>, expected: Option<Ty>, span: Sp) -> R<V> {
         // (this call's: not the calls in its arguments')
         let store_args = std::mem::take(&mut self.bk.store_args);
         // (the receiver's region tree is this call's: the calls in the arguments must not take it)
         let rg_recv = if recv.is_some() { self.rg.recv.take() } else { None };
         let rg_sp = std::mem::take(&mut self.rg.call_sp);
-        if self.prog.names.get(id as usize).is_some_and(|n| n == "__core_spawn") {
-            if let Some(c) = args.first() {
+        // (the closure: spawn's argument, or Builder::spawn's after its receiver, which a path call
+        // (`Builder::spawn(b, f)`) passes as the first argument)
+        if self.spawns(id) {
+            let at = usize::from(recv.is_none() && self.prog.names[id as usize] != "__core_spawn");
+            if let Some(c) = args.get(at) {
                 self.check_spawn_closure(c)?;
             }
         }
@@ -4197,6 +4426,13 @@ impl Cx<'_> {
                 }
             }
         }
+        // (the prelude's atomic intrinsics, on an integer, bool, char or pointer of 1, 2, 4 or 8 bytes: one atomic
+        // instruction each, not a call. Their bodies are only what a value of another type would do)
+        if let Some(op) = self.prog.names[id as usize].strip_prefix("__exr_atomic_") {
+            if let Some(r) = self.atomic_intrinsic(op, &vals) {
+                return Ok(r);
+            }
+        }
         // (drop の要らない型の `__exr_drop_in_place::<T>` / `drop(x)` は何もしない: インスタンスも作らない)
         if matches!(self.prog.names[id as usize].as_str(), "__exr_drop_in_place" | "__core_drop") && arg_tys.len() == 1 {
             let t = match arg_tys[0] {
@@ -4274,6 +4510,36 @@ impl Cx<'_> {
         let r = self.resolve_call(id, &arg_tys, sol0, expected, span);
         crate::traits::EXPLICIT_ARGS.with(|e| e.set(prev));
         let (target, sig) = r?;
+        // (a closure given as a value: by its type, now evaluated (vals holds the receiver or the builder first))
+        if self.spawns(id) && self.user_code {
+            let (ai, vi) = match (self.prog.names[id as usize] == "__core_spawn", recv.is_some()) {
+                (true, _) => (0, 0),
+                (false, true) => (0, 1),
+                (false, false) => (1, 1),
+            };
+            if let (Some(c), Some(v)) = (args.get(ai), vals.get(vi)) {
+                if !matches!(strip_paren(c), Expr::Closure(..)) {
+                    self.check_spawn_value(c, v.1)?;
+                }
+            }
+        }
+        // (spawn's T goes to the thread that joins: it must be Send, as std's `T: Send`. Builder::spawn's comes in a
+        // Result)
+        if self.spawns(id) && self.user_code {
+            let mut ret = sig.ret;
+            if let Ty::Struct(s) = ret {
+                if self.prog.structs[self.prog.base_of(s) as usize].name == "Result" {
+                    ret = self.prog.structs[s as usize].args.first().copied().unwrap_or(ret);
+                }
+            }
+            if let Ty::Struct(s) = ret {
+                if let Some(&t) = self.prog.structs[s as usize].args.first() {
+                    if not_send(self.prog, t) {
+                        return Err(self.at(span, format!("`{}` cannot be sent between threads safely", self.prog.tn(t))));
+                    }
+                }
+            }
+        }
         if let Some(sol) = sol_rg {
             self.rg_call(id, &sol, turbofish, args, &sig.params, sig.ret, rg_recv, skip == 1, if span.line == 0 { rg_sp } else { span });
         }
@@ -4801,13 +5067,17 @@ impl Cx<'_> {
                         let mut args = cargs.iter();
                         let a0 = args.next()?;
                         let rest: Vec<Expr> = args.cloned().collect();
+                        // (std's Pointer, which the compiler writes itself, `fmt::Pointer::fmt(&r, f)`: the method call with the
+                        // trait named (radix_fmt_method); its receiver keeps its `&`, as `Pointer::fmt(&rr, f)` of a `&&u8`
+                        // writes rr itself, not *rr)
+                        let std_fmt = ms == "fmt" && tr == if self.prog.traits.contains_key("__p_Pointer") { "__p_Pointer" } else { "Pointer" };
                         let recv = match a0 {
-                            Expr::Ref(_, e) => paren((**e).clone()),
+                            Expr::Ref(_, e) if !std_fmt => paren((**e).clone()),
                             _ => paren(a0.clone()),
                         };
                         // (a primitive receiver with an impl of this trait: `<u32 as Tr>::m(&x)`, which a builtin
                         // method of the same name (`to_string`) cannot take over as `x.m()` would let it)
-                        if let Some(t) = self.peek(&recv).map(|t| self.strip_refs(t)) {
+                        if let Some(t) = self.peek(&recv).map(|t| self.strip_refs(t)).filter(|_| !std_fmt) {
                             // (`It::iter(s)` with s: &[u8] and `impl It for [u8]`: that impl's, not the slice's own
                             // `iter`, which `s.iter()` is)
                             // (only for an impl for `[T]` / `str` itself: `impl Tr for &[u8]` is the reference's)
@@ -4844,8 +5114,11 @@ impl Cx<'_> {
                                     }
                                 }
                                 // (`A::m(&0.0f32)` taking A's default, beside another trait's `f32::m`: not `x.m()`, which
-                                // would reach that one; the path call keeps the trait)
-                                if self.prog.index.get(&key).is_some_and(|&i| self.prog.sigs[i as usize].impl_trait.as_deref().is_some_and(|it| it.split('<').next().unwrap_or(it).trim() != tr)) {
+                                // would reach that one; the path call keeps the trait. Not Display / Debug's `fmt` of a number,
+                                // which the compiler writes itself, beside the prelude's `impl LowerHex for u32`: the method
+                                // call with the trait named, as fmt_method takes it)
+                                if !(ms == "fmt" && matches!(tr.as_str(), "Display" | "Debug"))
+                                    && self.prog.index.get(&key).is_some_and(|&i| self.prog.sigs[i as usize].impl_trait.as_deref().is_some_and(|it| it.split('<').next().unwrap_or(it).trim() != tr)) {
                                     return None;
                                 }
                             }
@@ -4994,8 +5267,33 @@ fn base_name(prog: &Program, sid: u32) -> (&str, bool) {
 /// A type whose values may not move to another thread (not Send): an `Rc`, a raw pointer, a `MutexGuard` or an
 /// RwLock guard, a `&T` of a T that is not Sync, an `Arc<T>` of a T that is not Send and Sync, or a type holding one.
 /// A type of the program's with `unsafe impl Send` is Send. The prelude's own types are judged by their arguments (a
-/// Vec holds a raw pointer, and is Send when its elements are). A type parameter is taken as Send. (A `dyn Trait` is
-/// taken as Send: zustc's types do not keep `+ Send`, tests/security/send_dyn_thread.rs.)
+/// Vec holds a raw pointer, and is Send when its elements are). A type parameter is taken as Send. A `dyn Trait` is
+/// Send only when it is written with `+ Send` or its trait has Send as a supertrait (tests/security/send_dyn_thread.rs).
+/// The part of t that makes it not Send (sync: not Sync), as rustc names it: through a closure's captures and the
+/// fields of the program's own structs, down to the type that is not (`Rc<i32>`, not the closure that captures it, nor
+/// the raw pointer inside the Rc), else t
+pub fn auto_culprit(prog: &Program, t: Ty, sync: bool) -> Ty {
+    let fails = |x: Ty| if sync { not_sync(prog, x) } else { not_send(prog, x) };
+    let mut t = t;
+    for _ in 0..16 {
+        let Ty::Struct(sid) = t else { break };
+        let base = prog.base_of(sid);
+        let own = prog.struct_item.get(base as usize).is_some_and(|&i| i < prog.prelude_from);
+        if !own || prog.impls.contains(&(base, if sync { "Sync" } else { "Send" }.to_string())) {
+            break;
+        }
+        let next = prog.structs[sid as usize].fields.iter().enumerate().map(|(i, f)| match f.1 {
+            Ty::Ptr(_, inner) if prog.ref_capture(sid, i).is_some() => *inner,
+            x => x,
+        }).find(|&f| fails(f));
+        match next {
+            Some(n) => t = n,
+            None => break,
+        }
+    }
+    t
+}
+
 pub fn not_send(prog: &Program, t: Ty) -> bool {
     auto_trait_fails(prog, t, false, &mut vec![], 0)
 }
@@ -5018,6 +5316,11 @@ fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool
     let sync_ = |t: Ty, seen: &mut Vec<(u32, bool)>| auto_trait_fails(prog, t, true, seen, d + 1);
     match t {
         Ty::Ptr(..) => true,
+        // (a trait object: only by an auto trait it is written with (`dyn Tr + Send`) or its trait's supertraits)
+        Ty::Dyn(d) => {
+            let (core, send, sync_) = crate::types::dyn_autos(d);
+            !(if sync { sync_ } else { send }) && prog.tdb.gives_auto(prog, core, if sync { "Sync" } else { "Send" }) != Some(true)
+        }
         // (&T is Send if T is Sync; &mut T if T is Send; both are Sync if T is Sync)
         Ty::Ref(false, i) => sync_(*i, seen),
         Ty::Ref(true, i) if !sync => send(*i, seen),
@@ -5028,7 +5331,9 @@ fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool
             if prelude {
                 let args = &sd.args;
                 return match (name, sync) {
-                    ("Rc", _) | ("MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard", false) => true,
+                    // (std's atomics, AtomicPtr<T> too, are Send and Sync whatever they point to)
+                    (n, _) if n.starts_with("Atomic") => false,
+                    ("Rc", _) | ("MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard" | "StdoutLock", false) => true,
                     // (a RefCell's guards share the cell's non-atomic borrow flag: neither Send nor Sync, as in std)
                     ("Ref" | "RefMut", _) => true,
                     ("Cell" | "RefCell" | "UnsafeCell" | "LazyCell" | "OnceCell" | "__Rcvr__", true) => true,
@@ -5045,8 +5350,21 @@ fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool
                 return false;
             }
             seen.push((sid, sync));
-            sd.args.iter().any(|&a| auto_trait_fails(prog, a, sync, seen, d + 1))
-                || sd.fields.iter().any(|f| auto_trait_fails(prog, f.1, sync, seen, d + 1))
+            // (a closure's capture held by reference is a raw pointer: the reference it stands for. Sync needs
+            // `T: Sync`; Send of a `&mut T` (one the body mutates) `T: Send`, and of one that may be either kind both.
+            // A closure is judged by its captures alone: its type arguments are the parent's parameters and the
+            // captures' types, raw pointers among them)
+            let field = |i: usize, t: Ty, seen: &mut Vec<(u32, bool)>| match (t, prog.ref_capture(sid, i)) {
+                (Ty::Ptr(_, inner), Some(true)) => auto_trait_fails(prog, *inner, sync, seen, d + 1),
+                (Ty::Ptr(_, inner), Some(false)) => sync_(*inner, seen) || (!sync && send(*inner, seen)),
+                _ => auto_trait_fails(prog, t, sync, seen, d + 1),
+            };
+            // (a struct of the program's with fields is judged by them (`Maker<Rc<u32>>` of a `fn() -> T` field is
+            // Send); one without (a placeholder instance) by its arguments)
+            let closure = prog.closure_of_struct.contains_key(&base);
+            let laid_out = !sd.fields.is_empty() || !sd.variants.is_empty();
+            (!closure && !laid_out && sd.args.iter().any(|&a| auto_trait_fails(prog, a, sync, seen, d + 1)))
+                || sd.fields.iter().enumerate().any(|(i, f)| field(i, f.1, seen))
                 || sd.variants.iter().any(|v| v.fields.iter().any(|f| auto_trait_fails(prog, f.1, sync, seen, d + 1)))
         }
         _ => false,

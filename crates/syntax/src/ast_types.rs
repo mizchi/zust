@@ -86,6 +86,11 @@ pub(crate) fn const_expr_text(e: &Expr) -> Option<String> {
         Expr::Binary(op, l, r, _) => format!("({} {op} {})", const_expr_text(l)?, const_expr_text(r)?),
         Expr::Unary(op, x, _) if op == "-" => format!("(-{})", const_expr_text(x)?),
         Expr::Paren(x) => const_expr_text(x)?,
+        // (`u8::max_value()`: the type's constant, `u8::MAX` (#265))
+        Expr::Call(f, args) if crate::parse::int_bound_call(f, args).is_some() => {
+            let (Expr::Path(None, p), Some((_, k))) = (&**f, crate::parse::int_bound_call(f, args)) else { return None };
+            format!("{}::{k}", p.segs[0].name)
+        }
         // (`size_of::<c_long>()` / `mem::align_of::<T>()`: Program::eval_const knows primitives, pointers and aliases
         // of them; libc 0.2's `[u8; 128 - 2 * size_of::<c_int>()]`)
         Expr::Call(f, args)
@@ -210,19 +215,28 @@ pub fn is_auto_trait(name: &str) -> bool {
     matches!(name, "Send" | "Sync" | "Unpin" | "UnwindSafe" | "RefUnwindSafe")
 }
 
+// (`dyn Send + Sync` / `dyn Sync + Send` is `Send + Sync`, the text the other objects' auto traits are written in
+// (types::dyn_autos): the first is the object's trait, the second a kept auto trait)
 fn auto_dyn(t: &PTy) -> Option<String> {
     let PTy::Dyn(bs) = t else { return None };
-    let mut auto = None;
+    let mut autos: Vec<String> = vec![];
     for b in bs {
         match b {
             Bound::Trait(_, p) if p.segs.last().is_some_and(|s| is_auto_trait(&s.name)) => {
-                auto.get_or_insert_with(|| p.segs.last().unwrap().name.clone());
+                let n = p.segs.last().unwrap().name.clone();
+                if !autos.contains(&n) {
+                    autos.push(n);
+                }
             }
             Bound::Lifetime(_) => {}
             _ => return None,
         }
     }
-    auto
+    let first = autos.first()?.clone();
+    if autos.iter().any(|a| a == "Send") && autos.iter().any(|a| a == "Sync") {
+        return Some("Send + Sync".to_string());
+    }
+    Some(first)
 }
 
 pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
@@ -268,10 +282,21 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
                 }
             }
             match (tr, auto) {
-                (Some(s), _) => TySyn::Dyn(s),
+                // (`+ Send` / `+ Sync` are kept, in that order: they decide the object's own auto traits)
+                (Some(s), _) => {
+                    let has = |n: &str| bs.iter().any(|b| matches!(b, Bound::Trait(_, p) if p.segs.last().is_some_and(|s| s.name == n)));
+                    let mut s = s;
+                    for a in ["Send", "Sync"] {
+                        if has(a) {
+                            s.push_str(" + ");
+                            s.push_str(a);
+                        }
+                    }
+                    TySyn::Dyn(s)
+                }
                 // (an auto trait alone is the object's trait elsewhere too: `struct Wrap(dyn Sync)`, `impl Foo for dyn
-                // Send`, `type Z = dyn Unpin;`)
-                (None, Some(a)) => TySyn::Dyn(a),
+                // Send`, `type Z = dyn Unpin;`; spelled as behind a pointer (auto_dyn): `dyn Send + Sync` both)
+                (None, Some(a)) => TySyn::Dyn(auto_dyn(t).unwrap_or(a)),
                 (None, None) => return Err("`dyn` needs a trait".to_string()),
             }
         }
@@ -436,6 +461,13 @@ fn path_ty(p: &Path, self_ty: Option<&TySyn>) -> R<TySyn> {
             return Err("`io::Result` needs a type argument".to_string());
         };
         return Ok(TySyn::App("Result".into(), vec![tysyn(a, self_ty)?, io_err]));
+    }
+    // `thread::Result<T>` (a join's result: Err is the panic's payload, the prelude's __ThreadPanic)
+    if n >= 2 && p.segs[n - 2].name == "thread" && last.name == "Result" {
+        let Some(GArg::Ty(a)) = last.args.first() else {
+            return Err("`thread::Result` needs a type argument".to_string());
+        };
+        return Ok(TySyn::App("Result".into(), vec![tysyn(a, self_ty)?, TySyn::Named("__ThreadPanic".into())]));
     }
     // (`Result<T>` with one argument: `std::io::Result` imported by name (`use std::io::{self, Result};`), which is
     // the only way a one-argument `Result` names a type)

@@ -4,7 +4,7 @@ The percentages are rustc's own UI tests that pass in that area: run-pass + chec
 directories named in the comment next to the number (`ui:`), or compile-fail (`cf:`). They count only the tests
 `bench/rust_ui.py` can ask zustc to handle (no nightly features, auxiliary crates, special flags or targets other than
 Linux x86-64), so 100% does not mean every test of a directory passes. They were measured
-<!-- measured -->2026-11-27, fdbd948<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
+<!-- measured -->2026-11-28, 0f96483<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
 `scripts/update_readme.py` writes them here). The totals for each kind of test are in the
 [README](README.md#coverage-of-rustcs-test-suite), the subset of the language in prose is in
 [docs/language.md](docs/language.md), and the [reports](docs/reports/) explain each step.
@@ -80,7 +80,7 @@ alias); let chains, also in match guards; inline `const { .. }`, `&raw const` / 
 |---|---:|---|
 | the prelude (zustc's own small std; the list is below the table) | — | `std::panic::Location::caller` ([tracked-trait-obj](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/rfcs/rfc-2091-track-caller/tracked-trait-obj.rs)); `type_name` gives the type's short name, not its path ([type-name-intrinsic-usage-61894](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/typeck/type-name-intrinsic-usage-61894.rs)); `thread::park_timeout` ([park-timeout-wakeup-59020](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/std/park-timeout-wakeup-59020.rs)) |
 | async / await | <!-- ui:async-await -->82.5% (85 / 103) | an `async fn` runs at once and returns its value: it is not lowered to a state machine that `poll`s, and there is no executor or real `Waker`. Futures implemented and polled by hand work |
-| threads | <!-- ui:threads-sendsync -->72.4% (42 / 58) | parallelism: green threads on one OS thread, each with its own stack, run until they wait (`join`, `recv`, a held `Mutex`, `sleep`, `yield_now`, an atomic `load`) |
+| threads | <!-- ui:threads-sendsync -->72.4% (42 / 58) | `thread::scope`; poisoning (a panic does not unwind). OS threads (pthreads) run in parallel: atomic `Arc` and atomics, `Mutex` / `Condvar` / `RwLock` / `Once` / `OnceLock` / `park` on futexes, `mpsc`, `thread_local!` per thread, `thread::Builder` |
 | iterators | <!-- ui:iterators -->47.1% (8 / 17) | `iter::empty()` cannot infer its item from the target |
 | FFI | <!-- ui:abi -->81.0% (34 / 42) | structs by value, other ABIs; scalars only |
 | panics | <!-- ui:panics -->11.1% (1 / 9) | a panic aborts: no unwinding, `catch_unwind` ([catch-unwind-bang](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/panics/catch-unwind-bang.rs)), `set_hook` ([panic-handler-chain](https://github.com/rust-lang/rust/blob/0ef1bc386059596dada8fb65b50425aab2ea637a/tests/ui/panics/panic-handler-chain.rs)) |
@@ -108,7 +108,6 @@ or a `BinaryHeap`), formatting, stdin/stdout/fs/env/process basics.
 | coherence and bounds of blanket impls | | `check` time, LSP |
 | field-precise closure captures in codegen | | binary size |
 | a larger prelude | the prelude, ~11k lines, is scanned on every build | no-op build and cache size |
-| real concurrency: threads on several OS threads, in parallel | atomic `Arc` and atomics, a thread-safe runtime | runtime size |
 | executors: `async` lowered to state machines that `poll`, wakers | so that `Pin<Box<dyn Future>>` holds a pending future, not its value (~25 tests) | build time, binary size |
 | unwinding: `catch_unwind`, panic hooks | ~22 tests | landing pads: build time and binary size |
 | FFI: structs by value, other ABIs | ~27 tests | |

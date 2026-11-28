@@ -1,0 +1,4 @@
+Duration { secs: -3 } 1 2s
+Duration { secs: 7 }
+4 2 true
+std::time::Duration

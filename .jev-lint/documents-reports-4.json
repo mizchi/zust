@@ -80,6 +80,38 @@
     "docs_reports_2026-11-26-03-region-check-40.ja": {
       "path": "docs/ja/reports/2026-11-26-03-region-check-40.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-27-01-native-threads.en": {
+      "path": "docs/reports/2026-11-27-01-native-threads.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-27-01-native-threads.ja": {
+      "path": "docs/ja/reports/2026-11-27-01-native-threads.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-27-02-threads-ui.en": {
+      "path": "docs/reports/2026-11-27-02-threads-ui.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-27-02-threads-ui.ja": {
+      "path": "docs/ja/reports/2026-11-27-02-threads-ui.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-27-03-dyn-auto-traits.en": {
+      "path": "docs/reports/2026-11-27-03-dyn-auto-traits.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-27-03-dyn-auto-traits.ja": {
+      "path": "docs/ja/reports/2026-11-27-03-dyn-auto-traits.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-27-04-region-check-41.en": {
+      "path": "docs/reports/2026-11-27-04-region-check-41.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-27-04-region-check-41.ja": {
+      "path": "docs/ja/reports/2026-11-27-04-region-check-41.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -191,6 +223,50 @@
       },
       "target": {
         "source": "docs_reports_2026-11-26-03-region-check-40.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-27-01-native-threads",
+      "topic": "The Japanese file docs/ja/reports/2026-11-27-01-native-threads.md is a faithful translation of docs/reports/2026-11-27-01-native-threads.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-27-01-native-threads.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-27-01-native-threads.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-27-02-threads-ui",
+      "topic": "The Japanese file docs/ja/reports/2026-11-27-02-threads-ui.md is a faithful translation of docs/reports/2026-11-27-02-threads-ui.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-27-02-threads-ui.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-27-02-threads-ui.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-27-03-dyn-auto-traits",
+      "topic": "The Japanese file docs/ja/reports/2026-11-27-03-dyn-auto-traits.md is a faithful translation of docs/reports/2026-11-27-03-dyn-auto-traits.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-27-03-dyn-auto-traits.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-27-03-dyn-auto-traits.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-27-04-region-check-41",
+      "topic": "The Japanese file docs/ja/reports/2026-11-27-04-region-check-41.md is a faithful translation of docs/reports/2026-11-27-04-region-check-41.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-27-04-region-check-41.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-27-04-region-check-41.ja"
       }
     }
   ]
