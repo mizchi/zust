@@ -153,6 +153,10 @@ fn seg(name: &str) -> crate::parse::Seg {
 /// `r: &S` beside `T`, a value of a concrete type, which ref_param_probe does not take for a value of a type parameter
 /// whatever the instance makes that parameter
 pub fn concrete_params(prog: &Program, params: &[(Pat, PTy)], root: u32) -> Vec<String> {
+    // (only where the program has such impls: the probe that reads them runs only there)
+    if prog.ref_param_impls.is_empty() {
+        return vec![];
+    }
     let Some(rs) = prog.sigs.get(root as usize).filter(|rs| !rs.generics.is_empty() || rs.trait_of.is_some()) else { return vec![] };
     params
         .iter()
