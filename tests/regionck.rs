@@ -6153,3 +6153,80 @@ impl<T: W> Drop for V<T> { fn drop(&mut self) {} }
 fn main() {}
 "#, &[], "r21");
 }
+
+#[test]
+fn part42_drop_impl_trait_headers_equation_values_and_dyn_argument_lifetimes() {
+    // (each checked with rustc 1.97. A trait makes a `?Sized` parameter Sized only through its supertraits or a
+    // `Self: Sized` (Clone, Copy, Default, Sized), read from its parsed header: not a bound of its own parameters, nor
+    // one on another type, nor a word in a comment)
+    errors_at("trait Tr<U: ?Sized> {}\nstruct S<T: ?Sized + Tr<u8>>(Box<T>);\nimpl<T: Tr<u8>> Drop for S<T> { fn drop(&mut self) {} }\nfn main() {}\n", &[(3, "requires `T: Sized`")], "s1");
+    errors_at("trait Tr<U: Clone> {}\nstruct S<T: ?Sized + Tr<u8>>(Box<T>);\nimpl<T: Tr<u8>> Drop for S<T> { fn drop(&mut self) {} }\nfn main() {}\n", &[(3, "requires `T: Sized`")], "s2");
+    errors_at("trait Tr where u8: Clone {}\nstruct S<T: ?Sized + Tr>(Box<T>);\nimpl<T: Tr> Drop for S<T> { fn drop(&mut self) {} }\nfn main() {}\n", &[(3, "requires `T: Sized`")], "s3");
+    errors_at("trait Tr: /* Default */ std::fmt::Debug {}\nstruct S<T: ?Sized + Tr>(Box<T>);\nimpl<T: Tr> Drop for S<T> { fn drop(&mut self) {} }\nfn main() {}\n", &[(3, "requires `T: Sized`")], "s7");
+    errors_at(r#"trait A: Sized {}
+struct SA<T: ?Sized + A>(Box<T>);
+impl<T: A> Drop for SA<T> { fn drop(&mut self) {} }
+trait B0: Clone {}
+trait B: B0 {}
+struct SB<T: ?Sized + B>(Box<T>);
+impl<T: B> Drop for SB<T> { fn drop(&mut self) {} }
+trait C where Self: Sized {}
+struct SC<T: ?Sized + C>(Box<T>);
+impl<T: C> Drop for SC<T> { fn drop(&mut self) {} }
+trait D: std::default::Default {}
+struct SD<T: ?Sized + D>(Box<T>);
+impl<T: D> Drop for SD<T> { fn drop(&mut self) {} }
+fn main() {}
+"#, &[], "s4-s8");
+    // (an equation of the impl's bounds has the definition's value, its parameters renamed)
+    errors_at("struct S<T: Iterator<Item = u8>>(T);\nimpl<T: Iterator<Item = u16>> Drop for S<T> { fn drop(&mut self) {} }\nfn main() {}\n", &[(2, "requires `<T as Iterator>::Item == u16`")], "e1");
+    errors_at("struct S<T: Iterator<Item = U>, U>(T, U);\nimpl<A: Iterator<Item = u8>, B> Drop for S<A, B> { fn drop(&mut self) {} }\nfn main() {}\n", &[(2, "requires `<A as Iterator>::Item == u8`")], "e4");
+    errors_at(r#"struct S2<T: Iterator<Item = u8>>(T);
+impl<T: Iterator<Item = u8>> Drop for S2<T> { fn drop(&mut self) {} }
+struct S3<T: Iterator<Item = U>, U>(T, U);
+impl<A: Iterator<Item = B>, B> Drop for S3<A, B> { fn drop(&mut self) {} }
+struct S5<'a, T: Iterator<Item = &'a u8>>(T, &'a u8);
+impl<'x, A: Iterator<Item = &'x u8>> Drop for S5<'x, A> { fn drop(&mut self) {} }
+struct S6<T: Iterator>(T) where T: Iterator<Item = u8>;
+impl<T: Iterator<Item = u8>> Drop for S6<T> { fn drop(&mut self) {} }
+trait Trait { type Assoc; }
+struct Foo<T: Trait>(T);
+impl<T: Trait<Assoc = U>, U: ?Sized> Drop for Foo<T> { fn drop(&mut self) {} }
+struct S8<T: Iterator<Item = (u8, Vec<String>)>>(T);
+impl<T: Iterator<Item = (u8, Vec<String>)>> Drop for S8<T> { fn drop(&mut self) {} }
+fn main() {}
+"#, &[], "e2-e8");
+    // (the review's: values the same type spelled apart (a path's prefix, an alias of the program's) are not
+    // reported; ones surely apart are, std's and the program's types among them)
+    errors_at(r#"type B = u8;
+struct S1<T: Iterator<Item = String>>(T);
+impl<T: Iterator<Item = std::string::String>> Drop for S1<T> { fn drop(&mut self) {} }
+struct S2<T: Iterator<Item = u8>>(T);
+impl<T: Iterator<Item = B>> Drop for S2<T> { fn drop(&mut self) {} }
+struct S4<T: Iterator<Item = Option<u8>>>(T);
+impl<T: Iterator<Item = core::option::Option<u8>>> Drop for S4<T> { fn drop(&mut self) {} }
+fn main() {}
+"#, &[], "q1-q4");
+    errors_at("struct S<T: Iterator<Item = Vec<u8>>>(T);\nimpl<T: Iterator<Item = std::vec::Vec<u16>>> Drop for S<T> { fn drop(&mut self) {} }\nfn main() {}\n", &[(2, "requires `<T as Iterator>::Item == std::vec::Vec<u16>`")], "v1");
+    errors_at("struct Foo;\nstruct S<T: Iterator<Item = Foo>>(T);\nimpl<T: Iterator<Item = u8>> Drop for S<T> { fn drop(&mut self) {} }\nfn main() {}\n", &[(3, "requires `<T as Iterator>::Item == u8`")], "v3");
+    // (a trait object's arguments are invariant: a `'static` of the value's there makes `let _`'s annotation's
+    // lifetime 'static (variance/variance-associated-types2.rs))
+    errors_at("trait Foo { type Bar; }\nfn make() -> Box<dyn Foo<Bar = &'static u32>> { panic!() }\nfn take<'a>(_: &'a u32) {\n    let _: Box<dyn Foo<Bar = &'a u32>> = make();\n}\nfn main() {}\n", &[(4, "lifetime may not live long enough")], "d1");
+    errors_at("trait Foo<T> {}\nfn take<'a>(x: &'a dyn Foo<&'static u32>) {\n    let _: &dyn Foo<&'a u32> = x;\n}\nfn main() {}\n", &[(3, "lifetime may not live long enough")], "d2");
+    errors_at("fn take<'a>(x: Box<dyn Fn(&'static u32)>, _: &'a u32) {\n    let _: Box<dyn Fn(&'a u32)> = x;\n}\nfn main() {}\n", &[(2, "lifetime may not live long enough")], "d3");
+    // (and are fine where the lifetimes agree, are elided (inferred), or are the object's own)
+    errors_at(r#"trait Foo { type Bar; }
+trait Gen<T> {}
+fn make() -> Box<dyn Foo<Bar = &'static u32>> { panic!() }
+fn take<'a>(_: &'a u32, x: Box<dyn Gen<&'static u32> + 'static>, y: Box<dyn Gen<&'static u32>>) {
+    let _: Box<dyn Foo<Bar = &'static u32>> = make();
+    let _: Box<dyn Foo<Bar = &u32>> = make();
+    let _: Box<dyn Gen<&'static u32> + 'a> = x;
+    let _: Box<dyn Gen<&u32>> = y;
+}
+fn take2<'a: 'static>(x: Box<dyn Gen<&'static u32>>, _: &'a u32) {
+    let _: Box<dyn Gen<&'a u32>> = x;
+}
+fn main() {}
+"#, &[], "d4");
+}
