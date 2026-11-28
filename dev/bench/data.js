@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795831358955,
+  "lastUpdate": 1795831361400,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -94324,6 +94324,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 139.273,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "98ced550b5781d76d3472cc3e1131ab31622619f",
+          "message": "prelude: std::sync's LockResult / TryLockResult / TryLockError; try_lock, try_read, try_write (#250) (#333)\n\n* prelude: std::sync's LockResult / TryLockResult / TryLockError; try_lock, try_read, try_write\n\n- The type aliases LockResult / TryLockResult and the enum TryLockError\n  (Debug and Display as std writes them, From<PoisonError<T>>).\n- Mutex::try_lock and RwLock::try_read / try_write on the futex locks:\n  WouldBlock when the lock is held, never a wait. is_poisoned /\n  clear_poison (no lock is ever poisoned: a panic does not unwind).\n- RwLock's read / write / into_inner / get_mut and Condvar's wait /\n  wait_while give std's PoisonError as their Err, as Mutex's lock already\n  did, so `Err(e) => e.into_inner()` and `unwrap_or_else(|e| e.into_inner())`\n  work on them.\n\n(#250: crossbeam-utils' ShardedLock)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* rust-ui: drop/dropck_legal_cycles.rs passes (run-pass 1937)\n\nIts RwLock / Mutex uses take std's LockResult now (`read()` / `write()`\nwith a PoisonError Err).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-28T10:54:42+09:00",
+          "tree_id": "93403260867c2879b6914f7da5698d26ef2e5cc3",
+          "url": "https://github.com/mizchi/zust/commit/98ced550b5781d76d3472cc3e1131ab31622619f"
+        },
+        "date": 1795831361044,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.033,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.831,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.791,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 13.27,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.913,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.016,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 2.145,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 310.023,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 141.742,
             "unit": "MiB"
           }
         ]
