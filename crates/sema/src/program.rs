@@ -3260,6 +3260,11 @@ impl Program {
                 return Err(format!("{}:1: {why} (E0080)", items[c.item as usize].line));
             }
         }
+        // (a const parameter's default is evaluated where the type is declared, used or not, as rustc's: `struct
+        // S<const N: u8 = { u8::MAX + 1 }>` is an E0080. One with an operation only (a name or a literal has none))
+        if !p.struct_defaults.is_empty() {
+            p.const_default_errs(items, user)?;
+        }
         let header = |ii: usize| match items.get(ii).map(|it| it.kind) {
             Some(crate::lexer::ItemKind::ImplMember(h)) => Some(h as usize),
             _ => None,
@@ -4272,6 +4277,37 @@ impl Program {
     /// Whether alias n's type parameters from the k-th on all have defaults (a use may give only the first k)
     pub fn alias_fills(&self, n: &str, k: usize) -> bool {
         self.alias_defaults.get(n).is_some_and(|ds| k < ds.len() && ds[k..].iter().all(Option::is_some))
+    }
+
+    /// The first E0080 of a const parameter's default of the program's types, at the type's line (build_in)
+    #[cold]
+    #[inline(never)]
+    fn const_default_errs(&self, items: &[SrcItem], user: usize) -> R<()> {
+        let mut ids: Vec<&u32> = self.struct_defaults.keys().collect();
+        ids.sort();
+        for &id in ids {
+            let Some(&ii) = self.struct_item.get(id as usize).filter(|&&ii| (ii as usize) < user) else { continue };
+            for (k, d) in self.struct_defaults[&id].iter().enumerate() {
+                let Some(TySyn::Array(_, ArrLen::Const(text))) = d else { continue };
+                if !text.bytes().any(|b| matches!(b, b'+' | b'-' | b'*' | b'/' | b'%' | b'<' | b'>' | b'(' | b'&' | b'|' | b'^' | b'!')) {
+                    continue;
+                }
+                let ty = self.const_param_tys.get(&id).and_then(|v| v.iter().find(|x| x.0 == k)).and_then(|x| Ty::prim(&x.1)).unwrap_or(Ty::Usize);
+                let Ok(e) = crate::parse::parse_expr(text) else { continue };
+                match self.eval_const_as(&e, ty) {
+                    Err(m) if m.ends_with("(E0080)") => return Err(format!("{}:1: {m}", items[ii as usize].line)),
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether struct n is generic with defaults, so that written with no arguments it is a type only through them:
+    /// an expression's path leaves its arguments to inference, as rustc does (`Buf::default()` of `struct Buf<const N:
+    /// usize = 3>` may be a `Buf<5>`), while a type's place takes the defaults
+    pub fn bare_by_defaults(&self, n: &str) -> bool {
+        self.struct_index.get(n).is_some_and(|id| self.struct_defaults.contains_key(id) && !self.structs[*id as usize].generics.is_empty())
     }
 
     /// A method of primitive type t (from a trait impl, or else the trait's default method)
@@ -8250,7 +8286,19 @@ fn subst_tysyn(t: &TySyn, ps: &[String], args: &[TySyn]) -> TySyn {
         TySyn::Ref(m, i) => TySyn::Ref(*m, Box::new(r(i))),
         TySyn::Ptr(m, i) => TySyn::Ptr(*m, Box::new(r(i))),
         TySyn::Slice(i) => TySyn::Slice(Box::new(r(i))),
-        TySyn::Array(i, n) => TySyn::Array(Box::new(r(i)), n.clone()),
+        // (a length that is a const parameter takes its argument's: `struct S<const N: usize = 2, const M: usize = N>`
+        // used as `S` is `S<2, 2>`, M's default `[(); N]` written with N's argument, not a name of the user's scope)
+        TySyn::Array(i, n) => {
+            let len = match n {
+                ArrLen::Const(c) => match ps.iter().position(|p| p == c).map(|k| &args[k]) {
+                    Some(TySyn::Array(e, l)) if matches!(**e, TySyn::Prim(Ty::Unit)) => l.clone(),
+                    Some(TySyn::Named(x)) => ArrLen::Const(x.clone()),
+                    _ => n.clone(),
+                },
+                ArrLen::Lit(_) => n.clone(),
+            };
+            TySyn::Array(Box::new(r(i)), len)
+        }
         TySyn::Tuple(v) => TySyn::Tuple(v.iter().map(r).collect()),
         TySyn::FnPtr(v) => TySyn::FnPtr(v.iter().map(r).collect()),
         TySyn::Assoc(b, n) => TySyn::Assoc(Box::new(r(b)), n.clone()),

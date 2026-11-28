@@ -1,0 +1,9 @@
+b"hi\x0a"
+b"ok"
+name Ok(())
+ab CD
+true
+Ok(7)
+true true
+g7 f4 q3
+Ok(12) Err("invalid digit found in string")
