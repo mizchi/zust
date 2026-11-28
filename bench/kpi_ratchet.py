@@ -4,6 +4,7 @@
 usage:
   python3 bench/kpi_ratchet.py check   bench/kpi_ratchet.txt --base base.txt --head head.txt --env ENV
   python3 bench/kpi_ratchet.py tighten bench/kpi_ratchet.txt --head head.txt --env ENV --sha SHA
+  python3 bench/kpi_ratchet.py check   bench/kpi_ratchet.txt --head main.txt --env ENV --warn
 
 base.txt / head.txt are what `bench/kpi_track.py --dry-run` printed (kpi_pr.parse reads them); ENV is the environment
 the workflow's plan wrote (the toolchain, valgrind, the runner image and its C library).
@@ -128,6 +129,8 @@ def main():
     ap.add_argument("--head", required=True)
     ap.add_argument("--env", required=True)
     ap.add_argument("--sha", default="-")
+    # (check on main, after a merge: a KPI above its ceiling is a ::warning::, which the push's run shows, not a failure)
+    ap.add_argument("--warn", action="store_true")
     a = ap.parse_args()
     r = read(a.file)
     head = kpi_pr.parse(a.head)
@@ -141,7 +144,11 @@ def main():
     rows = check(r, a.env, kpi_pr.parse(a.base) if a.base else {}, head)
     for row in rows:
         print(f"{row['kpi']}\t{row['status']}\t{kpi_pr.fmt_pct(row['over'])} of the ceiling (tolerance {row['tol']:g}%)")
-    sys.exit(1 if any(row["status"] == "fail" for row in rows) else 0)
+        if a.warn and row["status"] == "fail":
+            print(f"::warning::KPI {row['kpi']}: main is {kpi_pr.fmt_pct(row['over'])} above its ceiling in bench/kpi_ratchet.txt "
+                  f"(tolerance {row['tol']:g}%): two changes that each passed, or one merged without the check. Take the cost out, "
+                  "or raise the ceiling on purpose")
+    sys.exit(1 if not a.warn and any(row["status"] == "fail" for row in rows) else 0)
 
 
 if __name__ == "__main__":

@@ -301,8 +301,9 @@ jobs:
           cat "$RUNNER_TEMP/kpi.md" >> "$GITHUB_STEP_SUMMARY"
           exit $status
 
-  # (every push to main: the ceilings of bench/kpi_ratchet.txt that main measures below by more than their tolerance
-  # become what it measured, and in another environment all of them do, in a commit on main that skips CI. The
+  # (every push to main: main's KPIs against the ceilings of bench/kpi_ratchet.txt, one above its own a ::warning::
+  # (a pull request is checked at its head, against its merge base: two that each passed may together pass one); and
+  # the ceilings that main measures below by more than their tolerance become what it measured, and in another environment all of them do, in a commit on main that skips CI. The
   # only job that writes to the repository; it runs main's code. A ceiling changed on main since this commit is left as
   # it is: the next push's run lowers from there)
   ratchet:
@@ -327,6 +328,7 @@ jobs:
           PLANNED: ${{ needs.plan.outputs.env }}
         run: |
           cat "$RUNNER_TEMP"/parts/head-*.txt > "$RUNNER_TEMP/head.txt"
+          python3 bench/kpi_ratchet.py check bench/kpi_ratchet.txt --head "$RUNNER_TEMP/head.txt" --env "$PLANNED" --warn
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           for i in 1 2 3 4; do
