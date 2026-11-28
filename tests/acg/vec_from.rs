@@ -44,6 +44,13 @@ fn main() {
         n
     }]);
     println!("{:?} {:?} {n}", v3, v4);
+    // (a turbofish whose type has a `->`: `Vec::<fn() -> u8>::from`, an array variable)
+    fn seven() -> u8 {
+        7
+    }
+    let fa: [fn() -> u8; 2] = [seven, seven];
+    let fv = Vec::<fn() -> u8>::from(fa);
+    println!("{} {}", fv.len(), fv[1]());
     drop(ds);
     println!("end");
 }

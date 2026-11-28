@@ -941,7 +941,8 @@ fn vec_path_before(b: &[u8], a: usize) -> bool {
         while i > 0 {
             i -= 1;
             match b[i] {
-                b'>' => d += 1,
+                // (`->` in a `fn` type is not a closing `>`)
+                b'>' if !(i > 0 && b[i - 1] == b'-') => d += 1,
                 b'<' => {
                     d -= 1;
                     if d == 0 {
