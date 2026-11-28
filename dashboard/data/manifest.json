@@ -2,7 +2,7 @@
  "contract": "repo-retrospective/v1",
  "repo": "mizchi/zust",
  "head": "c7cbe59b",
- "generated_at": "2026-11-28T11:25:19Z",
+ "generated_at": "2026-11-28T11:27:08Z",
  "generator": "scripts/retro/extract.py",
  "phases": [
   {
