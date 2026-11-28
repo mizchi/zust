@@ -2158,7 +2158,12 @@ impl Session {
         }
         // (a method of `impl<T: Tr> Tr for &T` that does more than forward to T's (Summary::ref_impl_bad): a call through
         // a bound would reach T's method through the deref, so it is reported where the program may make one)
-        if sums[..user_src].iter().any(|sm| !sm.ref_impl_fns.is_empty()) {
+        // (an impl for a reference to its parameter, one without members too: it may leave out each default method)
+        let ref_of_param = |sm: &Summary| {
+            matches!(&sm.impl_self_ty, Some(crate::types::TySyn::Ref(_, i))
+                if matches!(&**i, crate::types::TySyn::Named(n) if sm.impl_generics.iter().any(|g| g.0 == *n)))
+        };
+        if sums[..user_src].iter().any(|sm| !sm.ref_impl_fns.is_empty() || ref_of_param(sm)) {
             if let Some(e) = first_called_ref_impl_fn(&src, &items[..user_src], &sums[..user_src]) {
                 return Err(e);
             }
@@ -8318,12 +8323,12 @@ fn allows_lint(text: &str, lint: &str) -> bool {
     })
 }
 
-/// The first method of `impl<T: Tr> Tr for &T` that does more than forward to T's, or default method of the trait the
-/// impl leaves out (which rustc runs with Self = `&T`), that the program may reach through a generic parameter: it calls
-/// a method of that name (`.m(`, `.m::<`, `::m(`) outside the impl, and it uses the trait as a bound (`N: Tr`, `N:
-/// crate::Tr`, `N: for<'a> Tr`, `N: (Tr)`, `+ Tr`, `impl Tr`, `dyn Tr`, `<X as Tr>`) outside the impl's header. A direct
-/// call `s.m()` reaches X's own method, as rustc's probe takes it first; only a call through a bound would run the
-/// impl's (#144), as an error
+/// The first method of `impl<T: Tr> Tr for &T` that does more than forward to T's that the program may reach through a
+/// generic parameter: it calls a method of that name (`.m(`, `.m::<`, `::m(`) outside the method, and it uses the trait
+/// as a bound (`N: Tr`, `N: crate::Tr`, `N: for<'a> Tr`, `N: (Tr)`, `+ Tr`, `impl Tr`, `dyn Tr`, `<X as Tr>`) outside
+/// the impl's header. A direct call `s.m()` reaches X's own method, as rustc's probe takes it first; only a call through
+/// a bound would run the impl's (#144), as an error. And the first default method of the trait the impl leaves out
+/// (which rustc runs with Self = `&T`) that the program calls by name anywhere outside the impl
 #[cold]
 #[inline(never)]
 fn first_called_ref_impl_fn(src: &str, items: &[SrcItem], sums: &[Summary]) -> Option<String> {
@@ -8379,8 +8384,15 @@ fn first_called_ref_impl_fn(src: &str, items: &[SrcItem], sums: &[Summary]) -> O
         })
     };
     let trait_name = |h: usize| sums.get(h).and_then(|s| s.impl_trait.as_deref()).map(|tr| tr.split('<').next().unwrap_or(tr).trim());
+    // (the program's consts and statics: a `_` parameter given one of their names gets its value, not a unit struct's)
+    let values: Vec<&str> = sums.iter().flat_map(|s| s.consts.iter().map(|c| c.0.as_str()).chain(s.statics.iter().map(|c| c.0.as_str()))).map(|n| n.rsplit("::").next().unwrap_or(n)).collect();
     for (it, sm) in items.iter().zip(sums) {
-        if sm.ref_impl_bad.is_empty() {
+        let bad: Vec<&String> = sm
+            .ref_impl_bad
+            .iter()
+            .chain(sm.ref_impl_unit_args.iter().filter(|(_, v)| values.contains(&v.as_str())).map(|(m, _)| m))
+            .collect();
+        if bad.is_empty() {
             continue;
         }
         let crate::lexer::ItemKind::ImplMember(h) = it.kind else { continue };
@@ -8389,7 +8401,7 @@ fn first_called_ref_impl_fn(src: &str, items: &[SrcItem], sums: &[Summary]) -> O
         if !as_bound(tr, hdr) {
             continue;
         }
-        for m in &sm.ref_impl_bad {
+        for m in bad {
             if called(m, it.start..it.end) {
                 return Some(format!(
                     "{}:1: impls for references to a type parameter (`impl<T: Tr> Tr for &T`) are supported only with methods that forward to T's (`(**self).{m}(..)`), as calls through a bound reach T's through the deref: `{m}` does not",
@@ -8420,7 +8432,9 @@ fn first_called_ref_impl_fn(src: &str, items: &[SrcItem], sums: &[Summary]) -> O
             .collect();
         let end = members.last().map_or(hdr.end, |&k| items[k].end);
         for m in defaults.into_iter().filter(|m| !defined.iter().any(|f| f == m)) {
-            if as_bound(tr, hdr) && called(m, hdr.start..end) {
+            // (any call of the name: a direct one on `&&X` (a reference to a reference) takes the impl's method too, at
+            // rustc's first probe step, whose receiver type `&&X` is the impl's `&self`)
+            if called(m, hdr.start..end) {
                 return Some(format!(
                     "{}:1: impls for references to a type parameter (`impl<T> {tr} for &T`) are supported only when they define each default method of the trait, forwarding to T's: `{m}` is left out",
                     hdr.line

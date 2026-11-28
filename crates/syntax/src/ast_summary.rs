@@ -3019,8 +3019,19 @@ fn summarize_assoc_fn(owner: Option<&Owner>, sm: &mut Summary, fs: &PSig, body: 
                 sm.ref_impl_fns.push(fs.name.clone());
                 let bounded = ow.generics.iter().any(|g| g.0 == *param && g.1.iter().any(|b| b.split('<').next().unwrap_or(b).trim() == trn));
                 let mut_ref = matches!(&ow.self_ty, TySyn::Ref(true, _));
-                if bounded && fs.recv.is_some() && !forwards_to_referent(fs, body, param, trn, mut_ref) {
-                    sm.ref_impl_bad.push(fs.name.clone());
+                if bounded && fs.recv.is_some() {
+                    if !forwards_to_referent(fs, body, param, trn, mut_ref) {
+                        sm.ref_impl_bad.push(fs.name.clone());
+                    } else {
+                        // (a `_` parameter it gives the path of its type: a forward if that names a unit struct)
+                        for (p, t) in &fs.params {
+                            if let (Pat::Wild, PTy::Path(None, tp)) = (p, t) {
+                                if let Some(l) = tp.segs.last() {
+                                    sm.ref_impl_unit_args.push((fs.name.clone(), l.name.clone()));
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -3992,9 +4003,16 @@ fn forwards_to_referent(fs: &PSig, body: &Block, param: &str, tr: &str, mut_ref:
     // (`(*self).m(..)`: `*self` is the `&T`, whose own method is T's through the deref too; but not the `&mut T` of a
     // `&self` method, see above)
     let deref1_recv = !(mut_ref && recv == Recv::Ref(false));
-    // (the first argument of a path call: `&**self` / `&mut **self`, `*self`, or `self` itself, which coerces to T's
-    // receiver through the deref (`T::read(self, buf)`, embedded-io's; `Sp::spawn_obj(self, ..)`, futures-task's))
-    let first_ok = |a: &Expr| matches!(strip(a), Expr::Ref(_, i) if deref2(i)) || deref1(a) || one(a, "self");
+    // (the first argument of a path call: `&**self` / `&mut **self`, `*self`, or, where the head names T (`T::m`, `<T
+    // as Tr>::m`), `self` itself, which coerces to T's receiver through the deref (`T::read(self, buf)`, embedded-io's;
+    // `Sp::spawn_obj(self, ..)`, futures-task's). Not after the trait's name: `Tr::m(self)` takes Self = `&T`, this impl
+    // again)
+    let names_param = |f: &Expr| match strip(f) {
+        Expr::Path(None, p) => p.segs.first().is_some_and(|s| s.name == param),
+        Expr::Path(Some(_), _) => true,
+        _ => false,
+    };
+    let first_ok = |f: &Expr, a: &Expr| matches!(strip(a), Expr::Ref(_, i) if deref2(i)) || deref1(a) || (names_param(f) && one(a, "self"));
     match strip(e) {
         Expr::MethodCall(r, m, targs, args, _) => {
             *m == fs.name
@@ -4002,7 +4020,7 @@ fn forwards_to_referent(fs: &PSig, body: &Block, param: &str, tr: &str, mut_ref:
                 && targs_ok(targs)
                 && args_ok(args)
         }
-        Expr::Call(f, args) => path_head(f) && args.first().is_some_and(first_ok) && args_ok(&args[1..]),
+        Expr::Call(f, args) => path_head(f) && args.first().is_some_and(|a| first_ok(f, a)) && args_ok(&args[1..]),
         _ => false,
     }
 }
