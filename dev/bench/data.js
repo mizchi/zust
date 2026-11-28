@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795865738372,
+  "lastUpdate": 1795865740694,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -158217,6 +158217,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 5469,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c7cbe59bf4a86594078f0c48a45b00ef1943d5f1",
+          "message": "traits: an impl's where clauses and std's Deref impls in supertrait goals; Borrow for the blanket impl: false E0277 for equivalent and stable_deref_trait (#335)\n\nFalse E0277 for equivalent (`Q: Equivalent<K>` through a blanket impl with `Borrow` bounds) and stable_deref_trait (`String: Deref` as a supertrait goal): an impl's where clauses and std's Deref impls of its strings, collections and smart pointers count in supertrait goals, and zero-argument `borrow()` goes through std's Borrow impls when `Borrow` is in scope. Impls for OsString / Path / OsStr are no longer reported as conflicting with String / str (they are distinct std types), while a blanket impl or a program's own alias of the same type still conflicts (E0119, naming the type as written).\n\nFixes #261\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-28T11:24:50Z",
+          "tree_id": "be84a149a87c0be11d41e5c1cf168df7359f43e0",
+          "url": "https://github.com/mizchi/zust/commit/c7cbe59bf4a86594078f0c48a45b00ef1943d5f1"
+        },
+        "date": 1795865740401,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 80.82,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1942,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 86.27,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1564,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 74.13,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5475,
             "unit": "tests"
           }
         ]
