@@ -1277,6 +1277,7 @@ compile-fail	cast/casts-differing-anon.rs
 compile-fail	cast/casts-issue-46365.rs
 run-pass	cast/coercion-as-explicit-cast.rs
 run-pass	cast/constant-expression-cast-9942.rs
+compile-fail	cast/dyn-any-to-fn-with-missing-generics.rs
 check-pass	cast/dyn-tails-need-normalization.rs
 compile-fail	cast/enum-to-numeric-cast.rs
 compile-fail	cast/fat-ptr-cast.rs
