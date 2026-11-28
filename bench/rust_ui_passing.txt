@@ -3393,6 +3393,7 @@ compile-fail	higher-ranked/higher-lifetime-bounds.rs
 run-pass	higher-ranked/higher-ranked-encoding.rs
 compile-fail	higher-ranked/higher-ranked-invalid-bounds.rs
 compile-fail	higher-ranked/higher-ranked-lifetime-error.rs
+compile-fail	higher-ranked/hrtb-fn-ptr-impl-not-general-enough-57936.rs
 check-pass	higher-ranked/hrtb-projection-closure-62201.rs
 compile-fail	higher-ranked/hrtb-with-assoc-type-projection.rs
 check-pass	higher-ranked/leak-check/leak-check-in-selection-7-coherence.rs
@@ -3401,6 +3402,7 @@ compile-fail	higher-ranked/subtype/placeholder-pattern-fail.rs
 check-pass	higher-ranked/subtype/placeholder-pattern.rs
 check-pass	higher-ranked/subtyping-fn-ptr-coercion.rs
 check-pass	higher-ranked/trait-bounds/complex.rs
+compile-fail	higher-ranked/trait-bounds/due-to-where-clause.rs
 compile-fail	higher-ranked/trait-bounds/hang-on-deeply-nested-dyn.rs
 compile-fail	higher-ranked/trait-bounds/higher-trait-bounds-ice-60218.rs
 run-pass	higher-ranked/trait-bounds/hrtb-binder-levels-in-object-types.rs
@@ -3409,6 +3411,9 @@ run-pass	higher-ranked/trait-bounds/hrtb-closure-lifetime-infer.rs
 compile-fail	higher-ranked/trait-bounds/hrtb-conflate-regions.rs
 compile-fail	higher-ranked/trait-bounds/hrtb-debruijn-in-receiver.rs
 run-pass	higher-ranked/trait-bounds/hrtb-debruijn-object-types-in-closures.rs
+compile-fail	higher-ranked/trait-bounds/hrtb-exists-forall-trait-contravariant.rs
+compile-fail	higher-ranked/trait-bounds/hrtb-exists-forall-trait-covariant.rs
+compile-fail	higher-ranked/trait-bounds/hrtb-exists-forall-trait-invariant.rs
 run-pass	higher-ranked/trait-bounds/hrtb-fn-like-trait.rs
 compile-fail	higher-ranked/trait-bounds/hrtb-identity-fn-borrows.rs
 compile-fail	higher-ranked/trait-bounds/hrtb-just-for-static.rs
@@ -3428,6 +3433,7 @@ run-pass	higher-ranked/trait-bounds/infer-assoc-type-projection-type.rs
 run-pass	higher-ranked/trait-bounds/issue-36139-normalize-closure-sig.rs
 check-pass	higher-ranked/trait-bounds/issue-42114.rs
 check-pass	higher-ranked/trait-bounds/issue-43623.rs
+compile-fail	higher-ranked/trait-bounds/issue-46989.rs
 check-pass	higher-ranked/trait-bounds/issue-57639.rs
 compile-fail	higher-ranked/trait-bounds/issue-58451.rs
 check-pass	higher-ranked/trait-bounds/issue-60283.rs

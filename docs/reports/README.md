@@ -141,3 +141,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-27 | [Region (lifetime) checking, part 41: Drop impls that specialize or require more than their type, and `ref` bindings of owned places](2026-11-27-04-region-check-41.md) |
 | 2026-11-28 | [Region (lifetime) checking, part 42: the Drop check's trait headers and equation values, and the invariance of a trait object's arguments in `let _`](2026-11-28-01-region-check-42.md) |
 | 2026-11-28 | [Region (lifetime) checking, part 43: the trait obligations of calls, and the placeholders of their binders (higher-ranked bounds, 1)](2026-11-28-02-region-check-43.md) |
+| 2026-11-28 | [Region (lifetime) checking, part 44: placeholders' universes and outlives, and the binders of fn pointer types in trait obligations (higher-ranked bounds, 2)](2026-11-28-03-region-check-44.md) |

@@ -6287,3 +6287,65 @@ fn caller<'c>(r: &'c isize, q: &'c u8) {
 fn main() { caller(&1, &2); }
 "#, &[], "ok");
 }
+
+#[test]
+fn part44_placeholders_universes_and_outlives_and_fn_pointer_binders() {
+    // (each checked with rustc 1.97. A trait obligation's placeholder is none of the regions of the outer universe:
+    // the reference's region of `&u32`, which inference makes, is not the impl's `'a` for every `'a`)
+    errors_at("trait Foo<X> {}\nfn want_hrtb<T>() where T: for<'a> Foo<&'a isize> {}\nimpl<'a> Foo<&'a isize> for &'a u32 {}\nfn give() { want_hrtb::<&u32>(); }\nfn main() {}\n", &[(4, "implementation of `Foo` is not general enough")], "universe");
+    // (and outlives only itself)
+    errors_at(r#"fn main() {
+    test::<FooS>(&mut 42);
+}
+trait Foo<'a> {}
+struct FooS<'a> {
+    data: &'a mut u32,
+}
+impl<'a, 'b: 'a> Foo<'b> for FooS<'a> {}
+fn test<'a, F>(_data: &'a mut u32) where F: for<'b> Foo<'b> {}
+"#, &[(2, "implementation of `Foo` is not general enough")], "outlives");
+    // (a region a goal's fn pointer type binds is none of the impl's that its head does not bind there, both ways)
+    errors_at("trait X {}\nimpl<'a> X for fn(&'a ()) {}\nfn indirect<T: X>() {}\nfn f() { indirect::<fn(&())>(); }\nfn main() {}\n", &[(4, "implementation of `X` is not general enough")], "fn binds");
+    errors_at("trait Foo {}\nimpl<A> Foo for fn(A) {}\nfn assert_foo<T: Foo>() {}\nfn main() { assert_foo::<fn(&i32)>(); }\n", &[(4, "implementation of `Foo` is not general enough")], "fn(A)");
+    errors_at("trait X {}\nimpl X for fn(&()) {}\nfn indirect<T: X>() {}\nfn f<'a>() { indirect::<fn(&'a ())>(); }\nfn main() {}\n", &[(4, "implementation of `X` is not general enough")], "head binds");
+    errors_at("trait Trait<T> {}\nfn foo<T>() where T: Trait<for<'b> fn(fn(&'b u32))> {}\nimpl<'a> Trait<fn(fn(&'a u32))> for () {}\nfn main() { foo::<()>(); }\n", &[(4, "implementation of `Trait` is not general enough")], "bound's fn");
+    errors_at("trait Foo {}\nimpl<A> Foo for Vec<fn(A)> {}\nimpl<'a> Foo for &'a u8 {}\nfn f<T: Foo>() {}\nfn main() { f::<Vec<fn(&u8)>>(); }\n", &[(5, "implementation of `Foo` is not general enough")], "Vec<fn(A)>");
+    // (a type parameter of the impl that stands for the whole fn pointer type has its binder in it: fine)
+    errors_at("trait Foo {}\nimpl<T> Foo for Box<T> {}\nimpl<T> Foo for Vec<T> {}\nimpl<T> Foo for (T, u8) {}\nimpl<'a, T> Foo for &'a [T] {}\nimpl<'a> Foo for &'a u8 {}\nfn f<T: Foo>() {}\nfn main() {\n    f::<Box<fn(&u8)>>();\n    f::<Vec<fn(&u8)>>();\n    f::<(fn(&u8), u8)>();\n    f::<&[fn(&u8)]>();\n}\n", &[], "T around fn");
+    // (and impls general enough for them are fine; a region inference makes is either)
+    errors_at(r#"trait X {}
+impl X for fn(&()) {}
+fn indirect<T: X>() {}
+trait Y {}
+impl<'a> Y for fn(&'a ()) {}
+fn ind_y<T: Y>() {}
+trait Foo {}
+impl<A> Foo for fn(A) {}
+fn assert_foo<T: Foo>() {}
+trait Bar<'b> {}
+struct FooS<'a>(&'a u8);
+impl<'a, 'b> Bar<'b> for FooS<'a> {}
+fn want_bar<F: for<'b> Bar<'b>>() {}
+trait Baz<'x> {}
+struct G<'y>(&'y u8);
+impl<'a, 'b: 'a> Baz<'a> for G<'b> {}
+fn want_baz<F: for<'x> Baz<'x>>() {}
+trait Q<T> {}
+impl<'a> Q<&'a u8> for u8 {}
+fn want_q<T: for<'z> Q<&'z u8>>(_: T) {}
+fn f<'a>(h: fn(&())) {
+    indirect::<fn(&())>();
+    indirect::<for<'b> fn(&'b ())>();
+    ind_y::<fn(&'a ())>();
+    ind_y::<fn(&'static ())>();
+    assert_foo::<fn(i32)>();
+    assert_foo::<fn(&'static i32)>();
+    assert_foo::<fn(&'a i32)>();
+    want_bar::<FooS>();
+    want_baz::<G>();
+    want_q(5u8);
+    let _ = h;
+}
+fn main() { f(|_| {}); }
+"#, &[], "ok");
+}
