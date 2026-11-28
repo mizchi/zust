@@ -2376,6 +2376,7 @@ run-pass	drop/drop-with-trait-bound-calls-method-on-self.rs
 run-pass	drop/drop-with-type-ascription-1.rs
 run-pass	drop/drop-with-type-ascription-2.rs
 compile-fail	drop/drop_elaboration_with_errors2.rs
+run-pass	drop/dropck_legal_cycles.rs
 run-pass	drop/dropflag-reinit-in-loop.rs
 run-pass	drop/dst-coerce-unsized-drop.rs
 run-pass	drop/enum-drop-impl-15063.rs
