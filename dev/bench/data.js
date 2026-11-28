@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795865306163,
+  "lastUpdate": 1795865308986,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -131013,6 +131013,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 92.179,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b26511148a197e25abed7380f230c10cae93ce2f",
+          "message": "E0276 by the trait a bound names, std's renames in macro expansions: false E0276 in bitflags, writeable and nix (#348)\n\nFalse E0276 `impl has stricter requirements than trait` in bitflags, writeable and nix: zurgo expands a crate's macros before `std_renames` runs, so paths written by a macro with spaces (`core :: fmt :: Write`) kept std's name and the E0276 check, comparing bounds by their last segment, saw a bound the trait lacks. Bounds are now compared by the trait their path names, the spaced form is renamed too (never inside literals or comments), a trait's supertraits include its `where Self: ..` bounds, and an impl that leaves a parameter `Sized` where the trait's is `?Sized` is E0276 as in rustc.\n\nFixes #264\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-28T11:20:21Z",
+          "tree_id": "a05d31b7dbca16bf22c0f7019ba83dc1ae7bad4d",
+          "url": "https://github.com/mizchi/zust/commit/b26511148a197e25abed7380f230c10cae93ce2f"
+        },
+        "date": 1795865308415,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.154,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 82.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 78.125,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 72.727,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.28,
             "unit": "%"
           }
         ]
