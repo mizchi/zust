@@ -168,6 +168,7 @@ crate::enc_struct!(Summary {
     assoc_regions,
     ref_impl_fns,
     ref_impl_bad,
+    ref_impl_unit_args,
 });
 crate::enc_struct!(RAdtSyn { lts, fields, outlives, ty_outlives });
 crate::enc_struct!(AssocSyn {

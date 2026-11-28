@@ -2815,22 +2815,9 @@ impl Program {
                 && sm.impl_generics.iter().any(|g| g.0 == *sn);
             if ref_of_param {
                 // (its methods are not called: a call on the reference reaches T's through the deref, which is what
-                // one that forwards to T's does (the driver reports one that does more). A default method it leaves out
-                // would run with Self = &T, not T's: not supported)
-                // (the impl's members: the items that name this header)
-                let defined: Vec<&String> = items
-                    .iter()
-                    .zip(sums)
-                    .skip(ii + 1)
-                    .take_while(|(m, _)| matches!(m.kind, crate::lexer::ItemKind::ImplMember(h) if h as usize == ii))
-                    .flat_map(|(_, s)| s.ref_impl_fns.iter())
-                    .collect();
-                let left_out = p.traits.get(tr).and_then(|ids| {
-                    ids.iter().filter(|&&id| p.sigs[id as usize].has_body).map(|&id| p.names[id as usize].rsplit("::").next().unwrap_or("")).find(|m| !defined.iter().any(|f| f == m))
-                });
-                if let Some(m) = left_out {
-                    return Err(format!("{}:1: impls for references to a type parameter (`impl<T> {tr} for &T`) are supported only when they define each default method of the trait, forwarding to T's: `{m}` is left out", it.line));
-                }
+                // one that forwards to T's does. One that does more, and a default method it leaves out (which would run
+                // with Self = &T, not T's), the driver reports where the program may call it through a bound
+                // (first_called_ref_impl_fn))
                 // (`impl<T> Foo for T` covers `&U` too; `&T` and `&mut T` are two types)
                 let m = matches!(&sm.impl_self_ty, Some(TySyn::Ref(true, _)));
                 if bare_blankets.contains(tr) || !ref_blankets.insert((tr.clone(), m)) {
