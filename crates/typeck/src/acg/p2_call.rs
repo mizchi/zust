@@ -5645,14 +5645,7 @@ fn mentions_param0(prog: &crate::program::Program, t: Ty, depth: u32) -> bool {
 
 /// The methods of a slice (and so of an array) that take `&mut self`: an array's call of one needs the array `mut`
 /// (unused_mut)
-const MUT_SLICE_METHODS: &[&str] = &[
-    "sort", "sort_unstable", "sort_by", "sort_by_key", "sort_unstable_by", "sort_unstable_by_key", "sort_by_cached_key", "swap", "reverse",
-    "fill", "fill_with", "rotate_left", "rotate_right", "copy_from_slice", "clone_from_slice", "copy_within", "swap_with_slice", "iter_mut",
-    "as_mut_slice", "as_mut_ptr", "as_mut_ptr_range", "get_mut", "get_unchecked_mut", "first_mut", "last_mut", "split_at_mut",
-    "split_first_mut", "split_last_mut", "chunks_mut", "chunks_exact_mut", "rchunks_mut", "rchunks_exact_mut", "split_mut", "splitn_mut",
-    "rsplit_mut", "rsplitn_mut", "select_nth_unstable", "select_nth_unstable_by", "select_nth_unstable_by_key", "each_mut",
-    "make_ascii_uppercase", "make_ascii_lowercase", "partition_dedup",
-];
+const MUT_SLICE_METHODS: &[&str] = crate::program::MUT_SLICE_METHODS;
 
 /// A call's path to the function f with the method call's own type arguments (`r.size::<u16>()` as `T::__ref_size::<u16>`)
 fn with_targs(f: &str, gargs: &[crate::parse::GArg]) -> Expr {

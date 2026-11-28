@@ -534,6 +534,16 @@ pub fn prim_assoc_const(t: Ty, name: &str) -> Option<i128> {
     })
 }
 
+/// The methods of a slice (and of a str / number, `make_ascii_*`) that take `&mut self`
+pub const MUT_SLICE_METHODS: &[&str] = &[
+    "sort", "sort_unstable", "sort_by", "sort_by_key", "sort_unstable_by", "sort_unstable_by_key", "sort_by_cached_key", "swap", "reverse",
+    "fill", "fill_with", "rotate_left", "rotate_right", "copy_from_slice", "clone_from_slice", "copy_within", "swap_with_slice", "iter_mut",
+    "as_mut_slice", "as_mut_ptr", "as_mut_ptr_range", "get_mut", "get_unchecked_mut", "first_mut", "last_mut", "split_at_mut",
+    "split_first_mut", "split_last_mut", "chunks_mut", "chunks_exact_mut", "rchunks_mut", "rchunks_exact_mut", "split_mut", "splitn_mut",
+    "rsplit_mut", "rsplitn_mut", "select_nth_unstable", "select_nth_unstable_by", "select_nth_unstable_by_key", "each_mut",
+    "make_ascii_uppercase", "make_ascii_lowercase", "partition_dedup",
+];
+
 /// A method of an impl of trait `tr` for a reference to a type parameter, `impl<T: B> Tr for &T` / `&mut T`, that a
 /// call on the reference must run itself (#144): one that does more than forward to T's (or any, when T is bounded
 /// by another trait: `impl<T: Display> AsDisplay for &T`, whose X has no AsDisplay to reach), or a default method of
@@ -4413,7 +4423,7 @@ impl Program {
         let builtin = |t: Ty| {
             param.is_none()
                 && match t {
-                    Ty::Ref(_, u) => self.builtin_method(*u, method) == Some(true),
+                    Ty::Ref(rm, u) => self.builtin_method(*u, method) == Some(Some(rm)),
                     u => self.builtin_method(u, method).is_some(),
                 }
         };
@@ -4530,11 +4540,12 @@ impl Program {
     }
 
     /// Whether u, a str, a slice, an array or a number, has a method m of the compiler's own (`"abc".len()`,
-    /// `x.is_ascii()`), or an inherent one of the program's prelude, and how it takes self: Some(true) by reference
-    /// (rustc's probe takes it at the step of a reference to u, by value, and at u by the autoref), Some(false) by value
-    /// (at u only: `(&x).abs()` of `x: i32` is not i32's `abs(self)` but an impl's for `&T`), before an impl's method
-    /// of a trait at that step (#144)
-    pub fn builtin_method(&self, u: Ty, m: &str) -> Option<bool> {
+    /// `x.is_ascii()`), or an inherent one of the program's prelude, and how it takes self (as trait_recv_kind says
+    /// it): `&self` / `&mut self` (Some(Some(mutable))) rustc's probe takes at a reference of that kind to u, by value,
+    /// and at u by the autoref; `self` (Some(None)) at u only (`(&x).abs()` of `x: i32` is not i32's `abs(self)` but an
+    /// impl's for `&T`, nor `s.as_mut_ptr()` of `s: &[u8]` the slice's `as_mut_ptr(&mut self)`), before an impl's
+    /// method of a trait at that step (#144)
+    pub fn builtin_method(&self, u: Ty, m: &str) -> Option<Option<bool>> {
         // (a number's methods that take `&self`; its others take self by value)
         const NUM_BY_REF: &[&str] = &[
             "to_string", "eq_ignore_ascii_case", "to_ascii_uppercase", "to_ascii_lowercase", "make_ascii_uppercase", "make_ascii_lowercase", "fmt", "clone", "cmp", "partial_cmp", "eq", "ne", "lt", "le", "gt", "ge", "hash",
@@ -4543,15 +4554,23 @@ impl Program {
             "len", "is_empty", "as_bytes", "as_ptr", "as_mut_ptr", "iter", "iter_mut", "first", "last", "get", "get_mut", "contains", "to_vec", "to_owned", "starts_with", "ends_with", "split_at", "chunks", "windows", "join", "concat", "sort", "sort_unstable", "reverse", "swap", "fill", "first_mut", "last_mut", "binary_search", "to_string", "chars", "bytes", "lines", "trim", "split",
         ];
         let helper = |pre: &str| self.index.contains_key(&format!("{pre}{m}"));
+        // (by reference, `&mut self` for the methods that mutate)
+        let by_ref = || Some(Some(MUT_SLICE_METHODS.contains(&m) || m.ends_with("_mut") || matches!(m, "as_bytes_mut")));
         match u {
-            Ty::Str => (SEQ.contains(&m) || helper("__exr_str_") || crate::ast_infer::is_builtin_scalar_method(m)).then_some(true),
-            Ty::Slice(_) | Ty::Array(..) => (SEQ.contains(&m) || helper("__exr_slice_") || m.starts_with("sort_")).then_some(true),
+            Ty::Str => (SEQ.contains(&m) || helper("__exr_str_") || crate::ast_infer::is_builtin_scalar_method(m)).then(by_ref).flatten(),
+            Ty::Slice(_) | Ty::Array(..) => (SEQ.contains(&m) || helper("__exr_slice_") || m.starts_with("sort_") || MUT_SLICE_METHODS.contains(&m)).then(by_ref).flatten(),
             u if u.is_int() || u.is_float() || matches!(u, Ty::Bool | Ty::Char) => {
                 // (the prelude's own method: as its signature takes self)
                 if let Some(i) = self.prim_method(u, m).filter(|&i| self.sigs[i as usize].impl_trait.is_none()) {
-                    return Some(matches!(self.sigs[i as usize].params.first(), Some(Ty::Ref(..))));
+                    return Some(match self.sigs[i as usize].params.first() {
+                        Some(Ty::Ref(rm, _)) => Some(*rm),
+                        _ => None,
+                    });
                 }
-                (crate::ast_infer::is_builtin_scalar_method(m) || helper("__exr_char_")).then(|| m.starts_with("is_ascii") || NUM_BY_REF.contains(&m))
+                if !(crate::ast_infer::is_builtin_scalar_method(m) || helper("__exr_char_")) {
+                    return None;
+                }
+                Some((m.starts_with("is_ascii") || NUM_BY_REF.contains(&m)).then(|| m.starts_with("make_ascii")))
             }
             _ => None,
         }
