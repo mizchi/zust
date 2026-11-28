@@ -5834,8 +5834,11 @@ impl Program {
                 // (the bounds the impl writes of T, Tr among them or not: `impl<T: ?Sized> Tr for &T` is for every `&X`)
                 depth < 16
                     && bounds.into_iter().flatten().all(|b| {
-                        if b.split('<').next().unwrap_or(b).trim() == tr {
-                            self.ref_param_implements(tr, *i, depth + 1)
+                        let bn = b.split('<').next().unwrap_or(b).trim();
+                        if bn == tr || self.ref_param_impls.iter().any(|(t, _)| t == bn) {
+                            // (a bound of a trait with impls for references of its own (`T: Tr + Marker` beside
+                            // `impl<T> Marker for &T`): by them, structurally, not by the blanket answer)
+                            self.ref_param_implements(bn, *i, depth + 1)
                         } else {
                             relaxed_bound(b) || self.has_param(*i) || self.implements(*i, b)
                         }
@@ -5845,6 +5848,10 @@ impl Program {
             // (`impl Tr for &mut S`); the blanket impl for `&T` registered for tr is not one)
             Ty::Ref(..) => self.ref_impls.contains(&(u, tr.to_string())) || self.ref_impl_pat_holds(u, tr),
             Ty::Param(_) => false,
+            // (not a reference: the trait's impls for it. The impls for references register tr among the blanket
+            // traits, whose answer holds of any type; a blanket impl of the trait's own (`impl<T: B> Tr for T`)
+            // is still asked)
+            u if !self.blanket_bounds.contains_key(tr) => self.implements_concrete(u, tr),
             u => self.implements(u, tr),
         }
     }

@@ -2,7 +2,7 @@
 // `impl<T: ?Sized> Tr for &T`), where the str's own comes first (`"abc".len()` is 3) and `(&"abc").len()` takes the
 // impl at `&&str`; and an impl for `&str` beside `impl<T: Nm> Nm for &T` (whose T is Sized), which a call through a
 // bound with `T = &str` takes; bounds of the impl written in a where clause; a number's and a
-// slice's own methods
+// slice's own methods; two-phase borrows of a `&mut` autoref; an extra bound with impls for references
 trait Tr {
     fn len(self) -> usize;
 }
@@ -46,6 +46,24 @@ trait Asc { fn is_ascii(self) -> bool; }
 impl<T> Asc for &T { fn is_ascii(self) -> bool { false } }
 trait Mp { fn as_mut_ptr(self) -> *mut u8; }
 impl<T: ?Sized> Mp for &mut T { fn as_mut_ptr(self) -> *mut u8 { std::ptr::null_mut() } }
+// a `&mut self` default with Self = `&S` whose argument reads the receiver (`r.write(r.read())`, two-phase), and
+// the same through a bound (`b.advance(b.remaining())` of `B = &mut Bf`)
+trait Rw { fn read(&self) -> u32; fn write(&mut self, v: u32) -> u32 { v + 100 } }
+struct Sr;
+impl Rw for Sr { fn read(&self) -> u32 { 7 } }
+impl<T: Rw> Rw for &T { fn read(&self) -> u32 { 70 } }
+trait Bf { fn remaining(&self) -> usize; fn advance(&mut self, n: usize); }
+struct Cur(usize, usize);
+impl Bf for Cur { fn remaining(&self) -> usize { self.1 - self.0 } fn advance(&mut self, n: usize) { self.0 += n } }
+impl<T: Bf + ?Sized> Bf for &mut T { fn remaining(&self) -> usize { (**self).remaining() } fn advance(&mut self, n: usize) { (**self).advance(n) } }
+fn drain<B: Bf>(mut b: B) -> usize { let n = b.remaining(); b.advance(b.remaining()); n + b.remaining() }
+// an extra bound of a trait with an impl for references of its own: `S2` is not Marker, so `&S2` is not covered
+trait Marker {}
+impl<T> Marker for &T {}
+trait Nm2 { fn name2(&self) -> u32; }
+struct S2;
+impl Nm2 for S2 { fn name2(&self) -> u32 { 1 } }
+impl<T: Nm2 + Marker> Nm2 for &T { fn name2(&self) -> u32 { 2 } }
 fn run<T: Nm>(t: T) -> u32 {
     t.name()
 }
@@ -58,4 +76,10 @@ fn main() {
     let mut buf = [1u8, 2, 3];
     let sl: &mut [u8] = &mut buf;
     println!("{} {}", (&x).is_ascii(), sl.as_mut_ptr().is_null());
+    let sr = Sr;
+    let mut r = &sr;
+    let mut c = Cur(1, 5);
+    println!("{} {} {}", r.write(r.read()), drain(&mut c), c.0);
+    let s2 = S2;
+    println!("{}", (&&s2).name2());
 }

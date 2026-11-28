@@ -4966,6 +4966,29 @@ impl Cx<'_> {
             return Ok(None);
         };
         let Some(id) = self.prog.ref_param_fn(st, method, &tr) else { return Ok(None) };
+        // (a `&mut` autoref whose arguments name the receiver, `b.advance(b.remaining())`: rustc's two-phase borrow
+        // reserves the receiver while they are evaluated. A path call's `&mut` argument is not two-phase, so the
+        // arguments go first, into temporaries, and the call takes them: `{ let a0 = b.remaining(); b.advance(a0) }`
+        // (the receiver a place, whose evaluation does nothing else))
+        if adj == Some(true) && is_place_expr(strip_paren(recv)) {
+            if let Some(n) = borrowck::root_local(recv) {
+                if margs.iter().any(|a| borrowck::mentions(a, n)) {
+                    let tag = recv as *const Expr as usize;
+                    let mut stmts = vec![];
+                    let mut tmps = vec![];
+                    for (i, a) in margs.iter().enumerate() {
+                        let t = format!("__rp{tag}_{i}");
+                        stmts.push(Stmt::Let(Pat::Ident(false, false, t.clone(), None), None, Some(a.clone()), None, Default::default()));
+                        tmps.push(path_expr(&t));
+                    }
+                    let call = Expr::MethodCall(Box::new(recv.clone()), method.to_string(), gargs.to_vec(), tmps, msp);
+                    stmts.push(Stmt::Expr(call, false));
+                    let blk = Expr::Block(None, false, PBlock { stmts, spos: Default::default() });
+                    let blk: &Expr = self.keep_expr(blk);
+                    return self.expr(blk, expected).map(Some);
+                }
+            }
+        }
         self.check_unsafe_call(id, msp.start)?;
         let mut r = paren(recv.clone());
         for _ in 0..derefs {
