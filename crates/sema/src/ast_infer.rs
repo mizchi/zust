@@ -346,6 +346,7 @@ pub fn infer_ctx_margs(
     s.unify(tail, ret);
     s.finish_unsize();
     s.finish_late_bounds();
+    s.finish_bound_hints();
     s.finish_collects();
     s.finish_assocs();
     let lets = std::mem::take(&mut s.lets);
@@ -582,6 +583,9 @@ impl Inf<'_> {
         self.unify_fn_bounds(&prog.sigs[id as usize].generics, &mut pv);
         self.unify_assoc_bounds(&prog.sigs[id as usize].generics, &mut pv);
         let r = self.known_g(ret, &mut pv);
+        if prog.sigs[id as usize].generics.iter().any(|g| !g.1.is_empty()) {
+            self.bound_hints.push((id, pv.clone()));
+        }
         self.late_bounds(id, pv);
         r
     }
@@ -2284,6 +2288,14 @@ impl Inf<'_> {
                             sig.self_ty.is_some_and(|st| p.match_ty(st, t, &mut sol) && p.arg_refs_agree(st, t))
                         })
                         .collect();
+                    if let [c] = fit.as_slice() {
+                        return Some(*c);
+                    }
+                }
+                // (or, while it is known only in part, the one its shape fits: `Cursor::new([])`'s `Cursor<[_; 0]>` is the
+                // `Cursor<[u8; N]>` impl's)
+                else {
+                    let fit: Vec<u32> = of_trait.iter().copied().filter(|&c| p.sigs[c as usize].self_ty.is_some_and(|st| self.fits(rv, st, 0))).collect();
                     if let [c] = fit.as_slice() {
                         return Some(*c);
                     }

@@ -2043,6 +2043,15 @@ impl Cx<'_> {
             soft = false;
             vals.push(v);
         }
+        // (an empty array nothing around it types: what inference gave it, from a bound that picks one impl (either's
+        // `Left(io::Cursor::new([]))` read as a Read: a `[u8; 0]`))
+        if elem.is_none() && elems.is_empty() {
+            if let Some(&Ty::Array(t, 0)) = self.lets.get(&(e as *const Expr as usize)) {
+                if !has_hole(self.prog, *t) && !self.prog.has_param(*t) {
+                    elem = Some(*t);
+                }
+            }
+        }
         let Some(elem) = elem else {
             return err(SP, "type annotations needed for an empty array");
         };

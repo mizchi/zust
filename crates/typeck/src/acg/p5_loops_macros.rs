@@ -1543,12 +1543,21 @@ impl Cx<'_> {
                 }
                 // Compare as `a == b` / `a != b` (structural comparison, a hand-written eq, String and &str too)
                 let (a, b) = (&args[0], &args[1]);
-                let paren = |x: &Expr| Expr::Paren(Box::new(x.clone()));
+                // (a range index, `mockdata[..n]`, as it is: `&(mockdata[..n])` would take the unsized slice by value; `&mockdata[..n]`
+                // borrows it, as std's `match (&$left, &$right)` does)
+                let paren = |x: &Expr| match x {
+                    Expr::Index(_, ix, _) if matches!(**ix, Expr::Range(..)) => x.clone(),
+                    _ => Expr::Paren(Box::new(x.clone())),
+                };
                 // With formatting available, also prints the left / right values ({:?}) as rustc does (a, b evaluated once)
                 if self.prog.panic_handler.is_none() && self.prog.index.contains_key("__exr_panic_fmt") {
                     let op = if name.ends_with("_eq") { "==" } else { "!=" };
                     let (l, c) = if self.caller_loc { (0u32, 0u32) } else { self.loc(self.mstart) };
-                    let deref = |n: &str| Expr::Unary("*".into(), Box::new(path_expr(n)), crate::parse::Span::default());
+                    // (the references compared where one side is a range index, an unsized slice: `&[u8; 16] == &[u8]`, as
+                    // std's `*left_val == *right_val` compares the unsized places)
+                    let range_ix = |x: &Expr| matches!(x, Expr::Index(_, ix, _) if matches!(**ix, Expr::Range(..)));
+                    let by_ref = range_ix(a) || range_ix(b);
+                    let deref = |n: &str| if by_ref { path_expr(n) } else { Expr::Unary("*".into(), Box::new(path_expr(n)), crate::parse::Span::default()) };
                     let cmp = Expr::Binary(op.to_string(), Box::new(deref("__exr_l")), Box::new(deref("__exr_r")), crate::parse::Span::default());
                     let fail_src = if args.len() > 2 {
                         let fmt = format!("assertion `left {op} right` failed: {{}}\n  left: {{:?}}\n right: {{:?}}");

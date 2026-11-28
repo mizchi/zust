@@ -2126,8 +2126,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         }
     }
     let mut chosen = vec![false; all.len()];
-    // (cross-type comparisons of arrays / slices and Vec: `v == [1, 2]`)
-    if !sc.has("no_std")
+    // (cross-type comparisons of arrays / slices and Vec: `v == [1, 2]`; in a no_std crate too where it uses std
+    // (`extern crate std;`, gone from the text by now, and `std::` paths: either's tests, `assert_eq!(buf, mockdata[..n])`))
+    if (!sc.has("no_std") || sc.has("std::"))
         && sc.has("[")
         && (sc.has("==") || sc.has("!=") || sc.has("assert_eq!") || sc.has("assert_ne!"))
     {

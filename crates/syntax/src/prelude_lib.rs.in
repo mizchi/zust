@@ -6054,6 +6054,13 @@ impl Read for Cursor<&[u8]> {
     }
 }
 
+// (a cursor over an array, `io::Cursor::new([1, 2])` / `io::Cursor::new([])`: std's `T: AsRef<[u8]>`)
+impl<const N: usize> Read for Cursor<[u8; N]> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, IoError> {
+        Ok(__exr_cursor_read(&self.inner, &mut self.pos, buf))
+    }
+}
+
 // std::io::SeekFrom and Seek: an offset from the start, the end or the current position
 pub enum SeekFrom {
     Start(u64),
@@ -6103,6 +6110,12 @@ impl Seek for Cursor<Vec<u8>> {
 impl Seek for Cursor<&[u8]> {
     fn seek(&mut self, pos: SeekFrom) -> Result<u64, IoError> {
         __exr_cursor_seek(self.inner.len(), &mut self.pos, pos)
+    }
+}
+
+impl<const N: usize> Seek for Cursor<[u8; N]> {
+    fn seek(&mut self, pos: SeekFrom) -> Result<u64, IoError> {
+        __exr_cursor_seek(N, &mut self.pos, pos)
     }
 }
 

@@ -3898,6 +3898,30 @@ impl Cx<'_> {
             Expr::Path(None, p) => p.segs.len() == 1 && p.segs[0].name == "None" && p.segs[0].args.is_empty(),
             _ => false,
         };
+        // (an empty array argument for a type parameter not known (or a placeholder's): the type expected of the call's
+        // result, which inference gave from a bound that picks one impl (`let c = io::Cursor::new([]);` read as a Read
+        // is a `Cursor<[u8; 0]>`), or what inference gave the array)
+        let open = |this: &Self, x: Option<Ty>| x.is_none_or(|t| matches!(t, Ty::Struct(p) if this.prog.is_placeholder(p)));
+        if args.iter().zip(&sig0.params[skip..]).any(|(a, &pt)| empty_arr(a) && self.prog.has_param(pt)) && sol.iter().any(|&x| open(self, x)) {
+            let mut fills: Vec<(Ty, Ty)> = expected.filter(|&t| !has_hole(self.prog, t) && !self.prog.has_param(t)).map(|et| (sig0.ret, et)).into_iter().collect();
+            for (a, &pt) in args.iter().zip(&sig0.params[skip..]) {
+                if empty_arr(a) {
+                    if let Some(t) = self.lets.get(&(strip_paren(a) as *const Expr as usize)).copied().filter(|&t| !has_hole(self.prog, t) && !self.prog.has_param(t)) {
+                        fills.push((pt, t));
+                    }
+                }
+            }
+            for (pat, t) in fills {
+                let mut s2: Vec<Option<Ty>> = sol.iter().map(|&x| if open(self, x) { None } else { x }).collect();
+                if self.prog.match_ty(pat, t, &mut s2) {
+                    for (x, y) in sol.iter_mut().zip(s2) {
+                        if open(self, *x) && y.is_some() {
+                            *x = y;
+                        }
+                    }
+                }
+            }
+        }
         if args.iter().zip(&sig0.params[skip..]).any(|(a, &pt)| empty_arr(a) && self.prog.has_param(self.prog.partial_subst(pt, &sol))) {
             // (only the type parameters the empty arguments' types mention, and not from closures: their types are
             // the closures' own)
