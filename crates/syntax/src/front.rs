@@ -151,6 +151,9 @@ pub fn with_prelude_in(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i3
     let mut tm = Timer { on: std::env::var_os("ZUSTC_PROF").is_some(), last: now_ns(), start: now_ns() };
     let renamed = crate::prep::std_renames(src);
     let src: &str = renamed.as_deref().unwrap_or(src);
+    // (std paths to a prelude type the program shadows: the prelude's, renamed below)
+    let to_shadowed = crate::prelude::std_paths_to_shadowed(src);
+    let src: &str = to_shadowed.as_deref().unwrap_or(src);
     let pre = crate::prep::prep(src, crates, fix, cfg, &mut cache.prep)?;
     tm.lap("prep", String::new());
     let mut items = split_inc(&pre, &mut cache.split)?;
