@@ -525,6 +525,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         parts: vec![],
         pat_moved: vec![],
         pat_vars: vec![],
+        or_groups: Default::default(),
         rel_parts: None,
         index_owns: false,
         scrut_mut: false,
@@ -1289,6 +1290,9 @@ pub struct Cx<'p> {
     pub pat_moved: Vec<(Option<Value>, i32, Ty)>,
     /// The enum variants patterns matched: (the base address of the enum's place, its offset, the enum, the variant)
     pub pat_vars: Vec<(Option<Value>, i32, u32, usize)>,
+    /// A match whose or-pattern arms match_ made one arm per alternative (by the match's address): each arm's
+    /// original arm (u32::MAX for one not split), whose alternatives bind each name in one type (E0308)
+    pub or_groups: crate::fxhash::FxMap<usize, Vec<u32>>,
     /// The parts (offset in the place released, type) that the pattern of the next release moved out of, and the
     /// variants (offset, enum, variant) it matched on the way
     pub rel_parts: Option<PatParts>,

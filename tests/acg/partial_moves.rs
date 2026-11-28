@@ -262,6 +262,20 @@ fn reinit_then_move_early(c: bool) -> u32 {
     println!("end reinit_then_move_early");
     0
 }
+// An or-pattern whose alternatives move out of different variants: what is left of the local is that variant's
+// (A's third field, B's second), dropped at the end of the scope (CodeRabbit on #224)
+enum E3 {
+    A(S, u64, S),
+    B(S, S),
+}
+fn or_parts(a: bool) {
+    let e = if a { E3::A(S(131), 7, S(133)) } else { E3::B(S(134), S(135)) };
+    match e {
+        E3::A(x, ..) | E3::B(x, ..) => drop(x),
+    }
+    println!("or_parts {a}");
+}
+
 fn main() {
     reinit_then_move();
     reinit_then_move_early(true);
@@ -291,4 +305,6 @@ fn main() {
     t1();
     t2();
     t3();
+    or_parts(true);
+    or_parts(false);
 }

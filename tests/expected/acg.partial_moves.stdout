@@ -129,3 +129,9 @@ end t3
 drop 7
 drop 8
 drop 9
+drop 131
+or_parts true
+drop 133
+drop 134
+or_parts false
+drop 135

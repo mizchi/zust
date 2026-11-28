@@ -4004,6 +4004,9 @@ fn or_pattern_missing_bindings() {
     // (the same names of different types: E0308, at the alternative (rustc: at its binding, 4:24))
     let src = "enum E { A(u8), B(u16) }\nfn main() {\n    match E::A(1) {\n        E::A(x) | E::B(x) => { let _ = x; }\n    }\n}\n";
     assert_eq!(first(src), Some((4, 19, "mismatched types: expected `u8`, found `u16`".to_string())), "types");
+    // (and of a local the arm moves out of, whose alternatives become arms of their own)
+    let src = "enum E { A(String), B(Vec<u8>) }\nfn main() {\n    let e = E::A(String::new());\n    match e {\n        E::A(x) | E::B(x) => { let _ = x; }\n    }\n}\n";
+    assert_eq!(first(src), Some((5, 19, "mismatched types: expected `String`, found `Vec<u8>`".to_string())), "types of a local");
 }
 
 #[test]

@@ -198,22 +198,33 @@ impl Cx<'_> {
         }
         // (an arm with a guard and an or-pattern: the guard runs for each alternative that matches, left to right.
         // The arm becomes one arm per alternative)
-        if arms.iter().any(|a| a.guard.is_some() && has_or(&a.pat)) {
+        // (so does one whose alternatives move out of a place, `E::A(x, ..) | E::B(x, ..)` on a local: each arm splits
+        // the local by its own variant's layout (split_moved), as the alternative that matched is known only there.
+        // Only a place that is no reference and has something to drop, and an arm with no `ref` binding: the check that
+        // its alternatives bind each name in one mode (`(0, ref y) | (y, 0)`) looks at the or-pattern whole)
+        let place = matches!(strip_paren(scrut), Expr::Path(..) | Expr::Field(..))
+            && self.peek(scrut).is_some_and(|t| !matches!(t, Ty::Ref(..)) && self.needs_drop(t));
+        let per_alt = |a: &crate::parse::Arm| has_or(&a.pat) && (a.guard.is_some() || (place && binds_by_value(&a.pat) && !binds_by_ref(&a.pat)));
+        if arms.iter().any(per_alt) {
             let mut out = vec![];
+            let mut groups: Vec<u32> = vec![];
             let mut changed = false;
-            for a in arms {
-                let alts = if a.guard.is_some() { or_alts(&a.pat) } else { vec![] };
+            for (ai, a) in arms.iter().enumerate() {
+                let alts = if per_alt(a) { or_alts(&a.pat) } else { vec![] };
                 if alts.len() < 2 || alts.len() > 32 {
                     out.push(a.clone());
+                    groups.push(u32::MAX);
                     continue;
                 }
                 changed = true;
                 for p in alts {
                     out.push(crate::parse::Arm { pat: p, pos: a.pos, guard: a.guard.clone(), body: a.body.clone() });
+                    groups.push(ai as u32);
                 }
             }
             if changed {
                 let m2 = self.keep_expr(Expr::Match(scrut.clone(), out));
+                self.or_groups.insert(m2 as *const Expr as usize, groups);
                 // (the region check follows the arms that were lowered)
                 if self.rg_on() {
                     self.rg.alias.insert(m as *const Expr as usize, m2);
@@ -308,7 +319,10 @@ impl Cx<'_> {
         // `&mut` of it there (forget_variant) removes it, and that arm's variant is not known after it)
         let track_f = if track { self.moved_root(scrut).map(|r| r.2) } else { None };
         const MARK: (u32, usize) = (u32::MAX, usize::MAX);
-        for arm in arms {
+        // (the arms one or-pattern's alternatives became: the names the first of each bound, and their types)
+        let groups = self.or_groups.remove(&(m as *const Expr as usize)).unwrap_or_default();
+        let mut group_tys: crate::fxhash::FxMap<u32, Vec<(String, Ty)>> = Default::default();
+        for (ai, arm) in arms.iter().enumerate() {
             let next = self.b.create_block();
             // (after a guard that failed, the next arm tests the scrutinee again: what the guard moved out of it is
             // used (E0382, at the match, as rustc reports it))
@@ -345,6 +359,9 @@ impl Cx<'_> {
             self.bk.guard_arm = false;
             self.bk_bind_end();
             r?;
+            if let Some(&g) = groups.get(ai).filter(|&&g| g != u32::MAX) {
+                self.or_group_types(g, &arm.pat, &mut group_tys)?;
+            }
             if self.owned_binds > ob {
                 self.rel_parts = self.pat_parts(place, pv0);
                 let r = self.release_outer(scrut, sflag);
@@ -2589,12 +2606,37 @@ impl Cx<'_> {
         }
     }
 
+    /// An arm that was an alternative of an or-pattern (group g, match_): each name it binds has the type the group's
+    /// first alternative gave it (E0308 at the alternative, as the or-pattern's own lowering reports it)
+    #[cold]
+    fn or_group_types(&mut self, g: u32, pat: &Pat, seen: &mut crate::fxhash::FxMap<u32, Vec<(String, Ty)>>) -> R<()> {
+        let mut names = vec![];
+        crate::ast_closure::pat_idents(pat, &mut names);
+        let tl: Vec<(String, Ty)> = names.iter().filter_map(|n| self.lookup(n).map(|(_, t)| (n.clone(), t))).collect();
+        let Some(t0) = seen.get(&g) else {
+            seen.insert(g, tl);
+            return Ok(());
+        };
+        if let Some((a, b)) = t0.iter().find_map(|a| tl.iter().find(|b| b.0 == a.0 && b.1 != a.1).map(|b| (a, b))) {
+            let (want, got) = (self.prog.tn(a.1), self.prog.tn(b.1));
+            let sp = Some(crate::parse::pat_pos(pat)).filter(|s| s.line != 0).unwrap_or_default();
+            return Err(self.at(sp, format!("mismatched types: expected `{want}`, found `{got}`")));
+        }
+        Ok(())
+    }
+
     /// The parts (offset in `place`, type) that the pattern bound after pat_moved's entry `from` moved out of, or None
     /// when one is not in place's memory (behind a reference or a Box)
     pub(crate) fn pat_parts(&mut self, place: Place, from: (usize, usize)) -> Option<PatParts> {
         let moved = self.pat_moved.split_off(from.0.min(self.pat_moved.len()));
         let vars = self.pat_vars.split_off(from.1.min(self.pat_vars.len()));
         let Place::Mem(a, o, _) = place else { return None };
+        // (an or-pattern's alternatives each record their variant, `E::A(x, ..) | E::B(x, ..)`: which one matched is
+        // known only at run time, so no part is split by one variant's layout; split_moved takes it as a whole move)
+        let vs: Vec<&(Option<Value>, i32, u32, usize)> = vars.iter().filter(|v| v.0 == Some(a)).collect();
+        if vs.iter().any(|x| vs.iter().any(|y| x.1 == y.1 && x.2 == y.2 && x.3 != y.3)) {
+            return None;
+        }
         let parts = moved.iter().map(|&(b, mo, t)| (b == Some(a)).then_some((mo - o, t))).collect::<Option<Vec<_>>>()?;
         Some((parts, vars.iter().filter(|v| v.0 == Some(a)).map(|v| (v.1 - o, v.2, v.3)).collect()))
     }
@@ -3776,6 +3818,29 @@ impl Cx<'_> {
         }
         self.b.ins().return_(&[]);
         Ok(())
+    }
+}
+
+/// Whether p binds a name by value (not `ref`, not behind a `&` pattern): a move out of the place it matches, when the
+/// type is not Copy. (A capitalized name is taken for a unit variant or a constant)
+fn binds_by_value(p: &Pat) -> bool {
+    match p {
+        Pat::Ident(false, _, n, sub) => n.starts_with(|c: char| c.is_lowercase() || c == '_') || sub.as_deref().is_some_and(binds_by_value),
+        Pat::Ident(true, _, _, Some(q)) => binds_by_value(q),
+        Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Slice(v) | Pat::Or(v, _) => v.iter().any(binds_by_value),
+        Pat::Struct(_, fs, _) => fs.iter().any(|f| binds_by_value(&f.1)),
+        _ => false,
+    }
+}
+
+/// Whether p has a `ref` / `ref mut` binding
+fn binds_by_ref(p: &Pat) -> bool {
+    match p {
+        Pat::Ident(r, _, _, sub) => *r || sub.as_deref().is_some_and(binds_by_ref),
+        Pat::Ref(_, q) => binds_by_ref(q),
+        Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Slice(v) | Pat::Or(v, _) => v.iter().any(binds_by_ref),
+        Pat::Struct(_, fs, _) => fs.iter().any(|f| binds_by_ref(&f.1)),
+        _ => false,
     }
 }
 
