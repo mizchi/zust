@@ -23,3 +23,4 @@ impl has stricter requirements than trait	264	false E0276 in bitflags' impls
 cannot find value \(unsupported path\)	265	value paths zustc cannot resolve
 takes \d+ type arguments?, but \d+ (were|was) given	266	std iterator adapters' arity (`Copied`, `Cloned`, `Map`)
 not all trait items implemented	298	a std trait's default method zustc requires
+duplicate definition of	297	duplicate associated items of two impls
