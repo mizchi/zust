@@ -1,0 +1,18 @@
+# The most each KPI of the `KPI` workflow may be, as its runners count it (bench/kpi_ratchet.py): a pull request whose
+# head is above a ceiling by more than its tolerance fails. Raise a ceiling only on purpose, in the pull request that
+# takes the cost, and say why in its description (the KPI comment gives the line). Every push to main lowers the
+# ceilings that main measures below to what it measured. The ceilings hold in the `env` they were measured in: in
+# another one nothing is checked, and the next push to main measures them anew.
+# KPI	ceiling (M instructions; cache: KiB; LSP session: G)	tolerance (%)	commit measured
+env	rustc 1.100.1 (20ddd0171 2026-11-25) | valgrind-3.22.0 | ubuntu24 | ldd (Ubuntu GLIBC 2.39-0ubuntu8.12) 2.39
+no-op build	0.591	2	61c00e5b
+edit one fn	573.684	0.5	61c00e5b
+check	3925.898	0.5	61c00e5b
+cache	1903.2	0.5	61c00e5b
+LSP session	10.0865	1	61c00e5b
+traits check	1147.973	0.5	61c00e5b
+traits edit	67.129	0.5	61c00e5b
+crates no-op	11.247	2	61c00e5b
+crates edit	370.894	0.5	61c00e5b
+patterns check	751.488	0.5	61c00e5b
+patterns edit	277.921	0.5	61c00e5b
