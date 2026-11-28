@@ -1277,6 +1277,7 @@ compile-fail	cast/casts-differing-anon.rs
 compile-fail	cast/casts-issue-46365.rs
 run-pass	cast/coercion-as-explicit-cast.rs
 run-pass	cast/constant-expression-cast-9942.rs
+compile-fail	cast/dyn-any-to-fn-with-missing-generics.rs
 check-pass	cast/dyn-tails-need-normalization.rs
 compile-fail	cast/enum-to-numeric-cast.rs
 compile-fail	cast/fat-ptr-cast.rs
@@ -2375,6 +2376,7 @@ run-pass	drop/drop-with-trait-bound-calls-method-on-self.rs
 run-pass	drop/drop-with-type-ascription-1.rs
 run-pass	drop/drop-with-type-ascription-2.rs
 compile-fail	drop/drop_elaboration_with_errors2.rs
+run-pass	drop/dropck_legal_cycles.rs
 run-pass	drop/dropflag-reinit-in-loop.rs
 run-pass	drop/dst-coerce-unsized-drop.rs
 run-pass	drop/enum-drop-impl-15063.rs

@@ -3,7 +3,7 @@ arrays.binary_bytes 15750
 arrays.cache_bytes 16597
 arrays.object_bytes 16363
 assoc_consts.binary_bytes 19362
-assoc_consts.cache_bytes 28532
+assoc_consts.cache_bytes 30024
 assoc_consts.object_bytes 23881
 binary_heap.binary_bytes 62689
 binary_heap.cache_bytes 113260
@@ -75,7 +75,7 @@ methods.binary_bytes 12238
 methods.cache_bytes 11517
 methods.object_bytes 12650
 modules.binary_bytes 20941
-modules.cache_bytes 32122
+modules.cache_bytes 33769
 modules.object_bytes 26636
 nostd_calc.binary_bytes 11533
 nostd_calc.cache_bytes 9765
