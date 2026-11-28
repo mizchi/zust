@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795850687080,
+  "lastUpdate": 1795850690174,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -129116,6 +129116,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/8e4e02d811527587914b1583147e85fc79bafc58"
         },
         "date": 1795849806994,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 75,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.103,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.693,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d5b174749f149b609904cad77f460efc6289f9f8",
+          "message": "Deref coercion through a program's Deref; std's Deref of String / Vec / references (either's deref test) (#334)\n\n* Deref coercion through a program's Deref; std's Deref of String / Vec / references\n\n- `&W` where a `&Target` is expected (an argument, a typed let, a return\n  value) goes through W's `deref` (`deref_mut` for a `&mut`), as many as\n  reach the type, and on to a String's str / a Vec's slice: either's\n  `is_str(&value)` of an `Either<String, &str>`. A program's types only:\n  the prelude's (PathBuf, Rc) are not coerced here, as rustc's E0277 of\n  `ToolA::from(&path_buf)` with two From impls has it\n- String / Vec / references implement Deref (Target str / [T] / T) for\n  bounds such as either's `L: Deref, R: Deref<Target = L::Target>`\n- `x.m()` through a Deref whose target is a str / slice by the receiver's\n  instance (`type Target = L::Target`) finds str's / the slice's methods\n- probes deref_coerce_user, deref_either; tests/ui\n  issue-56556.rs passes (baseline)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gioNHaJyvaYW2mEqC\n\n* bench: one ratchet line per kind after merging main\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gioNHaJyvaYW2mEqC\n\n* bench: one ratchet line per kind after merging main\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gioNHaJyvaYW2mEqC\n\n* bench: one ratchet line per kind after merging main\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gioNHaJyvaYW2mEqC\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-28T16:18:50+09:00",
+          "tree_id": "d0c3c3762d4b19172f71f89b6bcaeeeeee64e7cb",
+          "url": "https://github.com/mizchi/zust/commit/d5b174749f149b609904cad77f460efc6289f9f8"
+        },
+        "date": 1795850689571,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
