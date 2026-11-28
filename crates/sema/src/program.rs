@@ -534,6 +534,16 @@ pub fn prim_assoc_const(t: Ty, name: &str) -> Option<i128> {
     })
 }
 
+/// The methods of a slice (and of a str / number, `make_ascii_*`) that take `&mut self`
+pub const MUT_SLICE_METHODS: &[&str] = &[
+    "sort", "sort_unstable", "sort_by", "sort_by_key", "sort_unstable_by", "sort_unstable_by_key", "sort_by_cached_key", "swap", "reverse",
+    "fill", "fill_with", "rotate_left", "rotate_right", "copy_from_slice", "clone_from_slice", "copy_within", "swap_with_slice", "iter_mut",
+    "as_mut_slice", "as_mut_ptr", "as_mut_ptr_range", "get_mut", "get_unchecked_mut", "first_mut", "last_mut", "split_at_mut",
+    "split_first_mut", "split_last_mut", "chunks_mut", "chunks_exact_mut", "rchunks_mut", "rchunks_exact_mut", "split_mut", "splitn_mut",
+    "rsplit_mut", "rsplitn_mut", "select_nth_unstable", "select_nth_unstable_by", "select_nth_unstable_by_key", "each_mut",
+    "make_ascii_uppercase", "make_ascii_lowercase", "partition_dedup",
+];
+
 /// A method of an impl of trait `tr` for a reference to a type parameter, `impl<T: B> Tr for &T` / `&mut T`, that a
 /// call on the reference must run itself (#144): one that does more than forward to T's (or any, when T is bounded
 /// by another trait: `impl<T: Display> AsDisplay for &T`, whose X has no AsDisplay to reach), or a default method of
@@ -996,6 +1006,8 @@ pub struct ClosureDef {
     pub ret_ann: Option<Ty>,
     /// ClosureSyn::fake_reads
     pub fake_reads: Vec<String>,
+    /// ClosureSyn::param_caps
+    pub param_caps: Vec<u64>,
 }
 
 /// A monomorphized instance (the generic fn base with the type arguments args)
@@ -2587,6 +2599,7 @@ impl Program {
                         ret_ann,
                         fake_reads: c.fake_reads.clone(),
                         mutated: c.mutated.clone(),
+                        param_caps: c.param_caps.clone(),
                     },
                 );
                 p.closure_by.insert((first, k as u32), fid);
@@ -3580,7 +3593,11 @@ impl Program {
             let values: Vec<&str> = sums.iter().flat_map(|s| s.consts.iter().map(|c| c.0.as_str()).chain(s.statics.iter().map(|c| c.0.as_str()))).map(|n| n.rsplit("::").next().unwrap_or(n)).collect();
             bad.extend(members().flat_map(|(_, s)| s.ref_impl_unit_args.iter()).filter(|(_, v)| values.contains(&v.as_str())).map(|(m, _)| m));
         }
-        let bounds: Vec<String> = sums[ii].impl_generics.iter().find(|g| g.0 == sn).map(|g| g.1.clone()).unwrap_or_default();
+        let mut bounds: Vec<String> = sums[ii].impl_generics.iter().find(|g| g.0 == sn).map(|g| g.1.clone()).unwrap_or_default();
+        // (T declared `?Sized`, which the bounds do not keep: only then is the impl for `&str`, `&[T]`, `&dyn Tr`)
+        if sums[ii].adt_unsized.iter().any(|g| g == sn) {
+            bounds.push("?Sized".to_string());
+        }
         self.ref_impls_of.entry(tr.to_string()).or_default().push((mutable, bounds.clone()));
         let Some(ids) = self.traits.get(tr) else { return };
         for &d in ids {
@@ -4320,6 +4337,351 @@ impl Program {
     /// usize = 3>` may be a `Buf<5>`), while a type's place takes the defaults
     pub fn bare_by_defaults(&self, n: &str) -> bool {
         self.struct_index.get(n).is_some_and(|id| self.struct_defaults.contains_key(id) && !self.structs[*id as usize].generics.is_empty())
+    }
+
+    /// x meets the bounds bs (T's of an impl for `&T`): a trait with an impl for references to a type parameter, of
+    /// which Program::evaluate's blanket answer holds any type, by that impl's bounds for a reference (`&&S: Name` of
+    /// `S: Name`) and by x's own impls otherwise; any other bound as evaluate answers it
+    pub fn ref_bounds_hold(&self, x: Ty, bs: &[String], depth: u32) -> bool {
+        // (T is Sized unless the impl says `?Sized`: `impl<T: Sz> Sz for &T` is not for `&str`)
+        if matches!(x, Ty::Str | Ty::Slice(_) | Ty::Dyn(_)) && !bs.iter().any(|b| b.trim() == "?Sized") {
+            return false;
+        }
+        bs.iter().all(|b| {
+            let b = b.trim();
+            if b.starts_with('?') || b.starts_with('\'') || b.starts_with("for<") || b.contains('(') {
+                return true;
+            }
+            let n = b.split('<').next().unwrap_or(b).trim();
+            let n = n.rsplit("::").next().unwrap_or(n);
+            match self.ref_impls_of.get(n) {
+                None => self.implements(x, n),
+                Some(_) if depth > 8 => true,
+                Some(impls) => match x {
+                    Ty::Ref(m, y) if impls.iter().any(|i| i.0 == m) => impls.iter().any(|i| i.0 == m && self.ref_bounds_hold(*y, &i.1, depth + 1)),
+                    _ => self.implements_concrete(x, n),
+                },
+            }
+        })
+    }
+
+    /// The fn c runs for Self = the reference st (`&X` of an impl for `&T`, `&mut X` of one for `&mut T`) when c's
+    /// bounds of T hold of X: the impl's method, or the trait's default it leaves out
+    pub fn ref_impl_fn(&self, cs: &[&RefImplFn], method: &str, st: Ty) -> Option<u32> {
+        let Ty::Ref(ms, x) = st else { return None };
+        // (a blanket impl's method: Self is the reference itself, when it meets the impl's bounds)
+        let c = cs.iter().find(|c| if c.blanket { self.ref_bounds_hold(st, &c.bounds, 0) } else { c.mutable == ms && self.ref_bounds_hold(*x, &c.bounds, 0) })?;
+        c.f.or_else(|| {
+            self.traits.get(&c.tr)?.iter().copied().find(|&d| self.sigs[d as usize].has_body && self.names[d as usize].rsplit("::").next() == Some(method))
+        })
+    }
+
+
+    /// #144: the walk of rustc's probe steps for `recv.method()` of a receiver of type rt, among the methods all of
+    /// impls for references (ref_dispatch): of a type parameter (an index of gens, the generic fn's; one past them an
+    /// opaque type, every trait's) under k references, or of a type of its own (param None). (the fn, the derefs, the
+    /// autoref taken) where it takes one of them; None where the probe takes another method, the lookup's. named: the
+    /// trait a path call named; own: x's own method of the name and how it takes self (Program::ref_own_method)
+    #[allow(clippy::too_many_arguments)]
+    pub fn ref_impl_walk(&self, all: &[RefImplFn], rt: Ty, method: &str, param: Option<usize>, k: usize, gens: &[(String, Vec<String>)], named: Option<&str>, own: &dyn Fn(Ty) -> Option<u8>) -> Option<(u32, usize, Option<bool>)> {
+        let mut k = k;
+        // (a value of P: of the traits P's bounds name; a call that named its trait, that one's)
+        // (a bound's trait, or one of its supertraits: `<P as Name>::name` of `P: Loud` with `trait Loud: Name`)
+        let supers = |b: &str, tr: &str| {
+            let mut seen: Vec<&str> = vec![b];
+            let mut i = 0;
+            while i < seen.len() && seen.len() < 32 {
+                if seen[i] == tr {
+                    return true;
+                }
+                for s in self.trait_supers.get(seen[i]).map(|v| v.as_slice()).unwrap_or(&[]) {
+                    let s = s.split('<').next().unwrap_or(s).trim();
+                    let s = s.rsplit("::").next().unwrap_or(s);
+                    if !seen.contains(&s) {
+                        seen.push(s);
+                    }
+                }
+                i += 1;
+            }
+            false
+        };
+        let bound = |tr: &str| {
+            param.is_none_or(|i| i >= gens.len() || gens.get(i).is_some_and(|g| g.1.iter().any(|b| {
+                let b = b.trim();
+                let b = b.split('<').next().unwrap_or(b).trim();
+                supers(b.rsplit("::").next().unwrap_or(b), tr)
+            })))
+        };
+        let named = |tr: &str| named.is_none_or(|t| t == tr);
+        let cs: Vec<&RefImplFn> = all.iter().filter(|c| (c.blanket || bound(&c.tr)) && named(&c.tr)).collect();
+        // (one trait's: two traits' impls for references with the method are left to the lookup)
+        let first = cs.first()?;
+        if cs.iter().any(|c| c.tr != first.tr) {
+            return None;
+        }
+        let kind = first.recv;
+        if param.is_none() {
+            k = 0;
+            let mut t = rt;
+            while let Ty::Ref(_, i) = t {
+                t = *i;
+                k += 1;
+            }
+        }
+        let (mut cur, mut depth, mut s) = (rt, k, 0usize);
+        // (a str's, a slice's or a number's own method of the name at a step, which comes first there: a `&self` one at
+        // a reference to the value or the value, `s.len()` of `s: &str` beside `impl<T: ?Sized> Tr for &T`'s
+        // `len(self)`; a `self` one at the value only)
+        let builtin = |t: Ty| {
+            param.is_none()
+                && match t {
+                    Ty::Ref(rm, u) => self.builtin_method(*u, method) == Some(Some(rm)),
+                    u => self.builtin_method(u, method).is_some(),
+                }
+        };
+        // (`self` by value: Self is the type at the first step, or P's)
+        if kind == 0 {
+            // (a value's own `&mut self` builtin comes after the `&` autoref, where an impl for `&T` may be taken:
+            // `(*s).as_mut_ptr()` of `s: &mut [u8]`)
+            let mut_builtin = param.is_none() && !matches!(rt, Ty::Ref(..)) && self.builtin_method(rt, method) == Some(Some(true));
+            if builtin(rt) && !mut_builtin {
+                return None;
+            }
+            if param.is_some() && k > 0 {
+                return None;
+            }
+            // (a value of a type of its own, `a.len()` of `a: [i32; 3]`: Self is the value by an autoref (`&a`, then
+            // `&mut a`) where no own method of the name comes first, one taking self by value at the value, one taking
+            // `&self` at the `&` autoref (`&mut self` at the `&mut` one))
+            if let (None, 0) = (param, k) {
+                // (only a type whose own methods are known here, a struct's (the program's and the prelude's), an
+                // array's, a slice's, a str's, a scalar's: another's (a raw pointer's `is_null(self)`, a Box's, a
+                // tuple's) are the lookup's)
+                if !(matches!(rt, Ty::Struct(_) | Ty::Array(..) | Ty::Slice(_) | Ty::Str | Ty::Bool | Ty::Char) || rt.is_int() || rt.is_float()) {
+                    return None;
+                }
+                let o = own(rt);
+                // (a std prelude trait's method taking self by value, which the value's step takes before the autoref:
+                // `x.min(2)` of `x: u32` is Ord's, `x.into()` and `x.try_into()` the blanket impls' of every type,
+                // `a.into_iter()` IntoIterator's)
+                let std_by_value = match method {
+                    "into" | "try_into" => true,
+                    "min" | "max" | "clamp" => rt.is_int() || matches!(rt, Ty::Bool | Ty::Char) || self.implements(rt, "Ord"),
+                    "into_iter" => matches!(rt, Ty::Array(..)) || self.implements(rt, "IntoIterator") || self.implements(rt, "Iterator"),
+                    _ => false,
+                };
+                if o == Some(0) || std_by_value {
+                    return None;
+                }
+                if o != Some(1) {
+                    if let Some(f) = self.ref_impl_fn(&cs, method, Ty::Ref(false, intern(rt))) {
+                        return Some((f, 0, Some(false)));
+                    }
+                }
+                if !matches!(o, Some(1 | 2)) && !mut_builtin {
+                    if let Some(f) = self.ref_impl_fn(&cs, method, Ty::Ref(true, intern(rt))) {
+                        return Some((f, 0, Some(true)));
+                    }
+                }
+                return None;
+            }
+            // (`(&s).take()`: S's own `take(&self)` comes first)
+            if let (None, 1, Ty::Ref(m, x)) = (param, k, rt) {
+                if own(*x) == Some(1 + m as u8) {
+                    return None;
+                }
+            }
+            return self.ref_impl_fn(&cs, method, rt).map(|f| (f, 0, None));
+        }
+        let want_mut = kind == 2;
+        loop {
+            if builtin(cur) {
+                return None;
+            }
+            if depth == 0 {
+                // (at P: Self is what P stands for, by the autoref; a type of its own: X's method, the lookup's)
+                return if param.is_some() { self.ref_impl_fn(&cs, method, cur).map(|f| (f, s, Some(want_mut))) } else { None };
+            }
+            let Ty::Ref(mc, inner) = cur else { return None };
+            if mc == want_mut {
+                // (by value: Self is what cur points to)
+                if depth == 1 {
+                    if param.is_some() {
+                        // (P itself, `n.name()` of `n: &N`: an impl for references when P stands for one)
+                        return self.ref_impl_fn(&cs, method, *inner).map(|f| (f, s, None));
+                    }
+                    // (X's own method, `(&s).name()`; else the impl's for `&X` by the autoref below (#143))
+                    if own(*inner).is_some() {
+                        return None;
+                    }
+                } else if let Some(f) = self.ref_impl_fn(&cs, method, *inner) {
+                    return Some((f, s, None));
+                }
+            }
+            // (by the autoref: Self is cur, `r.get()` of `r: &mut C` with `impl Counter for &mut T`'s `get(&self)`)
+            if let Some(f) = self.ref_impl_fn(&cs, method, cur) {
+                return Some((f, s, Some(want_mut)));
+            }
+            cur = *inner;
+            depth -= 1;
+            s += 1;
+        }
+    }
+
+
+    /// x's (not a reference's) own method named m, which a receiver `&x` reaches before an impl for `&T`: how it takes
+    /// self (0 `self`, 1 `&self`, 2 `&mut self`, 3 otherwise)
+    pub fn ref_own_method(&self, x: Ty, m: &str) -> Option<u8> {
+        let id = match x {
+            Ty::Struct(sid) => self.self_method(sid, m).or_else(|| self.self_default_method(sid, m)),
+            // (a trait object: its trait's methods and its supertraits', `d.name()` of `d: &dyn Name` is the object's)
+            Ty::Dyn(d) => {
+                let first = d.split('+').next().unwrap_or(d).trim();
+                let first = first.split(['<', '(']).next().unwrap_or(first).trim();
+                let mut seen = vec![first.rsplit("::").next().unwrap_or(first).to_string()];
+                let mut i = 0;
+                let mut found = None;
+                while i < seen.len() && seen.len() < 32 && found.is_none() {
+                    found = self.traits.get(&seen[i]).and_then(|ds| ds.iter().copied().find(|&d| self.names[d as usize].rsplit("::").next() == Some(m)));
+                    for s in self.trait_supers.get(&seen[i]).cloned().unwrap_or_default() {
+                        let s = s.split('<').next().unwrap_or(&s).trim().to_string();
+                        if !seen.contains(&s) {
+                            seen.push(s);
+                        }
+                    }
+                    i += 1;
+                }
+                found.or_else(|| self.prim_self_method(x, m))
+            }
+            t => self.prim_self_method(t, m),
+        }?;
+        Some(self.recv_code(id))
+    }
+
+    /// How fn id takes self, as ref_own_method says it (0 `self`, 1 `&self`, 2 `&mut self`, 3 otherwise)
+    pub fn recv_code(&self, id: u32) -> u8 {
+        let sig = &self.sigs[id as usize];
+        match sig.params.first() {
+            Some(Ty::Ref(false, _)) => 1,
+            Some(Ty::Ref(true, _)) => 2,
+            // (self by value, of any type: a struct's, a type parameter's, a number's `impl A for u32 { fn value(self) }`)
+            Some(Ty::Struct(_) | Ty::Param(_)) => 0,
+            Some(_) if sig.has_self => 0,
+            _ => 3,
+        }
+    }
+
+    /// The default fn m (an associated fn too, `T::phf_hash_slice(xs)` of `T = &u8`) of a trait whose impl for
+    /// references to a type parameter (`impl<T: B> Tr for &T`, ref_impls_of) covers the reference t and leaves m out:
+    /// the impl's own fns are `T::__ref_m` (#144)
+    pub fn ref_impl_default(&self, t: Ty, m: &str) -> Option<u32> {
+        let Ty::Ref(rm, x) = t else { return None };
+        self.ref_impls_of.iter().find_map(|(tr, impls)| {
+            let d = self.traits.get(tr)?.iter().copied().find(|&d| self.sigs[d as usize].has_body && self.names[d as usize].rsplit("::").next() == Some(m))?;
+            impls.iter().any(|(im, bs)| *im == rm && self.ref_bounds_hold(*x, bs, 0)).then_some(d)
+        })
+    }
+
+    /// How trait tr declares its method m to take self (`&self`: Some(Some(false)), `&mut self`: Some(Some(true)),
+    /// `self`: Some(None)); None when tr declares no method m taking self
+    pub fn trait_recv_kind(&self, tr: &str, m: &str) -> Option<Option<bool>> {
+        let d = self.traits.get(tr)?.iter().copied().find(|&d| self.sigs[d as usize].has_self && self.names[d as usize].rsplit("::").next() == Some(m))?;
+        Some(match self.sigs[d as usize].params.first()? {
+            Ty::Ref(m, _) => Some(*m),
+            _ => None,
+        })
+    }
+
+    /// Whether u, a str, a slice, an array or a number, has a method m of the compiler's own (`"abc".len()`,
+    /// `x.is_ascii()`), or an inherent one of the program's prelude, and how it takes self (as trait_recv_kind says
+    /// it): `&self` / `&mut self` (Some(Some(mutable))) rustc's probe takes at a reference of that kind to u, by value,
+    /// and at u by the autoref; `self` (Some(None)) at u only (`(&x).abs()` of `x: i32` is not i32's `abs(self)` but an
+    /// impl's for `&T`, nor `s.as_mut_ptr()` of `s: &[u8]` the slice's `as_mut_ptr(&mut self)`), before an impl's
+    /// method of a trait at that step (#144)
+    pub fn builtin_method(&self, u: Ty, m: &str) -> Option<Option<bool>> {
+        // (std's own methods of a str, a slice, an array; a number's that take `&self` (its others take self by
+        // value); the names the compiler knows for numbers that are not numbers' (a pointer's, a str's))
+        const STR: &[&str] = &[
+            "len", "is_empty", "is_char_boundary", "as_bytes", "as_bytes_mut", "as_ptr", "as_mut_ptr", "get", "get_mut", "get_unchecked", "get_unchecked_mut", "split_at",
+            "split_at_mut", "chars", "char_indices", "bytes", "split_whitespace", "split_ascii_whitespace", "lines", "encode_utf16", "contains", "starts_with", "ends_with",
+            "find", "rfind", "split", "rsplit", "split_terminator", "rsplit_terminator", "split_inclusive", "splitn", "rsplitn", "split_once", "rsplit_once", "matches",
+            "rmatches", "match_indices", "rmatch_indices", "trim", "trim_start", "trim_end", "trim_matches", "trim_start_matches", "trim_end_matches", "strip_prefix",
+            "strip_suffix", "parse", "is_ascii", "eq_ignore_ascii_case", "make_ascii_uppercase", "make_ascii_lowercase", "escape_debug", "escape_default", "escape_unicode",
+            "replace", "replacen", "to_lowercase", "to_uppercase", "repeat", "to_ascii_uppercase", "to_ascii_lowercase",
+        ];
+        const SLICE: &[&str] = &[
+            "len", "is_empty", "first", "last", "split_first", "split_last", "get", "get_unchecked", "as_ptr", "as_ptr_range", "iter", "windows", "chunks", "chunks_exact",
+            "rchunks", "rchunks_exact", "split_at", "split", "splitn", "rsplit", "rsplitn", "contains", "starts_with", "ends_with", "strip_prefix", "strip_suffix",
+            "binary_search", "binary_search_by", "binary_search_by_key", "to_vec", "into_vec", "repeat", "concat", "join", "is_sorted", "is_sorted_by", "is_sorted_by_key",
+            "partition_point", "is_ascii", "eq_ignore_ascii_case", "to_ascii_uppercase", "to_ascii_lowercase", "escape_ascii", "iter_mut",
+        ];
+        // (an array's own; a slice's are at the unsized step, `[T]`, not at `[T; N]`)
+        const ARRAY: &[&str] = &["map", "as_slice", "as_mut_slice", "each_ref", "each_mut"];
+        const NUM_BY_REF: &[&str] = &["eq_ignore_ascii_case", "to_ascii_uppercase", "to_ascii_lowercase", "make_ascii_uppercase", "make_ascii_lowercase"];
+        const NOT_NUM: &[&str] = &["as_bytes", "as_ptr", "is_null", "read_volatile", "write_volatile", "offset", "wrapping_offset", "read_unaligned", "write_unaligned", "try_into"];
+        let helper = |pre: &str| self.index.contains_key(&format!("{pre}{m}"));
+        if !matches!(u, Ty::Str | Ty::Slice(_) | Ty::Array(..) | Ty::Bool | Ty::Char) && !u.is_int() && !u.is_float() {
+            return None;
+        }
+        // (the prelude's own inherent method of the type: as its signature takes self)
+        if let Some(i) = self.prim_method(u, m).filter(|&i| self.sigs[i as usize].impl_trait.is_none() && self.sigs[i as usize].has_self) {
+            return Some(match self.sigs[i as usize].params.first() {
+                Some(Ty::Ref(rm, _)) => Some(*rm),
+                _ => None,
+            });
+        }
+        // (by reference, `&mut self` for the methods that mutate)
+        let by_ref = || Some(Some(MUT_SLICE_METHODS.contains(&m) || m.ends_with("_mut")));
+        match u {
+            Ty::Str => (STR.contains(&m) || helper("__exr_str_")).then(by_ref).flatten(),
+            Ty::Slice(_) => (SLICE.contains(&m) || MUT_SLICE_METHODS.contains(&m) || helper("__exr_slice_")).then(by_ref).flatten(),
+            Ty::Array(..) => match m {
+                "map" => Some(None),
+                _ => ARRAY.contains(&m).then(by_ref).flatten(),
+            },
+            u if u.is_int() || u.is_float() || matches!(u, Ty::Bool | Ty::Char) => {
+                // (each scalar type's own: the ASCII ones a u8's and a char's, `abs` a signed number's, the bit ones
+                // an integer's; a char's others the prelude's `__exr_char_` helpers)
+                let ascii = m.starts_with("is_ascii") || NUM_BY_REF.contains(&m);
+                // (std's own methods of a float, a char, a bool, an integer beyond the compiler's names, all taking
+                // self by value but `total_cmp(&self)`)
+                const FLOAT: &[&str] = &[
+                    "floor", "ceil", "round", "round_ties_even", "trunc", "fract", "abs", "signum", "copysign", "mul_add", "div_euclid", "rem_euclid", "powi",
+                    "powf", "sqrt", "exp", "exp2", "ln", "log", "log2", "log10", "cbrt", "hypot", "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
+                    "sin_cos", "exp_m1", "ln_1p", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh", "is_nan", "is_infinite", "is_finite", "is_subnormal",
+                    "is_normal", "classify", "is_sign_positive", "is_sign_negative", "next_up", "next_down", "recip", "to_degrees", "to_radians", "max", "min",
+                    "maximum", "minimum", "midpoint", "to_bits", "to_le_bytes", "to_be_bytes", "to_ne_bytes", "total_cmp", "clamp", "abs_sub",
+                    "to_int_unchecked",
+                ];
+                const CHAR: &[&str] = &[
+                    "is_alphabetic", "is_alphanumeric", "is_numeric", "is_whitespace", "is_lowercase", "is_uppercase", "is_control", "is_digit", "to_digit",
+                    "to_lowercase", "to_uppercase", "len_utf8", "len_utf16", "encode_utf8", "encode_utf16", "escape_debug", "escape_default", "escape_unicode",
+                ];
+                const INT: &[&str] = &[
+                    "ilog", "ilog2", "ilog10", "checked_ilog", "checked_ilog2", "checked_ilog10", "midpoint", "reverse_bits", "overflowing_div",
+                    "overflowing_rem", "wrapping_div", "wrapping_rem", "saturating_mul", "saturating_div", "checked_next_power_of_two",
+                    "checked_next_multiple_of", "checked_isqrt", "checked_div_euclid", "checked_rem_euclid", "wrapping_div_euclid", "wrapping_rem_euclid",
+                    "from_be", "from_le", "cast_signed", "cast_unsigned", "checked_add_signed", "saturating_add_signed", "overflowing_add_signed",
+                    "checked_sub_unsigned", "checked_add_unsigned", "saturating_add_unsigned", "wrapping_add_unsigned", "is_multiple_of", "checked_neg",
+                    "wrapping_neg", "overflowing_neg", "leading_ones", "trailing_ones", "abs_diff", "isqrt",
+                ];
+                let known = match u {
+                    _ if ascii => matches!(u, Ty::U8 | Ty::Char),
+                    Ty::Bool => matches!(m, "then" | "then_some"),
+                    Ty::Char => CHAR.contains(&m) || helper("__exr_char_"),
+                    u if u.is_float() => FLOAT.contains(&m),
+                    u => {
+                        let signed_only = matches!(m, "abs" | "signum" | "is_positive" | "is_negative" | "checked_abs" | "wrapping_abs" | "saturating_abs" | "overflowing_abs" | "unsigned_abs" | "saturating_neg");
+                        let unsigned_only = matches!(m, "is_power_of_two" | "next_power_of_two" | "next_multiple_of" | "wrapping_add_signed" | "checked_next_power_of_two");
+                        (INT.contains(&m) || signed_only || unsigned_only || (crate::ast_infer::is_builtin_scalar_method(m) && !NOT_NUM.contains(&m)))
+                            && !(signed_only && !u.signed())
+                            && !(unsigned_only && u.signed())
+                    }
+                };
+                known.then(|| (ascii || m == "total_cmp").then(|| m.starts_with("make_ascii")))
+            }
+            _ => None,
+        }
     }
 
     /// A method of primitive type t (from a trait impl, or else the trait's default method)

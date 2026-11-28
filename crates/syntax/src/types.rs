@@ -601,6 +601,9 @@ pub struct ClosureSyn {
     /// `&mut x`; ast_closure::mutates_capture). Held by reference, it is then a `&mut T` (or a unique borrow): Send when
     /// T is. The others held by reference may be either kind (a method's `&mut self` is not seen here)
     pub mutated: Vec<bool>,
+    /// Per capture: 1 + the place of the fn's parameter it is (`self` first), where the fn's body binds the name nowhere
+    /// else; 0 otherwise. Its type as the generic body writes it is the parameter's (#144, the code generator's gen_ty)
+    pub param_caps: Vec<u64>,
 }
 
 /// The owner of the members of an impl / trait

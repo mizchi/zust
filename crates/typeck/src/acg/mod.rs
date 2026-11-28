@@ -446,7 +446,8 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     }
     let extra: Vec<(String, Ty)> = caps.iter().map(|c| (c.0.clone(), c.1)).collect();
     let user_code = prog.item_of.get(body_id as usize).copied().flatten().is_some_and(|i| i < prog.prelude_from);
-    let ((lets, _, _), margs, texts) = crate::ast_infer::infer_ctx_margs(prog, f.sig.recv.is_some(), &f.sig.params, &f.block, &sig, &env, &extra, Some(sig.ret), Some((root, base_k)));
+    let gen_params = gen_params_of(prog, f, root, body_id);
+    let ((lets, _, _), margs, texts) = crate::ast_infer::infer_ctx_margs(prog, f.sig.recv.is_some(), &f.sig.params, &f.block, &sig, &env, &extra, Some(sig.ret), Some((root, base_k)), &gen_params);
     let bk_level = if user_code { borrowck::level() } else { 0 };
     let mut cx = Cx {
         b: FunctionBuilder::new(&clif_sig(&sig)),
@@ -501,7 +502,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         fake_reads: prog.closures.get(&body_id).map(|cd| cd.fake_reads.clone()).unwrap_or_default(),
         root,
         generic_args: generic_args_of(prog, &f.sig.params, root),
-        gen_params: gen_params_of(prog, f, root, root == body_id),
+        gen_params,
         gen_lets: vec![],
         gen_pending: None,
         closure_ix,
@@ -3419,6 +3420,7 @@ impl Cx<'_> {
                     base.and_then(|base| self.prog.index.get(&format!("{base}::{pre}{m}")).copied())
                         .or_else(|| self.prog.prim_method(t, m))
                         .or_else(|| self.ref_blanket_fn(t, m, None))
+                        .or_else(|| self.prog.ref_impl_default(t, m))
                 }
                 Ty::Struct(sid) => self.prog.method(sid, m).or_else(|| self.prog.default_method(sid, m)),
                 // (else a default fn of a trait t implements: a blanket `impl<T> Tr for T {}`)
@@ -3748,13 +3750,33 @@ pub(crate) fn generic_args_of(prog: &Program, params: &[(crate::parse::Pat, crat
 /// The parameters of fn root's body f (`self` first) with the types root's signature gives them, type parameters as
 /// Param, for the method lookup of #144 (Cx::gen_params): only when the program has such impls, and not of a closure's
 /// body (own: f is root's own body), whose parameters are not root's
-pub(crate) fn gen_params_of(prog: &Program, f: &ItemFn, root: u32, own: bool) -> Vec<(String, Ty)> {
-    if prog.ref_dispatch.is_empty() || !own {
+pub(crate) fn gen_params_of(prog: &Program, f: &ItemFn, root: u32, body_id: u32) -> Vec<(String, Ty)> {
+    if prog.ref_dispatch.is_empty() {
         return vec![];
     }
     let Some(rs) = prog.sigs.get(root as usize).filter(|rs| !rs.generics.is_empty()) else { return vec![] };
-    let skip = f.sig.recv.is_some() as usize;
     let mut out = vec![];
+    // (a closure's body: its captures that are root's parameters (ClosureDef::param_caps), and its own parameters whose
+    // types the closure's signature writes with root's type parameters alone (`|x: &T|`; one inferred, `|t|`, is its own
+    // `__P0`))
+    if root != body_id {
+        let Some(cd) = prog.closures.get(&body_id) else { return vec![] };
+        for (n, &pc) in cd.captures.iter().zip(&cd.param_caps) {
+            if let Some(&t) = pc.checked_sub(1).and_then(|i| rs.params.get(i as usize)) {
+                out.push((n.clone(), t));
+            }
+        }
+        let cs = &prog.sigs[body_id as usize];
+        for (i, (p, _)) in f.sig.params.iter().enumerate().skip(1) {
+            if let (crate::parse::Pat::Ident(_, _, n, None), Some(&t)) = (p, cs.params.get(i)) {
+                if params_below(prog, t, cd.n_parent as u8, 0) {
+                    out.push((n.clone(), t));
+                }
+            }
+        }
+        return out;
+    }
+    let skip = f.sig.recv.is_some() as usize;
     if skip == 1 {
         if let Some(&t) = rs.params.first() {
             out.push(("self".to_string(), t));
@@ -3766,6 +3788,19 @@ pub(crate) fn gen_params_of(prog: &Program, f: &ItemFn, root: u32, own: bool) ->
         }
     }
     out
+}
+
+/// Whether the type parameters t names are all below n (a closure's: its parent's, which lead its own)
+fn params_below(prog: &Program, t: Ty, n: u8, depth: u32) -> bool {
+    if depth > 16 {
+        return false;
+    }
+    match t {
+        Ty::Param(i) => i < n,
+        Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => params_below(prog, *i, n, depth + 1),
+        Ty::Struct(sid) => prog.structs[sid as usize].args.iter().all(|&a| params_below(prog, a, n, depth + 1)),
+        t => !prog.has_param(t),
+    }
 }
 
 /// A pattern of bindings, `_` and tuples of them, which matches any value (no exhaustiveness check needed: a parameter

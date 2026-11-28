@@ -2697,6 +2697,25 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
             }));
         }
         let by_move = *mv || (!moved.is_empty() && moved.iter().all(|&m| m));
+        // (a capture that is the fn's parameter: its place, where the body binds the name nowhere else)
+        let rebound = |n: &str| {
+            body.stmts.iter().any(|s| match s {
+                Stmt::Let(p, _, init, _, ..) => ast_closure::pat_binds_name_pub(p, n) || init.as_ref().is_some_and(|x| ast_closure::binds_name(x, n, 0)),
+                Stmt::Expr(x, _) => ast_closure::binds_name(x, n, 0),
+                _ => false,
+            })
+        };
+        let has_self = sig_ast.recv_ty.is_some() as u64;
+        let param_caps: Vec<u64> = caps
+            .iter()
+            .map(|n| {
+                let place = if n == "self" { (has_self == 1).then_some(0) } else { sig_ast.params.iter().position(|(p, _)| pat_name(p) == Some(n.as_str())).map(|i| i as u64 + has_self) };
+                match place {
+                    Some(i) if !rebound(n) => i + 1,
+                    _ => 0,
+                }
+            })
+            .collect();
         out.push(ClosureSyn {
             name: name,
             generics: generics,
@@ -2709,6 +2728,7 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
             fake_reads: ast_closure::fake_reads(c).into_iter().filter(|n| bound.contains(n)).collect(),
             deref,
             mutated,
+            param_caps,
         });
     }
     // `-> impl Fn(A) -> B { move |x| .. }`: the type is the struct of the trailing closure
@@ -3451,6 +3471,8 @@ fn summarize_impl(sm: &mut Summary, g: &Generics, tr: &Option<(bool, Path)>, sel
         }
     }
     collect_generics(g, &mut sm.impl_generics)?;
+    // (and those declared `?Sized`, which an impl for `&T` of the program's covers a `&str` / `&[T]` / `&dyn Tr` by (#144))
+    sm.adt_unsized = adt_unsized(g);
     // (E0207: a type parameter must appear in the self type or the trait; a where clause counts too)
     {
         let mut names = vec![];

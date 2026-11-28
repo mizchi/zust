@@ -1,0 +1,3 @@
+&mut S1 Wrap(S(1))
+&mut &mut S1 | &mut S1
+&mut S2 | S2
