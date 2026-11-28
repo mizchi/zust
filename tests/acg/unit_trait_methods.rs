@@ -38,6 +38,29 @@ fn generic<A: T<D>>(a: A) -> u8 {
 fn generic_b<X: B + Copy>(x: X) -> u8 {
     x.r() + x.b()
 }
+// (two traits with a method of one name for `()`: a generic call takes the bound's (CodeRabbit on #224))
+trait P1 {
+    fn pm(&self) -> u8;
+}
+trait P2 {
+    fn pm(&self) -> u8;
+}
+impl P1 for () {
+    fn pm(&self) -> u8 {
+        11
+    }
+}
+impl P2 for () {
+    fn pm(&self) -> u8 {
+        12
+    }
+}
+fn via_p1<X: P1>(x: X) -> u8 {
+    x.pm()
+}
+fn via_p2<X: P2>(x: X) -> u8 {
+    x.pm()
+}
 fn main() {
     let mut u = ();
     println!("{} {} {}", ().b(), u.r(), u.w());
@@ -47,4 +70,5 @@ fn main() {
     println!("{}", mm.w());
     println!("{} {} {}", ().dummy(D), generic(()), generic_b(()));
     println!("{} {}", ().c(), B::b(()));
+    println!("{} {}", via_p1(()), via_p2(()));
 }

@@ -4997,10 +4997,11 @@ impl Cx<'_> {
             Ty::Ref(_, i) => (*i, true),
             t => (t, false),
         };
-        // (a primitive; or a struct when two traits of the program's have the method, so that the bound decides which:
+        // (a primitive, `()` too (whose method of the name unit_trait_method would take by the name alone, whichever
+        // trait it is of); or a struct when two traits of the program's have the method, so that the bound decides which:
         // `s.scaled()` of `S: S1` with S's instance implementing S0 and S1)
         let multi = || matches!(t, Ty::Struct(_)) && self.prog.multi_trait_methods.contains(method);
-        if !(t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) || multi()) {
+        if !(t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Unit) || multi()) {
             return None;
         }
         let gens = &self.prog.sigs.get(self.root as usize)?.generics;
