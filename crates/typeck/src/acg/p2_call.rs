@@ -4960,7 +4960,8 @@ impl Cx<'_> {
                 return None;
             }
             let opaque = |u: Ty| !concrete && self.prog.param_bounded_by(self.root, &self.env, tr, u);
-            let (st, n, adj) = self.prog.ref_param_probe(tr, method, kind, t, &opaque)?;
+            let named = self.explicit_trait.as_ref().is_some_and(|(m, _)| m == method);
+            let (st, n, adj) = self.prog.ref_param_probe(tr, method, kind, t, &opaque, named)?;
             Some((tr.clone(), st, n, adj))
         }) else {
             return Ok(None);
@@ -4970,8 +4971,8 @@ impl Cx<'_> {
         // reserves the receiver while they are evaluated. A path call's `&mut` argument is not two-phase, so the
         // arguments go first, into temporaries, and the call takes them: `{ let a0 = b.remaining(); b.advance(a0) }`)
         // (the receiver's place as one whose evaluation has no effect of its own: a local, its fields and derefs, and
-        // indexes whose index is hoisted into a temporary first (`a[index()]`: rustc evaluates the index before the
-        // arguments); None for another receiver)
+        // indexes whose index is read into a temporary first (`a[index()]`, `a[i]`: rustc evaluates the receiver
+        // before the arguments); None for another receiver)
         fn quiet_place(e: &Expr, tag: usize, stmts: &mut Vec<Stmt>) -> Option<Expr> {
             Some(match strip_paren(e) {
                 p @ Expr::Path(None, pp) if pp.segs.len() == 1 => p.clone(),
@@ -4979,8 +4980,10 @@ impl Cx<'_> {
                 Expr::Unary(op, b, sp) if op == "*" => Expr::Unary(op.clone(), Box::new(quiet_place(b, tag, stmts)?), *sp),
                 Expr::Index(b, i, sp) => {
                     let b = quiet_place(b, tag, stmts)?;
+                    // (a literal as it is; a local too is read first, as an argument may assign it:
+                    // `a[i].write({ i = 1; .. })` is `a[0]`'s)
                     let i = match strip_paren(i) {
-                        i @ (Expr::Lit(..) | Expr::Path(None, _)) => i.clone(),
+                        i @ Expr::Lit(..) => i.clone(),
                         i => {
                             let t = format!("__rp{tag}_i{}", stmts.len());
                             stmts.push(Stmt::Let(Pat::Ident(false, false, t.clone(), None), None, Some(i.clone()), None, Default::default()));

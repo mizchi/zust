@@ -5750,7 +5750,7 @@ impl Program {
     /// (or `Self` of tr's default) is that parameter, whose structure the generic code does not see: it is Self itself.
     /// None where the Self found is not such a reference (the ordinary lookup's, through the deref), or where an
     /// inherent method comes first
-    pub fn ref_param_probe(&self, tr: &str, m: &str, kind: Option<bool>, t: Ty, opaque: &dyn Fn(Ty) -> bool) -> Option<(Ty, usize, Option<bool>)> {
+    pub fn ref_param_probe(&self, tr: &str, m: &str, kind: Option<bool>, t: Ty, opaque: &dyn Fn(Ty) -> bool, named: bool) -> Option<(Ty, usize, Option<bool>)> {
         let imp = |u: Ty| self.ref_param_implements(tr, u, 0);
         let covered = |st: Ty| matches!(st, Ty::Ref(m, _) if self.ref_param_impls.iter().any(|(t, rm)| t == tr && *rm == m));
         // (how an inherent method m of struct sid takes self, as trait_recv_kind says it)
@@ -5788,6 +5788,12 @@ impl Program {
             }
             // (the tries at this step: by value (None), then `&` and `&mut` (Some(mutable)))
             for adj in [None, Some(false), Some(true)] {
+                // (another trait of the program's with a method m that this try reaches comes first, or ties: the
+                // ordinary lookup's (`r.name()` of `A::name` for S beside `impl<T> B for &T`). Not for a call that
+                // named its trait (`named`: `A::m(&x)`), which is that trait's)
+                if !named && self.other_trait_at(tr, m, adj, s) {
+                    return None;
+                }
                 // (an inherent method whose receiver this try makes: `x.m()` of `S::m(&self)` with x a `&S` by value,
                 // or an `S` borrowed)
                 let inh = match (adj, s) {
@@ -5817,6 +5823,24 @@ impl Program {
                 _ => return None,
             }
         }
+    }
+
+    /// Whether a trait of the program's other than tr has a method m that the probe's try `adj` (by value: None; `&` /
+    /// `&mut`: Some(mutable)) at step s reaches: its receiver is what the try makes and its Self implements it
+    fn other_trait_at(&self, tr: &str, m: &str, adj: Option<bool>, s: Ty) -> bool {
+        self.traits.keys().any(|b| {
+            if b == tr || !self.user_traits.contains(b.as_str()) {
+                return false;
+            }
+            let Some(kb) = self.trait_recv_kind(b, m) else { return false };
+            let imp = |u: Ty| if self.ref_param_impls.iter().any(|(t, _)| t == b) { self.ref_param_implements(b, u, 0) } else { !matches!(u, Ty::Param(_)) && self.implements(u, b) };
+            match (adj, kb, s) {
+                (None, None, s) => imp(s),
+                (None, Some(km), Ty::Ref(xm, x)) => xm == km && imp(*x),
+                (Some(am), Some(km), s) => am == km && imp(s),
+                _ => false,
+            }
+        })
     }
 
     /// Whether u implements tr (one of ref_param_impls), through the program's impls for references to a type parameter

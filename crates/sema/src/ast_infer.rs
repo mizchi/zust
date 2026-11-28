@@ -629,7 +629,7 @@ impl Inf<'_> {
                 return None;
             }
             let opaque = |u: Ty| !concrete && prog.param_bounded_by(root, env, tr, u);
-            let (st, _, _) = prog.ref_param_probe(tr, n, kind, t, &opaque)?;
+            let (st, _, _) = prog.ref_param_probe(tr, n, kind, t, &opaque, named.is_some())?;
             Some((tr.clone(), st))
         })?;
         let id = prog.ref_param_fn(st, n, &tr)?;

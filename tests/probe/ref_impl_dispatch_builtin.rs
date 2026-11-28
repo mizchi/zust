@@ -3,7 +3,7 @@
 // impl at `&&str`; and an impl for `&str` beside `impl<T: Nm> Nm for &T` (whose T is Sized), which a call through a
 // bound with `T = &str` takes; bounds of the impl written in a where clause; a number's and a
 // slice's own methods; two-phase borrows of a `&mut` autoref (an index
-// receiver's index first); an extra bound with impls for references
+// receiver's index first, a local one too); another trait's method at an earlier try; an extra bound with impls for references
 trait Tr {
     fn len(self) -> usize;
 }
@@ -58,6 +58,14 @@ struct Cur(usize, usize);
 impl Bf for Cur { fn remaining(&self) -> usize { self.1 - self.0 } fn advance(&mut self, n: usize) { self.0 += n } }
 impl<T: Bf + ?Sized> Bf for &mut T { fn remaining(&self) -> usize { (**self).remaining() } fn advance(&mut self, n: usize) { (**self).advance(n) } }
 fn idx() -> usize { println!("idx"); 1 }
+// another trait's method of the name at an earlier try: `r.nm3()` of `r: &S3` is A3's (S3's, by value at `&S3`),
+// not B3's impl for `&T` (an autoref)
+trait A3 { fn nm3(&self) -> u32; }
+trait B3 { fn nm3(&self) -> u32; }
+struct S3;
+impl A3 for S3 { fn nm3(&self) -> u32 { 1 } }
+impl<T> B3 for &T { fn nm3(&self) -> u32 { 2 } }
+fn f3<U>(r: &S3) -> u32 { r.nm3() }
 fn drain<B: Bf>(mut b: B) -> usize { let n = b.remaining(); b.advance(b.remaining()); n + b.remaining() }
 // an extra bound of a trait with an impl for references of its own: `S2` is not Marker, so `&S2` is not covered
 trait Marker {}
@@ -84,6 +92,9 @@ fn main() {
     println!("{} {} {}", r.write(r.read()), drain(&mut c), c.0);
     let mut a = [&sr, &sr];
     println!("{}", a[idx()].write(a[0].read()));
+    let mut i = 0;
+    println!("{}", a[i].write({ i = 1; a[i].read() }));
+    println!("{}", f3::<u8>(&S3));
     let s2 = S2;
     println!("{}", (&&s2).name2());
 }
