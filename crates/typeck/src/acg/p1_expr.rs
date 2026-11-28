@@ -388,6 +388,7 @@ impl Cx<'_> {
             // A const (`LIMIT` / `S::N`) used as a place (`println!("{}", LIMIT)` / `&LIMIT`): put in a temporary
             Expr::Path(_, p) if self.const_of(e).is_some() && ident_of(p).is_none_or(|id| self.lookup(id).is_none()) => {
                 let ci = self.const_of(e).unwrap();
+                let ci = self.pick_const_expr(e, ci, None);
                 let (v, t) = self.const_value(e, ci)?;
                 match v {
                     Some(a) if t.is_agg() => Ok(Place::Mem(a, 0, t)),
@@ -1145,6 +1146,8 @@ impl Cx<'_> {
             // A const embeds the expression itself
             Expr::Path(..) if self.const_of(e).is_some() => {
                 let ci = self.const_of(e).unwrap();
+                // (`<&S>::C`: of consts of one name in more impls, the one of the impl it names)
+                let ci = self.pick_const_expr(e, ci, expected);
                 self.const_hint = expected;
                 self.const_value(e, ci)
             }
@@ -4430,6 +4433,11 @@ impl Cx<'_> {
 
     fn call_inner(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Call(func, cargs) = c else { return err(SP, "internal: expected a call") };
+        // (`u32::max_value()` / `i8::min_value()`: the integer type's `MAX` / `MIN`, as `u32::MAX` (#265))
+        if let Some((t, k)) = crate::parse::int_bound_call(func, cargs) {
+            let v = crate::program::prim_assoc_const(t, k).unwrap_or(0);
+            return Ok((Some(self.int_const(t, v)), t));
+        }
         // (E0040: `Drop::drop(&mut x)`, `<S as Drop>::drop(..)`)
         if let (true, Expr::Path(_, p)) = (self.user_code, &**func) {
             if p.segs.len() >= 2 && p.segs[p.segs.len() - 1].name == "drop" && p.segs[p.segs.len() - 2].name == "Drop" {

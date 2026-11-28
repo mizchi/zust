@@ -522,6 +522,9 @@ pub struct Summary {
     /// That method, when it has a receiver and does more than forward to T's method (ast_summary::forwards_to_referent),
     /// or T is bounded by another trait than Tr: a call on the reference that takes the impl runs it (Program::ref_dispatch)
     pub ref_impl_bad: Vec<String>,
+    /// A forwarding method's `_` parameter given the path of its type as a value, (method, the path's last segment):
+    /// a forward only when that is a unit struct, not a const or static of the same name (Program::note_ref_impl checks)
+    pub ref_impl_unit_args: Vec<(String, String)>,
 }
 
 /// A trait's declaration: the lifetimes Self must outlive (`trait Wedding<'t>: 't`) are the item `#outlives` of
@@ -636,3 +639,13 @@ pub const TYS: [Ty; 18] = [
     Ty::I128,
     Ty::U128,
 ];
+
+/// The prelude's name of a std unit struct a value path names by another (`fmt::Error`, std's unit struct, is the
+/// prelude's `__FmtError`), else the path's last segment
+pub fn std_unit_name<'a>(segs: &[&'a str]) -> &'a str {
+    match segs {
+        [.., "fmt", "Error"] => "__FmtError",
+        [.., last] => last,
+        [] => "",
+    }
+}

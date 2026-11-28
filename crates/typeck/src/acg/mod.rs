@@ -3436,9 +3436,25 @@ impl Cx<'_> {
                 let tr = &p.segs[p.segs.len() - 2].name;
                 // (among impls of the trait for instances of one type, `<Box<[f32]> as FromWasmAbi>::from_abi` beside
                 // Box<[u8]>'s: the one for the type itself)
-                let own = |c: u32| self.prog.sigs[c as usize].self_ty.is_some_and(|st| self.prog.match_ty_exact(st, t, &mut vec![None; self.prog.sigs[c as usize].generics.len()]));
                 let key = format!("{}::{m}", self.ty_key(t));
                 let multi = self.prog.overloads.contains_key(&key);
+                // (and among impls of the trait with other arguments, `<Z0 as ToInt<i16>>::to_int` beside `ToInt<i8>`'s:
+                // the one whose trait arguments the path writes)
+                let targs: Option<Vec<Ty>> = (multi && !self.prog.fn_targs.is_empty() && !p.segs[p.segs.len() - 2].args.is_empty())
+                    .then(|| p.segs[p.segs.len() - 2].args.iter().map(|a| match a {
+                        crate::parse::GArg::Ty(x) => self.parse_ty(x).ok(),
+                        _ => None,
+                    }).collect())
+                    .flatten();
+                let own = |c: u32| {
+                    let sig = &self.prog.sigs[c as usize];
+                    let mut sol = vec![None; sig.generics.len()];
+                    sig.self_ty.is_some_and(|st| self.prog.match_ty_exact(st, t, &mut sol))
+                        && match (&targs, self.prog.fn_targs.get(&c)) {
+                            (Some(a), Some(ta)) => a.len() == ta.len() && ta.iter().zip(a).all(|(&x, &y)| self.prog.match_ty_exact(x, y, &mut sol)),
+                            _ => true,
+                        }
+                };
                 if let Some(i) = multi.then(|| self.trait_candidate_where(&key, tr, own)).flatten().or_else(|| self.trait_candidate(&key, tr)).or_else(|| self.trait_default(tr, &m, t)) {
                     return Some((i, &self.prog.sigs[i as usize]));
                 }
@@ -3552,7 +3568,8 @@ impl Cx<'_> {
             }
         }
         let i = match self.prog.fn_by_p(&PPath::of(p), self.self_sid) {
-            Some(i) => i,
+            // (of inherent functions in impls for disjoint instances, the one of the self type the path names)
+            Some(i) => self.prog.fn_of_path_self(i, p, &self.env),
             // (`S::f()` where f is a default fn of a trait S implements)
             None => {
                 let t = self.path_self_ty(p)?;

@@ -281,6 +281,19 @@ pub struct ConstDef {
     pub stat: Option<bool>,
 }
 
+/// The impl block of an associated const of a group (Program::const_groups)
+#[derive(Clone, Debug)]
+pub struct ConstImpl {
+    /// Its self type, with the impl's parameters as Param (None: it does not resolve)
+    pub self_ty: Option<Ty>,
+    /// Its trait's own name (None for an inherent impl) and the trait's arguments over the impl's parameters, when they
+    /// resolve
+    pub trait_name: Option<String>,
+    pub trait_args: Option<Vec<Ty>>,
+    /// The impl's parameters
+    pub ngen: usize,
+}
+
 /// Associated consts such as `u32::MAX`
 /// `const _: () = { .. };` (nameless: only a compile-time check, so skipped; also a flattened module's `m___`)
 fn anon_const(n: &str) -> bool {
@@ -509,6 +522,8 @@ pub fn prim_assoc_const(t: Ty, name: &str) -> Option<i128> {
     let bits = t.bits();
     Some(match (name, t.signed()) {
         ("BITS", _) => bits as i128,
+        // (`char::REPLACEMENT_CHARACTER`, U+FFFD, and `core::char::REPLACEMENT_CHARACTER` (its deprecated module's))
+        ("REPLACEMENT_CHARACTER", _) if t == Ty::Char => 0xFFFD,
         // (u128::MAX is held as its bit pattern: -1)
         ("MAX", true) => (u128::MAX >> (129 - bits)) as i128,
         ("MIN", true) => -((u128::MAX >> (129 - bits)) as i128) - 1,
@@ -693,6 +708,13 @@ pub struct Program {
     /// Same-named fns of separate trait impls for one type (`impl From<&str> for P`, `impl From<String> for P`):
     /// the first name → the candidates (later ones are named like `P::from#1`). The caller picks by argument types
     pub overloads: FxMap<String, Vec<u32>>,
+    /// The overloads of impls for other self types, instances of one type (simdutf8's `impl SimdU8Value<__m256i> { fn
+    /// from_32_cut_off_leading(..) }` beside `.. <__m128i>`, and its `impl From<__m256i> for SimdU8Value<__m256i>` beside
+    /// `From<__m128i>`'s), by the first name: the self type a path names chooses (fn_for_self_ty), as no receiver does
+    pub self_ty_groups: FxSet<String>,
+    /// Of the overloads that are trait impls' fns, the trait's arguments of each one's impl, over the fn's generics
+    /// (`impl ToInt<i16> for Z0 { fn to_int() }`: [i16]): a qualified path's `<Z0 as ToInt<i16>>::to_int` chooses by them
+    pub fn_targs: FxMap<u32, Vec<Ty>>,
     /// zust_syntax::lexer::trait_scopes of the program's own source: where two scopes define traits of one name, the
     /// traits in scope on each line (pick_overload chooses the impl of the one in scope at the call)
     pub trait_scopes: Vec<(u32, u32, Vec<String>)>,
@@ -788,6 +810,14 @@ pub struct Program {
     pub const_index: FxMap<String, u32>,
     /// Associated consts (`S::N`) by their last name (`N`) (for over-approximating references)
     pub const_by_last: FxMap<String, Vec<u32>>,
+    /// Associated consts of one name in impl blocks rustc tells apart, which a name alone does not: impls of one trait
+    /// with other arguments (`impl ToInt<i8> for Z0`, `impl ToInt<i16> for Z0`) or self types (`impl Tr for S`, `impl
+    /// Tr for &S`), inherent impls for disjoint instances (`impl W<u8>`, `impl W<u16>`). Each const of such a group →
+    /// the group; the first keeps its name, a later one is `S::C#k`, and a use chooses among them (pick_const)
+    pub const_group: FxMap<u32, u32>,
+    pub const_groups: Vec<Vec<u32>>,
+    /// The impls of those consts, by const: see ConstImpl
+    pub const_impls: FxMap<u32, ConstImpl>,
     /// Trait impls for primitive types (type, trait)
     pub prim_impls: HashSet<(Ty, String)>,
     /// prim_impls that only an impl for a reference to the type makes (`impl Tr for &mut i32`): the type itself does not
@@ -1657,6 +1687,8 @@ impl Program {
             const_fns: Default::default(),
             const_fn_tys: Default::default(),
             overloads: Default::default(),
+            self_ty_groups: FxSet::default(),
+            fn_targs: FxMap::default(),
             trait_scopes: vec![],
             item_lines: vec![],
             by_last: FxMap::default(),
@@ -1690,6 +1722,9 @@ impl Program {
             trait_decls: FxSet::default(),
             lower_consts: false,
             const_by_last: FxMap::default(),
+            const_group: FxMap::default(),
+            const_groups: vec![],
+            const_impls: FxMap::default(),
             prim_impls: HashSet::default(),
             prim_ref_only: HashSet::default(),
             ref_slice_traits: HashSet::default(),
@@ -1840,9 +1875,16 @@ impl Program {
                     crate::lexer::ItemKind::ImplMember(h) => sums[h as usize].impl_trait.clone(),
                     _ => None,
                 };
+                let header = |k: usize| match items[k].kind {
+                    crate::lexer::ItemKind::ImplMember(h) => Some(h),
+                    _ => None,
+                };
                 let mut n = n.clone();
+                // (the const of another impl block this one stands beside under one name: see const_groups)
+                let mut beside: Option<u32> = None;
                 if let Some(&prev) = p.const_index.get(&n) {
                     let pk = p.consts[prev as usize].item as usize;
+                    let other_block = header(ii).is_some() && header(pk).is_some() && header(ii) != header(pk);
                     match (trait_of(ii), trait_of(pk)) {
                         // (two of one trait impl's: a real duplicate. But impls for trait objects of each arity,
                         // `impl Tr for dyn Fn(A) -> R` and `.. for dyn Fn(A, B) -> R`, are one `__dyn_Fn` here: the
@@ -1850,13 +1892,14 @@ impl Program {
                         (Some(a), Some(b)) if a == b => {
                             // (not two in one impl: `impl Tr for dyn Obj { const N: bool = false; const N: bool = false; }`
                             // is E0201's duplicate)
-                            let header = |k: usize| match items[k].kind {
-                                crate::lexer::ItemKind::ImplMember(h) => Some(h),
-                                _ => None,
-                            };
-                            if n.starts_with("__dyn_") && ii != pk && header(ii) != header(pk) && sums[pk].consts.iter().any(|c| c.0 == n && c.2 == *e) {
+                            if n.starts_with("__dyn_") && ii != pk && other_block && sums[pk].consts.iter().any(|c| c.0 == n && c.2 == *e) {
                                 // (kept under a name no path reaches: the consts stay in the summaries' order)
                                 n = format!("{n}#dyn{}", p.consts.len());
+                            } else if other_block {
+                                // (two impls of one trait for one type, with other trait arguments or self types:
+                                // `impl ToInt<i8> for Z0` and `impl ToInt<i16> for Z0` (typenum), `impl FixedTag for S`
+                                // and `impl FixedTag for &S` (der). Each has its own; a use chooses (pick_const))
+                                beside = Some(prev);
                             } else {
                                 return Err(format!("{}:1: duplicate definition of `{n}`", items[ii].line));
                             }
@@ -1873,17 +1916,42 @@ impl Program {
                             p.consts[prev as usize].name = q.clone();
                             p.const_index.insert(q, prev);
                         }
+                        // (two inherent impls' (`impl W<u8> { const C }`, `impl W<u16> { const C }`): E0592 unless
+                        // their self types are apart, which is known once types are (const_group_impls))
+                        (None, None) if other_block => beside = Some(prev),
                         (None, None) => {
                             return Err(format!("{}:1: duplicate definition of `{n}`", items[ii].line));
                         }
                     }
-                    if p.const_index.contains_key(&n) {
-                        return Err(format!("{}:1: duplicate definition of `{n}`", items[ii].line));
+                    // (the qualified name another impl of the trait has: `impl Foo { const C }` with `impl Tr<u8> for
+                    // Foo` and `impl Tr<u16> for Foo`, each `Foo as Tr::C`)
+                    if let (None, Some(&q)) = (beside, p.const_index.get(&n)) {
+                        let qk = p.consts[q as usize].item as usize;
+                        if trait_of(ii).is_none() || trait_of(qk) != trait_of(ii) || header(qk).is_none() || header(qk) == header(ii) {
+                            return Err(format!("{}:1: duplicate definition of `{n}`", items[ii].line));
+                        }
+                        beside = Some(q);
                     }
+                }
+                let real_last = beside.map(|_| n.rsplit_once("::").map_or(n.as_str(), |x| x.1).to_string());
+                if let Some(prev) = beside {
+                    let g = match p.const_group.get(&prev) {
+                        Some(&g) => g,
+                        None => {
+                            p.const_groups.push(vec![prev]);
+                            p.const_group.insert(prev, p.const_groups.len() as u32 - 1);
+                            p.const_groups.len() as u32 - 1
+                        }
+                    };
+                    let me = p.consts.len() as u32;
+                    p.const_groups[g as usize].push(me);
+                    p.const_group.insert(me, g);
+                    // (a name of its own, which only the group reaches: `Z0::INT#1`)
+                    n = format!("{n}#{}", p.const_groups[g as usize].len() - 1);
                 }
                 let n = &n;
                 if let Some((_, last)) = n.rsplit_once("::") {
-                    p.const_by_last.entry(last.to_string()).or_default().push(p.consts.len() as u32);
+                    p.const_by_last.entry(real_last.unwrap_or_else(|| last.to_string())).or_default().push(p.consts.len() as u32);
                 }
                 p.const_index.insert(n.clone(), p.consts.len() as u32);
                 // (a trait impl's goes by `Foo as Tr::C` too: a qualified path that misses it reads the trait's default)
@@ -2186,6 +2254,9 @@ impl Program {
                 k += 1;
             }
         }
+        if !p.const_groups.is_empty() {
+            p.const_group_impls(items, sums)?;
+        }
         // Associated types (first, since they resolve `Self::Item` in fn signatures)
         let early: FxSet<(usize, usize)> = early.into_iter().collect();
         for (ii, (it, sm)) in items.iter().zip(sums).enumerate() {
@@ -2265,7 +2336,9 @@ impl Program {
                         // (inherent methods with `self` in impls for two instances of one type (either's
                         // `impl<L, R> Either<&L, &R> { fn cloned(self) }` and `.. Either<&mut L, &mut R>`, or `impl W<i32>` and
                         // `impl W<u8>`): overloads, told apart by the receiver as trait impls' are. The same self type twice is
-                        // E0592 still, as is a function without `self`, which a receiver does not choose)
+                        // E0592 still. A function without `self` (simdutf8's `from_32_cut_off_leading` of
+                        // `SimdU8Value<__m256i>` and of `SimdU8Value<__m128i>`) is told apart by the self type its path
+                        // names: self_ty_groups)
                         // (against every inherent method of the name so far, not the first alone: a third `W<u8>::f` is
                         // E0592 too. Self types overlap when one could be the other, `Cake<T>` and `Cake<Box<U>>` (tests/ui
                         // coherence-overlap-issue-23516-inherent): E0592 as well)
@@ -2290,9 +2363,7 @@ impl Program {
                                 if cs.impl_trait.is_some() {
                                     return false;
                                 }
-                                let apart = ss.has_self
-                                    && cs.has_self
-                                    && block_of(c).is_some()
+                                let apart = block_of(c).is_some()
                                     && block_of(c) != own_block
                                     && matches!((mine, cs.self_ty), (Some(a), Some(b)) if !p.self_tys_overlap(a, b));
                                 !apart
@@ -2304,6 +2375,25 @@ impl Program {
                                 _ => it.line,
                             };
                             return Err(format!("{line}:1: duplicate definition of `{name}`"));
+                        }
+                        if group.iter().any(|&c| p.sigs[c as usize].self_ty != mine) {
+                            p.self_ty_groups.insert(name.clone());
+                        }
+                        // (of trait impls' fns, the trait's arguments of each impl: `<Z0 as ToInt<i16>>::to_int()` chooses
+                        // by them (typenum's `impl ToInt<i8> for Z0` beside `ToInt<i16>`'s))
+                        if ss.impl_trait.is_some() {
+                            let targs = |p: &Program, k: usize, gens: &[(String, Vec<String>)]| {
+                                let gn: Vec<&str> = gens.iter().map(|g| g.0.as_str()).collect();
+                                impl_trait_of(p, items, sums, k, &gn).1.filter(|a| !a.is_empty())
+                            };
+                            if !p.fn_targs.contains_key(&prev) && p.sigs[prev as usize].impl_trait.is_some() {
+                                if let Some(a) = p.item_of.get(prev as usize).copied().flatten().and_then(|k| targs(&p, k as usize, &p.sigs[prev as usize].generics)) {
+                                    p.fn_targs.insert(prev, a);
+                                }
+                            }
+                            if let Some(a) = targs(&p, ii, &ss.generics) {
+                                p.fn_targs.insert(p.names.len() as u32, a);
+                            }
                         }
                         let k = p.overloads.entry(name.clone()).or_insert_with(|| vec![prev]);
                         k.push(p.names.len() as u32);
@@ -3462,7 +3552,13 @@ impl Program {
         // (the impl's members: the items that name this header)
         let members = || items.iter().zip(sums).skip(ii + 1).take_while(|(m, _)| matches!(m.kind, crate::lexer::ItemKind::ImplMember(h) if h as usize == ii));
         let defined: Vec<&String> = members().flat_map(|(_, s)| s.ref_impl_fns.iter()).collect();
-        let bad: Vec<&String> = members().flat_map(|(_, s)| s.ref_impl_bad.iter()).collect();
+        let mut bad: Vec<&String> = members().flat_map(|(_, s)| s.ref_impl_bad.iter()).collect();
+        // (a forward that gives a `_` parameter its type's path is one only when that names a unit struct, not one of
+        // the program's consts or statics, whose value it would pass)
+        if members().any(|(_, s)| !s.ref_impl_unit_args.is_empty()) {
+            let values: Vec<&str> = sums.iter().flat_map(|s| s.consts.iter().map(|c| c.0.as_str()).chain(s.statics.iter().map(|c| c.0.as_str()))).map(|n| n.rsplit("::").next().unwrap_or(n)).collect();
+            bad.extend(members().flat_map(|(_, s)| s.ref_impl_unit_args.iter()).filter(|(_, v)| values.contains(&v.as_str())).map(|(m, _)| m));
+        }
         let bounds: Vec<String> = sums[ii].impl_generics.iter().find(|g| g.0 == sn).map(|g| g.1.clone()).unwrap_or_default();
         self.ref_impls_of.entry(tr.to_string()).or_default().push((mutable, bounds.clone()));
         let Some(ids) = self.traits.get(tr) else { return };
@@ -4117,6 +4213,8 @@ impl Program {
                 // Mutex is Sync when T is Send, an Arc or RwLock when T is Send and Sync)
                 let args = &self.structs[sid as usize].args;
                 match name {
+                    // (std's atomics, AtomicPtr<T> too, are Send and Sync whatever they point to)
+                    n if ours && n.starts_with("Atomic") => return true,
                     "Rc" | "Ref" | "RefMut" if ours => return false,
                     "MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard" | "StdoutLock" if !sync && ours => return false,
                     "Cell" | "RefCell" | "LazyCell" | "OnceCell" | "UnsafeCell" | "__Rcvr__" if sync && ours => return false,
@@ -4905,6 +5003,11 @@ impl Program {
                 r
             }
             Expr::Path(None, p) if p.segs.len() == 1 && (p.segs[0].name == "true" || p.segs[0].name == "false") => un((p.segs[0].name == "true") as i128),
+            // (`usize::max_value()`: the type's `MAX`, getrandom's `const FD_UNINIT: usize = usize::max_value();` (#265))
+            Expr::Call(f, args) if crate::parse::int_bound_call(f, args).is_some() => {
+                let (t, k) = crate::parse::int_bound_call(f, args).unwrap();
+                self.prim_const_t(t, k)
+            }
             // (`size_of::<T>()` / `align_of::<T>()` of a primitive, a pointer or an alias of one: an array length in
             //  libc 0.2, `[u8; 128 - 2 * size_of::<c_int>()]`. Other types are not known here)
             Expr::Call(f, args)
@@ -5352,6 +5455,8 @@ impl Program {
             Expr::Paren(x) | Expr::Ref(_, x) => self.static_ty(x),
             Expr::Unary(op, x, _) if op == "-" || op == "!" => self.static_ty(x),
             Expr::Cast(_, t) => It::of_name(&self.cast_prim(t)),
+            // (`u32::max_value()`, as `u32::MAX`)
+            Expr::Call(f, args) if crate::parse::int_bound_call(f, args).is_some() => It::of_ty(crate::parse::int_bound_call(f, args)?.0),
             Expr::Binary(op, l, r, _) => match op.as_str() {
                 "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||" => None,
                 "<<" | ">>" => self.static_ty(l),
@@ -7272,6 +7377,130 @@ impl Program {
             }
         }
         U { p: self, tys: FxMap::default() }.ty(0, a, 1, b, 0)
+    }
+
+    /// The impls of the consts of const_groups, once types resolve: their self types and trait arguments. Two inherent
+    /// impls' consts whose self types may be one type are E0592's duplicate after all (`impl<T> W<T> { const C }` and
+    /// `impl W<u8> { const C }`), at the first one's line as rustc has it
+    fn const_group_impls(&mut self, items: &[SrcItem], sums: &[Summary]) -> R<()> {
+        for g in 0..self.const_groups.len() {
+            for k in 0..self.const_groups[g].len() {
+                let ci = self.const_groups[g][k];
+                let ii = self.consts[ci as usize].item as usize;
+                let crate::lexer::ItemKind::ImplMember(h) = items[ii].kind else { continue };
+                let sm = &sums[h as usize];
+                let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+                let self_ty = sm.impl_self_ty.as_ref().and_then(|t| self.resolve_g(t, &gn).ok());
+                let (trait_name, trait_args) = match sm.impl_trait {
+                    Some(_) => {
+                        let (n, a) = impl_trait_of(self, items, sums, ii, &gn);
+                        (Some(n), a)
+                    }
+                    None => (None, None),
+                };
+                let ngen = gn.len();
+                self.const_impls.insert(ci, ConstImpl { self_ty, trait_name, trait_args, ngen });
+            }
+            let cs = &self.const_groups[g];
+            for (k, &b) in cs.iter().enumerate() {
+                for &a in &cs[..k] {
+                    let (ia, ib) = (&self.const_impls[&a], &self.const_impls[&b]);
+                    if ia.trait_name.is_some() || ib.trait_name.is_some() {
+                        continue;
+                    }
+                    let apart = matches!((ia.self_ty, ib.self_ty), (Some(x), Some(y)) if !self.self_tys_overlap(x, y));
+                    if !apart {
+                        let c = &self.consts[a as usize];
+                        return Err(format!("{}:1: duplicate definition of `{}`", items[c.item as usize].line, c.name));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Of the consts of ci's group (const_groups), the one of the impl a use names: by the self type t (an exact match
+    /// of the impl's), the trait tr and its arguments args, and else by the type the use expects (want, typenum's
+    /// `let x: i16 = Z0::INT`). ci itself when ci has no group, or when none fits
+    pub fn pick_const(&self, ci: u32, t: Option<Ty>, tr: Option<&str>, args: Option<&[Ty]>, want: Option<Ty>) -> u32 {
+        let Some(&g) = self.const_group.get(&ci) else { return ci };
+        let group = &self.const_groups[g as usize];
+        let tr = tr.map(|tr| tr.rsplit("::").next().unwrap_or(tr));
+        let fits = |c: u32| -> bool {
+            let Some(im) = self.const_impls.get(&c) else { return false };
+            let mut sol = vec![None; im.ngen];
+            if let Some(t) = t {
+                if !im.self_ty.is_some_and(|st| crate::traits::mtch(self, st, t, &mut sol, false, 0)) {
+                    return false;
+                }
+            }
+            if tr.is_some_and(|tr| im.trait_name.as_deref() != Some(tr)) {
+                return false;
+            }
+            match (args, &im.trait_args) {
+                (None, _) => true,
+                (Some(a), Some(ta)) => a.len() == ta.len() && ta.iter().zip(a).all(|(&p, &x)| crate::traits::mtch(self, p, x, &mut sol, false, 0)),
+                (Some(_), None) => false,
+            }
+        };
+        let fit: Vec<u32> = group.iter().copied().filter(|&c| fits(c)).collect();
+        if let [c] = fit[..] {
+            return c;
+        }
+        // (several: the one whose declared type is the one wanted)
+        if let (Some(w), true) = (want.filter(|&w| !self.has_param(w)), fit.len() > 1) {
+            let by_ty: Vec<u32> = fit.iter().copied().filter(|&c| self.consts[c as usize].ty == w).collect();
+            if let [c] = by_ty[..] {
+                return c;
+            }
+        }
+        if fit.contains(&ci) { ci } else { fit.first().copied().unwrap_or(ci) }
+    }
+
+    /// The self type a path to an associated item names by its segment before the last (`W::<u16>::new`, `Alias::C`
+    /// of `type Alias = W<u16>`, `Self::C`, `T::C` of a type parameter), modules before it stripped; None when that is
+    /// no type (or a type parameter still)
+    pub fn path_self(&self, p: &crate::parse::Path, env: &TyEnv) -> Option<Ty> {
+        let n = p.segs.len();
+        if n < 2 || (n > 2 && self.strip_mods_p(&PPath::of(p)).is_none_or(|q| q.segs.len() != 2)) {
+            return None;
+        }
+        let ty = crate::parse::Ty::Path(None, crate::parse::Path { global: false, segs: vec![p.segs[n - 2].clone()], pos: Default::default() });
+        let ts = crate::ast_types::tysyn(&ty, Some(&TySyn::Named("Self".into()))).ok()?;
+        self.resolve_env(&ts, env).ok().filter(|t| !matches!(t, Ty::Param(_)))
+    }
+
+    /// Of the functions of one name in impls for other instances of a type (self_ty_groups: `impl W<u8> { fn new() }`
+    /// beside `impl W<u16> { fn new() }`, `impl From<u8> for W<u8>` beside `impl From<u16> for W<u16>`), one of the impl
+    /// for t, the self type the path to it names (path_self): id when it is one, else the first such inherent
+    /// function, then the first trait impl's; id when none is
+    pub fn fn_for_self_ty(&self, id: u32, t: Ty) -> u32 {
+        let name = &self.names[id as usize];
+        let Some(group) = self.overloads.get(name.split('#').next().unwrap_or(name)) else { return id };
+        let fits = |c: u32| {
+            let sig = &self.sigs[c as usize];
+            sig.self_ty.is_some_and(|st| self.match_ty_exact(st, t, &mut vec![None; sig.generics.len()]))
+        };
+        if fits(id) {
+            return id;
+        }
+        let inherent = |c: &u32| self.sigs[*c as usize].impl_trait.is_none();
+        group.iter().copied().filter(inherent).find(|&c| fits(c)).or_else(|| group.iter().copied().find(|&c| fits(c))).unwrap_or(id)
+    }
+
+    /// fn_for_self_ty of the fn id a path p names (fn_by_p), by the self type the path names in env
+    pub fn fn_of_path_self(&self, id: u32, p: &crate::parse::Path, env: &TyEnv) -> u32 {
+        if self.self_ty_groups.is_empty() {
+            return id;
+        }
+        let name = &self.names[id as usize];
+        if !self.self_ty_groups.contains(name.split('#').next().unwrap_or(name)) {
+            return id;
+        }
+        match self.path_self(p, env) {
+            Some(t) => self.fn_for_self_ty(id, t),
+            None => id,
+        }
     }
 
     /// Of the inherent methods with `self` overloading `id` (in impls for other instances of the type), the one whose
