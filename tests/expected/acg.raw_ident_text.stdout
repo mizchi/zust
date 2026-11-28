@@ -1,0 +1,5 @@
+r#foo + 1 = 4
+r#foo
+r#struct
+r#foo.r#bar(r#baz)
+3

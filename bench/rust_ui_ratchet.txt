@@ -1,6 +1,6 @@
 # the least number of tests/ui tests of each kind zustc must pass (bench/rust_ui.py --check fails below it;
 # --write-baseline raises it, never lowers it). Accidental passes (rust_ui_accidental.txt) are not counted
-run-pass	1942
-check-pass	1563
-build-pass	104
-compile-fail	5405
+run-pass	1960
+check-pass	1590
+build-pass	105
+compile-fail	5414

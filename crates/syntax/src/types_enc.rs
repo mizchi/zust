@@ -136,6 +136,7 @@ crate::enc_struct!(Summary {
     fns,
     structs,
     unions,
+    unit,
     reprs,
     const_fns,
     const_fn_tys,

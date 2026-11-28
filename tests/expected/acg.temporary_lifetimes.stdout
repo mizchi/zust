@@ -1,0 +1,31 @@
+end1
+drop 1
+end2
+drop 2
+end3
+drop 3
+end4
+drop 4
+end5
+drop 5
+end6
+drop 6
+drop 7
+end7
+drop 1
+drop 2
+n 1
+drop 10
+drop 11
+m 11
+drop 20
+b 20
+drop 40
+drop 50
+k 40
+drop 41
+drop 50
+k 41
+r 60
+end
+drop 60

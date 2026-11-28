@@ -1,5 +1,5 @@
 use super::*;
-use crate::parse::{Block as PBlock, Expr, Pat, Path};
+use crate::parse::{Block as PBlock, Expr, Pat, Path, Stmt};
 use crate::types::{Ty, intern};
 use crate::acg::clif::{AbiParam, Signature, TrapCode, types};
 use crate::ir::{Block, IntCC, StackSlot, Value};
@@ -25,6 +25,18 @@ impl Cx<'_> {
     // --- match / if let / while let --------------------------------------
 
     /// match 対象を place にする。値なら一時変数に置く。None は発散
+    /// The scrutinee's place for patterns `pats` (bk_scrutinee): a mutable place when one of them binds by `ref mut`, so
+    /// that a scrutinee through a user `Deref` (`match *b { ref mut n => .. }`, `let ref mut z = *y;`) calls `deref_mut`
+    pub(crate) fn scrut_place(&mut self, e: &Expr, expected: Option<Ty>, pats: &[&Pat]) -> R<Option<Place>> {
+        // (only a place reached through something (`*b`, `p.x`) can be through a Deref: a local's pattern is not read)
+        if !matches!(strip_paren(e), Expr::Path(..)) && is_place_expr(e) && pats.iter().any(|p| binds_ref_mut(p)) {
+            self.scrut_mut = true;
+        }
+        let r = self.bk_scrutinee(e, expected, pats);
+        self.scrut_mut = false;
+        r
+    }
+
     pub(crate) fn scrutinee(&mut self, e: &Expr) -> R<Option<Place>> {
         self.scrutinee_as(e, None)
     }
@@ -46,7 +58,11 @@ impl Cx<'_> {
         }
         let bare_none = expected.is_some() && matches!(strip_paren(e), Expr::Path(None, pa) if pa.segs.len() == 1 && pa.segs[0].name == "None");
         if is_place_expr(e) && !bare_none {
-            let p = self.place(e)?;
+            let m = self.bk.place_mut || std::mem::take(&mut self.scrut_mut);
+            let pm = std::mem::replace(&mut self.bk.place_mut, m);
+            let p = self.place(e);
+            self.bk.place_mut = pm;
+            let p = p?;
             // (the annotation is the place's type (`let ref s: String = n;` with n an i32 is E0308); not a pointer's,
             // to which a coercion may apply)
             let coercible = |t: Ty| matches!(t, Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_) | Ty::Fn(_) | Ty::Dyn(_) | Ty::Never);
@@ -182,22 +198,33 @@ impl Cx<'_> {
         }
         // (an arm with a guard and an or-pattern: the guard runs for each alternative that matches, left to right.
         // The arm becomes one arm per alternative)
-        if arms.iter().any(|a| a.guard.is_some() && has_or(&a.pat)) {
+        // (so does one whose alternatives move out of a place, `E::A(x, ..) | E::B(x, ..)` on a local: each arm splits
+        // the local by its own variant's layout (split_moved), as the alternative that matched is known only there.
+        // Only a place that is no reference and has something to drop, and an arm with no `ref` binding: the check that
+        // its alternatives bind each name in one mode (`(0, ref y) | (y, 0)`) looks at the or-pattern whole)
+        let place = matches!(strip_paren(scrut), Expr::Path(..) | Expr::Field(..))
+            && self.peek(scrut).is_some_and(|t| !matches!(t, Ty::Ref(..)) && self.needs_drop(t));
+        let per_alt = |a: &crate::parse::Arm| has_or(&a.pat) && (a.guard.is_some() || (place && binds_by_value(&a.pat) && !binds_by_ref(&a.pat)));
+        if arms.iter().any(per_alt) {
             let mut out = vec![];
+            let mut groups: Vec<u32> = vec![];
             let mut changed = false;
-            for a in arms {
-                let alts = if a.guard.is_some() { or_alts(&a.pat) } else { vec![] };
+            for (ai, a) in arms.iter().enumerate() {
+                let alts = if per_alt(a) { or_alts(&a.pat) } else { vec![] };
                 if alts.len() < 2 || alts.len() > 32 {
                     out.push(a.clone());
+                    groups.push(u32::MAX);
                     continue;
                 }
                 changed = true;
                 for p in alts {
                     out.push(crate::parse::Arm { pat: p, pos: a.pos, guard: a.guard.clone(), body: a.body.clone() });
+                    groups.push(ai as u32);
                 }
             }
             if changed {
                 let m2 = self.keep_expr(Expr::Match(scrut.clone(), out));
+                self.or_groups.insert(m2 as *const Expr as usize, groups);
                 // (the region check follows the arms that were lowered)
                 if self.rg_on() {
                     self.rg.alias.insert(m as *const Expr as usize, m2);
@@ -247,7 +274,7 @@ impl Cx<'_> {
             }
             _ => self.bare_none_ty(scrut, &pats)?,
         };
-        let Some(place) = self.bk_scrutinee(scrut, scrut_exp, &pats)? else {
+        let Some(place) = self.scrut_place(scrut, scrut_exp, &pats)? else {
             return Ok((None, Ty::Never));
         };
         let scrut_drop = self.bk.scrut_drop.take();
@@ -282,7 +309,20 @@ impl Cx<'_> {
         let mut guard_places: Option<Vec<(borrowck::BPlace, bool)>> = None;
         // 各 arm を上から順に試す (判定 → 束縛 → ガード → 本体)
         let mut after_guard = false;
-        for arm in arms {
+        // (the variant every arm that goes on matched: Some(None) when they differ or one matches any. Only of an enum
+        // in a local that is dropped)
+        let mut on_vars: Option<Option<(u32, usize)>> = None;
+        let track = matches!(strip_paren(scrut), Expr::Path(..))
+            && matches!(place.ty(), Ty::Struct(sid) if self.prog.structs[sid as usize].is_enum)
+            && self.moved_root(scrut).is_some();
+        // (the scrutinee's flag, for a mark in known_var during each arm's body: an assignment to the scrutinee or a
+        // `&mut` of it there (forget_variant) removes it, and that arm's variant is not known after it)
+        let track_f = if track { self.moved_root(scrut).map(|r| r.2) } else { None };
+        const MARK: (u32, usize) = (u32::MAX, usize::MAX);
+        // (the arms one or-pattern's alternatives became: the names the first of each bound, and their types)
+        let groups = self.or_groups.remove(&(m as *const Expr as usize)).unwrap_or_default();
+        let mut group_tys: crate::fxhash::FxMap<u32, Vec<(String, Ty)>> = Default::default();
+        for (ai, arm) in arms.iter().enumerate() {
             let next = self.b.create_block();
             // (after a guard that failed, the next arm tests the scrutinee again: what the guard moved out of it is
             // used (E0382, at the match, as rustc reports it))
@@ -313,13 +353,20 @@ impl Cx<'_> {
             self.bk_bind_begin();
             self.bk.guard_arm = arm.guard.is_some();
             self.bk.arm_at = Some(arm.pos).filter(|p| p.line != 0);
+            let pv0 = (self.pat_moved.len(), self.pat_vars.len());
             let r = self.pat_bind(&arm.pat, place, BindMode::Move);
             self.bk.arm_at = None;
             self.bk.guard_arm = false;
             self.bk_bind_end();
             r?;
+            if let Some(&g) = groups.get(ai).filter(|&&g| g != u32::MAX) {
+                self.or_group_types(g, &arm.pat, &mut group_tys)?;
+            }
             if self.owned_binds > ob {
-                self.release_outer(scrut, sflag)?;
+                self.rel_parts = self.pat_parts(place, pv0);
+                let r = self.release_outer(scrut, sflag);
+                self.rel_parts = None;
+                r?;
             } else if self.bk.pat_moves > pm {
                 self.deref_move_check(scrut)?;
             }
@@ -414,7 +461,7 @@ impl Cx<'_> {
                 }
                 for c in cs {
                     if let Expr::Let(lpat, lexpr) = c {
-                        let Some(lplace) = ({ let ex = self.bare_none_ty(lexpr, &[&**lpat])?; self.bk_scrutinee(lexpr, ex, &[&**lpat])? }) else {
+                        let Some(lplace) = ({ let ex = self.bare_none_ty(lexpr, &[&**lpat])?; self.scrut_place(lexpr, ex, &[&**lpat])? }) else {
                             break;
                         };
                         // (a pattern that is not of the value's type: at the pattern, `Ok(x) if let Err(_) = x`)
@@ -453,7 +500,22 @@ impl Cx<'_> {
                 self.bk_ev(borrowck::Ev::Def(id, vec![]));
             }
             let t0 = self.temps.len();
+            if let Some(f) = track_f {
+                self.known_var.push((f, MARK.0, MARK.1));
+            }
             let (v, t) = self.expr(&arm.body, result_ty.or(expected))?;
+            let kept = track_f.and_then(|f| self.known_var.iter().position(|k| *k == (f, MARK.0, MARK.1)));
+            if let Some(i) = kept {
+                self.known_var.remove(i);
+            }
+            if track && t != Ty::Never {
+                let var = kept.and_then(|_| self.pat_variant(&arm.pat, place.ty()));
+                on_vars = match on_vars {
+                    Some(Some(x)) if var != Some(x) => Some(None),
+                    Some(x) => Some(x),
+                    None => Some(var),
+                };
+            }
             // (the fn's tail: what an arm returns by naming one of its bindings is returned here, while the binding is
             // in scope (`S(&mut ref mut r) => r`: E0713 through a `Drop` value); after the match, the return of the
             // match no longer finds it)
@@ -472,6 +534,12 @@ impl Cx<'_> {
         // どの arm にも合わない (rustc が網羅性を保証するので到達しない)
         self.b.ins().trap(TrapCode::unwrap_user(2));
         self.b.switch_to_block(merge);
+        if let Some(Some((sid, vi))) = on_vars {
+            if let Some((_, _, f)) = self.moved_root(scrut) {
+                self.known_var.retain(|k| k.0 != f);
+                self.known_var.push((f, sid, vi));
+            }
+        }
         Ok(match result_ty {
             None => (None, Ty::Never),
             Some(t) => (param, t),
@@ -486,7 +554,7 @@ impl Cx<'_> {
             return err(SP, "internal: if_let without `let`");
         };
         let t0 = self.temps.len();
-        let Some(place) = ({ let ex = self.bare_none_ty(lexpr, &[&**lpat])?; self.bk_scrutinee(lexpr, ex, &[&**lpat])? }) else {
+        let Some(place) = ({ let ex = self.bare_none_ty(lexpr, &[&**lpat])?; self.scrut_place(lexpr, ex, &[&**lpat])? }) else {
             return Ok((None, Ty::Never));
         };
         let sflag = self.last_scrut;
@@ -500,11 +568,15 @@ impl Cx<'_> {
         let ob = self.owned_binds;
         let pm = self.bk.pat_moves;
         self.bk_bind_begin();
+        let pv0 = (self.pat_moved.len(), self.pat_vars.len());
         let r = self.pat_bind(lpat, place, BindMode::Move);
         self.bk_bind_end();
         r?;
         if self.owned_binds > ob {
-            self.release_outer(lexpr, sflag)?;
+            self.rel_parts = self.pat_parts(place, pv0);
+            let r = self.release_outer(lexpr, sflag);
+            self.rel_parts = None;
+            r?;
         } else if self.bk.pat_moves > pm {
             self.deref_move_check(lexpr)?;
         }
@@ -551,6 +623,7 @@ impl Cx<'_> {
         let Expr::Let(pat, e) = &**cond else {
             unreachable!()
         };
+        self.presplit_loop(Some(e), body);
         self.while_let_parts(pat, e, body, "while")
     }
 
@@ -564,7 +637,7 @@ impl Cx<'_> {
         // 毎回 match 対象を評価し直す (一時値は 1 回ごとに drop する)
         let t0 = self.temps.len();
         let bk_t0 = self.bk.stmt_temps.len();
-        let Some(place) = ({ let ex = self.bare_none_ty(e, &[pat])?; self.bk_scrutinee(e, ex, &[pat])? }) else {
+        let Some(place) = ({ let ex = self.bare_none_ty(e, &[pat])?; self.scrut_place(e, ex, &[pat])? }) else {
             return Ok((None, Ty::Never));
         };
         let sflag = self.last_scrut;
@@ -573,11 +646,15 @@ impl Cx<'_> {
         let ob = self.owned_binds;
         let pm = self.bk.pat_moves;
         self.bk_bind_begin();
+        let pv0 = (self.pat_moved.len(), self.pat_vars.len());
         let r = self.pat_bind(pat, place, BindMode::Move);
         self.bk_bind_end();
         r?;
         if self.owned_binds > ob {
-            self.release_outer(e, sflag)?;
+            self.rel_parts = self.pat_parts(place, pv0);
+            let r = self.release_outer(e, sflag);
+            self.rel_parts = None;
+            r?;
         } else if self.bk.pat_moves > pm {
             self.deref_move_check(e)?;
         }
@@ -1272,10 +1349,13 @@ impl Cx<'_> {
                 Some(sub) => self.pat_test(sub, p, fail),
                 None => Ok(()),
             },
-            Pat::Ref(_, inner) => {
+            Pat::Ref(pm, inner) => {
                 let Ty::Ref(_, _) = p.ty() else {
                     return err(SP, format!("mismatched types: `{}` is not a reference", self.prog.tn(p.ty())));
                 };
+                if let Some(m) = self.ref_pat_mutability_err(*pm, p.ty()) {
+                    return err(SP, m);
+                }
                 let (q, _) = self.pat_deref_once(p);
                 self.pat_test(inner, q, fail)
             }
@@ -1325,6 +1405,11 @@ impl Cx<'_> {
             Pat::Lit(l) if lit_kind(l, |x| matches!(x, Lit::ByteStr(_))) => {
                 let Expr::Lit(text, _) = &**l else { unreachable!() };
                 let Some(Lit::ByteStr(bs)) = lit::lit(text) else { unreachable!() };
+                // (the program's: a literal of a reference's type takes no reference off (rustc's match ergonomics), so a
+                // `&&[u8]` or a `&mut [u8; N]` is another type (E0308))
+                if self.user_code && !matches!(p.ty(), Ty::Ref(false, Ty::Slice(Ty::U8) | Ty::Array(Ty::U8, _))) {
+                    return err(SP, format!("mismatched types: expected `{}`, found `&[u8; {}]`", self.prog.tn(p.ty()), bs.len()));
+                }
                 let mut p = p;
                 // (&&[u8] などは 1 段ずつ外し、&[u8] / &[u8; N] で止める)
                 while let Ty::Ref(_, i) = p.ty() {
@@ -1355,6 +1440,10 @@ impl Cx<'_> {
             Pat::Lit(l) if lit_kind(l, |x| matches!(x, Lit::Str(_))) => {
                 let Expr::Lit(text, _) = &**l else { unreachable!() };
                 let sref = Ty::Ref(false, intern(Ty::Str));
+                // (the program's: no reference is taken off a `&&str` (E0308), as for a byte string)
+                if self.user_code && matches!(p.ty(), Ty::Ref(_, Ty::Ref(..))) {
+                    return err(SP, format!("mismatched types: expected `{}`, found `&str`", self.prog.tn(p.ty())));
+                }
                 let mut p = p;
                 while let Ty::Ref(_, i) = p.ty() {
                     if p.ty() == sref || *i == Ty::Str {
@@ -1580,6 +1669,21 @@ impl Cx<'_> {
     }
 
     /// n names the unit struct t is (no fields, no variants)
+    /// A `&` pattern on a `&mut` value, or a `&mut` pattern on a `&` one: the types differ in mutability (E0308)
+    fn ref_pat_mutability_err(&self, pat_mut: bool, t: Ty) -> Option<String> {
+        let Ty::Ref(m, i) = t else { return None };
+        if !self.user_code || m == pat_mut {
+            return None;
+        }
+        let (want, found) = if m { ("&mut ", "&_") } else { ("&", "&mut _") };
+        Some(format!("mismatched types: expected `{want}{}`, found `{found}` (types differ in mutability)", self.prog.tn(*i)))
+    }
+
+    /// Whether n names a unit struct of the program (`struct S;`, not generic)
+    pub(crate) fn unit_struct_named(&self, n: &str) -> bool {
+        !self.prog.unit_structs.is_empty() && self.prog.unit_structs.contains(n) && self.prog.struct_index.get(n).is_some_and(|&sid| self.prog.structs[sid as usize].generics.is_empty())
+    }
+
     pub(crate) fn unit_struct_pat(&self, n: &str, t: Ty) -> bool {
         let Ty::Struct(sid) = t else { return false };
         let sd = &self.prog.structs[self.prog.base_of(sid) as usize];
@@ -1654,6 +1758,14 @@ impl Cx<'_> {
 
     /// 判定に通った後で、パターン中の名前を束縛する
     pub(crate) fn pat_bind(&mut self, pat: &Pat, p: Place, mode: BindMode) -> R<()> {
+        // (a destructuring assignment, `(x, y) = &(1, 2);` (parse::destructure_assign's `let` of `__exr_da` names): no
+        // default binding mode takes a reference off its right side (E0308))
+        if let (Pat::Tuple(_) | Pat::Slice(_), Ty::Ref(..)) = (pat, p.ty()) {
+            if destructure_assign_pat(pat) {
+                let shape = if matches!(pat, Pat::Tuple(_)) { "a tuple" } else { "an array" };
+                return err(SP, format!("mismatched types: expected `{}`, found {shape}", self.prog.tn(p.ty())));
+            }
+        }
         match pat {
             // (`let PhantomData::<(A, B)> = x`: a unit struct's turbofish names the type the value has)
             Pat::Path(path) if path.segs.last().is_some_and(|s| !s.args.is_empty()) && self.variant_on(path, p.ty()).is_none() => {
@@ -1669,8 +1781,9 @@ impl Cx<'_> {
             Pat::Ident(..) if const_lit_pat(self.prog, pat).is_some() => Ok(()),
             Pat::Ident(..) if self.const_pat_ok(pat, p.ty()) => Ok(()),
             // (a unit struct's name, of the value's type: a pattern that binds and moves nothing (`let Unit = *w;`
-            // through a Deref, `let Unit = u;` before a use of u))
-            Pat::Ident(false, false, n, None) if self.unit_struct_pat(n, p.ty()) => Ok(()),
+            // through a Deref, `let Unit = u;` before a use of u); through references too, by the default binding mode
+            // (`let U = &U;`))
+            Pat::Ident(false, false, n, None) if self.unit_struct_pat(n, self.strip_refs(p.ty())) => Ok(()),
             // (an aggregate constant, tested by pat_test: not a new name, so a nested match still compares with it)
             Pat::Ident(_, _, n, None)
                 if self.user_code
@@ -1679,6 +1792,11 @@ impl Cx<'_> {
                     && self.lookup(n).is_none() =>
             {
                 Ok(())
+            }
+            // (the name of a unit struct is that struct, not a new name, for a value of another type too: `let Test = 1;`,
+            // `let Thing { foo } = t;` with a `struct foo;` (E0308))
+            Pat::Ident(false, false, n, None) if self.user_code && self.unit_struct_named(n) => {
+                err(SP, format!("mismatched types: expected `{}`, found `{n}`", self.prog.tn(p.ty())))
             }
             Pat::Ident(by_ref, mutable, name, subpat) => {
                 // (`x @ sub`: sub binds first, and what it binds is checked against x below (at_conflict))
@@ -1737,7 +1855,15 @@ impl Cx<'_> {
                         let (v, t) = self.read(p);
                         self.bk_pat_move(t, &name);
                         self.bk.mut_next = Some(*mutable);
+                        let ob = self.owned_binds;
                         self.bind(name.clone(), t, v);
+                        // (a value that needs dropping, which bind owned: a part the pattern moved out of the place)
+                        if self.owned_binds > ob {
+                            self.pat_moved.push(match p {
+                                Place::Mem(a, o, t) => (Some(a), o, t),
+                                _ => (None, 0, t),
+                            });
+                        }
                         self.rg_pat_bind(&name, false);
                     }
                     BindMode::Ref(m) => {
@@ -1772,6 +1898,15 @@ impl Cx<'_> {
                 Ok(())
             }
             Pat::Ref(pm, inner) => {
+                // (`let &x = 5u32;`, `fn f(&a: Foo)`: a reference's pattern on a value that is not one (E0308), as
+                // pat_test says for a refutable one)
+                let t = p.ty();
+                if matches!(t, Ty::Struct(_) | Ty::Array(..) | Ty::Unit | Ty::Bool | Ty::Char | Ty::F32 | Ty::F64) || t.is_int() {
+                    return err(SP, format!("mismatched types: expected `{}`, found `&_`", self.prog.tn(t)));
+                }
+                if let Some(m) = self.ref_pat_mutability_err(*pm, t) {
+                    return err(SP, m);
+                }
                 let (q, _) = self.pat_deref_once(p);
                 let saved = self.bk_pat_proj(borrowck::ref_deref(*pm));
                 let rs = (self.rg.pat.clone(), self.rg.pat_ref);
@@ -1832,11 +1967,13 @@ impl Cx<'_> {
                             // (E0308: a name has the first alternative's type in each; at the alternative, a binding
                             // having no position of its own)
                             if t0.len() != tl.len() {
-                                return err(SP, "`|` alternatives bind different types");
+                                // (at the alternative, as rustc: `Some(y) | None`)
+                                let sp = [crate::parse::pat_pos(case), crate::parse::pat_pos(&cases[0])].into_iter().find(|s| s.line != 0).unwrap_or(SP);
+                                return Err(self.at(sp, "`|` alternatives bind different types".to_string()));
                             }
                             if let Some((a, b)) = t0.iter().zip(tl.iter()).find(|(a, b)| a.1 != b.1) {
                                 let (want, got) = (self.prog.tn(a.1), self.prog.tn(b.1));
-                                let sp = at.get(k).copied().unwrap_or_default();
+                                let sp = Some(crate::parse::pat_pos(case)).filter(|s| s.line != 0).or_else(|| at.get(k).copied()).unwrap_or_default();
                                 return Err(self.at(sp, format!("mismatched types: expected `{want}`, found `{got}`")));
                             }
                         }
@@ -1996,6 +2133,9 @@ impl Cx<'_> {
                 self.rg_pat_lifetimes(path);
                 let (fields, vname, rvi) = match self.variant_on(path, p.ty()) {
                     Some((sid, vi)) => {
+                        if let Place::Mem(a, o, _) = p {
+                            self.pat_vars.push((Some(a), o, sid, vi));
+                        }
                         self.tuple_pat_of_variant(path, sid, vi)?;
                         let v = &self.prog.structs[sid as usize].variants[vi];
                         (v.fields.clone(), Some(v.name.clone()), Some(vi))
@@ -2040,7 +2180,11 @@ impl Cx<'_> {
                 self.rg_pat_lifetimes(spath);
                 // (the borrow check follows the parts by their names, as for a tuple struct's (`S { x: ax, .. } = a`
                 // moves a.x); the region check does not)
-                let vname = self.variant_on(spath, p.ty()).map(|(sid, vi)| self.prog.structs[sid as usize].variants[vi].name.clone());
+                let var = self.variant_on(spath, p.ty());
+                if let (Some((sid, vi)), Place::Mem(a, o, _)) = (var, p) {
+                    self.pat_vars.push((Some(a), o, sid, vi));
+                }
+                let vname = var.map(|(sid, vi)| self.prog.structs[sid as usize].variants[vi].name.clone());
                 let deref = matches!(mode, BindMode::Ref(_));
                 // (a union's field is marked, as an expression's is (borrowck::UNION_FIELD): a loan of `u.a` by
                 // `U { a: ref x }` overlaps a write to `u.a` or `u.b`)
@@ -2065,6 +2209,17 @@ impl Cx<'_> {
     }
 }
 
+/// Whether pattern p binds a name by `ref mut`
+fn binds_ref_mut(p: &Pat) -> bool {
+    match p {
+        Pat::Ident(by_ref, m, _, sub) => (*by_ref && *m) || sub.as_deref().is_some_and(binds_ref_mut),
+        Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Or(ps, _) | Pat::Slice(ps) => ps.iter().any(binds_ref_mut),
+        Pat::Struct(_, fs, _) => fs.iter().any(|f| binds_ref_mut(&f.1)),
+        Pat::Ref(_, q) => binds_ref_mut(q),
+        _ => false,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Drop
 // ---------------------------------------------------------------------------
@@ -2072,7 +2227,8 @@ impl Cx<'_> {
 // - drop が要る型 ([`Program::needs_drop`]) の値を持つローカル変数・一時値は、所有者として
 //   `owned` / `temps` に drop フラグ (スタック上の 1 byte) と一緒に登録する。
 // - ムーブ (値としての読み出し・値で受ける self・move キャプチャ・値で束縛するパターン) でフラグを 0 にする。
-//   フィールドだけのムーブ (部分ムーブ) も全体のフラグを 0 にする (残りはリークする)。
+//   A move out of a part of a local (a partial move) splits its flag into flags of its other parts, which are
+//   dropped in its place (split_moved); what zustc does not split (an array's element, what a Box holds) leaks.
 // - スコープの終わり・return / break / continue / `?` で、フラグが 1 のものを登録と逆順に drop する。
 // - drop 本体は `__exr_drop_in_place::<T>` のインスタンス (drop glue)。codegen が型ごとに
 //   1 段だけ展開した本体を作り、入れ子の型は呼び出しにする (再帰的な型でも展開が止まる)。
@@ -2106,7 +2262,7 @@ impl Cx<'_> {
         }
         let flag = self.new_flag();
         let depth = self.scopes.len() - 1;
-        self.owned.push(Owned { loc, ty, flag, depth });
+        self.owned.push(Owned { loc, ty, flag, depth, off: 0 });
     }
 
     /// 一時値 v (集約型ならアドレス) を文の終わりまで所有する。drop が要らなければ None
@@ -2122,7 +2278,7 @@ impl Cx<'_> {
             Loc::Slot(ss)
         };
         let flag = self.new_flag();
-        self.temps.push(Owned { loc, ty, flag, depth: 0 });
+        self.temps.push(Owned { loc, ty, flag, depth: 0, off: 0 });
         Some(flag)
     }
 
@@ -2355,16 +2511,17 @@ impl Cx<'_> {
             return;
         }
         let flag = self.new_flag();
-        self.temps.push(Owned { loc: Loc::Ptr(a), ty, flag, depth: 0 });
+        self.temps.push(Owned { loc: Loc::Ptr(a), ty, flag, depth: 0, off: 0 });
     }
 
     /// ローカル変数 (の場所) の drop フラグ
     pub(crate) fn flag_of_loc(&self, loc: Loc) -> Option<StackSlot> {
-        self.owned.iter().rev().find(|o| o.loc == loc).map(|o| o.flag)
+        // (not a part's (split_moved), which has its local's place)
+        self.owned.iter().rev().find(|o| o.loc == loc && (self.parts.is_empty() || !self.parts.iter().any(|p| p.3 == o.flag))).map(|o| o.flag)
     }
 
-    /// mark_moved が下ろすフラグ (下ろさずに返す)
-    pub(crate) fn moved_flag(&self, e: &Expr) -> Option<StackSlot> {
+    /// The local mark_moved moves out of (its place, type and drop flag), without touching its flag
+    pub(crate) fn moved_root(&self, e: &Expr) -> Option<(Loc, Ty, StackSlot)> {
         let mut e = e;
         loop {
             match e {
@@ -2376,15 +2533,18 @@ impl Cx<'_> {
                     if matches!(t, Ty::Ref(..) | Ty::Ptr(..)) {
                         return None;
                     }
-                    return self.flag_of_loc(loc);
+                    return self.flag_of_loc(loc).map(|f| (loc, t, f));
                 }
                 _ => return None,
             }
         }
     }
 
-    /// 式 e (ローカル変数か、そのフィールド) から値をムーブした: 変数のフラグを下ろす
+    /// A value was moved out of e (a local, or a field of one): the local is not dropped, or (a part of it moved out,
+    /// split_moved) only its other parts are
     pub(crate) fn mark_moved(&mut self, e: &Expr) {
+        let parts = self.rel_parts.take();
+        let e0 = e;
         let mut e = e;
         let mut via_field = false;
         loop {
@@ -2409,7 +2569,14 @@ impl Cx<'_> {
                         // (Box の中身のフィールドをムーブしたときも Box ごとムーブ済みにする: 領域はリークする)
                         let _ = via_field;
                         if let Some(f) = self.flag_of_loc(loc) {
-                            self.clear_flag(f);
+                            if !self.split_moved(e0, loc, t, f, parts) {
+                                // (all of it moved: the flags of the parts an earlier move split out too)
+                                self.clear_flag(f);
+                                let pfs: Vec<StackSlot> = self.parts.iter().filter(|p| p.0 == f).map(|p| p.3).collect();
+                                for pf in pfs {
+                                    self.clear_flag(pf);
+                                }
+                            }
                         }
                     }
                     return;
@@ -2417,6 +2584,515 @@ impl Cx<'_> {
                 _ => return,
             }
         }
+    }
+
+    /// The variant (enum, variant) a match arm's pattern names, if it names one: `None`, `E::A(..)`, `E::S { .. }`
+    fn pat_variant(&self, pat: &Pat, t: Ty) -> Option<(u32, usize)> {
+        match pat {
+            Pat::Path(p) | Pat::TupleStruct(p, _) | Pat::Struct(p, _, _) => self.variant_on(p, t),
+            Pat::Ident(..) => self.variant_on(&unit_variant_ident(self.prog, pat)?, t),
+            _ => None,
+        }
+    }
+
+    /// A local e (or a part of it) is assigned or borrowed `&mut`: no variant is known of it any more (known_var)
+    pub(crate) fn forget_variant(&mut self, e: &Expr) {
+        let mut cur = strip_paren(e);
+        while let Expr::Field(b, _, _) | Expr::Index(b, _, _) = cur {
+            cur = strip_paren(b);
+        }
+        if let Some((_, _, f)) = self.moved_root(cur) {
+            self.known_var.retain(|k| k.0 != f);
+        }
+    }
+
+    /// An arm that was an alternative of an or-pattern (group g, match_): each name it binds has the type the group's
+    /// first alternative gave it (E0308 at the alternative, as the or-pattern's own lowering reports it)
+    #[cold]
+    fn or_group_types(&mut self, g: u32, pat: &Pat, seen: &mut crate::fxhash::FxMap<u32, Vec<(String, Ty)>>) -> R<()> {
+        let mut names = vec![];
+        crate::ast_closure::pat_idents(pat, &mut names);
+        let tl: Vec<(String, Ty)> = names.iter().filter_map(|n| self.lookup(n).map(|(_, t)| (n.clone(), t))).collect();
+        let Some(t0) = seen.get(&g) else {
+            seen.insert(g, tl);
+            return Ok(());
+        };
+        if let Some((a, b)) = t0.iter().find_map(|a| tl.iter().find(|b| b.0 == a.0 && b.1 != a.1).map(|b| (a, b))) {
+            let (want, got) = (self.prog.tn(a.1), self.prog.tn(b.1));
+            let sp = Some(crate::parse::pat_pos(pat)).filter(|s| s.line != 0).unwrap_or_default();
+            return Err(self.at(sp, format!("mismatched types: expected `{want}`, found `{got}`")));
+        }
+        Ok(())
+    }
+
+    /// The parts (offset in `place`, type) that the pattern bound after pat_moved's entry `from` moved out of, or None
+    /// when one is not in place's memory (behind a reference or a Box)
+    pub(crate) fn pat_parts(&mut self, place: Place, from: (usize, usize)) -> Option<PatParts> {
+        let moved = self.pat_moved.split_off(from.0.min(self.pat_moved.len()));
+        let vars = self.pat_vars.split_off(from.1.min(self.pat_vars.len()));
+        let Place::Mem(a, o, _) = place else { return None };
+        // (an or-pattern's alternatives each record their variant, `E::A(x, ..) | E::B(x, ..)`: which one matched is
+        // known only at run time, so no part is split by one variant's layout; split_moved takes it as a whole move)
+        let vs: Vec<&(Option<Value>, i32, u32, usize)> = vars.iter().filter(|v| v.0 == Some(a)).collect();
+        if vs.iter().any(|x| vs.iter().any(|y| x.1 == y.1 && x.2 == y.2 && x.3 != y.3)) {
+            return None;
+        }
+        let parts = moved.iter().map(|&(b, mo, t)| (b == Some(a)).then_some((mo - o, t))).collect::<Option<Vec<_>>>()?;
+        Some((parts, vars.iter().filter(|v| v.0 == Some(a)).map(|v| (v.1 - o, v.2, v.3)).collect()))
+    }
+
+    /// A part of a local was moved out of (e: the local or a field of it, its parts: what a pattern moved out of e, or
+    /// all of e): the local's flag (f) is split into flags of its other parts, which are dropped in its place, field
+    /// by field, as rustc drops what a partial move leaves. False when it is not split (all of it moved; a local not in
+    /// memory; a part through a Box): the caller clears f, and what is left is not dropped
+    pub(crate) fn split_moved(&mut self, e: &Expr, loc: Loc, t: Ty, f: StackSlot, parts: Option<PatParts>) -> bool {
+        if !matches!(loc, Loc::Slot(_) | Loc::Ptr(_)) || parts.is_none() && matches!(strip_paren(e), Expr::Path(..)) {
+            return false;
+        }
+        let Some(depth) = self.owned.iter().rev().find(|o| o.flag == f).map(|o| o.depth) else { return false };
+        let Some((off, pt, whole)) = self.local_part(e, t) else { return false };
+        let mut vars = vec![];
+        let moved: Vec<(i32, Ty)> = match parts {
+            Some((v, vs)) => {
+                vars = vs.into_iter().map(|(o, sid, vi)| (off + o, sid, vi)).collect();
+                v.into_iter().map(|(o, k)| (off + o, k)).filter(|&(_, k)| self.needs_drop(k)).collect()
+            }
+            None if whole => return false,
+            None => [(off, pt)].into_iter().filter(|&(_, k)| self.needs_drop(k)).collect(),
+        };
+        // (a part that needs no dropping: the local is dropped as before, what drops nothing of it included)
+        if moved.is_empty() {
+            return true;
+        }
+        if moved.iter().any(|&(o, k)| o == 0 && k == t) {
+            return false;
+        }
+        if let Some(&(_, sid, vi)) = self.known_var.iter().find(|k| k.0 == f) {
+            if vars.iter().any(|v| v.0 == 0 && v.1 == sid && v.2 != vi) {
+                return false;
+            }
+        }
+        self.part_vars = vars;
+        // (not in a loop the local outlives, unless the flags of the parts are there from before it (presplit_loop):
+        // code lowered before the split, which knows no flag the split makes, runs again after it on the next pass)
+        if self.in_loop_since(depth) && !self.parts_ready(f, t, &moved, true) {
+            self.part_vars.clear();
+            return false;
+        }
+        self.split_part((f, loc, depth), f, 0, t, &moved, true);
+        self.part_vars.clear();
+        true
+    }
+
+    /// Whether a loop entered after scope depth `depth` is being lowered (a local of that depth outlives its passes)
+    fn in_loop_since(&self, depth: usize) -> bool {
+        self.loops.iter().any(|l| !l.is_block && l.depth > depth)
+    }
+
+    /// Whether split_part of the local of type t whose flag is f, for moved, makes no flag that is not there yet
+    fn parts_ready(&self, f: StackSlot, t: Ty, moved: &[(i32, Ty)], clear: bool) -> bool {
+        let mut need = vec![];
+        let _ = self.part_plan(f, 0, t, moved, clear, &mut need);
+        need.is_empty()
+    }
+
+    /// The flags (offset, type) split_part of the part (off, t) of the local whose flag is f would make (those not
+    /// made yet, into need), or None where it splits nothing (and clears the flag of what is left)
+    fn part_plan(&self, f: StackSlot, off: i32, t: Ty, moved: &[(i32, Ty)], clear: bool, need: &mut Vec<(i32, Ty)>) -> Option<()> {
+        let kids = self.part_kids(t, off, moved)?;
+        let exact = |o: i32, k: Ty| moved.iter().any(|&(mo, mt)| mo == o && mt == k);
+        if kids.iter().all(|&(o, k)| exact(o, k) && clear) {
+            return Some(());
+        }
+        for &(o, k) in &kids {
+            if exact(o, k) && clear {
+                continue;
+            }
+            if !self.parts.iter().any(|p| p.0 == f && p.1 == o && p.2 == k) && !need.contains(&(o, k)) {
+                need.push((o, k));
+            }
+            if exact(o, k) {
+                continue;
+            }
+            let size = self.prog.size_align(k).0 as i32;
+            let inner: Vec<(i32, Ty)> = moved.iter().copied().filter(|&(mo, _)| o <= mo && mo < o + size).collect();
+            if !inner.is_empty() {
+                self.part_plan(f, o, k, &inner, clear, need)?;
+            }
+        }
+        Some(())
+    }
+
+    /// Before a loop (its condition, its body): the flags of the parts of the locals it outlives that a field of one
+    /// moved out of or assigned in it would split them into, made now (split_part does not make one in such a loop,
+    /// in_loop_since). They are zero (each use of a part splits the local's flag at run time, as outside a loop)
+    #[inline]
+    pub(crate) fn presplit_loop(&mut self, cond: Option<&Expr>, body: &PBlock) {
+        if !self.owned.is_empty() {
+            self.presplit_owned(cond, body);
+        }
+    }
+
+    #[inline(never)]
+    fn presplit_owned(&mut self, cond: Option<&Expr>, body: &PBlock) {
+        // (only with a local that can be split: a tuple or a struct of the program's, without a `Drop` of its own,
+        // with a part to drop)
+        let splittable = |o: &Owned| {
+            let Ty::Struct(sid) = o.ty else { return false };
+            let b = self.prog.base_of(sid);
+            matches!(o.loc, Loc::Slot(_) | Loc::Ptr(_))
+                && !self.prog.structs[sid as usize].is_enum
+                && self.prog.struct_item.get(b as usize).is_none_or(|&i| i < self.prog.prelude_from)
+                && !self.prog.drop_impls.contains(&b)
+                && self.needs_drop(o.ty)
+        };
+        if !self.owned.iter().any(splittable) {
+            return;
+        }
+        if let Some(c) = cond {
+            self.presplit_scan(c);
+        }
+        self.presplit_block(body);
+    }
+
+    fn presplit_block(&mut self, b: &PBlock) {
+        for s in &b.stmts {
+            match s {
+                Stmt::Let(pat, _, init, els, ..) => {
+                    if let Some(e) = init {
+                        self.presplit_pat(pat, e);
+                        self.presplit_scan(e);
+                    }
+                    if let Some(b) = els {
+                        self.presplit_block(b);
+                    }
+                }
+                Stmt::Expr(e, _) => self.presplit_scan(e),
+                Stmt::Item(_) => {}
+            }
+        }
+    }
+
+    /// The fields of locals in e that may be moved out of or assigned (not a method's receiver, what `&` borrows, an
+    /// index's base, a comparison's operand, what `*` or `+=` takes)
+    fn presplit_scan(&mut self, e: &Expr) {
+        let field = |x: &Expr| matches!(strip_paren(x), Expr::Field(..));
+        match e {
+            Expr::Field(b, _, _) => {
+                let mut cur = strip_paren(b);
+                while let Expr::Field(x, _, _) = cur {
+                    cur = strip_paren(x);
+                }
+                match cur {
+                    Expr::Path(..) => self.presplit_field(e),
+                    _ => self.presplit_scan(cur),
+                }
+            }
+            Expr::MethodCall(r, _, _, args, _) => {
+                if !field(r) {
+                    self.presplit_scan(r);
+                }
+                for a in args {
+                    self.presplit_scan(a);
+                }
+            }
+            Expr::Ref(_, x) | Expr::RawRef(_, x) | Expr::Unary(_, x, _) if field(x) => {}
+            Expr::Index(x, i, _) | Expr::AssignOp(_, x, i, _) if field(x) => self.presplit_scan(i),
+            Expr::Binary(op, l, r, _) if matches!(op.as_str(), "==" | "!=" | "<" | "<=" | ">" | ">=") => {
+                for x in [l, r] {
+                    if !field(x) {
+                        self.presplit_scan(x);
+                    }
+                }
+            }
+            Expr::Closure(..) => {}
+            Expr::Macro(p, g, _) => self.presplit_macro(p, g),
+            _ => {
+                match e {
+                    Expr::Match(x, arms) => {
+                        for a in arms {
+                            self.presplit_pat(&a.pat, x);
+                        }
+                    }
+                    Expr::Let(pat, x) => self.presplit_pat(pat, x),
+                    _ => {}
+                }
+                crate::ast_closure::each_child_pub(e, &mut |c| self.presplit_scan(c))
+            }
+        }
+    }
+
+    /// presplit_scan of a macro call's arguments, when they may name a field (`dbg!({ x.1 = v; })`, `vec![x.0]`): a
+    /// format macro's argument that is a field is only borrowed
+    #[inline(never)]
+    fn presplit_macro(&mut self, p: &Path, g: &str) {
+        if !g.contains('.') {
+            return;
+        }
+        let name = p.segs.last().map_or("", |s| s.name.as_str());
+        if matches!(name, "matches" | "stringify" | "concat" | "include_str" | "include_bytes" | "cfg" | "env") {
+            return;
+        }
+        let Some(args) = crate::ast_closure::macro_args_at(g, Default::default()) else { return };
+        let fmt = matches!(
+            name,
+            "println" | "print" | "eprintln" | "eprint" | "format" | "format_args" | "write" | "writeln" | "panic" | "assert"
+                | "assert_eq" | "assert_ne" | "debug_assert" | "debug_assert_eq" | "debug_assert_ne" | "unreachable" | "todo"
+                | "unimplemented"
+        );
+        for a in &args {
+            if !(fmt && matches!(strip_paren(a), Expr::Field(..))) {
+                self.presplit_scan(a);
+            }
+        }
+    }
+
+    /// presplit_loop of what a pattern moves out of a local or a field of one (`let (a, _) = x`, `match x.0 { S { a, .. } => .. }`)
+    fn presplit_pat(&mut self, pat: &Pat, x: &Expr) {
+        if matches!(pat, Pat::Ident(..) | Pat::Wild) || !matches!(strip_paren(x), Expr::Path(..) | Expr::Field(..)) {
+            return;
+        }
+        let Some((loc, t, f)) = self.moved_root(x) else { return };
+        if !matches!(loc, Loc::Slot(_) | Loc::Ptr(_)) {
+            return;
+        }
+        let Some(depth) = self.owned.iter().rev().find(|o| o.flag == f).map(|o| o.depth) else { return };
+        let Some((off, pt, _)) = self.local_part(x, t) else { return };
+        let mut moved = vec![];
+        if self.pat_move_parts(pat, pt, off, &mut moved).is_none() {
+            return;
+        }
+        moved.retain(|&(_, k)| self.needs_drop(k));
+        if moved.is_empty() || moved.iter().any(|&(o, k)| o == 0 && k == t) {
+            return;
+        }
+        let mut need = vec![];
+        if self.part_plan(f, 0, t, &moved, false, &mut need).is_none() {
+            return;
+        }
+        for (o, k) in need {
+            self.part_flag((f, loc, depth), o, k);
+        }
+    }
+
+    /// The parts (offset, type) of a place of type t at off that pat binds by value: None for a pattern of an enum, a
+    /// slice or alternatives, which are not looked into
+    fn pat_move_parts(&self, pat: &Pat, t: Ty, off: i32, out: &mut Vec<(i32, Ty)>) -> Option<()> {
+        match pat {
+            Pat::Wild | Pat::Rest | Pat::Lit(_) | Pat::Range(..) | Pat::Path(_) | Pat::Ident(true, ..) => Some(()),
+            Pat::Ident(false, ..) => {
+                out.push((off, t));
+                Some(())
+            }
+            Pat::Tuple(ps) | Pat::TupleStruct(_, ps) => {
+                let Ty::Struct(sid) = t else { return None };
+                let sd = &self.prog.structs[sid as usize];
+                if sd.is_enum {
+                    return None;
+                }
+                let rest = ps.iter().position(|p| matches!(p, Pat::Rest));
+                for (i, p) in ps.iter().enumerate() {
+                    if matches!(p, Pat::Rest) {
+                        continue;
+                    }
+                    let fi = match rest {
+                        Some(r) if i > r => sd.fields.len().checked_sub(ps.len() - i)?,
+                        _ => i,
+                    };
+                    let (ft, fo) = self.prog.field(sid, &fi.to_string())?;
+                    self.pat_move_parts(p, ft, off + fo as i32, out)?;
+                }
+                Some(())
+            }
+            Pat::Struct(_, fs, _) => {
+                let Ty::Struct(sid) = t else { return None };
+                if self.prog.structs[sid as usize].is_enum {
+                    return None;
+                }
+                for (n, p) in fs {
+                    let (ft, fo) = self.prog.field(sid, n)?;
+                    self.pat_move_parts(p, ft, off + fo as i32, out)?;
+                }
+                Some(())
+            }
+            _ => None,
+        }
+    }
+
+    /// presplit_loop of a field e (`x.a`, `x.a.b`) of a local
+    fn presplit_field(&mut self, e: &Expr) {
+        let Some((loc, t, f)) = self.moved_root(e) else { return };
+        if !matches!(loc, Loc::Slot(_) | Loc::Ptr(_)) {
+            return;
+        }
+        let Some(depth) = self.owned.iter().rev().find(|o| o.flag == f).map(|o| o.depth) else { return };
+        let Some((off, pt, false)) = self.local_part(e, t) else { return };
+        if (off == 0 && pt == t) || !self.needs_drop(pt) {
+            return;
+        }
+        let mut need = vec![];
+        if self.part_plan(f, 0, t, &[(off, pt)], false, &mut need).is_none() {
+            return;
+        }
+        for (o, k) in need {
+            self.part_flag((f, loc, depth), o, k);
+        }
+    }
+
+    /// The offset and type of the place e (a local, or its fields `x.a.b`) in the local of type t, and whether it is
+    /// the local itself. None through anything else (`*b`, an index)
+    fn local_part(&self, e: &Expr, t: Ty) -> Option<(i32, Ty, bool)> {
+        let mut names = vec![];
+        let mut cur = strip_paren(e);
+        while let Expr::Field(b, n, _) = cur {
+            names.push(n.as_str());
+            cur = strip_paren(b);
+        }
+        if !matches!(cur, Expr::Path(..)) {
+            return None;
+        }
+        let (mut off, mut pt) = (0i32, t);
+        for n in names.iter().rev() {
+            let Ty::Struct(sid) = pt else { return None };
+            if self.prog.structs[sid as usize].is_enum {
+                return None;
+            }
+            let (ft, fo) = self.prog.field(sid, n)?;
+            off += fo as i32;
+            pt = ft;
+        }
+        Some((off, pt, names.is_empty()))
+    }
+
+    /// Splits the part (off, t) of a local (root: its flag, place, scope depth), whose flag is cont, down to each part
+    /// in moved: the fields of t that need dropping get flags of their own, set where cont is, and cont is cleared.
+    /// The flag of a part in moved is then cleared (clear: a move) or left (an assignment to it). A part zustc does
+    /// not split (an array's element, what a Box holds, an enum with no one variant that holds the parts) is not
+    /// dropped, as after a move of all of it
+    fn split_part(&mut self, root: (StackSlot, Loc, usize), cont: StackSlot, off: i32, t: Ty, moved: &[(i32, Ty)], clear: bool) {
+        let Some(kids) = self.part_kids(t, off, moved) else {
+            self.clear_flag(cont);
+            return;
+        };
+        // (a part moved out needs no flag: one a split before made is cleared. When every part is moved out, the
+        // local's flag is all there is to clear: `match o { Some(v) => .. }`)
+        let exact = |o: i32, k: Ty| moved.iter().any(|&(mo, mt)| mo == o && mt == k);
+        let flags: Vec<Option<StackSlot>> = kids
+            .iter()
+            .map(|&(o, k)| match exact(o, k) && clear {
+                true => self.parts.iter().find(|p| p.0 == root.0 && p.1 == o && p.2 == k).map(|p| p.3),
+                false => Some(self.part_flag(root, o, k)),
+            })
+            .collect();
+        if kids.iter().all(|&(o, k)| exact(o, k) && clear) {
+            for f in flags.into_iter().flatten() {
+                self.clear_flag(f);
+            }
+            for &(o, k) in &kids {
+                self.clear_inner_parts(root.0, o, k);
+            }
+            self.clear_flag(cont);
+            return;
+        }
+        let c = self.b.ins().stack_load(types::I8, cont, 0);
+        for (&(o, k), f) in kids.iter().zip(&flags) {
+            if let (Some(f), false) = (*f, exact(o, k) && clear) {
+                let x = self.b.ins().stack_load(types::I8, f, 0);
+                let y = self.b.ins().bor(x, c);
+                self.b.ins().stack_store(y, f, 0);
+            }
+        }
+        self.clear_flag(cont);
+        for (&(o, k), &f) in kids.iter().zip(&flags) {
+            let Some(f) = f else { continue };
+            if exact(o, k) {
+                if clear {
+                    self.clear_flag(f);
+                    self.clear_inner_parts(root.0, o, k);
+                }
+                continue;
+            }
+            let size = self.prog.size_align(k).0 as i32;
+            let inner: Vec<(i32, Ty)> = moved.iter().copied().filter(|&(mo, _)| o <= mo && mo < o + size).collect();
+            if !inner.is_empty() {
+                self.split_part(root, f, o, k, &inner, clear);
+            }
+        }
+    }
+
+    /// A part (off, t) of the local whose flag is f0 moved out as a whole: the flags of its own parts that an earlier
+    /// split made (`let a = x.0.0; x.0.0 = ..;` before `let b = x.0;`) are cleared too, so that they are not dropped
+    /// where the local is as well as by the new owner
+    fn clear_inner_parts(&mut self, f0: StackSlot, off: i32, t: Ty) {
+        if !self.parts.iter().any(|p| p.0 == f0 && p.1 >= off && (p.1, p.2) != (off, t)) {
+            return;
+        }
+        let size = self.prog.size_align(t).0 as i32;
+        let inner: Vec<StackSlot> = self
+            .parts
+            .iter()
+            .filter(|p| p.0 == f0 && off <= p.1 && p.1 + self.prog.size_align(p.2).0 as i32 <= off + size && (p.1, p.2) != (off, t))
+            .map(|p| p.3)
+            .collect();
+        for f in inner {
+            self.clear_flag(f);
+        }
+    }
+
+    /// The fields (offset, type) of the part (off, t) that need dropping, when t is a struct or tuple without a `Drop`
+    /// of its own, or an enum of which one variant holds every part in moved (that variant's)
+    fn part_kids(&self, t: Ty, off: i32, moved: &[(i32, Ty)]) -> Option<Vec<(i32, Ty)>> {
+        let Ty::Struct(sid) = t else { return None };
+        let base = self.prog.base_of(sid);
+        if self.prog.drop_impls.contains(&base) || self.prog.unions.contains(&self.prog.structs[base as usize].name) || t.is_dst_struct() {
+            return None;
+        }
+        let holds = |fs: &[(String, Ty, u32)]| {
+            moved.iter().all(|&(mo, mt)| {
+                fs.iter().any(|f| {
+                    let o = off + f.2 as i32;
+                    (mo == o && mt == f.1) || (o <= mo && mo < o + self.prog.size_align(f.1).0 as i32)
+                })
+            })
+        };
+        let sd = &self.prog.structs[sid as usize];
+        // (an enum: the variant its pattern matched, or the one variant that holds the parts)
+        let matched = self.part_vars.iter().find(|v| v.0 == off && v.1 == sid).map(|v| v.2);
+        let fields = if let (true, Some(vi)) = (sd.is_enum, matched) {
+            &sd.variants.get(vi)?.fields
+        } else if sd.is_enum {
+            let mut vs = sd.variants.iter().filter(|v| holds(&v.fields));
+            let v = vs.next()?;
+            if vs.next().is_some() {
+                return None;
+            }
+            &v.fields
+        } else if holds(&sd.fields) {
+            &sd.fields
+        } else {
+            return None;
+        };
+        Some(fields.iter().filter(|f| self.needs_drop(f.1)).map(|f| (off + f.2 as i32, f.1)).collect())
+    }
+
+    /// The flag of the part (off, t) of a local (root), made the first time: zero on entry, owned next to the local,
+    /// so that its parts are dropped where it is, in the order of their offsets
+    fn part_flag(&mut self, root: (StackSlot, Loc, usize), off: i32, t: Ty) -> StackSlot {
+        let (f0, loc, depth) = root;
+        if let Some(p) = self.parts.iter().find(|p| p.0 == f0 && p.1 == off && p.2 == t) {
+            return p.3;
+        }
+        let ss = self.b.create_stack_slot(1, 1);
+        self.late_flags.push(ss);
+        if let Some(pos) = self.owned.iter().rposition(|o| o.flag == f0) {
+            let mut i = pos + 1;
+            while i < self.owned.len() && self.owned[i].off > off && self.parts.iter().any(|p| p.0 == f0 && p.3 == self.owned[i].flag) {
+                i += 1;
+            }
+            self.owned.insert(i, Owned { loc, ty: t, flag: ss, depth, off });
+        }
+        self.parts.push((f0, off, t, ss));
+        ss
     }
 
     /// パターンが match 対象 e から値でムーブした (flag は e が一時値のときのフラグ)
@@ -2688,10 +3364,55 @@ impl Cx<'_> {
             if let Some(id) = ident_of(pp) {
                 if let Some((loc, ty)) = self.lookup(id) {
                     if let Some(flag) = self.flag_of_loc(loc) {
-                        self.emit_owned_drop(Owned { loc, ty, flag, depth: 0 });
+                        self.known_var.retain(|k| k.0 != flag);
+                        self.emit_owned_drop(Owned { loc, ty, flag, depth: 0, off: 0 });
+                        // (what a partial move left of it)
+                        let mut ps: Vec<(i32, Ty, StackSlot)> = self.parts.iter().filter(|p| p.0 == flag).map(|p| (p.1, p.2, p.3)).collect();
+                        ps.sort_by_key(|p| p.0);
+                        for (off, t, f) in ps {
+                            self.emit_owned_drop(Owned { loc, ty: t, flag: f, depth: 0, off });
+                        }
                         return Some(flag);
                     }
                 }
+            }
+        }
+        // (a field of a local that a partial move split: the field gets a flag of its own, and its old value is dropped
+        // when the flag says it is there)
+        if let Some(r) = self.assign_part(left) {
+            return Some(r);
+        }
+        // (`*b = v` of a Box local: what b holds is dropped only when it is there (`*b;` moved it out, which clears b's
+        // flag); b holds a value again after it, as rustc re-initializes `*b`)
+        if let (Expr::Unary(op, inner, _), Place::Mem(a, o, t)) = (strip_paren(left), p) {
+            if op == "*" {
+                if let Expr::Path(_, pp) = strip_paren(inner) {
+                    if let Some((loc, Ty::Box(_))) = ident_of(pp).and_then(|id| self.lookup(id)) {
+                        if let Some(flag) = self.flag_of_loc(loc) {
+                            let addr = self.addr_plus(a, o);
+                            self.emit_owned_drop(Owned { loc: Loc::Ptr(addr), ty: t, flag, depth: 0, off: 0 });
+                            return Some(flag);
+                        }
+                    }
+                }
+            }
+        }
+        // (a field of a local: dropped only while the local's flag says it is all there. A move out of it in a loop it
+        // outlives (split_moved) cleared the flag, and the moved field is not dropped again; the rest leaks)
+        if let (Expr::Field(..), Place::Mem(a, o, t)) = (strip_paren(left), p) {
+            if let Some((Loc::Slot(_) | Loc::Ptr(_), _, f)) = self.moved_root(left) {
+                if self.needs_drop(t) {
+                    let addr = self.addr_plus(a, o);
+                    let x = self.b.ins().stack_load(types::I8, f, 0);
+                    let yes = self.b.create_block();
+                    let done = self.b.create_block();
+                    self.b.ins().brif(x, yes, &[], done, &[]);
+                    self.b.switch_to_block(yes);
+                    self.drop_in_place(addr, t);
+                    self.b.ins().jump(done, &[]);
+                    self.b.switch_to_block(done);
+                }
+                return None;
             }
         }
         // フィールド・`*p`・`a[i]`: 初期化済みなので必ず drop する
@@ -2707,6 +3428,41 @@ impl Cx<'_> {
         };
         self.drop_in_place(addr, p.ty());
         None
+    }
+
+    /// `x.a = v` with x a local split by a partial move (split_moved): x.a's own flag, split out of x's, after its old
+    /// value is dropped if it is there
+    fn assign_part(&mut self, left: &Expr) -> Option<StackSlot> {
+        if self.parts.is_empty() || !matches!(strip_paren(left), Expr::Field(..)) {
+            return None;
+        }
+        let (loc, t, f) = self.moved_root(left)?;
+        if !matches!(loc, Loc::Slot(_) | Loc::Ptr(_)) || !self.parts.iter().any(|p| p.0 == f) {
+            return None;
+        }
+        let depth = self.owned.iter().rev().find(|o| o.flag == f)?.depth;
+        let (off, pt, _) = self.local_part(left, t)?;
+        if !self.needs_drop(pt) {
+            return None;
+        }
+        // (in a loop the local outlives, only parts whose flags are there from before it: no flag is made there
+        // (split_moved))
+        if self.in_loop_since(depth) && !self.parts_ready(f, t, &[(off, pt)], false) {
+            return None;
+        }
+        self.split_part((f, loc, depth), f, 0, t, &[(off, pt)], false);
+        let pf = self.parts.iter().find(|p| p.0 == f && p.1 == off && p.2 == pt)?.3;
+        // (the parts of x.a an earlier move split out: those still there are dropped, in order, and their flags
+        // cleared, so that the new value has x.a's flag alone)
+        let size = self.prog.size_align(pt).0 as i32;
+        let mut inner: Vec<(i32, Ty, StackSlot)> =
+            self.parts.iter().filter(|p| p.0 == f && off <= p.1 && p.1 < off + size && p.3 != pf).map(|p| (p.1, p.2, p.3)).collect();
+        inner.sort_by_key(|p| p.0);
+        for (o, k, flag) in inner {
+            self.emit_owned_drop(Owned { loc, ty: k, flag, depth: 0, off: o });
+        }
+        self.emit_owned_drop(Owned { loc, ty: pt, flag: pf, depth: 0, off });
+        Some(pf)
     }
 
     /// name (bound at loc) is a capture of the closure being lowered, held by value
@@ -2743,6 +3499,7 @@ impl Cx<'_> {
             }
             Loc::Zst(_) => self.b.ins().iconst(PTR, 0),
         };
+        let addr = self.addr_plus(addr, o.off);
         self.drop_in_place(addr, o.ty);
         self.b.ins().jump(done, &[]);
         self.b.switch_to_block(done);
@@ -2816,6 +3573,21 @@ impl Cx<'_> {
             }
         }
         self.temps.extend(keep);
+    }
+
+    /// The temporaries of a statement from t: the one whose flag is `value` (the value a `ref` binding refers to) lives
+    /// to the block's end, the others are dropped now
+    pub(crate) fn extend_value_temp(&mut self, t: usize, value: Option<StackSlot>) {
+        let ts: Vec<Owned> = self.temps.drain(t.min(self.temps.len())..).collect();
+        let depth = self.scopes.len() - 1;
+        let (keep, rest): (Vec<Owned>, Vec<Owned>) = ts.into_iter().partition(|o| value == Some(o.flag));
+        for o in rest.into_iter().rev() {
+            self.emit_owned_drop(o);
+        }
+        for mut o in keep {
+            o.depth = depth;
+            self.owned.push(o);
+        }
     }
 
     /// let の初期化式の一時値は、ブロックの終わりまで延ばす (rustc の一時値の寿命延長の近似)
@@ -3046,6 +3818,29 @@ impl Cx<'_> {
         }
         self.b.ins().return_(&[]);
         Ok(())
+    }
+}
+
+/// Whether p binds a name by value (not `ref`, not behind a `&` pattern): a move out of the place it matches, when the
+/// type is not Copy. (A capitalized name is taken for a unit variant or a constant)
+fn binds_by_value(p: &Pat) -> bool {
+    match p {
+        Pat::Ident(false, _, n, sub) => n.starts_with(|c: char| c.is_lowercase() || c == '_') || sub.as_deref().is_some_and(binds_by_value),
+        Pat::Ident(true, _, _, Some(q)) => binds_by_value(q),
+        Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Slice(v) | Pat::Or(v, _) => v.iter().any(binds_by_value),
+        Pat::Struct(_, fs, _) => fs.iter().any(|f| binds_by_value(&f.1)),
+        _ => false,
+    }
+}
+
+/// Whether p has a `ref` / `ref mut` binding
+fn binds_by_ref(p: &Pat) -> bool {
+    match p {
+        Pat::Ident(r, _, _, sub) => *r || sub.as_deref().is_some_and(binds_by_ref),
+        Pat::Ref(_, q) => binds_by_ref(q),
+        Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Slice(v) | Pat::Or(v, _) => v.iter().any(binds_by_ref),
+        Pat::Struct(_, fs, _) => fs.iter().any(|f| binds_by_ref(&f.1)),
+        _ => false,
     }
 }
 
@@ -3366,4 +4161,13 @@ fn e0023(m: String, variant: bool) -> String {
     let (Ok(a), Ok(b)) = (n.parse::<usize>(), r.parse::<usize>()) else { return m };
     let f = |k: usize| if k == 1 { "field" } else { "fields" };
     format!("this pattern has {a} {}, but the corresponding tuple {} has {b} {} (E0023)", f(a), if variant { "variant" } else { "struct" }, f(b))
+}
+
+/// The pattern of a destructuring assignment's `let` (parse::destructure_assign): its names are `__exr_da..`
+fn destructure_assign_pat(p: &Pat) -> bool {
+    match p {
+        Pat::Tuple(ps) | Pat::Slice(ps) => ps.iter().any(destructure_assign_pat),
+        Pat::Ident(_, _, n, _) => n.starts_with("__exr_da"),
+        _ => false,
+    }
 }

@@ -663,6 +663,9 @@ pub struct Program {
     /// The names a `use` of the program's has a path through (`E` of `use E::*;` / `use m::E::{A, B};`): an enum of
     /// one of these names may have its variants in scope, so a binding of a variant's name may be the variant
     pub use_prefixes: Vec<String>,
+    /// The variants `use`s of the program's bring from a lowercase enum: (the enum, the variant's name, or `*` for a
+    /// glob): `use color::{red, green};` brings red and green, not color's other variants
+    pub use_lower: Vec<(String, String)>,
     /// The crate enables `fn_traits` (`#![feature(fn_traits)]`): a call of a closure's `call` / `call_mut` /
     /// `call_once` is allowed
     pub fn_traits: bool,
@@ -693,6 +696,8 @@ pub struct Program {
     pub ref_impls_of: FxMap<String, Vec<(bool, Vec<String>)>>,
     /// The structs that are unions
     pub unions: HashSet<String>,
+    /// The program's unit structs (`struct S;`; not the prelude's): `let S = 1;` is a pattern of S, not a new name
+    pub unit_structs: HashSet<String>,
     /// The tag type of enums with `#[repr(u8)]` and the like
     pub reprs: HashMap<String, Ty>,
     /// `#[repr(packed(N))]` structs / unions: their fields aligned to at most N
@@ -718,6 +723,9 @@ pub struct Program {
     /// zust_syntax::lexer::trait_scopes of the program's own source: where two scopes define traits of one name, the
     /// traits in scope on each line (pick_overload chooses the impl of the one in scope at the call)
     pub trait_scopes: Vec<(u32, u32, Vec<String>)>,
+    /// When the program implements a trait for `()`: the traits declared at the top level of its root
+    /// (lexer::root_traits), whose methods a `()` receiver's method call takes; else empty
+    pub unit_traits: Vec<String>,
     /// The source line (1-based) of each item, for trait_scopes: the diagnostic line base of a function is not it (a
     /// dependency's is tagged, and it is the line before). Empty when trait_scopes is
     pub item_lines: Vec<u32>,
@@ -1267,42 +1275,8 @@ impl Insts {
                 }
             }
         }
-        // (the where clauses on other than a parameter, `where T::A: Bar`: the type each names for these arguments,
-        // normalized by the trait that gives it, must meet the bound. Bounds of the program's traits only, as for the
-        // nested goals of impls)
-        if let Some(preds) = prog.fn_preds.get(&base) {
-            let names: Vec<&str> = b.generics.iter().map(|g| g.0.as_str()).collect();
-            for (syn, qtr, bounds) in preds {
-                let Some(st) = prog.pred_subject(syn, qtr, b, &names, &args) else { continue };
-                // (nor a type implements does not see the program's impls for: a Box, an array, a slice, a type with a
-                // trait object in it; as for the supertraits and item bounds of impls)
-                if prog.opaque_to_impls(st) {
-                    continue;
-                }
-                // (nor one with a placeholder in it: the instance checks the generic fn's own body, where its where
-                // clauses are what it may assume, not what it must prove (`where &'max G: Get`))
-                if prog.holds_placeholder(st, 0) {
-                    continue;
-                }
-                for tr in bounds {
-                    // (its bindings too, `where W<T>: Tr<A = u32>`, as for a parameter's bounds: of the program's fns)
-                    let own = prog.item_of.get(base as usize).copied().flatten().is_some_and(|i| i < prog.prelude_from);
-                    if let Some((proj, want, got)) = own.then(|| prog.binding_mismatch(st, tr, &names, &args)).flatten() {
-                        return Err(format!("type mismatch resolving `{proj} == {}`: it is `{}` (E0271)", prog.tn(want), prog.tn(got)));
-                    }
-                    let tname = tr.split('<').next().unwrap_or(tr).trim();
-                    if !prog.user_traits.contains(tname) {
-                        continue;
-                    }
-                    match prog.evaluate(st, tr) {
-                        Certainty::No => return Err(format!("the trait bound `{}: {tr}` is not satisfied (E0277)", prog.tn(st))),
-                        Certainty::Maybe(MaybeCause::Cycle) => {
-                            return Err(format!("overflow evaluating the requirement `{}: {tr}` (E0275)", prog.tn(st)));
-                        }
-                        _ => {}
-                    }
-                }
-            }
+        if let Some(e) = prog.fn_pred_error(base, &args) {
+            return Err(e);
         }
         let names: Vec<String> = args.iter().map(|&t| prog.tn(t)).collect();
         let impl_of = if b.trait_of.is_some() {
@@ -1667,6 +1641,7 @@ impl Program {
             deny_unused_mut: false,
             allow_overflowing_literals: false,
             use_prefixes: Vec::new(),
+            use_lower: vec![],
             fn_traits: false,
             allow_implicit_autorefs: false,
             deny_trivial_casts: (false, false),
@@ -1680,6 +1655,7 @@ impl Program {
             ref_dispatch: FxMap::default(),
             ref_impls_of: FxMap::default(),
             unions: Default::default(),
+            unit_structs: Default::default(),
             reprs: Default::default(),
             packed: Default::default(),
             min_align: Default::default(),
@@ -1690,6 +1666,7 @@ impl Program {
             self_ty_groups: FxSet::default(),
             fn_targs: FxMap::default(),
             trait_scopes: vec![],
+            unit_traits: vec![],
             item_lines: vec![],
             by_last: FxMap::default(),
             ref_groups: vec![],
@@ -1751,6 +1728,7 @@ impl Program {
             .iter()
             .flat_map(|sm| sm.structs.iter().map(|x| x.0.as_str()).chain(sm.enums.iter().map(|x| x.0.as_str())))
             .collect();
+        p.unit_structs.extend(sums[..user.min(sums.len())].iter().filter(|sm| sm.unit).filter_map(|sm| sm.structs.first().map(|x| x.0.clone())));
         for sm in sums {
             p.unions.extend(sm.unions.iter().cloned());
             for (n, ps, b) in &sm.const_fns {
@@ -3136,7 +3114,8 @@ impl Program {
                 }
                 // (the internal names of overloads `get#1` and of impls for references `__ref_foo`: the method's own)
                 let m = p.names[fi].rsplit("::").next().unwrap_or("");
-                let m = m.split('#').next().unwrap_or(m);
+                // (only a number's `#`: `r#trait` is a raw name)
+                let m = m.rsplit_once('#').filter(|(_, n)| !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit())).map_or(m, |(a, _)| a);
                 // (`__ref_foo` is the generated name of an impl for a reference; a method the trait declares with that
                 // name matches as written)
                 let mut bare = m;
@@ -4313,6 +4292,74 @@ impl Program {
     /// A method of primitive type t (from a trait impl, or else the trait's default method)
     /// prim_method for a method call: of the functions of that name, one that takes self (`impl Foo for isize`
     /// with `fn new() -> bool` and `impl Bar for isize` with `fn new(&self) -> bool`: `1.new()` is Bar's)
+    /// Whether name is a method std's `[T]` or `str` has of its own, which a receiver `&[T]` / `&str` (t, through
+    /// references) takes before a trait's method of the name: inherent methods come first in rustc's probe, and a
+    /// trait impl for `[T]` may call it (`impl It for [T] { fn iter(&self) -> .. { self.iter() } }`)
+    pub fn std_inherent(t: Ty, name: &str) -> bool {
+        let mut t = t;
+        while let Ty::Ref(_, i) = t {
+            t = *i;
+        }
+        match t {
+            Ty::Slice(_) => matches!(
+                name,
+                "len" | "is_empty" | "first" | "first_mut" | "last" | "last_mut" | "split_first" | "split_first_mut" | "split_last"
+                    | "split_last_mut" | "get" | "get_mut" | "get_unchecked" | "get_unchecked_mut" | "as_ptr" | "as_mut_ptr" | "swap"
+                    | "reverse" | "iter" | "iter_mut" | "windows" | "chunks" | "chunks_mut" | "chunks_exact" | "chunks_exact_mut"
+                    | "rchunks" | "split_at" | "split_at_mut" | "split" | "split_mut" | "splitn" | "rsplit" | "contains"
+                    | "starts_with" | "ends_with" | "strip_prefix" | "strip_suffix" | "binary_search" | "binary_search_by"
+                    | "binary_search_by_key" | "sort" | "sort_by" | "sort_by_key" | "sort_by_cached_key" | "sort_unstable"
+                    | "sort_unstable_by" | "sort_unstable_by_key" | "rotate_left" | "rotate_right" | "fill" | "fill_with"
+                    | "clone_from_slice" | "copy_from_slice" | "copy_within" | "swap_with_slice" | "to_vec" | "into_vec" | "repeat"
+                    | "concat" | "join" | "first_chunk" | "split_first_chunk" | "is_sorted" | "is_sorted_by" | "is_sorted_by_key"
+                    | "partition_point" | "is_ascii" | "to_ascii_uppercase" | "to_ascii_lowercase" | "eq_ignore_ascii_case"
+            ),
+            Ty::Str => matches!(
+                name,
+                "len" | "is_empty" | "is_char_boundary" | "as_bytes" | "as_ptr" | "get" | "split_at" | "chars" | "char_indices" | "bytes"
+                    | "split_whitespace" | "split_ascii_whitespace" | "lines" | "contains" | "starts_with" | "ends_with" | "find"
+                    | "rfind" | "split" | "split_inclusive" | "rsplit" | "split_terminator" | "splitn" | "rsplitn" | "split_once"
+                    | "rsplit_once" | "matches" | "match_indices" | "trim" | "trim_start" | "trim_end" | "trim_matches"
+                    | "trim_start_matches" | "trim_end_matches" | "strip_prefix" | "strip_suffix" | "parse" | "is_ascii"
+                    | "eq_ignore_ascii_case" | "replace" | "replacen" | "to_lowercase" | "to_uppercase" | "repeat"
+                    | "to_ascii_uppercase" | "to_ascii_lowercase"
+            ),
+            _ => false,
+        }
+    }
+
+    /// The names of std_inherent's that `[T]` has as `&mut self` methods: rustc's probe reaches them only with a `&mut`
+    /// autoref (or a `&mut [T]` receiver as it is), after a trait's `&self` method of the name for `[T]`
+    pub fn mut_self_inherent(t: Ty, name: &str) -> bool {
+        let mut t = t;
+        while let Ty::Ref(_, i) = t {
+            t = *i;
+        }
+        matches!(t, Ty::Slice(_)) && Self::slice_mut_self(name)
+    }
+
+    /// Whether `[T]` has a `&mut self` method of the name (std_inherent's)
+    pub fn slice_mut_self(name: &str) -> bool {
+        matches!(
+            name,
+            "first_mut" | "last_mut" | "split_first_mut" | "split_last_mut" | "get_mut" | "get_unchecked_mut" | "as_mut_ptr" | "swap"
+                | "reverse" | "iter_mut" | "chunks_mut" | "chunks_exact_mut" | "split_at_mut" | "split_mut" | "sort" | "sort_by"
+                | "sort_by_key" | "sort_by_cached_key" | "sort_unstable" | "sort_unstable_by" | "sort_unstable_by_key"
+                | "rotate_left" | "rotate_right" | "fill" | "fill_with" | "clone_from_slice" | "copy_from_slice" | "copy_within"
+                | "swap_with_slice"
+        )
+    }
+
+    /// std_inherent, for a receiver that is a `&mut` reference to t or not: a `&mut self` method of `[T]` comes before a
+    /// trait's `&self` method (id) of the name only for a `&mut [T]` receiver
+    /// (mut_recv and trait_method are asked only for a `&mut self` method's name)
+    pub fn std_inherent_first(&self, t: Ty, name: &str, mut_recv: impl FnOnce() -> bool, trait_method: impl FnOnce() -> Option<u32>) -> bool {
+        Self::std_inherent(t, name)
+            && (!Self::mut_self_inherent(t, name)
+                || mut_recv()
+                || !trait_method().is_some_and(|id| matches!(self.sigs[id as usize].params.first(), Some(Ty::Ref(false, _)))))
+    }
+
     pub fn prim_self_method(&self, t: Ty, name: &str) -> Option<u32> {
         // (`impl<T> Fake for T {}`: the trait's methods are methods of every type, numbers too)
         let Some(id) = self.prim_method(t, name) else {
@@ -6373,6 +6420,49 @@ impl Program {
         found
     }
 
+    /// The first of fn `base`'s where clauses on other than a parameter that its instance for `args` does not meet
+    /// (`where T::A: Bar`), as the instance's error: none when they hold or cannot be told
+    pub fn fn_pred_error(&self, base: u32, args: &[Ty]) -> Option<String> {
+        // (the where clauses on other than a parameter, `where T::A: Bar`: the type each names for these arguments,
+        // normalized by the trait that gives it, must meet the bound. Bounds of the program's traits only, as for the
+        // nested goals of impls)
+        let b = &self.sigs[base as usize];
+        let preds = self.fn_preds.get(&base)?;
+        let names: Vec<&str> = b.generics.iter().map(|g| g.0.as_str()).collect();
+        for (syn, qtr, bounds) in preds {
+            let Some(st) = self.pred_subject(syn, qtr, b, &names, args) else { continue };
+            // (nor a type implements does not see the program's impls for: a Box, an array, a slice, a type with a
+            // trait object in it; as for the supertraits and item bounds of impls)
+            if self.opaque_to_impls(st) {
+                continue;
+            }
+            // (nor one with a placeholder in it: the instance checks the generic fn's own body, where its where
+            // clauses are what it may assume, not what it must prove (`where &'max G: Get`))
+            if self.holds_placeholder(st, 0) {
+                continue;
+            }
+            for tr in bounds {
+                // (its bindings too, `where W<T>: Tr<A = u32>`, as for a parameter's bounds: of the program's fns)
+                let own = self.item_of.get(base as usize).copied().flatten().is_some_and(|i| i < self.prelude_from);
+                if let Some((proj, want, got)) = own.then(|| self.binding_mismatch(st, tr, &names, args)).flatten() {
+                    return Some(format!("type mismatch resolving `{proj} == {}`: it is `{}` (E0271)", self.tn(want), self.tn(got)));
+                }
+                let tname = tr.split('<').next().unwrap_or(tr).trim();
+                if !self.user_traits.contains(tname) {
+                    continue;
+                }
+                match self.evaluate(st, tr) {
+                    Certainty::No => return Some(format!("the trait bound `{}: {tr}` is not satisfied (E0277)", self.tn(st))),
+                    Certainty::Maybe(MaybeCause::Cycle) => {
+                        return Some(format!("overflow evaluating the requirement `{}: {tr}` (E0275)", self.tn(st)));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        None
+    }
+
     /// The type a where clause on other than a parameter names for the arguments `args` of a fn's parameters
     /// `names` (Insts::request). A projection is a normalizes-to goal: `<T as Tr>::A` by Tr's impls, `T::A` by those of
     /// the traits T's bounds name, which must agree. None when it is not known (a parameter is left, nothing
@@ -6412,7 +6502,12 @@ impl Program {
             let mut traits: Vec<String> = if !qtr.is_empty() {
                 vec![qtr.to_string()]
             } else if let Ty::Param(i) = a.base {
-                sig.generics.get(i as usize)?.1.iter().map(|b| b.split('<').next().unwrap_or(b).trim().to_string()).collect()
+                let mut v: Vec<String> = sig.generics.get(i as usize)?.1.iter().map(|b| b.split('<').next().unwrap_or(b).trim().to_string()).collect();
+                // (`Self::A` in a method of a blanket impl, `impl<T> Tr for T`: by the impl's trait too)
+                if let (Some(tr), true) = (sig.impl_trait.as_deref(), sig.self_ty == Some(a.base)) {
+                    v.push(tr.split('<').next().unwrap_or(tr).trim().to_string());
+                }
+                v
             } else {
                 // (`Self::A` in a method of `impl Tr for S`: by the impl's trait, and its supertraits below)
                 let tr = sig.impl_trait.as_deref()?;
@@ -6446,6 +6541,15 @@ impl Program {
             }
             found
         }
+    }
+
+    /// t is std's `Rc` / `Arc` of a trait object (`Rc<dyn Send>`), whose unsizing zustc does not do
+    pub fn std_rc_of_dyn(&self, t: Ty) -> bool {
+        let Ty::Struct(sid) = t else { return false };
+        let base = self.base_of(sid) as usize;
+        matches!(self.structs[base].name.as_str(), "Rc" | "Arc")
+            && matches!(self.structs[sid as usize].args.first(), Some(Ty::Dyn(_)))
+            && self.struct_item.get(base).is_some_and(|&ii| ii >= self.prelude_from)
     }
 
     /// t is a type whose impls of the program's implements does not see: a Box, an array or a slice, or one with a
@@ -8575,6 +8679,17 @@ impl Program {
                         return None;
                     }
                     return v;
+                }
+                // (a lowercase one too, `use color::{red, green};` of `enum color { red, green }`: a variant of an enum
+                // of the program's that a `use` goes through (the prelude's own `a` / `b` are its locals), when no fn,
+                // constant or struct has the name)
+                _ if !self.use_prefixes.is_empty() => {
+                    let v = self.variant_names.get(n).copied().flatten()?;
+                    let user = self.struct_item.get(v.0 as usize).is_some_and(|&ii| ii < self.prelude_from);
+                    let en = &self.structs[v.0 as usize].name;
+                    let used = self.use_lower.iter().any(|(e, m)| e == en && (m == "*" || m == n));
+                    let other = self.index.contains_key(n) || self.const_index.contains_key(n) || self.struct_index.contains_key(n);
+                    return (user && used && !other).then_some(v);
                 }
                 _ => return None,
             };

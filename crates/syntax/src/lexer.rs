@@ -2789,6 +2789,31 @@ pub fn trait_scopes(src: &str) -> Vec<(u32, u32, Vec<String>)> {
     trait_scopes_with(src, src.contains("mod"))
 }
 
+/// The traits declared at the top level of the crate root (outside every module, fn body, block and impl), which a
+/// method call anywhere at the root can use. A trait in a module or in a body is in scope only where it is declared or
+/// imported, which zustc does not track for a method call on `()` (Program::unit_traits)
+#[cold]
+#[inline(never)]
+pub fn root_traits(src: &str) -> Vec<String> {
+    let s = src.as_bytes();
+    let toks = tokenize(s);
+    let mut out = vec![];
+    let mut depth = 0i32;
+    for k in 0..toks.len() {
+        let t = &s[toks[k].1..toks[k].2];
+        if toks[k].0 == 1 && t.len() == 1 {
+            match t[0] {
+                b'{' => depth += 1,
+                b'}' => depth -= 1,
+                _ => {}
+            }
+        } else if depth == 0 && toks[k].0 == 0 && t == b"trait" && k + 1 < toks.len() && toks[k + 1].0 == 0 {
+            out.push(String::from_utf8_lossy(&s[toks[k + 1].1..toks[k + 1].2]).into_owned());
+        }
+    }
+    out
+}
+
 /// trait_scopes, with whether src contains `mod` already known (one search of the text for both uses)
 pub fn trait_scopes_with(src: &str, has_mod: bool) -> Vec<(u32, u32, Vec<String>)> {
     trait_scopes_in(src, has_mod, None)
@@ -4048,7 +4073,11 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 } else if (is_sym(q, b'(') || is_sym(q, b'[') || is_sym(q, b'{')) && close[q] != usize::MAX {
                     // (`const B: bool = { 2 > 1 }`: its `>` is no end)
                     q = close[q];
-                } else if d == 1 && toks[q].0 == 0 && (is_sym(q - 1, b'<') || is_sym(q - 1, b',') || is_id(q - 1, b"const")) && renamed_names.contains(&tok(q)) {
+                // (not a lifetime's name: `fn union<'union>()` binds no type `union`, which the item's `&'union union`
+                // still names)
+                } else if d == 1 && toks[q].0 == 0 && (is_sym(q - 1, b'<') || is_sym(q - 1, b',') || is_id(q - 1, b"const")) && renamed_names.contains(&tok(q))
+                    && !(toks[q].1 >= 1 && s[toks[q].1 - 1] == b'\'')
+                {
                     names.push(tok(q));
                 }
                 q += 1;
@@ -4264,7 +4293,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     let names = names_with!(&final_globs, &imp_map);
     let mut k = 0;
     while k < toks.len() {
-        if toks[k].0 != 0 || skip[k] || local_tok[k] {
+        // (not a lifetime's name, `'union`: a lifetime is no item to rename)
+        if toks[k].0 != 0 || skip[k] || local_tok[k] || (toks[k].1 >= 1 && s[toks[k].1 - 1] == b'\'') {
             k += 1;
             continue;
         }
@@ -4386,7 +4416,10 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             false
         };
         let is_def = def_tok[k];
-        {
+        // (the contextual keyword of a union's declaration, `union union { .. }` in a module that renames a `union`:
+        // the keyword stays, its name after it is the one renamed)
+        let union_kw = tok(k) == b"union" && k + 2 < toks.len() && toks[k + 1].0 == 0 && (is_sym(k + 2, b'{') || is_sym(k + 2, b'<') || is_id(k + 2, b"where"));
+        if !union_kw {
             let n = tok(k);
             // (a primitive type's name that is not called, `Result<u32, Error>` / `[u8]` / `u32::MAX`, is the primitive
             //  unless a type of that name shadows it: getrandom's `pub fn u32() -> Result<u32, Error>` is a value, and
@@ -4467,7 +4500,13 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             };
             // (the scope's own item, its import, or what its globs pass on, globs of globs too, all of them compared
             //  (two distinct is ambiguous): libc's unix sees `time_t` of linux_like/linux/gnu/b64; a definition is its own)
-            let nn = in_block().or_else(|| if is_def { renamed_in(sc, n) } else if prim { names.lookup_type(sc, n) } else { names.lookup(sc, n, w) });
+            // (`::f` / `::E::V` whose first segment names no module: an item of the crate root, as in 2015; in a crate
+            //  module (a dependency's), that crate's root, where its items are renamed `dep__E`)
+            let nn = if leading {
+                names.lookup(crate_root(sc), n, w)
+            } else {
+                in_block().or_else(|| if is_def { renamed_in(sc, n) } else if prim { names.lookup_type(sc, n) } else { names.lookup(sc, n, w) })
+            };
             // (not a macro's name: `use core::panic as p;` then `p!()` stays as it is written)
             let std_path = |nn: &[u8]| [&b"std::"[..], b"core::", b"alloc::"].iter().any(|p| nn.starts_with(p));
             // (a name before a `:` only when it is no field: the walk back to a `where` is for a name that is renamed)

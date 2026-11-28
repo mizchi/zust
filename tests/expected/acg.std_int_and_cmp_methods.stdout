@@ -1,0 +1,7 @@
+Some(127) None None
+Some(2) None None
+-128 0 (-128, true) (1, false)
+127 -128 127 255 -12
+true true true false
+false true true true false false
+true true

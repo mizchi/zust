@@ -49,6 +49,13 @@ fn is_builtin_scalar_method(n: &str) -> bool {
             | "overflowing_mul"
             | "rem_euclid"
             | "div_euclid"
+            | "checked_div_euclid"
+            | "checked_rem_euclid"
+            | "saturating_mul"
+            | "wrapping_div_euclid"
+            | "wrapping_rem_euclid"
+            | "overflowing_div_euclid"
+            | "overflowing_rem_euclid"
             | "next_multiple_of"
             | "div_ceil"
             | "wrapping_add_signed"
@@ -638,7 +645,9 @@ impl Inf<'_> {
             if name.is_empty() || name.as_bytes()[0].is_ascii_digit() {
                 continue;
             }
-            if let Some(v) = self.lookup(name) {
+            // (a named argument's name (`{r:rw$}` with `rw = width`): the variable it is given is the usize)
+            let var = named_fmt_arg(g, name).unwrap_or(name);
+            if let Some(v) = self.lookup(var) {
                 let u = self.known(Ty::Usize);
                 self.unify(v, u);
             }
@@ -856,12 +865,39 @@ impl Inf<'_> {
                 self.pat(p, i, None);
             }
             Pat::Or(cs, _) => {
+                // (the alternatives bind the same names, each of one type: `Ok(y) | Err(y)` makes the error type the
+                // ok one. The first alternative's bindings are the names, the others' are unified with them)
+                let n0 = self.scopes.last().map_or(0, |s| s.len());
+                let mut n1 = None;
                 for c in cs {
+                    let k = self.scopes.last().map_or(0, |s| s.len());
                     self.pat(c, v, mode);
+                    let Some(n1) = n1 else {
+                        n1 = Some(self.scopes.last().map_or(0, |s| s.len()));
+                        continue;
+                    };
+                    let Some(sc) = self.scopes.last_mut() else { continue };
+                    let new: Vec<(String, u32)> = sc.drain(k.max(n1)..).collect();
+                    for (n, x) in new {
+                        if let Some(y) = self.scopes.last().and_then(|sc| sc[n0..n1].iter().find(|b| b.0 == n)).map(|b| b.1) {
+                            // (not a `ref y` with a `y`: bindings of two modes are E0409, the type check's to report)
+                            let refd = |me: &mut Self, v: u32| {
+                                let r = me.find(v);
+                                matches!(me.shape[r as usize], Some(Shape::Ref(..)))
+                            };
+                            if refd(self, x) == refd(self, y) {
+                                self.unify(x, y);
+                            }
+                        }
+                    }
                 }
             }
             Pat::Lit(e) => {
-                let (v, _) = self.auto_deref(v, mode);
+                // (a string or byte string, a literal of a reference's type: rustc takes no reference off for it, so
+                // `match &tag { b"NAME" => .. }` makes tag a `[u8; 4]`. Only a reference to a reference is taken off, as
+                // the type check reports it)
+                let refd = matches!(&**e, Expr::Lit(t, _) if t.starts_with(['"', 'r']) || t.starts_with("b\"") || t.starts_with("br"));
+                let (v, _) = if refd { self.deref_refs_to_ref(v, mode) } else { self.auto_deref(v, mode) };
                 let e = match &**e {
                     Expr::Lit(t, _) => self.lit_var(t),
                     e => self.expr(e),
@@ -974,6 +1010,8 @@ impl Inf<'_> {
             match st {
                 Stmt::Let(pat, ann_ty, init, _, ..) => {
                     let ann = ann_ty.as_ref().and_then(|t| self.parse_ty(t));
+                    // (`let _: Rc<dyn Send> = Rc::new(x);`: the unsizing zustc does not do, set aside as typeck does)
+                    let ann = ann.filter(|&t| !(matches!(pat, Pat::Wild) && self.prog.std_rc_of_dyn(t)));
                     let v = match init {
                         Some(init) => self.expr(init),
                         None => self.var(),
@@ -995,7 +1033,17 @@ impl Inf<'_> {
                             }
                             if self.prog.has_param(t) { v } else { k }
                         }
-                        None => v,
+                        // (and `let v = it.collect::<Vec<_>>();`, whose turbofish writes the type the same way)
+                        None => {
+                            let mut call = init.as_ref();
+                            while let Some(Expr::Paren(x)) = call {
+                                call = Some(x);
+                            }
+                            if !self.s.collects.is_empty() && matches!(call, Some(Expr::MethodCall(_, m, tf, _, _)) if m == "collect" && !tf.is_empty()) {
+                                self.s.ready_collects();
+                            }
+                            v
+                        }
                     };
                     if self.no_record == 0 {
                         self.lets.push((stmt_key(st), v));
@@ -1253,6 +1301,28 @@ impl Inf<'_> {
         }
     }
 
+    /// The type of `Vec::from(x)` (see `call`)
+    #[cold]
+    #[inline(never)]
+    fn vec_from(&mut self, x: &Expr) -> u32 {
+        let vb = self.prog.struct_index["Vec"];
+        let a = self.expr(x);
+        let el = match self.elem_of(a) {
+            Some(e) => e,
+            None => {
+                let d = self.deref_expr(a);
+                let r = self.find(d);
+                let bytes = match self.shape[r as usize] {
+                    Some(Shape::Known(Ty::Str)) => true,
+                    Some(Shape::Known(Ty::Struct(sid))) => self.prog.structs[sid as usize].base.is_none() && self.prog.structs[sid as usize].name == "String",
+                    _ => false,
+                };
+                if bytes { self.known(Ty::U8) } else { self.var() }
+            }
+        };
+        self.adt(vb, vec![el])
+    }
+
     /// `i32::pow(2, 10)` / `Trait::m(&x, a)` / `Ord::cmp(&a, &b)` / `HashMap::from([..])` などをメソッド呼び出しなどに
     /// 書き換えたもの (front.rs の prim_method_call と同じ規則)
     fn prim_method_call(&self, f: &Expr, args: &[Expr]) -> Option<Expr> {
@@ -1270,7 +1340,17 @@ impl Inf<'_> {
                     let selfm = ds
                         .iter()
                         .any(|&d| self.prog.sigs[d as usize].has_self && self.prog.names[d as usize].rsplit("::").next() == Some(ms.as_str()));
-                    if selfm && !matches!(tr.as_str(), "Ord" | "PartialOrd" | "PartialEq" | "Eq") {
+                    // (not of a trait implemented for `[T]` / `str` whose method has a name they have one of their
+                    // own: `It::iter(s)` is the impl's, which `s.iter()` would not be. The path call is typed by the
+                    // trait's method)
+                    let on_seq = || {
+                        (Program::std_inherent(Ty::Slice(intern(Ty::U8)), ms) || Program::std_inherent(Ty::Str, ms))
+                            && self.prog.sigs.iter().any(|s| {
+                                matches!(s.self_ty, Some(Ty::Slice(_) | Ty::Str))
+                                    && s.impl_trait.as_deref().is_some_and(|it| it.split('<').next().unwrap_or(it).trim() == tr.as_str())
+                            })
+                    };
+                    if selfm && !matches!(tr.as_str(), "Ord" | "PartialOrd" | "PartialEq" | "Eq") && !on_seq() {
                         let recv = match &args[0] {
                             Expr::Ref(_, e) => (**e).clone(),
                             a => a.clone(),
@@ -1437,6 +1517,15 @@ impl Inf<'_> {
                         match Ty::from_suffix(segs[0]).or(if segs[0] == "char" { Some(Ty::Char) } else { None }) {
                             Some(_) if segs.len() == 2 && segs[1] == "BITS" => self.known(Ty::U32),
                             Some(t) if segs.len() == 2 => self.known(t),
+                            // (a float's constants: `x == f32::NAN` makes `let x = 42.0;` an f32)
+                            None if segs.len() == 2 && matches!(segs[0], "f32" | "f64") && segs[1].starts_with(|c: char| c.is_ascii_uppercase()) => {
+                                let f = if segs[0] == "f32" { Ty::F32 } else { Ty::F64 };
+                                self.known(match segs[1] {
+                                    "RADIX" | "MANTISSA_DIGITS" | "DIGITS" => Ty::U32,
+                                    "MIN_EXP" | "MAX_EXP" | "MIN_10_EXP" | "MAX_10_EXP" => Ty::I32,
+                                    _ => f,
+                                })
+                            }
                             // (`std::marker::PhantomData` / `m::S`: a unit struct through a module path)
                             _ => match self.prog.struct_index.get(crate::types::std_unit_name(&segs)).copied() {
                                 Some(sid)
@@ -1628,9 +1717,26 @@ impl Inf<'_> {
             Expr::Closure(..) => self.closure(e),
             Expr::MethodCall(recv, name, tf, args, _) => self.method_call(recv, name, tf, args),
             Expr::Cast(x, t) => {
-                self.expr(x);
+                let xv = self.expr(x);
                 match self.parse_ty(t) {
-                    Some(t) => self.known(t),
+                    Some(t) => {
+                        // (`&data as *const *const ()` with `let data = ptr::null();`: the reference coerces to the
+                        // pointer, so what it refers to is the pointer's pointee, when not known yet)
+                        let mut xe = &**x;
+                        while let Expr::Paren(i) = xe {
+                            xe = i;
+                        }
+                        if let (Ty::Ptr(_, pt), Expr::Ref(..)) = (t, xe) {
+                            let r = self.find(xv);
+                            if let Some(Shape::Ref(_, i)) = self.shape[r as usize] {
+                                if !self.known_in_full(i, 0) && !self.prog.has_param(*pt) {
+                                    let k = self.known(*pt);
+                                    self.unify(i, k);
+                                }
+                            }
+                        }
+                        self.known(t)
+                    }
                     None => self.var(),
                 }
             }
@@ -1640,6 +1746,14 @@ impl Inf<'_> {
 
     fn macro_expr(&mut self, p: &Path, g: &str) -> u32 {
         let name = if p.segs.len() == 1 { p.segs[0].name.as_str() } else { "" };
+        // (`(column!(), line!())` beside `(0, 0)`: the literals are u32s too)
+        if matches!(name, "line" | "column") {
+            return self.known(Ty::U32);
+        }
+        // (`concat!("a", "b").to_string()`: a string literal's type, for the method's receiver)
+        if matches!(name, "concat" | "stringify") {
+            return self.known(Ty::Ref(false, intern(Ty::Str)));
+        }
         if name == "format" && self.prog.struct_index.contains_key("String") {
             self.fmt_width_vars(g);
             let ss = self.prog.struct_index["String"];
@@ -1647,6 +1761,14 @@ impl Inf<'_> {
         }
         if name == "dbg" {
             let Some(xs) = ast_closure::macro_args_at(g, self.mbase) else { return self.var() };
+            // (`dbg!(a, b)`: the tuple of them)
+            if xs.len() > 1 {
+                let base = self.prog.tuple_base(xs.len());
+                self.pos_record += 1;
+                let args: Vec<(String, u32)> = xs.into_iter().enumerate().map(|(i, x)| (i.to_string(), self.expr_kept(x, false))).collect();
+                self.pos_record -= 1;
+                return self.adt_ctor(base, None, args);
+            }
             let Some(x) = xs.into_iter().next() else { return self.var() };
             self.pos_record += 1;
             let v = self.expr_kept(x, false);
@@ -1689,11 +1811,13 @@ impl Inf<'_> {
                 let vb = self.expr(unsafe { &*b });
                 self.pos_record -= 1;
                 // (unified unless both sides are calls: a generic call's result (`foo(&node)` with V from an associated
-                // type) would take the other call's integer default (`Some(22)`))
+                // type) would take the other call's integer default (`Some(22)`). Unless one of them is of a type known
+                // in full: `assert_eq!(map.get(&k), Some(&v))` makes `let v = 46;` a usize)
                 let simple = |e: &Expr| !matches!(e, Expr::Call(..) | Expr::MethodCall(..));
                 // SAFETY: as above
                 // (as `==` does: `&[u8]` against `[1, 2, 3]` only makes the elements one type)
-                if simple(unsafe { &*a }) || simple(unsafe { &*b }) {
+                let unify = simple(unsafe { &*a }) || simple(unsafe { &*b }) || self.known_in_full(va, 0) || self.known_in_full(vb, 0);
+                if unify {
                     self.seq_unify(va, vb);
                 }
             }
@@ -1918,6 +2042,22 @@ impl Inf<'_> {
                 let vv = self.adt(vb, vec![el]);
                 let callee = self.fn_by(p);
                 return self.apply(callee, vec![vv], 0);
+            }
+        }
+        // `Vec::from(x)`: a Vec of x's elements (an array's or a slice's, through references, or a Vec's), or of u8s
+        // (a `&str` / a String), as the code generator rewrites it
+        if let (Expr::Path(None, p), [x]) = (f, args) {
+            if p.segs.len() == 2 && p.segs[0].name == "Vec" && p.segs[1].name == "from" && self.prog.struct_index.contains_key("Vec") && self.fn_by(p).is_none() {
+                let v = self.vec_from(x);
+                // (`Vec::<u8>::from([1, 2])`: the turbofish's elements)
+                if let Some(crate::parse::GArg::Ty(t)) = p.segs[0].args.first() {
+                    let el = self.elem_of(v);
+                    let tv = self.ty_var(t);
+                    if let Some(el) = el {
+                        self.unify(el, tv);
+                    }
+                }
+                return v;
             }
         }
         // (`mem::size_of::<T>()` / `align_of` / `size_of_val(&x)`: usize, the code generator's intrinsics, so a literal
@@ -2781,7 +2921,17 @@ impl Inf<'_> {
                 }
             }
             if let Some(t) = self.resolve(rv) {
-                if let Some(id) = self.prog.prim_method(t, n) {
+                // (the reference around the slice, as rustc's autoderef reaches it: `&&mut [T]`'s is `&mut`)
+                let mut mut_recv = false;
+                if crate::program::Program::mut_self_inherent(t, n) {
+                    let mut rr = self.find(r) as usize;
+                    for _ in 0..8 {
+                        let Some(Shape::Ref(m, i)) = self.shape[rr] else { break };
+                        mut_recv = m;
+                        rr = self.find(i) as usize;
+                    }
+                }
+                if let Some(id) = self.prog.prim_method(t, n).filter(|&id| !self.prog.std_inherent_first(t, n, || mut_recv, || Some(id))) {
                     return self.apply_recv(Some(id), avs, rv);
                 }
             }
@@ -2911,12 +3061,12 @@ impl Inf<'_> {
                 let rr = self.with(Shape::Ref(n == "get_mut", sl));
                 self.option_of(rr)
             }
-            "get" | "get_mut" | "first" | "last" => {
+            "get" | "get_mut" | "first" | "last" | "first_mut" | "last_mut" => {
                 for a in avs {
                     let k = self.known(Ty::Usize);
                     self.unify(a, k);
                 }
-                let rr = self.with(Shape::Ref(n == "get_mut", el));
+                let rr = self.with(Shape::Ref(n.ends_with("_mut"), el));
                 self.option_of(rr)
             }
             "swap" | "truncate" | "rotate_left" | "rotate_right" => {
@@ -3071,13 +3221,13 @@ impl Inf<'_> {
             };
         }
         match name {
-            "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "min" | "max" | "saturating_add" | "saturating_sub" => {
+            "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "min" | "max" | "saturating_add" | "saturating_sub" | "saturating_mul" => {
                 for a in avs {
                     self.unify(a, rv);
                 }
                 rv
             }
-            "rem_euclid" | "div_euclid" | "next_multiple_of" | "div_ceil" => {
+            "rem_euclid" | "div_euclid" | "next_multiple_of" | "div_ceil" | "wrapping_div_euclid" | "wrapping_rem_euclid" => {
                 for a in avs {
                     self.unify(a, rv);
                 }
@@ -3100,7 +3250,7 @@ impl Inf<'_> {
                 }
                 rv
             }
-            "overflowing_add" | "overflowing_sub" | "overflowing_mul" | "overflowing_pow" => {
+            "overflowing_add" | "overflowing_sub" | "overflowing_mul" | "overflowing_pow" | "overflowing_div_euclid" | "overflowing_rem_euclid" => {
                 for a in avs {
                     let k = if name == "overflowing_pow" { self.known(Ty::U32) } else { rv };
                     self.unify(a, k);
@@ -3163,7 +3313,7 @@ impl Inf<'_> {
                 }
                 rv
             }
-            "checked_add" | "checked_sub" | "checked_mul" | "checked_div" | "checked_rem" => {
+            "checked_add" | "checked_sub" | "checked_mul" | "checked_div" | "checked_rem" | "checked_div_euclid" | "checked_rem_euclid" => {
                 for a in avs {
                     self.unify(a, rv);
                 }
@@ -3217,4 +3367,52 @@ fn lets_in_expr(e: &Expr, out: &mut Vec<*const Stmt>) {
         }
         _ => ast_closure::each_child_pub(e, &mut |c| lets_in_expr(c, out)),
     }
+}
+
+/// The variable a format macro's named argument `name = var` is given (`println!("{:w$}", x, w = width)`), when it is
+/// one: the arguments after the format string, at the top level of the call
+fn named_fmt_arg<'a>(g: &'a str, name: &str) -> Option<&'a str> {
+    let b = g.as_bytes();
+    let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+    let mut depth = 0i32;
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            // (a raw string, `r#".."#` / `br".."`, to its end: what it holds is no argument)
+            b'r' if (i == 0 || !id(b[i - 1]) || (b[i - 1] == b'b' && (i == 1 || !id(b[i - 2])))) && matches!(b.get(i + 1), Some(b'"' | b'#')) => {
+                let hashes = b[i + 1..].iter().take_while(|&&c| c == b'#').count();
+                if b.get(i + 1 + hashes) == Some(&b'"') {
+                    let close: Vec<u8> = std::iter::once(b'"').chain(std::iter::repeat_n(b'#', hashes)).collect();
+                    let from = i + 2 + hashes;
+                    i = b[from..].windows(close.len()).position(|w| w == close.as_slice()).map_or(b.len(), |p| from + p + close.len() - 1);
+                }
+            }
+            // (a char literal of a quote, `'"'`)
+            b'\'' if b.get(i + 1) == Some(&b'"') && b.get(i + 2) == Some(&b'\'') => i += 2,
+            b'"' => {
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth -= 1,
+            b',' if depth <= 1 => {
+                let rest = g[i + 1..].trim_start();
+                if let Some(r) = rest.strip_prefix(name).filter(|r| !r.starts_with(|c: char| c == '_' || c.is_ascii_alphanumeric())) {
+                    if let Some(r) = r.trim_start().strip_prefix('=').filter(|r| !r.starts_with('=')) {
+                        let r = r.trim_start();
+                        let n = r.bytes().take_while(|&c| id(c)).count();
+                        let after = r[n..].trim_start();
+                        if n > 0 && !r.as_bytes()[0].is_ascii_digit() && (after.is_empty() || after.starts_with([',', ')', ']', '}'])) {
+                            return Some(&r[..n]);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
 }

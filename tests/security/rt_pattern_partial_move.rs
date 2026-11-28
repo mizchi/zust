@@ -1,9 +1,9 @@
 //! A pattern that moves some parts of a value and leaves the rest to `_` / `..` (`let (a, _) = pair();`,
 //! `let W { a, .. } = w;`, `match pair() { (a, _) => .. }`): the parts left are still owned, and are dropped at the end
-//! of the statement (a temporary) or of the owner's scope (a local). zustc drops neither, so they leak; the counts
-//! differ from rustc's (and valgrind sees the Strings lost). No part is dropped twice.
+//! of the statement (a temporary) or of the owner's scope (a local). zustc drops a local's (split_moved), not a temporary's, so those leak;
+//! the counts differ from rustc's (and valgrind sees the Strings lost). No part is dropped twice.
 //@ pattern: drops
-//@ todo: the parts a pattern does not move out of a value are never dropped (a leak, no double free)
+//@ todo: the parts a pattern does not move out of a temporary are never dropped (a leak, no double free); a local's are
 //@ expect: run
 use std::cell::Cell;
 struct D<'a>(u32, &'a Cell<u32>);

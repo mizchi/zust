@@ -107,6 +107,10 @@ fn tokens_text(src: &str) -> String {
         if k > 0 && space_between(&toks, k, src) {
             s.push(' ');
         }
+        // (a raw identifier as written: `stringify!(r#foo)` is "r#foo")
+        if t.is_raw() {
+            s.push_str("r#");
+        }
         s.push_str(&t.text);
     }
     s
@@ -122,7 +126,7 @@ fn space_between(toks: &[crate::parse::Tok], k: usize, src: &str) -> bool {
     if colon2_starts(k) || (k >= 2 && colon2_starts(k - 2)) {
         return false;
     }
-    let end = a.lo as usize + a.text.len();
+    let end = a.lo as usize + a.text.len() + if a.is_raw() { 2 } else { 0 };
     if src.get(end..b.lo as usize).is_some_and(|g| g.is_empty()) {
         return false;
     }
@@ -412,6 +416,7 @@ impl Cx<'_> {
                 let blk = self.keep_expr(blk);
                 return self.expr(blk, None);
             }
+            self.presplit_loop(None, fbody);
         }
         let mut temp = None;
         let mut items = None;
@@ -1428,33 +1433,32 @@ impl Cx<'_> {
             "dbg" => {
                 let args = self.macro_args(p, g)?;
                 let (sl, sc) = self.loc(self.mstart);
-                // (`dbg!()`: only the place; `dbg!(a, b)`: each one, as a tuple)
-                if args.len() != 1 {
-                    let ex = if args.is_empty() {
-                        Expr::Macro(path_of("eprintln"), format!("(\"[src/main.rs:{sl}:{sc}]\")"), crate::parse::Span::default())
-                    } else {
-                        let texts = macro_arg_texts(g);
-                        let sp = crate::parse::Span { start: self.mstart, at: self.mstart };
-                        Expr::Tuple(texts.iter().map(|t| Expr::Macro(path_of("dbg"), format!("({t})"), sp)).collect())
-                    };
+                // (`dbg!()`: only the place)
+                if args.is_empty() {
+                    let ex = Expr::Macro(path_of("eprintln"), format!("(\"[src/main.rs:{sl}:{sc}]\")"), crate::parse::Span::default());
                     let ex: &Expr = self.keep_expr(ex);
                     return self.expr(ex, expected);
                 }
-                let e = &args[0];
-                let text = tokens_text(macro_arg_texts(g).first().map(|s| s.as_str()).unwrap_or(""));
-                let head = format!("[src/main.rs:{sl}:{sc}] {} = ", text);
-                let ex = Expr::Block(
-                    None,
-                    false,
-                    PBlock {
-                        stmts: vec![
-                            let_stmt("__exr_dbg", e.clone()),
-                            Stmt::Expr(Expr::Macro(path_of("eprintln"), format!("(\"{{}}{{:#?}}\", {head:?}, __exr_dbg)"), crate::parse::Span::default()), true),
-                            Stmt::Expr(path_expr("__exr_dbg"), false),
-                        ],
-                        spos: Default::default(),
-                    },
-                );
+                // (each argument: printed and given back; `dbg!(a, b)` is the tuple of them, of the arguments as parsed,
+                // whose types inference recorded)
+                let texts = macro_arg_texts(g);
+                let one = |e: &Expr, t: &str| {
+                    let head = format!("[src/main.rs:{sl}:{sc}] {} = ", tokens_text(t));
+                    Expr::Block(
+                        None,
+                        false,
+                        PBlock {
+                            stmts: vec![
+                                let_stmt("__exr_dbg", e.clone()),
+                                Stmt::Expr(Expr::Macro(path_of("eprintln"), format!("(\"{{}}{{:#?}}\", {head:?}, __exr_dbg)"), crate::parse::Span::default()), true),
+                                Stmt::Expr(path_expr("__exr_dbg"), false),
+                            ],
+                            spos: Default::default(),
+                        },
+                    )
+                };
+                let blocks: Vec<Expr> = args.iter().enumerate().map(|(i, e)| one(e, texts.get(i).map(|s| s.as_str()).unwrap_or(""))).collect();
+                let ex = if blocks.len() == 1 { blocks.into_iter().next().unwrap() } else { Expr::Tuple(blocks) };
                 let ex: &Expr = self.keep_expr(ex);
                 self.expr(ex, expected)
             }
@@ -2068,6 +2072,28 @@ impl Cx<'_> {
                 return self.expr(ne, expected).map(Some);
             }
         }
+        // `Vec::from(x)`: std's `From` impls for Vec, by x's type
+        if name == "from" && n >= 2 && p.segs[n - 2].name == "Vec" && cargs.len() == 1 && !self.prog.index.contains_key("Vec::from") {
+            // (the type a `let` writes: inference makes `[foo]`'s elements fn pointers as well)
+            let written = if self.ann_init == c as *const Expr as usize { expected } else { None };
+            // (`Vec::<u8>::from(x)`: x's elements must be u8s)
+            let targ = match p.segs[n - 2].args.first() {
+                Some(GArg::Ty(t)) => Some(self.parse_ty(t)?),
+                _ => None,
+            };
+            if let Some(ne) = self.vec_from(p.pos, &cargs[0], written)? {
+                let r = self.expr(ne, expected)?;
+                if let (Some(want), Ty::Struct(sid)) = (targ, r.1) {
+                    let el = self.prog.structs[sid as usize].args.first().copied();
+                    if el.is_some_and(|e| e != want) && !self.prog.has_param(want) {
+                        let arg = self.peek(&cargs[0]).map(|t| crate::traits::display_ty(self.prog, t)).unwrap_or_default();
+                        let vt = crate::traits::display_ty(self.prog, Ty::Struct(self.prog.instantiate(self.prog.base_of(sid), vec![want])?));
+                        return err(p.pos, format!("the trait bound `{vt}: From<{arg}>` is not satisfied (E0277)"));
+                    }
+                }
+                return Ok(Some(r));
+            }
+        }
         // `Box::new(x)`: puts x on the heap and returns it as an owning `&mut T` (never freed)
         if name == "new" && n >= 2 && p.segs[n - 2].name == "Box" && !self.prog.struct_index.contains_key("Box") {
             if cargs.len() != 1 {
@@ -2325,6 +2351,68 @@ impl Cx<'_> {
         };
         let s = &self.prog.sigs[id as usize];
         (s.has_body || s.is_extern).then_some(id)
+    }
+
+    /// `Vec::from(x)` as what std's `From` impl for x's type does: an array's elements moved in (`vec![..]` of a
+    /// literal one), a copy of a `&[T]` / `&[T; N]` (`x.to_vec()`), the bytes of a `&str` or a String, or a Vec itself
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn vec_from(&mut self, pos: crate::parse::Pos, x: &Expr, written: Option<Ty>) -> R<Option<&'static Expr>> {
+        let sp = crate::parse::Span { start: pos, at: pos };
+        let m = |r: Expr, name: &str| Expr::MethodCall(Box::new(r), name.into(), vec![], vec![], sp);
+        let x0 = crate::acg::strip_paren(x);
+        if let Expr::Array(es) = x0 {
+            // (E0277: `Vec::from([foo])` with foo a fn is a Vec of foo's fn item type, which no `fn()` is: an element is
+            // coerced only where the Vec is built with its type known, `vec![foo]`)
+            let fn_ptr = |t: Ty| match t {
+                Ty::Fn(_) => true,
+                // (a tuple's: `Vec<(&str, fn())>` from `[("foo", foo)]`)
+                Ty::Struct(sid) => self.prog.is_tuple(sid) && self.prog.structs[sid as usize].args.iter().any(|a| matches!(a, Ty::Fn(_))),
+                _ => false,
+            };
+            let el = match written {
+                Some(Ty::Struct(sid)) if self.prog.structs[self.prog.base_of(sid) as usize].name == "Vec" => self.prog.structs[sid as usize].args.first().copied(),
+                _ => None,
+            };
+            // (the elements' type is a fn item's only when each is that fn, as written: `[foo as fn(), foo]` and
+            // `[foo, bar]` are arrays of fn pointers)
+            let fn_item = |e: &Expr| match crate::acg::strip_paren(e) {
+                Expr::Tuple(xs) => xs.iter().find_map(|x| self.fn_item(x)),
+                e => self.fn_item(e),
+            };
+            let ids: Vec<Option<u32>> = es.iter().map(fn_item).collect();
+            if el.is_some_and(fn_ptr) && !ids.is_empty() && ids[0].is_some() && ids.iter().all(|&i| i == ids[0]) {
+                let t = crate::traits::display_ty(self.prog, written.unwrap());
+                return err(pos, format!("the trait bound `{t}: From<[fn item; {}]>` is not satisfied (E0277): a fn item in the array is not coerced to a fn pointer", es.len()));
+            }
+            return Ok(Some(self.keep_expr(crate::acg::p2_call::vec_of(es))));
+        }
+        let named = |t: Ty, n: &str| matches!(t, Ty::Struct(sid) if self.prog.structs[self.prog.base_of(sid) as usize].name == n);
+        let x = Expr::Paren(Box::new(x.clone()));
+        let Some(t) = self.peek(x0) else { return Ok(None) };
+        let ne = match t {
+            // (an array value's elements moved in, by a `for` loop over it: `{ let a = x; let mut v = ..; for e in a
+            // { v.push(e); } v }`. The Vec's let is given its type as inference would: it never saw the block)
+            Ty::Array(e, n) => {
+                let src = format!("{{ let mut __exr_vfv = Vec::with_capacity({n}); for __exr_vfe in __exr_vfa {{ __exr_vfv.push(__exr_vfe); }} __exr_vfv }}");
+                let Ok(Expr::Block(l, u, mut b)) = crate::parse::parse_expr(&src) else { return Ok(None) };
+                let Some(&vb) = self.prog.struct_index.get("Vec") else { return Ok(None) };
+                let vt = Ty::Struct(self.prog.instantiate(vb, vec![*e])?);
+                b.stmts.insert(0, Stmt::Let(Pat::Ident(false, false, "__exr_vfa".into(), None), None, Some(x), None, Default::default()));
+                let ne = self.keep_expr(Expr::Block(l, u, b));
+                if let Expr::Block(_, _, b) = ne {
+                    self.lets.insert(crate::ast_infer::stmt_key(&b.stmts[1]), vt);
+                }
+                return Ok(Some(ne));
+            }
+            Ty::Ref(_, Ty::Slice(_) | Ty::Array(..)) => m(x, "to_vec"),
+            // (a call, not `.to_vec()`: the method would look up the type inference gave the receiver, which it never saw)
+            Ty::Ref(_, Ty::Str) => Expr::Call(Box::new(path_expr("__exr_slice_to_vec")), vec![m(x, "as_bytes")]),
+            t if named(t, "String") => m(x, "into_bytes"),
+            t if named(t, "Vec") => x,
+            _ => return Ok(None),
+        };
+        Ok(Some(self.keep_expr(ne)))
     }
 
     /// Fn item to fn pointer value. Generic: type arguments from the turbofish or expected type (`fn(i64) -> i64`)

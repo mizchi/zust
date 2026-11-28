@@ -220,11 +220,12 @@ impl Solver<'_> {
     pub fn seq_unify(&mut self, a: u32, b: u32) {
         let (fa, fb) = (self.find(a), self.find(b));
         let elem = |s: &mut Self, v: u32| -> Option<u32> {
-            // (`&[T]` against `[U; N]` (`PartialEq<[U; N]> for &[T]`): the slice's element)
+            // (`&[T]` against `[U; N]` (`PartialEq<[U; N]> for &[T]`): the slice's element. So for a reference to an
+            // array, a `&[_]` initialized from one: `let e: &[_] = &[1, 2, 3]; assert_eq!(e, ORDER)`)
             let v = match s.shape[v as usize] {
                 Some(Shape::Ref(_, i)) => {
                     let i = s.find(i);
-                    if matches!(s.shape[i as usize], Some(Shape::Slc(_))) { i } else { v }
+                    if matches!(s.shape[i as usize], Some(Shape::Slc(_) | Shape::Arr(..))) { i } else { v }
                 }
                 _ => v,
             };
@@ -694,6 +695,7 @@ impl Solver<'_> {
 
     /// 型パラメータに `Fn(A) -> B` の境界があり、渡したのがクロージャなら A / B と単一化する
     pub fn unify_fn_bounds(&mut self, generics: &[(String, Vec<String>)], pv: &mut Vec<Option<u32>>) {
+        self.int_lit_by_bounds(generics, pv);
         for (g, (_, bounds)) in generics.iter().enumerate() {
             if !bounds.iter().any(|b| b.starts_with("Fn")) {
                 continue;
@@ -715,6 +717,82 @@ impl Solver<'_> {
                 self.unify(cr, k);
             }
         }
+    }
+    /// An integer literal's variable passed as a type parameter bounded by traits of the program's (`foo2(42)` with
+    /// `fn foo2<I: Foo>` and `impl Foo for isize` only): the one integer type that implements them, as rustc selects
+    /// `{integer}: Foo`, not the i32 default
+    fn int_lit_by_bounds(&mut self, generics: &[(String, Vec<String>)], pv: &[Option<u32>]) {
+        for (g, (_, bounds)) in generics.iter().enumerate() {
+            if bounds.is_empty() {
+                continue;
+            }
+            let Some(v) = pv.get(g).copied().flatten() else { continue };
+            let root = self.find(v);
+            if self.shape[root as usize].is_some() || !self.int_lit.get(root as usize).copied().unwrap_or(false) {
+                continue;
+            }
+            self.int_by_traits(v, bounds);
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn int_by_traits(&mut self, v: u32, bounds: &[String]) {
+        let user = |tr: &str| self.prog.traits.get(tr).is_some_and(|ds| ds.iter().all(|&d| self.prog.item_of.get(d as usize).copied().flatten().is_some_and(|x| x < self.prog.prelude_from)));
+        let trs: Vec<&str> = bounds.iter().map(|b| b.split('<').next().unwrap_or(b).trim()).filter(|b| user(b)).collect();
+        if trs.is_empty() {
+            return;
+        }
+        let mut hit = None;
+        for t in [Ty::I8, Ty::I16, Ty::I32, Ty::I64, Ty::I128, Ty::Isize, Ty::U8, Ty::U16, Ty::U32, Ty::U64, Ty::U128, Ty::Usize] {
+            if trs.iter().all(|tr| self.prog.implements(t, tr)) {
+                if hit.is_some() {
+                    return;
+                }
+                hit = Some(t);
+            }
+        }
+        if let Some(t) = hit {
+            let k = self.known(t);
+            self.unify(v, k);
+        }
+    }
+
+    /// v's type is known in full, before any default: no variable is left in it, not even an integer literal's that
+    /// resolve would make an i32 (depth stops a cycle of shapes)
+    pub fn known_in_full(&mut self, v: u32, depth: u32) -> bool {
+        let mut memo = crate::fxhash::FxMap::default();
+        self.known_in_full_m(v, depth, &mut memo)
+    }
+
+    /// known_in_full, each type variable once per question: shapes share their parts (`pair(pair(..))` gives both
+    /// arguments one variable), which a walk without it would go through as a tree, in steps exponential in the
+    /// nesting. A part is kept known in full, or not, only where the depth cut off nothing below it: a true, or the
+    /// answer of its own shape
+    fn known_in_full_m(&mut self, v: u32, depth: u32, memo: &mut crate::fxhash::FxMap<u32, bool>) -> bool {
+        if depth > 64 {
+            return false;
+        }
+        let r = self.find(v);
+        if let Some(&k) = memo.get(&r) {
+            return k;
+        }
+        let (k, own) = match self.shape[r as usize] {
+            Some(Shape::Known(t)) => (!self.prog.has_param(t), true),
+            Some(Shape::Ref(_, i) | Shape::Bx(i) | Shape::Arr(i, _) | Shape::Slc(i) | Shape::Ptr(_, i)) => (self.known_in_full_m(i, depth + 1, memo), false),
+            Some(Shape::Adt(_, st, l)) => (
+                (st..st + l).all(|k| {
+                    let a = self.adt_args[k as usize];
+                    self.known_in_full_m(a, depth + 1, memo)
+                }),
+                false,
+            ),
+            _ => (false, true),
+        };
+        if k || own {
+            memo.insert(r, k);
+        }
+        k
     }
     /// 型変数 v の型 (まだ分からなければ None)。形の循環 (無限の型) があっても止まるように、深さを数える
     pub fn resolve(&mut self, v: u32) -> Option<Ty> {
@@ -954,6 +1032,8 @@ impl Solver<'_> {
     /// 型パラメータを含む型を、呼び出しごとの新しい型変数 (pv) で置き換えて作る
     pub fn known_g(&mut self, t: Ty, pv: &mut Vec<Option<u32>>) -> u32 {
         match t {
+            // (each `_` written in a type is a variable of its own: `Result<_, Result<_, _>>`)
+            Ty::Param(crate::program::HOLE) => self.var(),
             Ty::Param(i) => match pv.get(i as usize).copied().flatten() {
                 Some(v) => v,
                 None => {
@@ -1377,6 +1457,21 @@ impl Solver<'_> {
                 }
                 _ => return (v, mode),
             }
+        }
+    }
+
+    /// As auto_deref, but only through a reference to a reference: it stops at the last reference (`&&str` -> `&str`,
+    /// `&?T` stays)
+    pub fn deref_refs_to_ref(&mut self, mut v: u32, mut mode: Option<bool>) -> (u32, Option<bool>) {
+        loop {
+            let r = self.find(v);
+            let Some(Shape::Ref(m, i)) = self.shape[r as usize] else { return (v, mode) };
+            let ri = self.find(i);
+            if !matches!(self.shape[ri as usize], Some(Shape::Ref(..))) {
+                return (v, mode);
+            }
+            v = i;
+            mode = Some(if mode == Some(false) { false } else { m });
         }
     }
 

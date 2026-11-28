@@ -664,6 +664,7 @@ impl Cx<'_> {
             }
             Expr::Index(b, index, isp) if !matches!(&**index, Expr::Range(..)) => {
                 let isp = *isp;
+                self.index_owns = true;
                 let (base, len, elem) = self.indexable(b)?;
                 // (a place written through `IndexMut` (`v[v.len() - 1] = 1` of a Vec): the `&mut v` is taken before
                 // the index is evaluated, with no two-phase borrow)
@@ -1372,13 +1373,14 @@ impl Cx<'_> {
             }
             Expr::Unary(..) => self.unary(e, expected),
             // (`&*s` / `&**r` with s: String or Vec<T> (through Deref): `s.as_str()` / `&s[..]`)
+            // (also `&**s` with s: `Rc<String>`, whose `*s` has no type of its own recorded: the Rc's content)
             Expr::Ref(m, x)
                 if matches!(strip_paren(x), Expr::Unary(op, _, _) if op == "*")
-                    && matches!(strip_paren(x), Expr::Unary(_, y, _) if matches!(self.peek(y), Some(Ty::Struct(sid))
+                    && matches!(strip_paren(x), Expr::Unary(_, y, _) if matches!(self.peek_through_deref(y), Some(Ty::Struct(sid))
                         if matches!(self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), "String" | "Vec"))) =>
             {
                 let Expr::Unary(_, y, _) = strip_paren(x) else { unreachable!() };
-                let Some(Ty::Struct(sid)) = self.peek(y) else { unreachable!() };
+                let Some(Ty::Struct(sid)) = self.peek_through_deref(y) else { unreachable!() };
                 let yb = Expr::Paren(Box::new((**y).clone()));
                 let ne = if self.prog.structs[self.prog.base_of(sid) as usize].name == "String" {
                     mcall(yb, if *m { "as_mut_str" } else { "as_str" }, vec![])
@@ -1530,6 +1532,7 @@ impl Cx<'_> {
                 if self.prog.opt {
                     self.hoist_index_bases(wbody, None, Some(cond))?;
                 }
+                self.presplit_loop(Some(cond), wbody);
                 self.b.ins().jump(header, &[]);
                 self.b.switch_to_block(header);
                 let t0 = self.temps.len();
@@ -1591,6 +1594,7 @@ impl Cx<'_> {
                 self.pending_label = label.as_deref().map(label_name);
                 let body = self.b.create_block();
                 let exit = self.b.create_block();
+                self.presplit_loop(None, lbody);
                 self.b.ins().jump(body, &[]);
                 self.b.switch_to_block(body);
                 self.loops.push(Loop {
@@ -1638,7 +1642,18 @@ impl Cx<'_> {
                 if let (Some(_), Some(kind)) = (value, self.loops[li].no_value) {
                     return Err(self.at(*pos, format!("`break` with value from a `{kind}` loop (E0571)")));
                 }
-                // `break v`: evaluate the value, then leave (the first break decides the type)
+                // (`break;` out of a `loop` or a labeled block: its value is `()`, which a `break 3` after it must be too, as
+                // one before it must have been (E0308))
+                if value.is_none() && self.loops[li].no_value.is_none() {
+                    match self.loops[li].val {
+                        Some(w) if w != Ty::Unit && w != Ty::Never => {
+                            return Err(self.at(*pos, format!("mismatched types: expected `{}`, found `()`", self.prog.tn(w))));
+                        }
+                        Some(_) => {}
+                        None => self.loops[li].val = Some(Ty::Unit),
+                    }
+                }
+                // `break v`: evaluate the value, then leave (its type is the first break's)
                 let mut args = vec![];
                 if let Some(e) = value {
                     let want = self.loops[li].val;
@@ -2275,6 +2290,9 @@ impl Cx<'_> {
     pub(crate) fn reference(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Ref(m, rexpr) = e else { return err(SP, "internal: expected a reference") };
         let m = *m;
+        if m && !self.known_var.is_empty() {
+            self.forget_variant(rexpr);
+        }
         // (`&(42,).0` / `&NUMS[i]`: a field or an element of a constant is borrowed out of the constant promoted to
         // static data, `&(*&B).f` / `&(*&B)[i]`, so the reference outlives the function)
         // (`&CONST`: the constant's own static data, not a copy in this frame)
@@ -3416,7 +3434,16 @@ impl Cx<'_> {
                         *slot = Some(*a);
                     }
                 }
-                let (mut fid, _) = self.resolve_call(d, &recv, sol, None, span)?;
+                let (mut fid, _) = match self.resolve_call(d, &recv, sol, None, span) {
+                    Ok(x) => x,
+                    // (a method whose where clauses this type does not meet has no entry, as in rustc: `fn m(&self)
+                    // where Self::A: Foo` of `impl<T> Tr for T { type A = (); }`)
+                    Err(_) if self.impl_method_preds_fail(tr, d, t) => {
+                        fns.push(u32::MAX);
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                };
                 // A method of a generic impl (`impl<T> Tr for W<T>`) is instantiated further
                 if (fid as usize) < self.prog.sigs.len() && self.prog.sigs[fid as usize].is_generic() {
                     let g = self.prog.sigs[fid as usize].generics.len();
@@ -3735,6 +3762,14 @@ impl Cx<'_> {
                 return err(SP, "cannot borrow data in a `&` reference as mutable (E0596)".to_string());
             }
         }
+        // (E0277: a where clause of the method on an associated type the object binds, `where Self::A: Foo` through
+        // `dyn Tr<A = ()>`: the vtable has no entry for it)
+        if !binds.is_empty() && self.prog.fn_preds.contains_key(&decls[idx]) {
+            if let Some(e) = self.dyn_pred_error(decls[idx], &binds) {
+                return err(SP, e);
+            }
+        }
+        let ds = &self.prog.sigs[decls[idx] as usize];
         // (a method the vtable has no entry for: `self` by value / no `self` / generics of its own)
         let by_box = matches!(ds.params.first(), Some(Ty::Box(_)));
         if !ds.has_self || !matches!(ds.params.first(), Some(Ty::Ref(..) | Ty::Box(_))) || ds.generics.len() > 1 + targs.len() {
@@ -5142,6 +5177,73 @@ fn has_ref(t: Ty, depth: u32) -> bool {
         Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => has_ref(*i, depth + 1),
         Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&x| has_ref(x, depth + 1)),
         _ => false,
+    }
+}
+
+impl Cx<'_> {
+    /// The impl method of trait `tr`'s method `d` for type t has where clauses t does not meet (Program::fn_pred_error)
+    /// A where clause of the trait's method decl on `Self::X` that the type a trait object binds X to does not meet
+    #[cold]
+    #[inline(never)]
+    fn dyn_pred_error(&self, decl: u32, binds: &[(String, Ty)]) -> Option<String> {
+        let preds = self.prog.fn_preds.get(&decl)?;
+        let names: Vec<&str> = self.prog.sigs[decl as usize].generics.iter().map(|g| g.0.as_str()).collect();
+        for (syn, _, bounds) in preds {
+            let crate::types::TySyn::Assoc(b, name) = syn else { continue };
+            let (name, _) = crate::ast_types::split_trait_assoc(name);
+            if self.prog.resolve_g(b, &names).ok() != Some(Ty::Param(0)) {
+                continue;
+            }
+            let Some(&(_, bt)) = binds.iter().find(|x| x.0 == name) else { continue };
+            for tr in bounds {
+                let tname = tr.split('<').next().unwrap_or(tr).trim();
+                if self.prog.user_traits.contains(tname) && matches!(self.prog.evaluate(bt, tr), crate::program::Certainty::No) {
+                    return Some(format!("the trait bound `{}: {tr}` is not satisfied (E0277)", crate::traits::display_ty(self.prog, bt)));
+                }
+            }
+        }
+        None
+    }
+
+    fn impl_method_preds_fail(&self, tr: &str, d: u32, t: Ty) -> bool {
+        let Some(m) = self.prog.names[d as usize].rsplit("::").next() else { return false };
+        (0..self.prog.sigs.len()).any(|i| {
+            let s = &self.prog.sigs[i];
+            let (Some(st), Some(it)) = (s.self_ty, s.impl_trait.as_deref()) else { return false };
+            if it.split('<').next().unwrap_or(it).trim() != tr || self.prog.names[i].rsplit("::").next() != Some(m) || !self.prog.fn_preds.contains_key(&(i as u32)) {
+                return false;
+            }
+            let mut sol = vec![None; s.generics.len()];
+            if !self.prog.match_ty(st, t, &mut sol) {
+                return false;
+            }
+            let Some(args) = sol.into_iter().collect::<Option<Vec<Ty>>>() else { return false };
+            self.prog.fn_pred_error(i as u32, &args).is_some()
+        })
+    }
+}
+
+impl Cx<'_> {
+    /// e's type, or for `*z` with none recorded, what z (a reference, a Box, std's Rc / Arc or a guard of a RefCell /
+    /// Mutex / RwLock) points to
+    pub(crate) fn peek_through_deref(&self, e: &Expr) -> Option<Ty> {
+        if let Some(t) = self.peek(e) {
+            return Some(t);
+        }
+        let Expr::Unary(op, z, _) = strip_paren(e) else { return None };
+        if op != "*" {
+            return None;
+        }
+        match self.peek(z)? {
+            Ty::Ref(_, i) | Ty::Box(i) => Some(*i),
+            Ty::Struct(sid) => {
+                let base = self.prog.base_of(sid);
+                let std = self.prog.struct_item.get(base as usize).is_none_or(|&ii| ii >= self.prog.prelude_from);
+                let ptr = matches!(self.prog.structs[base as usize].name.as_str(), "Rc" | "Arc" | "Ref" | "RefMut" | "MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard");
+                (std && ptr).then(|| self.prog.structs[sid as usize].args.first().copied()).flatten()
+            }
+            _ => None,
+        }
     }
 }
 

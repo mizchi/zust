@@ -219,13 +219,25 @@ pub fn bound_names(bs: &[Bound]) -> R<Vec<String>> {
     Ok(v)
 }
 
+/// Whether the text writes the keyword `impl` (a whole word; not the raw identifier `r#impl`)
+fn impl_keyword_in(t: &str) -> bool {
+    let b = t.as_bytes();
+    let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+    t.match_indices("impl").any(|(i, _)| (i == 0 || !(id(b[i - 1]) || b[i - 1] == b'#')) && b.get(i + 4).is_none_or(|&c| !id(c)))
+}
+
 fn collect_generics(g: &Generics, out: &mut Vec<(String, Vec<String>)>) -> R<()> {
     // (`T: Iterator<Item = impl Foo>`)
     for p in &g.params {
         if let GParam::Ty(_, bs, _) = p {
             for b in bs {
                 if let Bound::Trait(_, bp) = b {
-                    if bp.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, crate::parse::GArg::Bind(_, PTy::Impl(_)) | crate::parse::GArg::Ty(PTy::Impl(_))))) {
+                    // (one written `impl`: an associated type bound, `Iterator<Item: Copy>`, is parsed as `Item = impl Copy`
+                    // and is allowed there)
+                    if bp.segs.iter().any(|s| {
+                        s.args.iter().any(|a| matches!(a, crate::parse::GArg::Bind(_, PTy::Impl(_)) | crate::parse::GArg::Ty(PTy::Impl(_))))
+                            && impl_keyword_in(&s.text)
+                    }) {
                         return err("`impl Trait` is not allowed in generics");
                     }
                 }
@@ -3801,7 +3813,8 @@ fn summarize_enum(item: &Item, sm: &mut Summary, sn: &String, g: &Generics, vars
                             _ => break,
                         };
                     }
-                    discr_src = crate::ast_types::const_expr_text(x).ok_or(er)?;
+                    // (at the discriminant, as rustc: `A = || {}` on the variant's line)
+                    discr_src = crate::ast_types::const_expr_text(x).ok_or_else(|| crate::parse::err_at_expr(x, &er))?;
                     Some(0)
                 }
             },
@@ -3855,6 +3868,8 @@ fn summarize_struct(item: &Item, sm: &mut Summary, sn: &String, g: &Generics, fi
     }
     if union {
         sm.unions.push(sn.clone());
+    } else if matches!(fields, Fields::Unit) {
+        sm.unit = true;
     }
     for r in layout_reprs(&item.attrs)? {
         sm.reprs.push((sn.clone(), r));

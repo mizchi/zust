@@ -1,0 +1,17 @@
+drop a-local
+drop a-temp
+drop b-local
+drop b-temp
+b 1
+drop c-local
+drop c-temp
+drop c-else-local
+drop c-else-temp
+iter 0 1
+drop d-temp
+drop d-local
+iter 1 1
+drop d-temp
+drop d-local
+drop e-local
+drop e-temp

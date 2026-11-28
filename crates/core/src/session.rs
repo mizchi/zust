@@ -2330,6 +2330,13 @@ impl Session {
                 prog.item_lines = items.iter().map(|it| it.line as u32).collect();
             }
         }
+        // (an impl of the program's for `()`: which traits a method call on `()` may use)
+        let for_unit = |it: &&lexer::SrcItem| {
+            it.kind == lexer::ItemKind::ImplHeader && src.get(it.start..it.end).is_some_and(|h| h.trim_end().trim_end_matches('{').trim_end().ends_with("for ()"))
+        };
+        if items[..user].iter().any(|it| for_unit(&it)) {
+            prog.unit_traits = lexer::root_traits(src0);
+        }
         prog.overflow_checks = !self.opts.opt;
         prog.deny_unreachable = deny_unreachable;
         // (the program has modules: read from its source as written, before flattening blanks their headers)
@@ -2398,8 +2405,26 @@ impl Session {
             while let Some(d) = rest[k..].find("::") {
                 let end = k + d;
                 let start = rest[..end].rfind(|c: char| !(c.is_alphanumeric() || c == '_')).map_or(0, |i| i + 1);
-                if start < end && b[start].is_ascii_uppercase() {
+                // (a lowercase enum's too, `use color::{red, green};`: only an enum's, not a module's, which a program
+                // with many `use`s has many of)
+                let lower_enum = || prog.struct_index.get(&rest[start..end]).is_some_and(|&id| prog.structs[id as usize].is_enum);
+                if start < end && (b[start].is_ascii_uppercase() || lower_enum()) {
                     prog.use_prefixes.push(rest[start..end].to_string());
+                    // (the variants it brings of a lowercase enum: a glob, a list (not one renamed by `as`), or one)
+                    if !b[start].is_ascii_uppercase() {
+                        let after = rest[end + 2..].trim_start();
+                        let enum_name = rest[start..end].to_string();
+                        let names: Vec<String> = if after.starts_with('*') {
+                            vec!["*".into()]
+                        } else if let Some(list) = after.strip_prefix('{').and_then(|l| l.split('}').next()) {
+                            list.split(',').map(str::trim).filter(|x| !x.is_empty() && !x.contains(' ')).map(String::from).collect()
+                        } else {
+                            after.split(|c: char| !(c.is_alphanumeric() || c == '_')).next().filter(|x| !x.is_empty()).map(String::from).into_iter().collect()
+                        };
+                        for nm in names {
+                            prog.use_lower.push((enum_name.clone(), nm));
+                        }
+                    }
                 }
                 k = end + 2;
             }
@@ -2774,6 +2799,12 @@ impl Session {
         // (E0107 at a use of a generic associated type without its arguments, or with the wrong number)
         if let Some(e) = first_gat_arity_error(&src, src0, &items[..user]) {
             return Err(e);
+        }
+        // (E0107 at a bound that gives one of the program's traits the wrong number of generic arguments)
+        if items[..user].iter().any(|it| matches!(it.kind, crate::lexer::ItemKind::TraitHeader)) {
+            if let Some(e) = first_bound_arity_error(&src, src0, &items[..user]) {
+                return Err(e);
+            }
         }
         // (a derive whose field has not the trait: `#[derive(Hash)] struct S { x: Error }`)
         if !prog.derived.is_empty() {
@@ -3778,9 +3809,10 @@ fn angle_parts(t: &[(u8, usize, usize)], text: &[u8], open: usize) -> Option<(Ve
 /// E0107 at an impl of one of the program's traits that gives it more generic (type / const) arguments than the
 /// trait declares, or fewer than it requires: `impl Seq<bool> for u32` with `trait Seq {}`. Read from the trait
 /// headers and the impl headers only (lifetimes and `Item = ..` bindings are not counted)
-fn first_trait_arity_error(src: &str, orig: &str, items: &[SrcItem]) -> Option<String> {
+/// Each of the program's traits' (required, declared) count of generic type and const arguments, from the trait
+/// headers (defaults make the required count smaller; lifetimes are not counted); None for a name declared twice
+fn trait_arities<'a>(src: &'a str, items: &[SrcItem]) -> crate::fxhash::FxMap<&'a str, Option<(usize, usize)>> {
     use crate::lexer::ItemKind;
-    // (each trait's (required, declared) count; a name declared twice is left out)
     let mut decl: crate::fxhash::FxMap<&str, Option<(usize, usize)>> = Default::default();
     for it in items.iter().filter(|it| matches!(it.kind, ItemKind::TraitHeader)) {
         let text = &src[it.start..it.end];
@@ -3823,6 +3855,12 @@ fn first_trait_arity_error(src: &str, orig: &str, items: &[SrcItem]) -> Option<S
         };
         decl.entry(name).and_modify(|e| *e = None).or_insert(Some(counts));
     }
+    decl
+}
+
+fn first_trait_arity_error(src: &str, orig: &str, items: &[SrcItem]) -> Option<String> {
+    use crate::lexer::ItemKind;
+    let decl = trait_arities(src, items);
     if decl.is_empty() {
         return None;
     }
@@ -3878,6 +3916,60 @@ fn first_trait_arity_error(src: &str, orig: &str, items: &[SrcItem]) -> Option<S
                 format!("trait takes {takes} {} but {given} {} {} supplied", plural(declared.max(required)), plural(given), if given == 1 { "was" } else { "were" })
             };
             // (rustc points at the trait's name)
+            let (line, col) = item_pos(src, orig, &crate::prep::hoist_marks(src), it, t[nk].1);
+            return Some(format!("{line}:{col}: {what} (E0107)"));
+        }
+    }
+    None
+}
+
+/// E0107 at a bound that names one of the program's traits with the wrong number of generic (type / const) arguments,
+/// after `:`, `+`, `impl` or `dyn` in any item: `fn two<T: Trait<Type: Default>>()` with `trait Trait<Type>` gives
+/// none (an associated type's bound or binding, `Type: ..` / `Type = ..`, is no argument; lifetimes are not counted)
+fn first_bound_arity_error(src: &str, orig: &str, items: &[SrcItem]) -> Option<String> {
+    let decl = trait_arities(src, items);
+    if !decl.values().any(|d| d.is_some_and(|(r, _)| r > 0)) {
+        return None;
+    }
+    let plural = |n: usize| if n == 1 { "generic argument" } else { "generic arguments" };
+    for it in items {
+        let text = &src[it.start..it.end];
+        if !decl.keys().any(|n| text.contains(n)) {
+            continue;
+        }
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+        let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && b[t[k].1] == c;
+        for nk in 1..t.len() {
+            let Some(&Some((required, declared))) = decl.get(w(nk)) else { continue };
+            if !sym(nk + 1, b'<') {
+                continue;
+            }
+            // (a bound: after `:` (not a path's `::`), `+`, `impl` or `dyn`)
+            let bound = (sym(nk - 1, b':') && !(nk >= 2 && sym(nk - 2, b':'))) || sym(nk - 1, b'+') || matches!(w(nk - 1), "impl" | "dyn");
+            if !bound {
+                continue;
+            }
+            let Some((parts, _)) = angle_parts(&t, b, nk + 1) else { continue };
+            let given = parts
+                .iter()
+                .filter(|p| {
+                    let lifetime = b[t[p.0].1] == b'\'' || (t[p.0].1 > 0 && b[t[p.0].1 - 1] == b'\'');
+                    // (`Type = ..`, `Type: ..`, and a generic associated type's `Assoc<'r> = ..` past its own arguments)
+                    let mut q = p.0 + 1;
+                    if t[p.0].0 == 0 && sym(q, b'<') {
+                        q = angle_parts(&t, b, q).map_or(q, |(_, close)| close + 1);
+                    }
+                    let named = t[p.0].0 == 0 && p.1 >= q && ((sym(q, b'=') && !sym(q + 1, b'=')) || (sym(q, b':') && !sym(q + 1, b':')));
+                    !lifetime && !named
+                })
+                .count();
+            if given <= declared && given >= required {
+                continue;
+            }
+            let takes = if required == declared { format!("{declared}") } else if given > declared { format!("at most {declared}") } else { format!("at least {required}") };
+            let what = format!("trait takes {takes} {} but {given} {} {} supplied", plural(declared.max(required)), plural(given), if given == 1 { "was" } else { "were" });
             let (line, col) = item_pos(src, orig, &crate::prep::hoist_marks(src), it, t[nk].1);
             return Some(format!("{line}:{col}: {what} (E0107)"));
         }
@@ -8803,6 +8895,110 @@ fn duplicate_import(src0: &str, split: &str, items: &[SrcItem]) -> Option<String
 /// A top-level `use a::..` (at the start of a line) whose first segment is no crate the build knows (std, core,
 /// a dependency, an `extern crate`), no module or item of the program, nor `crate` / `self` / `super`:
 /// "unresolved import `a`" (E0432). Only read when such a `use` is there at all
+const STD_COLLECTIONS: [&str; 7] = ["HashMap", "HashSet", "BTreeMap", "BTreeSet", "VecDeque", "BinaryHeap", "LinkedList"];
+
+/// Whether a program with no other error may name a std collection with no `use` of it, for
+/// undeclared_std_collection, which tokenizes the source: the prelude has a collection (the program names one), and
+/// `collections` is written nowhere but after a `//` (issue-31997-1's `HashMap::new()` beside a commented-out `use`)
+fn collection_unimported_hint(src: &str, prog: &crate::program::Program) -> bool {
+    STD_COLLECTIONS.iter().any(|n| prog.struct_index.contains_key(*n))
+        && src.match_indices("collections").all(|(i, _)| src[src[..i].rfind('\n').map_or(0, |p| p + 1)..i].contains("//"))
+}
+
+/// E0433 / E0412 of a std collection named where no `use` brings it into scope (`HashMap::new()` with no `use
+/// std::collections::HashMap;`): the prelude defines them all, so nothing else reports it. Looked for when the
+/// program has another error, or when collection_unimported_hint finds that one may be named so. Not when any `use`
+/// names it or globs a `collections`, nor when the program defines an item of the name (macros and other crates are
+/// not followed)
+#[cold]
+#[inline(never)]
+fn undeclared_std_collection(src: &str) -> Option<String> {
+    const NAMES: [&str; 7] = STD_COLLECTIONS;
+    if !NAMES.iter().any(|n| src.contains(n)) {
+        return None;
+    }
+    let toks = crate::parse::tokenize(src).ok()?;
+    let text = |i: usize| toks.get(i).map_or("", |t| t.text.as_str());
+    let path_sep = |i: usize| text(i) == ":" && text(i + 1) == ":";
+    let mut known: Vec<&str> = vec![];
+    let mut i = 0;
+    while i < toks.len() {
+        match text(i) {
+            // (what a `use` names, anywhere in it; a `collections::*` brings them all)
+            "use" => {
+                let mut j = i + 1;
+                while j < toks.len() && text(j) != ";" {
+                    if text(j) == "collections" && path_sep(j + 1) && text(j + 3) == "*" {
+                        return None;
+                    }
+                    if let Some(n) = NAMES.iter().find(|n| **n == text(j)) {
+                        known.push(n);
+                    }
+                    j += 1;
+                }
+                i = j;
+            }
+            "struct" | "enum" | "type" | "trait" | "union" | "mod" | "fn" | "macro_rules" | "impl" => {
+                if let Some(n) = NAMES.iter().find(|n| **n == text(i + 1)) {
+                    known.push(n);
+                }
+                // (a generic parameter of the name, `fn f<HashMap>(..)` / `impl<HashMap> ..`: declared where its list
+                // starts or after a `,` in it, before `:` / `,` / `>` / `=`)
+                let open = if text(i) == "impl" { i + 1 } else { i + 2 };
+                if text(open) == "<" {
+                    let mut d = 0;
+                    let mut j = open;
+                    while j < toks.len() {
+                        match text(j) {
+                            "<" => d += 1,
+                            ">" if text(j - 1) != "-" => {
+                                d -= 1;
+                                if d == 0 {
+                                    break;
+                                }
+                            }
+                            t if d == 1 && matches!(text(j - 1), "<" | ",") && matches!(text(j + 1), "," | ">" | "=") || d == 1 && text(j + 1) == ":" && !path_sep(j + 1) && matches!(text(j - 1), "<" | ",") => {
+                                if let Some(n) = NAMES.iter().find(|n| **n == t) {
+                                    known.push(n);
+                                }
+                            }
+                            _ => {}
+                        }
+                        j += 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    // (the names the program binds or defines as values, `let HashMap = 1;` .. `HashMap`: none of them is a type
+    // where it is written)
+    let values: Vec<&str> = toks
+        .iter()
+        .enumerate()
+        .filter(|&(i, t)| t.kind == crate::parse::TokKind::Ident && i >= 1 && matches!(text(i - 1), "let" | "mut" | "ref" | "const" | "static" | "fn"))
+        .map(|(_, t)| t.text.as_str())
+        .filter(|n| NAMES.contains(n))
+        .collect();
+    for (i, t) in toks.iter().enumerate() {
+        if t.kind != crate::parse::TokKind::Ident || !NAMES.contains(&t.text.as_str()) || known.contains(&t.text.as_str()) || values.contains(&t.text.as_str()) {
+            continue;
+        }
+        // (a path's first segment, not `collections::HashMap`, nor a field or method of the name)
+        if (i >= 2 && path_sep(i - 2)) || (i >= 1 && text(i - 1) == ".") {
+            continue;
+        }
+        if path_sep(i + 1) {
+            return Some(format!("{}:{}: failed to resolve: use of undeclared type `{}` (E0433)", t.line, t.col + 1, t.text));
+        }
+        if matches!(text(i + 1), "<" | ";" | ">" | "," | ")" | "=") {
+            return Some(format!("{}:{}: cannot find type `{}` in this scope (E0412)", t.line, t.col + 1, t.text));
+        }
+    }
+    None
+}
+
 fn unresolved_import(src: &str, split: &str, items: &[SrcItem], deps: &[String]) -> Option<String> {
     // (and the names std's prelude brings: `use Default::default` / `use Option::*`)
     let known = |n: &str| {
@@ -12617,6 +12813,165 @@ pub(crate) fn unhoist_err(a: &Analysis, e: String) -> String {
     }
 }
 
+/// When line of src calls a macro that src defines (`name!(..)` of `macro_rules! name`), the place of the token t in
+/// the transcribers of its rules, where a parse error of its expansion comes from: only when t is there once, and not
+/// in the call's arguments (where a fragment could have brought it)
+#[cold]
+#[inline(never)]
+fn macro_body_at(src: &str, line: usize, col: usize, t: &str) -> Option<(usize, usize)> {
+    if t.is_empty() || !src.contains("macro_rules!") {
+        return None;
+    }
+    let text = src.lines().nth(line.checked_sub(1)?)?;
+    // (the token at the place reported: the error is in the program's own text, not in an expansion)
+    if col.checked_sub(1).and_then(|c| text.get(c..)).is_some_and(|r| r.starts_with(t)) {
+        return None;
+    }
+    let sb = src.as_bytes();
+    let base = text.as_ptr() as usize - src.as_ptr() as usize;
+    let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+    let op = |c: u8| b"=<>!+-*/%&|^:.".contains(&c);
+    // (the end of the line at k, in bytes: a source can have other characters than ASCII)
+    let eol = |k: usize| sb[k..].iter().position(|&c| c == b'\n').map_or(sb.len(), |e| k + e);
+    let skip_ws = |mut i: usize| {
+        loop {
+            while i < sb.len() && sb[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if !sb[i..].starts_with(b"//") {
+                return i;
+            }
+            i = eol(i);
+        }
+    };
+    // (the closing delimiter of the group that opens at i, past comments and string literals)
+    let close = |i: usize| -> Option<usize> {
+        let (o, c) = match sb.get(i)? {
+            b'{' => (b'{', b'}'),
+            b'(' => (b'(', b')'),
+            b'[' => (b'[', b']'),
+            _ => return None,
+        };
+        let (mut d, mut e) = (0i32, i);
+        while e < sb.len() {
+            match sb[e] {
+                b'/' if sb.get(e + 1) == Some(&b'/') => e = eol(e),
+                b'"' => {
+                    e += 1;
+                    while e < sb.len() && sb[e] != b'"' {
+                        e += if sb[e] == b'\\' { 2 } else { 1 };
+                    }
+                }
+                x if x == o => d += 1,
+                x if x == c => {
+                    d -= 1;
+                    if d == 0 {
+                        return Some(e);
+                    }
+                }
+                _ => {}
+            }
+            e += 1;
+        }
+        None
+    };
+    // (the places of t as a token in from..to: not part of a longer one (`=` of `=>`, `x` of `xs`), nor in a comment)
+    let tb = t.as_bytes();
+    let occurs = |from: usize, to: usize| -> Vec<usize> {
+        let mut out = vec![];
+        let mut k = from;
+        while k < to {
+            if sb[k..].starts_with(b"//") {
+                k = eol(k);
+                continue;
+            }
+            if k + tb.len() <= to && sb[k..].starts_with(tb) {
+                let (p, q) = (k.checked_sub(1).map(|j| sb[j]), sb.get(k + tb.len()).copied());
+                let whole = if id(tb[0]) {
+                    p.is_none_or(|c| !id(c)) && q.is_none_or(|c| !id(c))
+                } else {
+                    p.is_none_or(|c| !op(c) || !op(tb[0])) && q.is_none_or(|c| !op(c) || !op(tb[tb.len() - 1]))
+                };
+                if whole {
+                    out.push(k);
+                }
+            }
+            k += 1;
+        }
+        out
+    };
+    // (the calls on the line: (where the name starts, the name, after it). The one the error is at, when it is at
+    // one; else the only one; with several and none at the place, the error stays)
+    let mut calls: Vec<(usize, &str, usize)> = vec![];
+    let mut i = 0;
+    while i < text.len() {
+        let tx = text.as_bytes();
+        // (not in a comment after the code, `//~ NOTE in this expansion of m!`; a string's `//` is none)
+        if tx[i..].starts_with(b"//") {
+            break;
+        }
+        if tx[i] == b'"' {
+            i += 1;
+            while i < tx.len() && tx[i] != b'"' {
+                i += if tx[i] == b'\\' { 2 } else { 1 };
+            }
+            i += 1;
+            continue;
+        }
+        if !id(tx[i]) || (i > 0 && id(tx[i - 1])) {
+            i += 1;
+            continue;
+        }
+        let s0 = i;
+        while i < tx.len() && id(tx[i]) {
+            i += 1;
+        }
+        let n = &text[s0..i];
+        if tx.get(i) == Some(&b'!') && n != "macro_rules" {
+            calls.push((s0, n, i));
+        }
+    }
+    if let Some(&c) = calls.iter().find(|c| c.0 + 1 == col) {
+        calls = vec![c];
+    } else if calls.len() > 1 {
+        return None;
+    }
+    for (_, n, i) in calls {
+        // (the call's arguments)
+        let a = skip_ws(base + i + 1);
+        let Some(ae) = close(a) else { continue };
+        if !occurs(a + 1, ae).is_empty() {
+            continue;
+        }
+        // (the definition by its tokens, `macro_rules ! n`: not one in a comment or a string)
+        let toks = crate::lexer::tokenize(sb);
+        let word = |t: &(u8, usize, usize), w: &str| t.0 == 0 && &src[t.1..t.2] == w;
+        let Some(after) = toks.windows(3).find(|w| word(&w[0], "macro_rules") && w[1].0 == 1 && sb[w[1].1] == b'!' && word(&w[2], n)).map(|w| w[2].2) else { continue };
+        let open = skip_ws(after);
+        let end = close(open)?;
+        // (the rules: a matcher, `=>`, a transcriber (its tokens and its closing delimiter), and `;` between them)
+        let mut hits = vec![];
+        let mut r = skip_ws(open + 1);
+        while r < end {
+            r = skip_ws(close(r)? + 1);
+            if !sb[r..].starts_with(b"=>") {
+                return None;
+            }
+            r = skip_ws(r + 2);
+            let te = close(r)?;
+            hits.extend(occurs(r + 1, te + 1));
+            r = skip_ws(te + 1);
+            if sb.get(r) == Some(&b';') {
+                r = skip_ws(r + 1);
+            }
+        }
+        if let [off] = hits[..] {
+            return Some((src[..off].matches('\n').count() + 1, off - src[..off].rfind('\n').map_or(0, |p| p + 1) + 1));
+        }
+    }
+    None
+}
+
 /// When (line, col) of src is a macro call (`name!(..)`), the place of the name n in its arguments. Read by tokens, so
 /// a delimiter or the name inside a literal or a comment does not count. None when the program's definition of the
 /// macro writes n itself (`($unused:ident) => { x }`): the name may come from its body, and stays at the call
@@ -12712,7 +13067,21 @@ impl Session {
         self.checking = false;
         let mut a = match r {
             Ok(a) => a,
-            Err(e) => return vec![Diagnostic::parse(&self.unhoist_analysis_err(src, diff_marker_first(src, e)))],
+            Err(e) => {
+                let mut d = Diagnostic::parse(&self.unhoist_analysis_err(src, diff_marker_first(src, e)));
+                // (a parse error in a macro's expansion, reported at the call: at the token of the rule's body that was
+                // found, as rustc)
+                let found = d.msg.strip_prefix("expected ").and_then(|m| m.rsplit_once("found `")).and_then(|(_, r)| r.rsplit_once('`'));
+                if let Some((l, c)) = found.and_then(|(t, _)| macro_body_at(src, d.line, d.col, t)) {
+                    d.line = l;
+                    d.col = c;
+                }
+                // (a std collection named with no `use` of it, at an earlier line: rustc reports it first)
+                if let Some(u) = undeclared_std_collection(src).map(|u| Diagnostic::parse(&u)).filter(|u| (u.line, u.col) < (d.line, d.col)) {
+                    return vec![u, d];
+                }
+                return vec![d];
+            }
         };
         // 検査だけ: コード生成 (acg) で型を検査し、機械語は作らない (ZUSTC_CHECK_CODEGEN=1 で機械語まで作る)。
         // 検査済みの印は、要求したインスタンスへの再配置だけを持つ空の Blob を、ビルドとは別のキーで覚える
@@ -12987,6 +13356,12 @@ impl Session {
             }
         }
         d.retain(|d| d.line <= user_lines);
+        // (a std collection named with no `use` of it: looked for beside another error, or when one may be)
+        if !d.is_empty() || collection_unimported_hint(src, &a.prog) {
+            if let Some(u) = undeclared_std_collection(src) {
+                d.push(Diagnostic::parse(&u));
+            }
+        }
         d.sort_by(|x, y| (x.line, x.col).cmp(&(y.line, y.col)));
         d.dedup();
         d

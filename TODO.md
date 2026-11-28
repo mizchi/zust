@@ -87,7 +87,7 @@ invariants.
 |---|---|
 | `rt_box_move_out` | `let x = *b;` moves the value but never frees the Box's block (a leak; valgrind) |
 | `rt_box_move_patterns` | the same leak through patterns (`let Pair { a, b } = *b`, `match *b`); no double free (valgrind) |
-| `rt_pattern_partial_move` | what a pattern leaves to `_` / `..` (`let (a, _) = pair();`, `let W { a, .. } = w;`) is never dropped (a leak) |
+| `rt_pattern_partial_move` | what a pattern leaves to `_` / `..` of a temporary (`let (a, _) = pair();`, `match pair() { (a, _) => .. }`) is never dropped (a leak); a local's parts are, in a loop it outlives too (`rt_partial_move_in_loop`) |
 
 ## Threads (`crates/syntax/src/prelude_lib.rs.in`, `tests/threads/`)
 

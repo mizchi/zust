@@ -462,8 +462,10 @@ impl Cx<'_> {
             let mut lhs = None;
             let simple = matches!(root, Expr::Path(..) | Expr::Block(..));
             if plain || generic || lt0.is_none() || !simple {
-                let p = self.place(left)?;
-                lhs = Some(p);
+                let pm = std::mem::replace(&mut self.bk.place_mut, true);
+                let p = self.place(left);
+                self.bk.place_mut = pm;
+                lhs = Some(p?);
             }
             let lt1 = lhs.map(|p| p.ty()).or(lt0);
             let rhint = if matches!(op, "<<" | ">>") { self.peek(right) } else { lt1 };
@@ -472,7 +474,12 @@ impl Cx<'_> {
             let (r, rt) = self.expr(right, rhint.or(lt1)).map_err(|m| self.int_float_op(e, right, m))?;
             let p = match lhs {
                 Some(p) => p,
-                None => self.place(left)?,
+                None => {
+                    let pm = std::mem::replace(&mut self.bk.place_mut, true);
+                    let p = self.place(left);
+                    self.bk.place_mut = pm;
+                    p?
+                }
             };
             let t = p.ty();
             // (an unsuffixed literal takes the place's type, which type inference may not have reached: `c[0] *= 10`
@@ -520,6 +527,10 @@ impl Cx<'_> {
         let hint = deref_num(hint);
         let (l, lt) = self.operand(left, hint, cmp).map_err(|m| self.int_float_op(e, left, m))?;
         let Some(mut l) = l else {
+            // (a `()` has no value either, but it does not diverge: `() + 1` has no `Add` (E0369))
+            if lt == Ty::Unit && self.user_code && !cmp {
+                return err(self.op_pos(e), self.cannot_op(op, lt, right));
+            }
             return Ok((None, Ty::Never));
         };
         // (E0369: `X == X` for a struct of the program that is not PartialEq (`<` and the others: PartialOrd), also as an
@@ -546,6 +557,13 @@ impl Cx<'_> {
         let rhint = if lit_str && matches!(self.strip_refs(lt), Ty::Struct(_)) { None } else { rhint.or(Some(lt)) };
         let (r, rt) = self.operand(right, rhint, cmp).map_err(|m| self.int_float_op(e, right, m))?;
         let Some(r) = r else {
+            // (`1 + x` with `x: ()`: not a value that diverges, one that no number adds (E0277), or compares with (E0308))
+            if rt == Ty::Unit && lt != Ty::Unit && self.user_code {
+                if cmp {
+                    return err(self.op_pos(e), format!("mismatched types: expected `{}`, found `()`", self.prog.tn(lt)));
+                }
+                return err(self.op_pos(e), self.cannot_op(op, lt, right).replace("(E0369)", "(E0277)"));
+            }
             return Ok((None, Ty::Never));
         };
 
@@ -559,6 +577,18 @@ impl Cx<'_> {
                 r = self.b.ins().load(ct, mf(), r, 0);
                 lt = *a;
                 rt = *a;
+            }
+        }
+        // (`a == b` with `a: &i32, b: i32`: no `PartialEq<i32>` for `&i32`, nor `PartialOrd` (E0277); `+` and the others
+        // have their `&i32 + i32` impls)
+        if cmp && self.user_code {
+            let num = |t: Ty| t.is_int() || t.is_float() || matches!(t, Ty::Char | Ty::Bool);
+            let one_ref = match (lt, rt) {
+                (Ty::Ref(_, i), t) | (t, Ty::Ref(_, i)) => *i == t && num(t),
+                _ => false,
+            };
+            if one_ref {
+                return err(self.op_pos(e), format!("can't compare `{}` with `{}` (E0277)", self.prog.tn(lt), self.prog.tn(rt)));
             }
         }
         if !matches!(op, "==" | "!=") || !lt.is_agg() {
@@ -781,6 +811,10 @@ impl Cx<'_> {
             }
         }
         if is_cmp(op) {
+            // (a `*mut T` or a reference compared with a `*const T`: coerced to it, `c_p == m_p`, `c_p == &x`)
+            if !rt.is_fat() && matches!(lt, Ty::Ptr(..)) && super::raw_ptr_coerces(rt, lt) {
+                rt = lt;
+            }
             self.same(SP, rt, lt)?;
             // Aggregate == / !=: a hand-written eq if there is one, else a structural comparison (as derive(PartialEq))
             if matches!(op, "==" | "!=") && lt.is_agg() {
@@ -1524,7 +1558,17 @@ impl Cx<'_> {
         } else {
             match expected {
                 // (an unsized instance (`Wrap<[u8]>`) is no value's type: the fields decide, and the value is coerced)
-                Some(Ty::Struct(e)) if self.prog.base_of(e) == self.prog.base_of(base) && !self.prog.has_param(Ty::Struct(e)) && !Ty::Struct(e).is_dst_struct() => Some(e),
+                // (nor the generic definition itself, which inference gives when it found no arguments
+                // (`S { f: Box::new(F) }` with `f: Box<dyn X<T>>`), when the fields' types name the parameters; a unit
+                // variant's (`Register::<0>::Field1`) has none)
+                Some(Ty::Struct(e))
+                    if self.prog.base_of(e) == self.prog.base_of(base)
+                        && (self.prog.structs[e as usize].base.is_some() || fields_of(self, e).iter().all(|f| !self.prog.has_param(f.1)))
+                        && !self.prog.has_param(Ty::Struct(e))
+                        && !Ty::Struct(e).is_dst_struct() =>
+                {
+                    Some(e)
+                }
                 _ => None,
             }
         };
@@ -1805,7 +1849,10 @@ impl Cx<'_> {
         let shared_pin = self.prog.structs[base as usize].name == "Pin"
             && self.prog.struct_item.get(base as usize).is_none_or(|&i| i >= self.prog.prelude_from)
             && matches!(self.prog.structs[sid as usize].args.first(), Some(Ty::Ref(false, _)));
-        let m = if !shared_pin && self.prog.method(sid, "deref_mut").is_some() { "deref_mut" } else { "deref" };
+        // (a place read or borrowed shared is reached by `deref`, one written or borrowed `&mut` by `deref_mut`, as rustc
+        // does: a Deref with effects counts them (`let _ = p.x;` calls `deref` once))
+        let shared = shared_pin || !self.bk.place_mut && self.prog.method(sid, "deref").is_some();
+        let m = if !shared && self.prog.method(sid, "deref_mut").is_some() { "deref_mut" } else { "deref" };
         let did = self.prog.method(sid, m)?;
         if !matches!(self.prog.sigs[did as usize].ret, Ty::Ref(_, i) if !i.is_fat() && !matches!(i, Ty::Str | Ty::Slice(_) | Ty::Dyn(_))) {
             return None;
@@ -1815,6 +1862,7 @@ impl Cx<'_> {
 
     /// (start address, length, element type) of an indexed target (array / slice / a reference to one)
     pub(crate) fn indexable(&mut self, e: &Expr) -> R<(Value, Value, Ty)> {
+        let own = std::mem::take(&mut self.index_owns);
         // (`g[i]` (g: MutexGuard<Vec<T>> and so on): `(*g)[i]`)
         if let Some(d) = self.user_deref(e) {
             let d = self.keep_expr(d);
@@ -1858,9 +1906,25 @@ impl Cx<'_> {
         let mut p = if is_place_expr(e) && !is_const {
             self.place(e)?
         } else {
+            // (a new value an index expression indexes (`[A(1)][0]`, `f()[0]`, `Box::new([..])[0]`, `vec![..][1]`) is a
+            // temporary of the statement: dropped with them. Not for the other callers (a `for` loop owns its array, or
+            // moves its elements out))
+            let fresh = own
+                && matches!(strip_paren(e), Expr::Array(_) | Expr::Repeat(..) | Expr::Call(..) | Expr::MethodCall(..) | Expr::Macro(..) | Expr::Struct(..) | Expr::Tuple(_));
             match self.expr(e, None)? {
-                (Some(a), t) if t.is_agg() => Place::Mem(a, 0, t),
-                (Some(v), Ty::Ref(_, i) | Ty::Box(i)) => Place::Mem(v, 0, *i),
+                (Some(a), t) if t.is_agg() => {
+                    if fresh {
+                        self.own_temp(a, t);
+                    }
+                    Place::Mem(a, 0, t)
+                }
+                (Some(v), t @ Ty::Box(i)) => {
+                    if fresh {
+                        self.own_temp(v, t);
+                    }
+                    Place::Mem(v, 0, *i)
+                }
+                (Some(v), Ty::Ref(_, i)) => Place::Mem(v, 0, *i),
                 (_, t) => {
                     return err(SP, format!("cannot index into a value of type `{}`", self.prog.tn(t)));
                 }
@@ -2085,7 +2149,7 @@ impl Cx<'_> {
                 Err(_) => {
                     // (an expression over other consts: Program evaluates its text)
                     let ts = crate::ast_types::tysyn(&crate::parse::Ty::Array(Box::new(crate::parse::Ty::Path(None, path_of("u8"))), Box::new(e.clone())), None)
-                        .or_else(|er| err(SP, er))?;
+                        .or_else(|er| err(SP, self.item_line_err(er)))?;
                     match self.prog.resolve(&ts) {
                         Ok(Ty::Array(_, n)) => Ok(n),
                         Ok(_) => err(SP, "array length must be a literal or a const"),

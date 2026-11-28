@@ -1,0 +1,63 @@
+drop a
+drop b
+drop c
+- d
+drop c0
+drop pa
+k c1
+drop c0'
+drop pa'
+k c1
+- pb
+got y2
+drop y2
+got y2'
+drop y2'
+drop z1
+drop z0
+drop v
+got wa
+drop wb
+drop wa
+got wc
+drop wd
+drop wc
+got wc
+drop wc
+got 0 ya
+drop ya
+got 0 yr
+drop yr
+drop yb
+got 1 yr
+drop yr
+got 1 yr
+drop yr
+drop yb'
+got qa
+drop qa
+got qa'
+drop qa'
+drop qc1
+got qa'
+drop qa'
+got qa'
+drop qa'
+- qb qc0
+drop qa'
+drop qb
+drop qc0
+drop qc1'
+drop yr
+drop yb'
+drop wd
+end
+drop z2
+drop y0
+drop y1
+drop y2'
+drop pa'
+drop pb
+drop c0'
+drop c1
+drop d

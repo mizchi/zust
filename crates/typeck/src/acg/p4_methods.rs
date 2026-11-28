@@ -282,6 +282,15 @@ impl Cx<'_> {
                     .map(Some)
             }
             "len" | "is_empty" => {
+                // (a constant array's length, from its type: its value is not built (`TEST_DATA.len()` of a 32 MiB
+                // `[u8; N]` would be on the stack))
+                if let (Ty::Array(_, n), Some(_)) = (rt, self.const_of(&*mc_recv)) {
+                    if n < crate::types::CONST_LEN_BASE {
+                        let len = self.b.ins().iconst(types::I64, n as i64);
+                        let c = if name == "len" { (len, Ty::Usize) } else { (self.b.ins().icmp_imm_u(IntCC::Equal, len, 0), Ty::Bool) };
+                        return Ok(Some((Some(c.0), c.1)));
+                    }
+                }
                 let (_, len, _) = self.indexable(&*mc_recv)?;
                 if name == "len" {
                     Ok(Some((Some(len), Ty::Usize)))
@@ -335,6 +344,10 @@ impl Cx<'_> {
             // `s.get(a..b)` / `get_mut`: Some(&s[a..b]) if the range is inside
             "get" | "get_mut" if matches!(args.first(), Some(Expr::Range(..))) => {
                 let Some(rg) = args.first().copied() else { unreachable!() };
+                // (E0596 for `get_mut(a..b)` through a `&[T]`, as for an element's)
+                if name == "get_mut" && matches!(self.peek(&*mc_recv), Some(Ty::Ref(false, _))) {
+                    return Err(self.at(expr_start(&mc_recv), MUT_THROUGH_SHARED.to_string()));
+                }
                 let (base, len, elem) = self.indexable(&*mc_recv)?;
                 let (lo, hi) = self.range_bounds(rg, len)?;
                 let m = name == "get_mut";
@@ -366,11 +379,20 @@ impl Cx<'_> {
                 self.b.switch_to_block(done);
                 Ok(Some((Some(out), ot)))
             }
-            "get" | "get_mut" | "first" | "last" => {
+            "get" | "get_mut" | "first" | "last" | "first_mut" | "last_mut" => {
+                // (E0596: a `&mut` of an element through a `&[T]`; a mutable borrow of an array local, for its `mut`)
+                if name.ends_with("_mut") {
+                    if matches!(self.peek(&*mc_recv), Some(Ty::Ref(false, _))) {
+                        return Err(self.at(expr_start(&mc_recv), MUT_THROUGH_SHARED.to_string()));
+                    }
+                    if is_place_expr(&*mc_recv) && !matches!(rt, Ty::Ref(..)) {
+                        self.bk_mut_use(&*mc_recv);
+                    }
+                }
                 let (base, len, elem) = self.indexable(&*mc_recv)?;
                 let i = match name.as_str() {
-                    "first" => self.b.ins().iconst(types::I64, 0),
-                    "last" => self.b.ins().iadd_imm_s(len, -1),
+                    "first" | "first_mut" => self.b.ins().iconst(types::I64, 0),
+                    "last" | "last_mut" => self.b.ins().iadd_imm_s(len, -1),
                     _ => {
                         let Some(a) = args.first() else {
                             return err(SP, "get needs an index");
@@ -380,7 +402,7 @@ impl Cx<'_> {
                         v.unwrap()
                     }
                 };
-                let rty = Ty::Ref(name == "get_mut", intern(elem));
+                let rty = Ty::Ref(name.ends_with("_mut"), intern(elem));
                 let ot = opt(self, rty)?;
                 let Ty::Struct(oi) = ot else { unreachable!() };
                 let out = self.temp(ot);
@@ -508,6 +530,22 @@ impl Cx<'_> {
         let Expr::MethodCall(mc_recv, mc_name, mc_tf, mc_args, _) = mc else { unreachable!() };
         let mc_recv: &Expr = mc_recv;
         let _ = (mc_name, mc_tf, mc_args);
+        // (`a.eq(&b)` / `a.ne(b)`: PartialEq's, `a == b` of the strings; through `&&str` too, as a generic fn's
+        // `self.expected.eq(&actual)` with T = &str. Before the receiver is evaluated: the comparison evaluates it)
+        if matches!(mc_name.as_str(), "eq" | "ne") && mc_args.len() == 1 {
+            let mut arg = mc_args[0].clone();
+            let mut at = self.peek(&arg);
+            while let Some(Ty::Ref(_, i @ Ty::Ref(..))) = at {
+                arg = Expr::Unary("*".into(), Box::new(Expr::Paren(Box::new(arg))), crate::parse::Span::default());
+                at = Some(*i);
+            }
+            if matches!(at, Some(Ty::Ref(_, Ty::Str))) {
+                let op = if mc_name.as_str() == "eq" { "==" } else { "!=" };
+                let e = Expr::Binary(op.into(), Box::new(Expr::Paren(Box::new(mc_recv.clone()))), Box::new(Expr::Paren(Box::new(arg))), crate::parse::Span::default());
+                let e: &Expr = self.keep_expr(e);
+                return self.expr(e, Some(Ty::Bool)).map(Some);
+            }
+        }
         let (v, mut t) = self.expr(&*mc_recv, None)?;
         let Some(mut fat) = v else {
             return Ok(Some((None, Ty::Never)));
@@ -645,7 +683,7 @@ impl Cx<'_> {
         let mc_recv: &Expr = mc_recv;
         let _ = (mc_name, mc_tf, mc_args);
         // (E0133: the pointer methods that are `unsafe fn` in std; the wrapping_* ones, is_null and cast are safe)
-        if matches!(mc_name.as_str(), "add" | "sub" | "offset" | "offset_from" | "read" | "read_volatile" | "read_unaligned" | "write" | "write_volatile" | "write_unaligned") {
+        if matches!(mc_name.as_str(), "add" | "sub" | "offset" | "offset_from" | "read" | "read_volatile" | "read_unaligned" | "write" | "write_volatile" | "write_unaligned" | "drop_in_place") {
             if let Expr::MethodCall(_, _, _, _, msp) = mc {
                 self.check_unsafe_op(mc_name, msp.at)?;
             }
@@ -717,6 +755,11 @@ impl Cx<'_> {
                 let Ty::Ptr(m, _) = pt else { unreachable!() };
                 (Some(p), Ty::Ptr(m, intern(to)))
             }
+            // (`p.drop_in_place()`, as `ptr::drop_in_place(p)`: the drop glue of what p points to; a sized pointee)
+            "drop_in_place" if !matches!(elem, Ty::Slice(_) | Ty::Str) && !elem.is_fat() => {
+                self.drop_in_place(p, elem);
+                (None, Ty::Unit)
+            }
             // (`impl Tr for *const T`: the method of `__ptr`; method_call passes the pointer)
             m if self.prog.prim_method(pt, m).is_some() => return Ok(None),
             m => {
@@ -730,6 +773,29 @@ impl Cx<'_> {
 
     /// Built-in integer methods (wrapping_* / checked_* / saturating_* / min / max / abs / pow /
     /// count_ones / leading_zeros / trailing_zeros / is_power_of_two / rotate_* / swap_bytes / signum)
+    /// a.div_euclid(b) / a.rem_euclid(b) (rem), b a divisor the division does not trap on
+    fn euclid(&mut self, a: Value, b: Value, signed: bool, rem: bool, ct: Type) -> Value {
+        if !signed {
+            return if rem { self.b.ins().urem(a, b) } else { self.b.ins().udiv(a, b) };
+        }
+        // r = a % b; r + |b| if r < 0, and the quotient is q - sign(b)
+        let rr = self.b.ins().srem(a, b);
+        let q = self.b.ins().sdiv(a, b);
+        let z = self.iconst_t(ct, 0);
+        let neg = self.b.ins().icmp(IntCC::SignedLessThan, rr, z);
+        if rem {
+            let ab = self.b.ins().iabs(b);
+            let fixed = self.b.ins().iadd(rr, ab);
+            return self.b.ins().select(neg, fixed, rr);
+        }
+        let bpos = self.b.ins().icmp(IntCC::SignedGreaterThan, b, z);
+        let one = self.iconst_t(ct, 1);
+        let qm = self.b.ins().isub(q, one);
+        let qp = self.b.ins().iadd(q, one);
+        let adj = self.b.ins().select(bpos, qm, qp);
+        self.b.ins().select(neg, adj, q)
+    }
+
     pub(crate) fn int_method(&mut self, mc: &Expr, t: Ty) -> R<Option<V>> {
         let Expr::MethodCall(mc_recv, mc_name, mc_tf, mc_args, _) = mc else { unreachable!() };
         let mc_recv: &Expr = mc_recv;
@@ -744,8 +810,17 @@ impl Cx<'_> {
         // (and `div_ceil` / `wrapping_add_signed` of a signed type (the one unstable in std, the other unsigned-only), of
         // a char or bool; `div_ceil` of a 128-bit one, which Cranelift cannot divide)
         let unsigned_only = matches!(name.as_str(), "div_ceil" | "wrapping_add_signed");
+        // (the checked / wrapping / overflowing Euclidean division of a 128-bit one likewise: its arms below take
+        // narrower types only)
+        let euclid_128 = t.is_int()
+            && t.bits() == 128
+            && matches!(
+                name.as_str(),
+                "checked_div_euclid" | "checked_rem_euclid" | "wrapping_div_euclid" | "wrapping_rem_euclid" | "overflowing_div_euclid" | "overflowing_rem_euclid"
+            );
         if matches!((name.as_str(), t.signed()), ("saturating_abs" | "saturating_neg", false) | ("next_multiple_of", true))
             || (unsigned_only && (t.signed() || !t.is_int() || (name == "div_ceil" && t.bits() == 128)))
+            || euclid_128
         {
             return Ok(None);
         }
@@ -1054,6 +1129,22 @@ impl Cx<'_> {
                 };
                 (Some(self.b.ins().select(of, sat, v)), t)
             }
+            // (MAX on an overflow, or MIN when the signs differ)
+            "saturating_mul" => {
+                let b = arg(self, 0, t)?;
+                let (v, of) = self.arith_ovf(2, s, a, b, t);
+                let max = self.int_const(t, crate::program::prim_assoc_const(t, "MAX").unwrap());
+                let sat = if s {
+                    let min = self.int_const(t, crate::program::prim_assoc_const(t, "MIN").unwrap());
+                    let x = self.b.ins().bxor(a, b);
+                    let z = self.iconst_t(ct, 0);
+                    let neg = self.b.ins().icmp(IntCC::SignedLessThan, x, z);
+                    self.b.ins().select(neg, min, max)
+                } else {
+                    max
+                };
+                (Some(self.b.ins().select(of, sat, v)), t)
+            }
             "checked_add" | "checked_sub" | "checked_mul" | "checked_div" | "checked_rem" => {
                 let b = arg(self, 0, t)?;
                 let (v, of) = match name.as_str() {
@@ -1201,27 +1292,49 @@ impl Cx<'_> {
             }
             "rem_euclid" | "div_euclid" => {
                 let b = arg(self, 0, t)?;
-                if !s {
-                    let v = if name == "rem_euclid" { self.b.ins().urem(a, b) } else { self.b.ins().udiv(a, b) };
+                (Some(self.euclid(a, b, s, name == "rem_euclid", ct)), t)
+            }
+            // (None when b is 0, or for a signed MIN / -1, as checked_div; the euclidean quotient or remainder with a safe
+            // divisor)
+            "checked_div_euclid" | "checked_rem_euclid" if t.bits() < 128 => {
+                let b = arg(self, 0, t)?;
+                let zero = self.b.ins().icmp_imm_u(IntCC::Equal, b, 0);
+                let bad = if s {
+                    let min = self.int_const(t, crate::program::prim_assoc_const(t, "MIN").unwrap());
+                    let am = self.b.ins().icmp(IntCC::Equal, a, min);
+                    let bm = self.b.ins().icmp_imm_s(IntCC::Equal, b, -1);
+                    let both = self.b.ins().band(am, bm);
+                    self.b.ins().bor(zero, both)
+                } else {
+                    zero
+                };
+                let one = self.iconst_t(ct, 1);
+                let safe = self.b.ins().select(bad, one, b);
+                let v = self.euclid(a, safe, s, name == "checked_rem_euclid", ct);
+                self.option_if(v, t, bad)?
+            }
+            // (a panic when b is 0; a signed MIN / -1 wraps: MIN, and 0 for the remainder, which a divisor of 1 gives)
+            "wrapping_div_euclid" | "wrapping_rem_euclid" | "overflowing_div_euclid" | "overflowing_rem_euclid" if t.bits() < 128 => {
+                let b = arg(self, 0, t)?;
+                let rem = name.ends_with("rem_euclid");
+                let zero = self.b.ins().icmp_imm_u(IntCC::Equal, b, 0);
+                self.ovf_panic(zero, if rem { 4 } else { 3 }, SP);
+                let of = if s {
+                    let min = self.int_const(t, crate::program::prim_assoc_const(t, "MIN").unwrap());
+                    let a_min = self.b.ins().icmp(IntCC::Equal, a, min);
+                    let m1 = self.iconst_t(ct, -1);
+                    let b_m1 = self.b.ins().icmp(IntCC::Equal, b, m1);
+                    self.b.ins().band(a_min, b_m1)
+                } else {
+                    self.b.ins().iconst(types::I8, 0)
+                };
+                let one = self.iconst_t(ct, 1);
+                let sb = self.b.ins().select(of, one, b);
+                let v = self.euclid(a, sb, s, rem, ct);
+                if name.starts_with("wrapping") {
                     (Some(v), t)
                 } else {
-                    // r = a % b; r + |b| if r < 0, and the quotient is q - sign(b)
-                    let rr = self.b.ins().srem(a, b);
-                    let q = self.b.ins().sdiv(a, b);
-                    let z = self.iconst_t(ct, 0);
-                    let neg = self.b.ins().icmp(IntCC::SignedLessThan, rr, z);
-                    if name == "rem_euclid" {
-                        let ab = self.b.ins().iabs(b);
-                        let fixed = self.b.ins().iadd(rr, ab);
-                        (Some(self.b.ins().select(neg, fixed, rr)), t)
-                    } else {
-                        let bpos = self.b.ins().icmp(IntCC::SignedGreaterThan, b, z);
-                        let one = self.iconst_t(ct, 1);
-                        let qm = self.b.ins().isub(q, one);
-                        let qp = self.b.ins().iadd(q, one);
-                        let adj = self.b.ins().select(bpos, qm, qp);
-                        (Some(self.b.ins().select(neg, adj, q)), t)
-                    }
+                    self.pair_with_bool(v, t, of)?
                 }
             }
             "next_power_of_two" => {
@@ -1450,5 +1563,7 @@ pub(crate) const INT_BUILTINS: &[&str] = &[
     "is_ascii_uppercase", "is_ascii_lowercase", "to_ascii_uppercase", "to_ascii_lowercase", "is_ascii_whitespace",
     "is_ascii_alphanumeric", "is_ascii_hexdigit", "is_ascii_punctuation", "is_ascii_graphic", "is_ascii_control",
     "is_ascii", "to_le_bytes", "to_be_bytes", "to_ne_bytes", "wrapping_shl", "wrapping_shr", "checked_shl",
-    "checked_shr", "overflowing_shl", "overflowing_shr", "reverse_bits",
+    "checked_shr", "overflowing_shl", "overflowing_shr", "reverse_bits", "checked_div_euclid", "checked_rem_euclid",
+    "saturating_mul", "wrapping_div_euclid", "wrapping_rem_euclid", "overflowing_div_euclid",
+    "overflowing_rem_euclid",
 ];

@@ -1009,7 +1009,8 @@ impl Cx<'_> {
                 self.call_named("__exr_dbg_begin", vec![Ty::Unit], &[(f, fref), (nm, str_ref), (kind, Ty::U8)], span)?;
                 for (i, (fname, ft, off)) in fields.iter().enumerate() {
                     let iv = self.b.ins().iconst(types::I64, i as i64);
-                    let key = self.str_const(if named { fname } else { "" });
+                    // (a raw field's name without its `r#`, as rustc's derive prints it: `HasKeywordField { struct: 3 }`)
+                    let key = self.str_const(if named { fname.strip_prefix("r#").unwrap_or(fname) } else { "" });
                     self.call_named("__exr_dbg_item", vec![Ty::Unit], &[(f, fref), (iv, Ty::Usize), (key, str_ref)], span)?;
                     let a = self.addr_plus(x, *off as i32);
                     self.call_named("__exr_debug", vec![*ft], &[(a, Ty::Ref(false, intern(*ft))), (f, fref)], span)?;

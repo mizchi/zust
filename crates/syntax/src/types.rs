@@ -461,6 +461,9 @@ pub struct Summary {
     pub structs: Vec<(String, Vec<(String, TySyn)>)>,
     /// The names of the structs above that are unions (fields all at offset 0)
     pub unions: Vec<String>,
+    /// The struct above is a unit struct (`struct S;`, not `struct S {}`): a name of the value namespace too, which a
+    /// pattern's name is. (A flag, not a list: a list of names made every summary bigger to copy)
+    pub unit: bool,
     /// (enum, integer type) for an enum with `#[repr(u8)]` and the like
     pub reprs: Vec<(String, String)>,
     /// (name, parameter names, body text) of a free `const fn`: constants may call it

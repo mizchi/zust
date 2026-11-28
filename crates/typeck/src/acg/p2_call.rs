@@ -57,8 +57,10 @@ fn simple_text(e: &Expr) -> Option<String> {
 pub(crate) fn vec_of(es: &[Expr]) -> Expr {
     let mut lets = vec![];
     let mut items = vec![];
+    // (with one element that is not simple, each one is evaluated into a let, in order: `[n, { n = 2; n }]` is [1, 2])
+    let all_simple = es.iter().all(|e| simple_text(e).is_some());
     for (i, e) in es.iter().enumerate() {
-        match simple_text(e) {
+        match simple_text(e).filter(|_| all_simple) {
             Some(t) => items.push(t),
             None => {
                 let n = format!("__exr_va{i}");
@@ -99,6 +101,10 @@ impl Cx<'_> {
     }
 
     pub(crate) fn method_call(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
+        // (a method may take its receiver `&mut`: what a match knew of the local's variant is forgotten)
+        if let (Expr::MethodCall(r, ..), false) = (e, self.known_var.is_empty()) {
+            self.forget_variant(r);
+        }
         // (invalid_atomic_ordering, deny by default: an atomic's load / store / failure ordering it cannot have)
         if let Expr::MethodCall(r, m, _, args, sp) = e {
             if self.user_code
@@ -917,7 +923,9 @@ impl Cx<'_> {
             let bt = self.peek(b).map(|t| self.strip_refs(t));
             let is_text = bt.is_some_and(|t| t == Ty::Str || matches!(t, Ty::Struct(sid) if self.prog.structs[sid as usize].name == "String"));
             if matches!(&**ix, Expr::Range(..)) && !is_text && method != "try_into" {
-                let ne = Expr::MethodCall(Box::new(Expr::Ref(false, Box::new(strip_paren(recv).clone()))), method.clone(), gargs.clone(), margs.clone(), crate::parse::Span::default());
+                // (`&mut` for a `&mut self` method of the slice: `v[1..].first_mut()`, `v.get_mut(a..b)` as `v[..].get_mut(a..b)`)
+                let m = crate::program::Program::slice_mut_self(method);
+                let ne = Expr::MethodCall(Box::new(Expr::Ref(m, Box::new(strip_paren(recv).clone()))), method.clone(), gargs.clone(), margs.clone(), crate::parse::Span::default());
                 let ne = self.keep_expr(ne);
                 return self.method_call(ne, expected);
             }
@@ -1331,6 +1339,13 @@ impl Cx<'_> {
             };
             return self.expr(&e, expected);
         }
+        // (`a.eq(&b)` / `a.lt(&b)` .. of a type whose PartialEq / PartialOrd is derived: the comparison `a == b`, which the
+        // derive gives; not when the type has a method of the name)
+        if margs.len() == 1 && matches!(&*method, "eq" | "ne" | "lt" | "le" | "gt" | "ge") {
+            if let Some(r) = self.derived_cmp_method(recv, method, &margs[0], expected)? {
+                return Ok(r);
+            }
+        }
         // `x.into()`: 期待型の `T::from(x)` (String は String::from、整数は広げるキャスト)
         if method == "into" && margs.is_empty() {
             let recv_own = match self.peek(recv) {
@@ -1374,6 +1389,13 @@ impl Cx<'_> {
                             let recv: &Expr = if matches!(self.peek(recv), Some(Ty::Slice(_) | Ty::Str)) { self.keep_expr(Expr::Ref(false, Box::new(paren(recv.clone())))) } else { recv };
                             let args: [&Expr; 1] = [recv];
                             return self.call_fn(id, None, &args, None, Some(Ty::Struct(sid)), SP);
+                        }
+                        // (into a Vec: `Vec::from(x)`, by std's impls for x's type)
+                        if self.prog.structs[self.prog.base_of(sid) as usize].name == "Vec" && !self.prog.index.contains_key("Vec::from") {
+                            let written = if self.ann_init == e as *const Expr as usize { target } else { None };
+                            if let Some(ne) = self.vec_from(SP, recv, written)? {
+                                return self.expr(ne, target);
+                            }
                         }
                     }
                     Some(t) if t.is_int() || t.is_float() => {
@@ -2610,7 +2632,88 @@ impl Cx<'_> {
         Some((target, is_string, seq))
     }
 
+    /// `a.eq(&b)` (and ne / lt / le / gt / ge) with a's type a struct or enum whose PartialEq (PartialOrd for the
+    /// orderings) is derived and which has no method of the name: `a == b` (b the argument through its `&`)
+    #[cold]
+    #[inline(never)]
+    fn derived_cmp_method(&mut self, recv: &Expr, method: &str, arg: &Expr, expected: Option<Ty>) -> R<Option<V>> {
+        let Some(Ty::Struct(sid)) = self.peek(recv).map(|t| self.strip_refs(t)) else { return Ok(None) };
+        let base = self.prog.base_of(sid);
+        let want = if matches!(method, "eq" | "ne") { "PartialEq" } else { "PartialOrd" };
+        if self.prog.method(sid, method).is_some() || !self.prog.derived.get(&base).is_some_and(|d| d.iter().any(|x| x == want)) {
+            return Ok(None);
+        }
+        let op = match method {
+            "eq" => "==",
+            "ne" => "!=",
+            "lt" => "<",
+            "le" => "<=",
+            "gt" => ">",
+            _ => ">=",
+        };
+        let rhs = match strip_paren(arg) {
+            Expr::Ref(_, x) => (**x).clone(),
+            a => Expr::Unary("*".into(), Box::new(paren(a.clone())), crate::parse::Span::default()),
+        };
+        let lhs = match self.peek(recv) {
+            Some(Ty::Ref(..)) => Expr::Unary("*".into(), Box::new(paren(recv.clone())), crate::parse::Span::default()),
+            _ => recv.clone(),
+        };
+        let e = self.keep_expr(Expr::Binary(op.into(), Box::new(paren(lhs)), Box::new(paren(rhs)), crate::parse::Span::default()));
+        let _ = expected;
+        self.expr(e, Some(Ty::Bool)).map(Some)
+    }
+
     /// プリミティブ型への trait 実装のメソッド (`impl Tr for u32` の `x.m()`)
+    #[cold]
+    #[inline(never)]
+    fn unit_trait_method(&mut self, recv: &Expr, by_ref: bool, method: &str, (gargs, margs): (&[GArg], &[Expr]), msp: crate::parse::Span, expected: Option<Ty>, written: bool) -> R<Option<V>> {
+        // (only an impl for `()` itself, or a default of a trait implemented for it: a blanket impl's method is left to
+        // the method call, which checks the impl's bounds)
+        let Some(pm) = self.prog.prim_method(Ty::Unit, method).filter(|&pm| self.prog.blanket.get(method) != Some(&pm)) else { return Ok(None) };
+        let id = self.prog.prim_self_method(Ty::Unit, method).unwrap_or(pm);
+        let sig = &self.prog.sigs[id as usize];
+        let tr = match sig.impl_trait.as_deref() {
+            Some(it) => it.split('<').next().unwrap_or(it).trim().to_string(),
+            // (a trait's default method: the trait is its name's path)
+            None => match self.prog.names[id as usize].rsplit_once("::") {
+                Some((tr, _)) if self.prog.traits.contains_key(tr) => tr.to_string(),
+                _ => return Ok(None),
+            },
+        };
+        // (a `&()` receiver: as it is to a `&self`, `*recv` to a `self`)
+        // (a trait declared at the root, which no type of the program's shares a name with: one in a module or a body is
+        // in scope only where it is declared or imported, which is not tracked here)
+        if !self.prog.unit_traits.iter().any(|t| *t == tr) || self.prog.struct_index.contains_key(&tr) {
+            return Ok(None);
+        }
+        // (E0107: more type arguments than the method and its impl have)
+        if gargs.len() > sig.generics.len() {
+            let n = sig.generics.len();
+            let (a, was) = if gargs.len() == 1 { ("argument", "was") } else { ("arguments", "were") };
+            return err(msp.start, format!("method takes {n} generic argument{} but {} generic {a} {was} supplied (E0107)", if n == 1 { "" } else { "s" }, gargs.len()));
+        }
+        // (an opaque result, `-> impl Display`, where a `let` writes a type: E0308, as the opaque type is no other)
+        if let Some(w) = expected.filter(|_| written && sig.ret_from & crate::types::OPAQUE_FROM != 0) {
+            return err(expr_start(recv), format!("mismatched types: expected `{}`, found opaque type (E0308)", self.prog.tn(w)));
+        }
+        let a0 = match (sig.params.first(), by_ref) {
+            (Some(Ty::Ref(..)), true) => recv.clone(),
+            (Some(Ty::Ref(m, _)), false) => Expr::Ref(*m, Box::new(recv.clone())),
+            (_, true) => Expr::Unary("*".into(), Box::new(recv.clone()), Default::default()),
+            _ => recv.clone(),
+        };
+        let Ok(Expr::Path(q, mut qp)) = crate::parse::parse_expr_at(&format!("<() as {tr}>::{method}"), msp.start) else { return Ok(None) };
+        // (the method's own type arguments, `().m::<u8>()`, go with the call)
+        if let Some(last) = qp.segs.last_mut() {
+            last.args = gargs.to_vec();
+        }
+        let mut args = vec![a0];
+        args.extend(margs.iter().cloned());
+        let c = self.keep_expr(Expr::Call(Box::new(Expr::Path(q, qp)), args));
+        self.expr(c, expected).map(Some)
+    }
+
     pub(crate) fn prim_trait_method(&mut self, e: &Expr, expected: Option<Ty>) -> R<Option<V>> {
         let Expr::MethodCall(recv, method, gargs, margs, msp) = e else { unreachable!() };
         let recv: &Expr = recv;
@@ -2628,10 +2731,19 @@ impl Cx<'_> {
                 t = only;
             }
         }
+        // (`().m()` with `impl Tr for ()` (its `#tuple0::m`, or the trait's default): `<() as Tr>::m(recv)`, the receiver
+        // borrowed as the method's self takes it)
+        if matches!(t, Ty::Unit | Ty::Ref(_, Ty::Unit)) && !self.prog.unit_traits.is_empty() {
+            let written = self.ann_init == e as *const Expr as usize;
+            if let Some(r) = self.unit_trait_method(recv, matches!(t, Ty::Ref(..)), method, (gargs, margs), *msp, expected, written)? {
+                return Ok(Some(r));
+            }
+        }
         // `impl Tr for &[T]` のメソッド (`__slice::__ref_m`、self は &[T]): 受け手の型が &[T] のとき
+        // (not one of a name the slice has a method of its own: `s.iter()` is the slice's, as rustc picks it first)
         if let Ty::Ref(false, Ty::Slice(_)) = t {
             let f = format!("__slice::__ref_{method}");
-            if let Some(&id) = self.prog.index.get(&f) {
+            if let Some(&id) = self.prog.index.get(&f).filter(|_| !crate::program::Program::std_inherent(self.strip_refs(t), method)) {
                 let a0 = match self.prog.sigs[id as usize].params.first() {
                     Some(Ty::Ref(m, Ty::Ref(..))) => Expr::Ref(*m, Box::new(recv.clone())),
                     _ => recv.clone(),
@@ -2750,7 +2862,25 @@ impl Cx<'_> {
         }
         let name = method.clone();
         // str / スライス / 配列への trait 実装 (`impl Hash for str` / `for [T]`): 受け手は &str / &[T] (fat) か &[T; N]
+        // (not of a name `[T]` / `str` has a method of its own: that one first)
         if matches!(t, Ty::Str | Ty::Slice(_) | Ty::Array(..)) {
+            if matches!(t, Ty::Str | Ty::Slice(_)) && crate::program::Program::std_inherent(t, &name) {
+                // (rustc's autoderef reaches `&mut [T]` itself, where the `&mut self` method takes it as it is)
+                let mut_recv = || {
+                    self.peek(recv).is_some_and(|mut rt| {
+                        while let Ty::Ref(m, i) = rt {
+                            if matches!(i, Ty::Slice(_) | Ty::Str) {
+                                return m;
+                            }
+                            rt = *i;
+                        }
+                        false
+                    })
+                };
+                if self.prog.std_inherent_first(t, &name, mut_recv, || self.prog.prim_self_method(t, &name)) {
+                    return Ok(None);
+                }
+            }
             let Some(id) = self.prog.prim_self_method(t, &name) else {
                 return Ok(None);
             };
@@ -3106,6 +3236,16 @@ impl Cx<'_> {
             return err(span, format!(
                 "cannot transmute between types of different sizes, or dependently-sized types (E0512): `{}` ({} bits) to `{}` ({} bits)",
                 self.prog.tn(from), a * 8, self.prog.tn(to), b * 8));
+        }
+        // (fn pointers whose parameters or result zustc passes differently: an aggregate (a struct, an enum) by
+        // address, a number in a register. A call through the result would read a register as an address)
+        if let (Ty::Fn(f), Ty::Fn(g)) = (from, to) {
+            let differs = |x: Ty, y: Ty| x.is_agg() != y.is_agg();
+            if differs(f.ret, g.ret) || f.params.iter().zip(&g.params).any(|(&x, &y)| differs(x, y)) {
+                return err(span, format!(
+                    "transmuting `{}` to `{}` is not supported: zustc passes an aggregate by address, a number in a register",
+                    self.prog.tn(from), self.prog.tn(to)));
+            }
         }
         Ok(())
     }
@@ -5347,10 +5487,11 @@ impl Cx<'_> {
             Ty::Ref(_, i) => (*i, true),
             t => (t, false),
         };
-        // (a primitive; or a struct when two traits of the program's have the method, so that the bound decides which:
+        // (a primitive, `()` too (whose method of the name unit_trait_method would take by the name alone, whichever
+        // trait it is of); or a struct when two traits of the program's have the method, so that the bound decides which:
         // `s.scaled()` of `S: S1` with S's instance implementing S0 and S1)
         let multi = || matches!(t, Ty::Struct(_)) && self.prog.multi_trait_methods.contains(method);
-        if !(t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) || multi()) {
+        if !(t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Unit) || multi()) {
             return None;
         }
         let gens = &self.prog.sigs.get(self.root as usize)?.generics;
@@ -5365,7 +5506,8 @@ impl Cx<'_> {
                 let first = self.prog.sigs[id as usize].params.first().copied();
                 let takes_ref = matches!(first, Some(Ty::Ref(..)));
                 let takes_mut = matches!(first, Some(Ty::Ref(true, _)));
-                let Ok(Expr::Path(q, mut p)) = crate::parse::parse_expr(&format!("<{} as {tr}>::{method}", self.prog.tn(t))) else { continue };
+                // (at the receiver: an error of the call (a bound of the method's) is the method call's)
+                let Ok(Expr::Path(q, mut p)) = crate::parse::parse_expr_at(&format!("<{} as {tr}>::{method}", self.prog.tn(t)), expr_start(recv)) else { continue };
                 // (the call's own type arguments: `x.m::<u8>()`)
                 if let Some(last) = p.segs.last_mut() {
                     last.args = gargs.to_vec();
@@ -5427,6 +5569,34 @@ impl Cx<'_> {
                         // (a primitive receiver with an impl of this trait: `<u32 as Tr>::m(&x)`, which a builtin
                         // method of the same name (`to_string`) cannot take over as `x.m()` would let it)
                         if let Some(t) = self.peek(&recv).map(|t| self.strip_refs(t)).filter(|_| !std_fmt) {
+                            // (`It::iter(s)` with s: &[u8] and `impl It for [u8]`: that impl's, not the slice's own
+                            // `iter`, which `s.iter()` is)
+                            // (only for an impl for `[T]` / `str` itself: `impl Tr for &[u8]` is the reference's)
+                            if matches!(t, Ty::Slice(_) | Ty::Str) && crate::program::Program::std_inherent(t, &ms) {
+                                // (this trait's, among the impls of the name's other traits)
+                                let own = self.prog.prim_self_method(t, &ms).and_then(|id| self.trait_candidate(&self.prog.names[id as usize], &tr));
+                                // (or `impl Tr for &[u8]`'s (`__slice::__ref_m`): `<&[u8] as Tr>::m`)
+                                let rf = if matches!(t, Ty::Slice(_)) { self.trait_candidate(&format!("__slice::__ref_{ms}"), &tr) } else { None };
+                                // (with both, Self is the first argument's type, less the `&` of a `&self` method:
+                                // `Tr::iter(&s)` is the impl for `&[u8]`, `Tr::iter(s)` the one for `[u8]`)
+                                let by_ref = own.or(rf).is_some_and(|id| matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(..))));
+                                let self_ty = self.peek(a0).and_then(|ta| match ta {
+                                    Ty::Ref(_, i) if by_ref => Some(*i),
+                                    _ if by_ref => None,
+                                    _ => Some(ta),
+                                });
+                                let amp = match (own, rf, self_ty) {
+                                    (_, Some(_), Some(Ty::Ref(_, Ty::Slice(_)))) => Some("&"),
+                                    (Some(_), _, _) => Some(""),
+                                    (None, Some(_), _) => Some("&"),
+                                    _ => None,
+                                };
+                                if let Some(amp) = amp {
+                                    if let Ok(Expr::Path(q, qp)) = crate::parse::parse_expr(&format!("<{amp}{} as {tr}>::{ms}", self.prog.tn(t))) {
+                                        return Some(Expr::Call(Box::new(Expr::Path(q, qp)), cargs.clone()));
+                                    }
+                                }
+                            }
                             if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) {
                                 let key = format!("{}::{ms}", self.ty_key(t));
                                 if self.trait_candidate(&key, &tr).is_some() {

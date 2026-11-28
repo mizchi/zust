@@ -633,3 +633,32 @@ fn main() {
     assert_eq!((got.as_str(), code), ("A Ok(4294967295) 'c' 6\nOk(Plus) true Minus\nSome(3) None 8\n", Some(0)), "{err}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A leading `::` path whose first segment names no crate or module is an item of its crate's root, as in 2015: in a
+/// dependency, that crate's root (where its items are renamed for the build), not the root of the build, which has
+/// items of the names too (CodeRabbit on #224). (zustc's alone: rustc reads these crates as 2021, where `::E` is a
+/// crate's name)
+#[test]
+fn leading_colons_in_a_dependency_name_its_own_root() {
+    let dir = std::env::temp_dir().join(format!("zustc_ws_leading_colons_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let files = [
+        ("dep.rs", "pub enum E {\n    V(u32),\n    W,\n}\npub fn f() -> u32 {\n    5\n}\npub fn get() -> u32 {\n    match ::E::V(3) {\n        ::E::V(n) => n + ::f(),\n        ::E::W => 0,\n    }\n}\n"),
+        ("app.rs", "enum E {\n    X,\n}\nfn f() -> u32 {\n    100\n}\nfn main() {\n    let _ = E::X;\n    println!(\"{} {}\", dep::get(), f());\n}\n"),
+        ("ws.txt", "lib dep dep.rs\nbin app app.rs dep\n"),
+    ];
+    for (p, t) in files {
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(p), t).unwrap();
+    }
+    let crates = zustc::session::read_workspace(&dir.join("ws.txt")).unwrap();
+    let out = dir.join("target");
+    let mut s = zustc::session::Session::new(zustc::session::Options { jobs: 1, ..Default::default() });
+    let built = s.build_workspace(&crates, &out);
+    let got = match built {
+        Ok(_) => run(&out.join("app"), &dir, 0).0,
+        Err(e) => format!("zustc: {e}"),
+    };
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(got, "8 100\n");
+}

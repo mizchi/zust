@@ -525,6 +525,16 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         hoisted: vec![],
         in_fmt_args: 0,
         late_flags: vec![],
+        parts: vec![],
+        pat_moved: vec![],
+        pat_vars: vec![],
+        or_groups: Default::default(),
+        rel_parts: None,
+        index_owns: false,
+        scrut_mut: false,
+        ann_init: 0,
+        part_vars: vec![],
+        known_var: vec![],
         owned: vec![],
         temps: vec![],
         owned_binds: 0,
@@ -1144,12 +1154,18 @@ pub struct Loop {
     pub no_value: Option<&'static str>,
 }
 
+/// What a pattern moved out of a place (pat_parts): the parts (offset, type), and the variants (offset, enum,
+/// variant) its enum patterns matched
+pub type PatParts = (Vec<(i32, Ty)>, Vec<(i32, u32, usize)>);
+
 #[derive(Clone, Copy)]
 pub struct Owned {
     pub loc: Loc,
     pub ty: Ty,
     pub flag: StackSlot,
     pub depth: usize,
+    /// the offset of the part of loc this owns (a part of a local partly moved out of, split_moved), else 0
+    pub off: i32,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -1278,6 +1294,32 @@ pub struct Cx<'p> {
     pub hoisted: Vec<(String, Value, Value, Ty, Option<(Value, Value, Value)>)>,
     pub in_fmt_args: u32,
     pub late_flags: Vec<StackSlot>,
+    /// The parts of locals partly moved out of (split_moved): (the local's flag, offset, type, the part's flag)
+    pub parts: Vec<(StackSlot, i32, Ty, StackSlot)>,
+    /// What patterns bound by value that needs dropping: (the base address of the place, its offset, type). A release
+    /// after a pattern reads the entries its pattern added (pat_parts)
+    pub pat_moved: Vec<(Option<Value>, i32, Ty)>,
+    /// The enum variants patterns matched: (the base address of the enum's place, its offset, the enum, the variant)
+    pub pat_vars: Vec<(Option<Value>, i32, u32, usize)>,
+    /// A match whose or-pattern arms match_ made one arm per alternative (by the match's address): each arm's
+    /// original arm (u32::MAX for one not split), whose alternatives bind each name in one type (E0308)
+    pub or_groups: crate::fxhash::FxMap<usize, Vec<u32>>,
+    /// The parts (offset in the place released, type) that the pattern of the next release moved out of, and the
+    /// variants (offset, enum, variant) it matched on the way
+    pub rel_parts: Option<PatParts>,
+    /// The next indexable owns a new value it indexes (an index expression's place, `[A(1)][0]`)
+    pub index_owns: bool,
+    /// The next scrutinee is placed mutable: a pattern binds by `ref mut` (scrut_place)
+    pub scrut_mut: bool,
+    /// The initializer of the `let` with a type annotation being typed, by address (0 if none): the type it is
+    /// expected to have is written, not what inference found
+    pub ann_init: usize,
+    /// The variants (offset in the local, enum, variant) of the split under way (split_moved)
+    pub part_vars: Vec<(i32, u32, usize)>,
+    /// Locals (their drop flags) that a match left known to be one variant (enum, variant): every arm that went on
+    /// matched it. Until the local is assigned or borrowed `&mut`, rustc takes another variant's fields for
+    /// uninitialized, and a partial move out of one leaves the rest undropped (known_variant)
+    pub known_var: Vec<(StackSlot, u32, usize)>,
     pub owned: Vec<Owned>,
     pub temps: Vec<Owned>,
     pub owned_binds: usize,
@@ -1379,6 +1421,18 @@ pub fn assoc_constraint(b: &str) -> Option<(String, crate::types::TySyn)> {
         return None;
     }
     crate::ast_summary::assoc_bindings(b).into_iter().next()
+}
+
+/// Whether a and b are the same one of std's pointers (both an Rc, both an Arc), whatever they point to
+fn same_std_ptr(p: &crate::program::Program, a: Ty, b: Ty) -> bool {
+    let ptr = |t: Ty| match t {
+        Ty::Struct(s) => {
+            let n = p.structs[p.base_of(s) as usize].name.as_str();
+            matches!(n, "Rc" | "Arc").then_some(n)
+        }
+        _ => None,
+    };
+    ptr(a).is_some_and(|n| ptr(b) == Some(n))
 }
 
 pub fn strip_paren(e: &Expr) -> &Expr {
@@ -1589,7 +1643,7 @@ impl Cx<'_> {
 
     /// 書かれた型 (`Self` と型パラメータは env から)
     pub fn parse_ty(&self, t: &crate::parse::Ty) -> R<Ty> {
-        let ts = crate::ast_types::tysyn(t, Some(&crate::types::TySyn::Named("Self".into())))?;
+        let ts = crate::ast_types::tysyn(t, Some(&crate::types::TySyn::Named("Self".into()))).map_err(|e| self.item_line_err(e))?;
         let r = self.prog.resolve_env(&ts, &self.env).map_err(|e| self.local_len_err(t, e))?;
         // (E0277: a type written in the program's code that puts a maybe-unsized type where only a sized one may be:
         // `Foo<T>` of a `T: ?Sized` with `struct Foo<T>`, `Vec<str>`, `[[u8]; 2]`)
@@ -2246,6 +2300,16 @@ impl Cx<'_> {
     }
 
     /// エラーのメッセージに場所 (ファイルの中の `行:桁: `) を付ける。もう付いているか、位置が分からなければそのまま
+    /// An error the syntax crate placed in the item's own text (`line:col: msg`, ast_types::tysyn's): at its line in
+    /// the file
+    pub fn item_line_err(&self, e: String) -> String {
+        let Some((l, rest)) = e.split_once(':') else { return e };
+        match l.parse::<u32>() {
+            Ok(l) if has_loc(&e) => format!("{}:{rest}", self.line_base + l),
+            _ => e,
+        }
+    }
+
     pub fn at(&self, sp: Sp, m: String) -> String {
         if sp.line == 0 || has_loc(&m) {
             return m;
@@ -2255,6 +2319,11 @@ impl Cx<'_> {
 
     /// `&&T` (`&&&T` ..) を `&T` の場所に渡すときの deref の強制変換
     pub fn deref_coerce(&mut self, mut v: Option<Value>, mut t: Ty, want: Ty) -> (Option<Value>, Ty) {
+        // (a `*mut T` where a `*const T` is expected, a reference where a raw pointer is: the same thin pointer,
+        // `fn f() -> *const T { unsafe { g_mut() } }`)
+        if !t.is_fat() && raw_ptr_coerces(t, want) {
+            return (v, want);
+        }
         while let (Ty::Ref(wm, _), Ty::Ref(om, inner @ Ty::Ref(..)), Some(val)) = (want, t, v) {
             // (a `&mut` is not reached through a shared reference: `&&mut u8` is no `&mut u8`)
             if t == want || t.is_fat() || (wm && !om) {
@@ -2356,6 +2425,9 @@ impl Cx<'_> {
             return self.block_stmts(nb, expected);
         }
         self.scopes.push(vec![]);
+        // (before edition 2024, the tail's temporaries outlive the block's locals: dropped after them, at the block's end.
+        // A plain block that is another's tail still drops them at its own end, where rustc leaves them to the outer one)
+        let mut tail_t0: Option<usize> = None;
         let mut diverged = false;
         let mut result: V = (None, Ty::Unit);
         // (`let Foo { value } = Foo::<&'static u32> { value: &x };`: a destructuring let of a literal whose type
@@ -2404,7 +2476,12 @@ impl Cx<'_> {
                     };
                     // (a Sized error of the annotation stands: `let (a, b): (Vec<str>, u8) = loop {};`)
                     let ann = match ann_ty.as_ref().map(|t| self.parse_ty(t)) {
-                        Some(Ok(a)) => Some(a),
+                        // (the holes are what inference found, as for a plain `let`: `let (Ok(y) | Err(y)): Result<_, _>
+                        // = Ok(1);`)
+                        Some(Ok(a)) => Some(match self.lets.get(&crate::ast_infer::stmt_key(st)).copied() {
+                            Some(inf) if self.fills_holes(a, inf) => written_muts(inf, a),
+                            _ => a,
+                        }),
                         Some(Err(e)) if e.contains(crate::traits::SOLVED_NO) => return Err(e),
                         _ => None,
                     };
@@ -2429,13 +2506,15 @@ impl Cx<'_> {
                     if self.bk_on() {
                         borrowck::extended_refs(self.prog, init, &mut self.bk.extended);
                     }
-                    let sc = self.bk_scrutinee(init, ann, &[pat]);
+                    let sc = self.scrut_place(init, ann, &[pat]);
                     self.bk.extended.truncate(ext1);
                     self.bk.let_scrut = false;
                     let Some(place) = sc? else {
                         diverged = true;
                         continue;
                     };
+                    // (the temporary that holds the value, when it is no place: what a `ref` binding refers to)
+                    let value_flag = self.last_scrut;
                     // (`let (y, _): (&'a u32, u32) = ..;`: the pattern binds from a value of the annotation's type)
                     if let Some(a) = ann_ty {
                         if let Some((t, tr)) = self.rg_let_ann(a, init, Some(place.ty())) {
@@ -2495,7 +2574,8 @@ impl Cx<'_> {
                     self.rg.scrut = scrut_saved.2;
                     let ob = self.owned_binds;
                     let pm = self.bk.pat_moves;
-                    let pre = if is_place_expr(init) { self.moved_flag(init) } else { None };
+                    let pre = if is_place_expr(init) { self.moved_root(init) } else { None };
+                    let pv0 = (self.pat_moved.len(), self.pat_vars.len());
                     self.bk_bind_begin();
                     // (the pattern's position, after the `let`, where an error of a `x @ sub` in it is reported)
                     let ap0 = std::mem::replace(&mut self.at_pat_at, Some(Sp { line: let_at.line, col: let_at.col + 4 }).filter(|s| s.line != 0));
@@ -2508,7 +2588,12 @@ impl Cx<'_> {
                     }
                     if self.owned_binds > ob {
                         match pre {
-                            Some(f) => self.clear_flag(f),
+                            Some((loc, t, f)) => {
+                                let parts = self.pat_parts(place, pv0);
+                                if !self.split_moved(init, loc, t, f, parts) {
+                                    self.clear_flag(f);
+                                }
+                            }
                             None => {
                                 let f = self.last_scrut;
                                 self.release(init, f)?;
@@ -2517,8 +2602,12 @@ impl Cx<'_> {
                     }
                     // (as for a plain let: what the bindings may borrow (a `ref` binding, a reference in the value)
                     // lives to the end of the block, the rest is dropped here: `let (n, _) = (c.borrow().len(), 0);`)
-                    if extends_temps(init) || self.bk_ty(place.ty()).1 || format!("{pat:?}").contains("Ident(true") {
+                    if extends_temps(init) || self.bk_ty(place.ty()).1 {
                         self.extend_temps(t0);
+                    } else if format!("{pat:?}").contains("Ident(true") {
+                        // (a `ref` binding keeps the value it refers to, not the statement's other temporaries:
+                        // `let ref x = f(&t());` drops t()'s at the `;`)
+                        self.extend_value_temp(t0, value_flag);
                     } else {
                         self.drop_temps(t0);
                     }
@@ -2553,6 +2642,10 @@ impl Cx<'_> {
                     // (a type zustc cannot read yet (`[(); foo()]`, `dyn Send`, `std::num::NonZero<u64>`) is not checked;
                     // a name of none of the program's is an error)
                     let ann = match ann_ty.as_ref().map(|t| (t, self.parse_ty(t))) {
+                        // (`let _: Rc<dyn Send> = Rc::new(x);`: the unsizing of a std pointer other than Box, which zustc
+                        // does not do; the value is dropped at once, the same with its own type. Only of an Rc to an Rc
+                        // (an Arc to an Arc): `let _: Rc<dyn Send> = 1u8;` stays a mismatch)
+                        Some((_, Ok(a))) if self.prog.std_rc_of_dyn(a) && self.peek(init).is_none_or(|it| same_std_ptr(self.prog, it, a)) => None,
                         Some((_, Ok(a))) => Some(a),
                         Some((t, Err(e))) if e.contains("cannot find type") && !names_std_path(t) => return Err(e),
                         // (and a Sized error, whatever the initializer: `let _: Vec<str> = loop {};`)
@@ -2575,7 +2668,10 @@ impl Cx<'_> {
                             Some(a) if matches!(strip_paren(init), Expr::Array(_) | Expr::Repeat(..)) => Some(a).filter(|&a| !has_hole(self.prog, a)),
                             _ => full,
                         };
-                        let (mut v, mut t) = self.expr(init, exp)?;
+                        let ai0 = std::mem::replace(&mut self.ann_init, if ann_ty.is_some() { init as *const Expr as usize } else { 0 });
+                        let r = self.expr(init, exp);
+                        self.ann_init = ai0;
+                        let (mut v, mut t) = r?;
                         if t == Ty::Never {
                             diverged = true;
                             // (the annotation's type is well formed all the same: `let _: &'a S<'b> = loop {};`)
@@ -2609,7 +2705,12 @@ impl Cx<'_> {
                         self.rg_let_wild(a, init);
                     }
                     self.rg.let_sp = let_sp0;
-                    self.drop_temps(t0);
+                    // (`let _ = &t();` extends t()'s temporary to the block's end, as a named let does)
+                    if extends_temps(init) {
+                        self.extend_temps(t0);
+                    } else {
+                        self.drop_temps(t0);
+                    }
                 }
                 Stmt::Let(pat, ann_ty, init, _, let_at) => {
                     let name = pat_name(pat)?;
@@ -2637,8 +2738,7 @@ impl Cx<'_> {
                                 // (only an instance of the annotation: `Box<_>` is not filled with a `bool`)
                                 // (a reference's mutability as written: inference does not unify `&mut T` with the `&T` of
                                 // its initializer (`let y: &mut [_] = &x[..];` is a mismatch))
-                                Some(inf) if has_hole(self.prog, a) && !has_hole(self.prog, inf) && !self.prog.has_param(inf) && std::mem::discriminant(&inf) == std::mem::discriminant(&a)
-                                    && !matches!((inf, a), (Ty::Struct(x), Ty::Struct(y)) if self.prog.base_of(x) != self.prog.base_of(y)) => Some(written_muts(inf, a)),
+                                Some(inf) if self.fills_holes(a, inf) => Some(written_muts(inf, a)),
                                 _ => Some(a),
                             }
                         }
@@ -2764,7 +2864,9 @@ impl Cx<'_> {
                     let ml0 = std::mem::replace(&mut self.bk.macro_let, name.starts_with("__exr_"));
                     let plain = if ann_ty.is_none() && self.bk_on() { borrowck::value_tail(init) as *const Expr as usize } else { 0 };
                     let plain0 = std::mem::replace(&mut self.bk.plain_init, plain);
+                    let ai0 = std::mem::replace(&mut self.ann_init, if ann_ty.is_some() { init as *const Expr as usize } else { 0 });
                     let r = self.expr(init, ann.or(hint));
+                    self.ann_init = ai0;
                     self.bk.plain_init = plain0;
                     // (`let b: &mut T = a;` / `let b: &T = s.f;` with a place of a `&mut T`: a coercion site, b reborrows
                     // what it points to (rustc's `&mut *a` / `&*s.f`), not a copy or a move of it: a use of `*a` while b
@@ -2881,8 +2983,18 @@ impl Cx<'_> {
                     }
                     if last && !*semi {
                         result = self.detach_tail(r, t0, None);
-                        self.drop_tail_temps(t0, result);
+                        if self.prog.edition >= 2024 {
+                            self.drop_tail_temps(t0, result);
+                        } else {
+                            tail_t0 = Some(t0);
+                        }
                     } else {
+                        // (the value of a `vec![..];` / `format!(..);` / `dbg!(..);` is the statement's temporary, dropped at its end)
+                        if let (Some(v), t @ Ty::Struct(_)) = r {
+                            if matches!(p.segs.last().map(|s| s.name.as_str()), Some("vec" | "format" | "dbg")) {
+                                self.own_temp(v, t);
+                            }
+                        }
                         self.drop_temps(t0);
                     }
                 }
@@ -3019,7 +3131,11 @@ impl Cx<'_> {
                     }
                     if last && !*semi {
                         result = self.detach_tail(r, t0, exp);
-                        self.drop_tail_temps(t0, result);
+                        if self.prog.edition >= 2024 {
+                            self.drop_tail_temps(t0, result);
+                        } else {
+                            tail_t0 = Some(t0);
+                        }
                     } else {
                         // (a block-like statement, `if .. {}` / `const { 2 }` without `;`, has the type `()`: rustc's
                         // E0308)
@@ -3093,6 +3209,9 @@ impl Cx<'_> {
             }
         }
         self.pop_scope();
+        if let Some(t0) = tail_t0 {
+            self.drop_tail_temps(t0, result);
+        }
         self.dead_stmt = dead0;
         if diverged && result.1 == Ty::Unit {
             result = (None, Ty::Never);
@@ -3136,6 +3255,8 @@ impl Cx<'_> {
 
     pub fn peek_syn(&self, e: &Expr) -> Option<Ty> {
         match e {
+            // (`(&raw mut s).drop_in_place()`: a raw pointer to what the place is)
+            Expr::RawRef(m, x) => Some(Ty::Ptr(*m, intern(self.peek(x)?))),
             // `f64::NAN` / `std::f64::consts::PI`
             Expr::Path(None, p)
                 if p.segs.len() >= 2
@@ -3792,6 +3913,28 @@ pub(crate) fn pat_binds_ref_mut(p: &Pat) -> bool {
         Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Or(ps, _) | Pat::Slice(ps) => ps.iter().any(pat_binds_ref_mut),
         Pat::Struct(_, fs, _) => fs.iter().any(|f| pat_binds_ref_mut(&f.1)),
         Pat::Ref(_, x) => pat_binds_ref_mut(x),
+        _ => false,
+    }
+}
+
+impl Cx<'_> {
+    /// inf, what inference found for a `let`, fills the holes of its annotation a: an instance of it, with none left
+    /// (`Box<_>` is not filled with a `bool`)
+    fn fills_holes(&self, a: Ty, inf: Ty) -> bool {
+        has_hole(self.prog, a)
+            && !has_hole(self.prog, inf)
+            && !self.prog.has_param(inf)
+            && std::mem::discriminant(&inf) == std::mem::discriminant(&a)
+            && !matches!((inf, a), (Ty::Struct(x), Ty::Struct(y)) if self.prog.base_of(x) != self.prog.base_of(y))
+    }
+}
+
+/// t coerces to the raw pointer want with no change of its value: `*mut T` to `*const T`, `&T` to `*const T`, `&mut T`
+/// to either
+pub(crate) fn raw_ptr_coerces(t: Ty, want: Ty) -> bool {
+    match (t, want) {
+        (Ty::Ptr(true, i), Ty::Ptr(false, w)) => i == w,
+        (Ty::Ref(m, i), Ty::Ptr(wm, w)) => i == w && (m || !wm),
         _ => false,
     }
 }

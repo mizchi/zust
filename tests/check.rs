@@ -3617,6 +3617,359 @@ fn macro_rules_with_whitespace_before_the_bang() {
     assert_eq!(first("macro_rules! m { () => { 1 } }\nfn main() { let my_macro_rules = 1; let _x = my_macro_rules != m!(); }\n"), None);
 }
 
+#[test]
+fn a_parse_error_in_a_macro_expansion_is_at_the_token_of_the_rule() {
+    // (rustc reports a parse error of the expansion at the token of the `macro_rules!` body it found, not at the
+    // call; a token that is part of a longer one (`x` of `xs`, `=` of `==`) is not it)
+    let at = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col))
+    };
+    assert_eq!(at("macro_rules! m {\n    () => {{\n        let x = 5 \"\";\n    }}\n}\nfn main() {\n    m!();\n}\n"), Some((3, 19)));
+    assert_eq!(at("macro_rules! t {\n    () => ( String ; );\n}\nfn main() {\n    let _i: Vec<t!()>;\n}\n").map(|p| p.0), Some(2));
+    assert_eq!(at("macro_rules! m {\n    () => {{\n        let xs = 1;\n        let y = 5 x;\n    }}\n}\nfn main() {\n    m!();\n}\n"), Some((4, 19)));
+    // (a token the arguments could have brought, or one the rules have twice: at the call)
+    assert_eq!(at("macro_rules! m {\n    ($e:tt) => {{\n        let x = 5 $e;\n    }}\n}\nfn main() {\n    m!(x);\n}\n").map(|p| p.0), Some(7));
+    assert_eq!(at("macro_rules! m {\n    () => {{ let y = 5 x; }};\n    (a) => {{ let x = 1; }};\n}\nfn main() {\n    m!();\n}\n").map(|p| p.0), Some(6));
+    // (other characters than ASCII in the rules)
+    assert_eq!(at("macro_rules! m {\n    () => {{\n        let \u{e9} = 5 \"\";\n    }}\n}\nfn main() {\n    m!();\n}\n").map(|p| p.0), Some(3));
+}
+
+#[test]
+fn patterns_of_another_type_than_the_value() {
+    // (rustc's E0308 for each, at the pattern's line)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let line = |src: &str| first(src).map(|x| x.0);
+    // (a reference's pattern on a value that is not one: a let, a parameter, one through a reference)
+    assert_eq!(line("fn main() {\n    let &_a = 5u32;\n}\n"), Some(2));
+    assert_eq!(line("#[derive(Clone, Copy)]\nstruct Foo {}\nfn foo(&_a: Foo) {}\nfn main() {}\n"), Some(3));
+    assert_eq!(line("fn agh(&&_a: &u32) {}\nfn main() {}\n"), Some(1));
+    assert_eq!(first("fn main() {\n    let &a = &5u32;\n    let _b: u32 = a;\n}\n"), None);
+    // (a unit struct's name is that struct, also in a closure and as a field's shorthand; a braced struct's is not)
+    assert_eq!(line("struct Test;\nfn main() {\n    || {\n        let Test = 1;\n    };\n}\n"), Some(4));
+    assert_eq!(line("#[allow(non_camel_case_types)]\nstruct foo;\nstruct Thing { foo: String }\nfn f(t: Thing) {\n    let Thing { foo } = t;\n}\nfn main() {}\n"), Some(5));
+    assert_eq!(first("struct Foo {}\nfn main() {\n    let Foo = 1;\n    let _x: i32 = Foo;\n}\n"), None);
+    assert_eq!(first("struct Unit;\nfn main() {\n    let Unit = Unit;\n}\n"), None);
+    // (a string or byte string takes no reference off: `&&str`, `&mut [u8; N]`)
+    assert_eq!(line("fn main() {\n    let s: &'static str = \"abc\";\n    match &s {\n        \"abc\" => {}\n        _ => {}\n    }\n}\n"), Some(4));
+    assert_eq!(line("fn main() {\n    let mut v = [97u8, 10u8];\n    match &mut v {\n        b\"a\\n\" => {}\n        _ => {}\n    }\n}\n"), Some(4));
+    assert_eq!(first("fn main() {\n    let v: Vec<&str> = vec![\"a\"];\n    for x in &v {\n        match *x {\n            \"a\" => {}\n            _ => {}\n        }\n    }\n    let s: &[u8] = b\"ab\";\n    match s {\n        b\"ab\" => {}\n        _ => {}\n    }\n}\n"), None);
+    // (the scrutinee's type is inferred from the literal without taking its reference off: `[u8; 4]`)
+    assert_eq!(first("fn load<L>() -> Option<L> {\n    todo!()\n}\nfn main() {\n    while let Some(tag) = load() {\n        match &tag {\n            b\"NAME\" => {}\n            _ => {}\n        }\n    }\n}\n"), None);
+}
+
+#[test]
+fn reference_patterns_breaks_and_destructuring_of_another_type() {
+    // (rustc's E0308 for each)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let line = |src: &str| first(src).map(|x| x.0);
+    // (a `&` pattern on a `&mut` value and a `&mut` one on a `&` value: the types differ in mutability)
+    assert_eq!(line("fn main() {\n    let foo = &mut 1;\n    let &_ = foo;\n}\n"), Some(3));
+    assert_eq!(line("fn main() {\n    let bar = &1;\n    match bar {\n        &mut _ => {}\n    }\n}\n"), Some(4));
+    assert_eq!(first("fn main() {\n    let mut v = vec![1, 2];\n    for &mut x in v.iter_mut() { let _ = x; }\n    for &x in v.iter() { let _ = x; }\n    let w = vec![(1, &2)];\n    for &(a, &b) in w.iter() { let _ = (a, b); }\n}\n"), None);
+    // (`break;` makes a loop's value `()`: a `break 3` after it, or before it, is another type)
+    assert_eq!(line("fn main() {\n    let _a = loop {\n        if true {\n            break;\n        }\n        break 3;\n    };\n}\n"), Some(6));
+    assert_eq!(line("fn main() {\n    let _a = loop {\n        if true {\n            break 1;\n        }\n        break;\n    };\n}\n"), Some(6));
+    assert_eq!(first("fn main() {\n    let _b = loop { break; };\n    let _c: i32 = loop { if true { break 2; } break 3; };\n    loop { if true { break; } break; }\n    while true { break; }\n}\n"), None);
+    // (a destructuring assignment takes no reference off its right side)
+    assert_eq!(line("fn main() {\n    let mut x = &0;\n    let mut y = &0;\n    (x, y) = &(1, 2);\n    let _ = (x, y);\n}\n"), Some(4));
+    assert_eq!(first("fn main() {\n    let (mut a, mut b) = (1, 2);\n    (a, b) = (b, a);\n    [a, b] = [5, 6];\n    let r = &(7, 8);\n    (a, b) = *r;\n    let _ = (a, b);\n}\n"), None);
+}
+
+#[test]
+fn operators_on_a_unit_or_a_reference_to_a_number() {
+    // (a `()` operand is a value that does not diverge: no number adds it (E0277), and `()` adds nothing (E0369); a
+    // reference to a number compares with no number (no `PartialEq<i32>` for `&i32`, E0277), though `+` has its impl)
+    let line = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| d.line)
+    };
+    assert_eq!(line("fn main() {\n    let x = ();\n    let _y = 1 +\n        x;\n}\n"), Some(3));
+    assert_eq!(line("fn main() {\n    let _y = () + ();\n}\n"), Some(2));
+    assert_eq!(line("fn f(a: &i32, b: i32) -> bool {\n    a == b\n}\nfn main() {}\n"), Some(2));
+    assert_eq!(line("fn f(a: &u8, b: u8) -> bool {\n    a < b\n}\nfn main() {}\n"), Some(2));
+    assert_eq!(line("fn f(a: &i32, b: i32) -> i32 {\n    let _ = *a == b;\n    let _ = a == &b;\n    a + b\n}\nfn main() {\n    let _ = () == ();\n    let _ = f(&1, 2);\n}\n"), None);
+}
+
+#[test]
+fn a_line_continuation_and_a_named_width_argument() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| (d.line, d.msg)).collect::<Vec<_>>()
+    };
+    // (a `\` line continuation skips spaces, tabs and line ends only, as rustc: a form feed stays in the string)
+    assert!(errs("fn main() {\n    let s = b\"a\\\n    \u{c}b\";\n    let _t: &[u8; 3] = s;\n}\n").is_empty());
+    assert!(errs("fn main() {\n    let s = b\"a\\\n    \tb\";\n    let _t: &[u8; 2] = s;\n}\n").is_empty());
+    // (a named argument used as a width or a precision (`{r:rw$}`, `rw = width`): the variable it is given is a usize)
+    assert!(errs("fn main() {\n    let width = 8;\n    let p = 2;\n    println!(\"[{:w$.pr$}]\", 1.5f64, w = width, pr = p);\n}\n").is_empty());
+    assert_eq!(errs("fn main() {\n    let width = 8;\n    println!(\"{:w$}\", 1, w = width);\n    let _n: i32 = width;\n}\n").first().map(|e| e.0), Some(4));
+}
+
+#[test]
+fn a_tuple_struct_in_a_fn_pointer_type_or_an_fn_bound() {
+    // (`fn(Foo)` and `dyn Fn(Foo)` name the type: the rewrite of a tuple struct passed as a function (`.map(Foo)`)
+    // does not take them for a call's argument)
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    let foo = "struct Foo<'a>(&'a ());\n";
+    for body in [
+        "fn with_fn() -> fn(Foo) {\n    |_| ()\n}\n",
+        "fn with_impl_fn() -> impl Fn(Foo) {\n    |_| ()\n}\n",
+        "fn g(_: Box<dyn FnMut(Foo)>) {}\n",
+        "type F = fn(Foo);\nstruct S { f: fn(Foo) }\n",
+        "fn w<T>() where T: FnOnce(Foo) {}\n",
+    ] {
+        assert!(errs(&format!("{foo}{body}fn main() {{}}\n")).is_empty(), "{body}");
+    }
+    // (a tuple struct passed as a function is still its constructor)
+    assert!(errs("struct W(u8);\nfn main() {\n    let v: Vec<W> = vec![1u8].into_iter().map(W).collect();\n    let _ = v.len();\n}\n").is_empty());
+}
+
+#[test]
+fn modules_that_rename_a_union_or_a_name_a_lifetime_shares() {
+    // (with modules, colliding names are renamed: not the `union` keyword of `union union { .. }`, nor a lifetime of
+    // the same name (`fn union<'union>() -> &'union union`), which binds no type `union`)
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    let src = "#![allow(non_camel_case_types, non_upper_case_globals)]\n\
+        mod u { pub type union = i32; pub fn union() -> union { 1 } }\n\
+        mod su {\n    pub struct union { pub union: u32 }\n    static union: union = union { union: 0 };\n    impl union {\n        pub fn union<'union>() -> &'union union { &union }\n    }\n}\n\
+        mod uu {\n    pub union union { pub union: u32 }\n    const union: union = union { union: 0 };\n    impl union { pub fn union() -> union { union } }\n}\n\
+        fn main() {\n    let _ = u::union();\n    let _ = su::union::union().union;\n    let x = uu::union::union();\n    let _ = unsafe { x.union };\n}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+}
+
+#[test]
+fn associated_type_bounds_in_generics_and_trait_arguments_they_do_not_give() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| (d.line, d.msg)).collect::<Vec<_>>()
+    };
+    // (`A: Iterator<Item: Copy>` in a trait's or a type alias's generics is an associated type bound, not a written
+    // `impl Trait`, which stays an error there)
+    assert!(errs("trait Case<A: Iterator<Item: Copy>> {}\nfn main() {}\n").is_empty());
+    assert_eq!(errs("trait Foo {}\nfn f<T: Iterator<Item = impl Foo>>() {}\nfn main() {}\n").first().map(|e| e.0), Some(2));
+    // (a bound that gives one of the program's traits too few or too many generic arguments: E0107 at the trait's
+    // name; an associated type's bound or binding is no argument, a default lets one out)
+    let e = errs("trait Trait<Type> {\n    type Type;\n    fn one(&self, val: impl Trait<Type: Default>);\n}\nfn main() {}\n");
+    assert_eq!(e.first().map(|e| e.0), Some(3), "{e:?}");
+    assert!(e[0].1.contains("trait takes 1 generic argument but 0 generic arguments were supplied"), "{e:?}");
+    assert_eq!(errs("trait Tr<A> {}\nfn f<T: Tr<u8, u16>>() {}\nfn main() {}\n").first().map(|e| e.0), Some(2));
+    assert!(errs("trait Tr<A, B = u8> { type O; type G<'a>; }\nfn f<T: Tr<u8>>() {}\nfn g<T: Tr<u8, u16, O = u8>>() {}\nfn h<'r, T>() where T: Tr<i32, O: Copy, G<'r> = ()> {}\nfn main() {}\n").is_empty());
+}
+
+#[test]
+fn a_raw_pointer_s_drop_in_place() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (`p.drop_in_place()`, also of a temporary pointer `(&raw mut s)`)
+    assert!(errs("struct S;\nfn main() {\n    unsafe {\n        let mut s = std::mem::ManuallyDrop::new(S);\n        let p: *mut S = &mut *s;\n        p.drop_in_place();\n        let mut t = S;\n        (&raw mut t).drop_in_place();\n        std::mem::forget(t);\n    }\n}\n").is_empty());
+}
+
+#[test]
+fn a_vtable_method_whose_where_clause_fails_and_or_patterns_of_one_binding_type() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (a method whose where clause the type does not meet has no vtable entry; a call of it is E0277)
+    let tr = "pub trait Foo {\n    type Bar;\n}\npub trait Broken {\n    type Assoc;\n    fn broken(&self) where Self::Assoc: Foo;\n}\nimpl<T> Broken for T {\n    type Assoc = ();\n    fn broken(&self) where Self::Assoc: Foo {\n        let _x: <Self::Assoc as Foo>::Bar;\n    }\n}\n";
+    assert!(errs(&format!("{tr}fn main() {{\n    let _m: &dyn Broken<Assoc = ()> = &();\n}}\n")).is_empty());
+    let e = errs(&format!("{tr}fn main() {{\n    ().broken();\n}}\n"));
+    assert!(e.iter().any(|m| m.contains("the trait bound `(): Foo` is not satisfied")), "{e:?}");
+    // (the alternatives of an or-pattern bind each name at one type: the error type is the ok one, also under an
+    // annotation with holes, each its own)
+    assert!(errs("fn main() {\n    let (Ok(y) | Err(y)) = Ok(1);\n    let (Ok(z) | Err(z)): Result<_, _> = Ok(1);\n    let _: i32 = y + z;\n}\n").is_empty());
+    let tri = "enum Tri<S, T, U> {\n    V1(S),\n    V2(T),\n    V3(U),\n}\nuse Tri::*;\n";
+    assert!(errs(&format!("{tri}fn main() {{\n    let (Ok((V1(a) | V2(a) | V3(a), b)) | Err(Ok((a, b)) | Err((a, b)))): Result<_, Result<_, _>> = Ok((V1(1), 1));\n    let _: i32 = a + b;\n}}\n")).is_empty());
+}
+
+#[test]
+fn assert_eq_of_two_calls_one_of_a_type_known_in_full() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (`Some(v)` against a call of a known type makes `let v = 46;` that type's)
+    assert!(errs("fn get() -> Option<&'static usize> {\n    None\n}\nfn main() {\n    let v = 46;\n    assert_eq!(get(), Some(&v));\n    let w = 1;\n    assert_eq!(get().copied(), Some(w));\n}\n").is_empty());
+    // (but not against a generic call whose type inference does not know: an integer literal is not an i32 yet)
+    let src = "pub trait K {\n    type V;\n}\npub struct N<T: K>(T, T::V);\nfn foo<T: K<V = Option<U>>, U: Clone>(n: &N<T>) -> Option<U> {\n    n.1.clone()\n}\nimpl K for i32 {\n    type V = Option<u32>;\n}\nfn main() {\n    let n: N<i32> = N(1, Some(22));\n    assert_eq!(foo(&n), Some(22));\n}\n";
+    assert!(errs(src).is_empty());
+}
+
+#[test]
+fn raw_pointer_coercions_at_a_tail_and_in_a_comparison() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (a `*mut T` where a `*const T` is expected, at a fn's tail, through blocks; a reference to a raw pointer)
+    let src = "fn m() -> *mut i32 {\n    std::ptr::null_mut()\n}\nfn a() -> *const i32 {\n    m()\n}\nfn b() -> *const i32 {\n    unsafe { m() }\n}\nfn c(x: &i32) -> *const i32 {\n    x\n}\nfn main() {\n    let x = 1;\n    let p: *const i32 = &x;\n    let _ = p == m();\n    let _ = p == &x;\n    let _ = (a(), b(), c(&x));\n}\n";
+    assert!(errs(src).is_empty());
+    // (not the other way: a `*const T` is no `*mut T`, nor a `&T`)
+    let e = errs("fn p() -> *const i32 {\n    std::ptr::null()\n}\nfn a() -> *mut i32 {\n    p()\n}\nfn main() {\n    let _ = a();\n}\n");
+    assert!(e.iter().any(|m| m.contains("mismatched types")), "{e:?}");
+    let e = errs("fn c(x: &i32) -> *mut i32 {\n    x\n}\nfn main() {\n    let _ = c(&1);\n}\n");
+    assert!(e.iter().any(|m| m.contains("mismatched types")), "{e:?}");
+}
+
+#[test]
+fn line_and_column_are_u32s_and_a_float_s_constants_its_type() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (`(column!(), line!())` beside `(0, 0)`: the literals are u32s; `x == f32::NAN` makes x an f32)
+    let src = "fn main() {\n    let c = || (column!(), line!());\n    let a = if true { c() } else { (0, 0) };\n    assert_eq!(a, (1, 2));\n    let x = 42.0;\n    let _b = x == f32::NAN;\n    let d = 1;\n    let _e = d == f64::MANTISSA_DIGITS;\n}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+}
+
+#[test]
+fn a_string_macro_s_methods_and_a_slice_s_first_mut_and_last_mut() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (`concat!(..)` / `stringify!(..)` as a method's receiver is a `&str`)
+    assert!(errs("fn main() {\n    let a = concat!(\"qux\", \"quux\",).to_string();\n    let b = stringify!(x).len();\n    let _ = (a, b);\n}\n").is_empty());
+    // (`first_mut` / `last_mut` of an array, a Vec and a slice)
+    let src = "fn main() {\n    let mut arr = [1u8, 2, 3];\n    *arr.last_mut().unwrap() = 30;\n    *arr.first_mut().unwrap() += 10;\n    let mut v = vec![1, 2];\n    let s: &mut [i32] = &mut v;\n    *s.first_mut().unwrap() = 5;\n    if let Some(x) = v.last_mut() {\n        *x = 20;\n    }\n}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+}
+
+#[test]
+fn an_or_pattern_whose_alternatives_bind_differently_is_reported_at_the_alternative() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| (d.line, d.msg)).collect::<Vec<_>>()
+    };
+    // (at the arm's pattern, not the `match`: rustc's E0408 there)
+    let e = errs("fn main() {\n    let x = Some(1);\n    match x {\n        Some(y) | None => {}\n    }\n}\n");
+    assert!(e.iter().any(|(l, m)| *l == 4 && m.contains("is not bound in all patterns (E0408)")), "{e:?}");
+}
+
+#[test]
+fn an_array_length_or_a_discriminant_zustc_cannot_evaluate_is_reported_where_it_is_written() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| (d.line, d.msg)).collect::<Vec<_>>()
+    };
+    // (at the length or the discriminant, not the item's first line: a field's type, a `let`'s, a repeat's, a variant)
+    let e = errs("fn main() {}\n\nstruct Bar {\n    a: u8,\n    b: [u8; || 1],\n}\n");
+    assert!(e.iter().any(|(l, m)| *l == 5 && m.contains("array length")), "{e:?}");
+    let e = errs("fn main() {\n    let _ = 1;\n    let _ = [0u8;\n        || 1];\n}\n");
+    assert!(e.iter().any(|(l, m)| *l == 4 && m.contains("array length")), "{e:?}");
+    let e = errs("enum E {\n    A,\n    B = || {},\n}\nfn main() {}\n");
+    assert!(e.iter().any(|(l, _)| *l == 3), "{e:?}");
+}
+
+#[test]
+fn a_turbofish_collect_s_elements_a_ref_array_s_and_an_unimported_collection_beside_another_error() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| (d.line, d.msg)).collect::<Vec<_>>()
+    };
+    // (`collect::<Vec<_>>()` takes its elements from the iterator at its `let`, so a later comparison decides the
+    // literals: the Vec is a `Vec<usize>`)
+    let e = errs("fn main() {\n    let expected: &[usize] = &[0, 1, 2];\n    let x = (0..3).collect::<Vec<_>>();\n    let _ = x == expected;\n    let _: () = x;\n}\n");
+    assert!(e.iter().any(|(_, m)| m.contains("found `Vec<usize>`")), "{e:?}");
+    // (a `&[_]` initialized from an array, against a `[usize; 3]`)
+    let e = errs("static ORDER: [usize; 3] = [1, 2, 3];\nfn main() {\n    let expected: &[_] = &[1, 2, 3];\n    assert_eq!(expected, ORDER);\n    let _: () = expected;\n}\n");
+    assert!(e.iter().any(|(_, m)| m.contains("usize")), "{e:?}");
+    // (a std collection with no `use` of it, beside another error: E0433 at it, as rustc reports first)
+    let e = errs("fn main() {\n    let mut m = HashMap::new();\n    m.insert(1u8, 2u8);\n    let _: () = 1;\n}\n");
+    assert!(e.iter().any(|(l, m)| *l == 2 && m.contains("use of undeclared type `HashMap` (E0433)")), "{e:?}");
+    let e = errs("use std::collections::HashMap;\nfn main() {\n    let mut m = HashMap::new();\n    m.insert(1u8, 2u8);\n    let _: () = 1;\n}\n");
+    assert!(!e.iter().any(|(_, m)| m.contains("E0433")), "{e:?}");
+    // (a value of the name is none: `let HashMap = 1;` and its use, beside another error (CodeRabbit on #224))
+    let e = errs("fn main() {\n    let HashMap = 1;\n    let _ = HashMap;\n    let _: u8 = \"s\";\n}\n");
+    assert!(!e.iter().any(|(_, m)| m.contains("E0412") || m.contains("E0433")), "{e:?}");
+    assert!(e.iter().any(|(_, m)| m.contains("mismatched types")), "{e:?}");
+}
+
+#[test]
+fn a_raw_identifier_s_name_an_imported_lowercase_variant_and_self_as_a_constructor() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (`r#foo` is `foo`; `r#struct` stays a name of its own)
+    assert!(errs("fn main() {\n    let foo = 2;\n    assert_eq!(2, r#foo);\n    let r#bar = 3;\n    assert_eq!(3, bar);\n    let r#struct = 1;\n    assert_eq!(1, r#struct);\n}\n").is_empty());
+    // (a lowercase variant a `use` brings: a value, and a pattern that is no binding (no E0170))
+    let src = "#![allow(non_camel_case_types)]\nuse color::{red, green};\n#[derive(Clone, Copy, PartialEq)]\nenum color {\n    red = 1,\n    green = 2,\n}\nfn name(c: color) -> u8 {\n    match c {\n        red => 1,\n        green => 2,\n    }\n}\nfn main() {\n    assert_eq!(name(red), 1);\n    let _ = green;\n}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+    // (`Self` passed as the constructor of the impl's tuple struct, also through a type alias)
+    let src = "struct W(u8);\ntype T = W;\nimpl T {\n    fn f(o: Option<u8>) -> Option<Self> {\n        o.map(Self)\n    }\n}\nfn main() {\n    let _ = W::f(None);\n}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+}
+
+#[test]
+fn a_trait_object_of_auto_traits_alone() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (`dyn Send` / `dyn Sync + 'static` / `dyn Unpin` as a type anywhere, not only behind a pointer)
+    let src = "struct Wrap(dyn Sync + 'static);\ntrait Foo {}\nimpl Foo for dyn Send {}\ntype Z = dyn Unpin;\nfn f(_: &Wrap, _: &Z) {}\nfn main() {}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+    // (`let _: Rc<dyn Send> = Rc::new(x);`: dropped at once, with the value's own type)
+    let src = "use std::rc::Rc;\nstruct S;\nfn main() {\n    let _: Rc<dyn Send> = Rc::new(S);\n}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+    // (a `dyn` with no trait at all stays an error)
+    assert!(!errs("type Z = dyn 'static;\nfn main() {}\n").is_empty());
+}
+
+#[test]
+fn a_reference_cast_to_a_raw_pointer_tells_what_it_refers_to() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (`&data as *const *const ()` with `let data = ptr::null();`: data is a `*const ()`)
+    assert!(errs("fn main() {\n    let data = std::ptr::null();\n    let _ = &data as *const *const ();\n    if data.is_null() {}\n}\n").is_empty());
+    // (not when what it refers to is known: `&x as *const u8` with x a u32 stays an error)
+    assert!(!errs("fn main() {\n    let x = 1u32;\n    let _ = &x as *const u8;\n}\n").is_empty());
+}
+
+#[test]
+fn a_raw_method_name_in_an_impl_and_a_string_behind_an_rc() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (`fn r#trait` of an impl is the trait's `r#trait`, not a method `r` (E0407))
+    assert!(errs("trait Trait {\n    fn r#trait(&self) -> u32;\n}\nstruct G;\nimpl Trait for G {\n    fn r#trait(&self) -> u32 {\n        1\n    }\n}\nfn main() {\n    assert_eq!(G.r#trait(), 1);\n}\n").is_empty());
+    // (`&**s` with s: `Rc<String>` / a RefCell's guard of one: its `str`)
+    let src = "use std::cell::RefCell;\nuse std::rc::Rc;\nfn main() {\n    let s = Rc::new(\"foo\".to_string());\n    assert_eq!(&**s, \"foo\");\n    let m = Rc::new(RefCell::new(String::from(\"x\")));\n    assert_eq!(&**m.borrow(), \"x\");\n}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+}
+
+#[test]
+fn a_path_from_the_crate_root_names_the_root_s_item_beside_a_module_s_own() {
+    let errs = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).into_iter().map(|d| d.msg).collect::<Vec<_>>()
+    };
+    // (`::f` in module m is the root's `f`, as in 2015, not m's: their types tell them apart)
+    let src = "pub fn f() -> u8 {\n    1\n}\nmod m {\n    pub fn f() -> String {\n        String::new()\n    }\n    pub fn g() -> u8 {\n        let _s: String = f();\n        ::f() + crate::f()\n    }\n}\nfn main() {\n    m::g();\n}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+    // (`::outer::dyn::dyn` from a macro in another module, a path from the root that a module name starts)
+    let src = "mod outer {\n    pub mod inner {\n        pub struct S;\n    }\n}\nmod user {\n    pub fn make() -> ::outer::inner::S {\n        ::outer::inner::S\n    }\n}\nfn main() {\n    let _ = user::make();\n}\n";
+    assert!(errs(src).is_empty(), "{:?}", errs(src));
+}
+
 /// #174: E0408, an or-pattern whose alternatives do not all bind a name, at the first alternative that does not (each
 /// expected line, column and message is rustc 1.100's on the same source); a name of a unit variant or a constant
 /// binds nothing
@@ -3655,6 +4008,158 @@ fn or_pattern_missing_bindings() {
     // (the same names of different types: E0308, at the alternative (rustc: at its binding, 4:24))
     let src = "enum E { A(u8), B(u16) }\nfn main() {\n    match E::A(1) {\n        E::A(x) | E::B(x) => { let _ = x; }\n    }\n}\n";
     assert_eq!(first(src), Some((4, 19, "mismatched types: expected `u8`, found `u16`".to_string())), "types");
+    // (and of a local the arm moves out of, whose alternatives become arms of their own)
+    let src = "enum E { A(String), B(Vec<u8>) }\nfn main() {\n    let e = E::A(String::new());\n    match e {\n        E::A(x) | E::B(x) => { let _ = x; }\n    }\n}\n";
+    assert_eq!(first(src), Some((5, 19, "mismatched types: expected `String`, found `Vec<u8>`".to_string())), "types of a local");
+}
+
+/// The checked / wrapping / overflowing Euclidean division of a 128-bit integer, which codegen does not build in: a
+/// method zustc does not have, not a crash (CodeRabbit on #224)
+#[test]
+fn euclidean_division_of_a_128_bit_integer_is_a_diagnostic() {
+    for m in ["checked_div_euclid", "checked_rem_euclid", "wrapping_div_euclid", "wrapping_rem_euclid", "overflowing_div_euclid", "overflowing_rem_euclid"] {
+        for t in ["u128", "i128"] {
+            let src = format!("fn main() {{\n    let a: {t} = 7;\n    let _ = a.{m}(2);\n}}\n");
+            let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+            let d = s.check(&src);
+            assert!(d.first().is_some_and(|d| d.msg.contains(m)), "{t}::{m}: {:?}", d.first().map(|d| &d.msg));
+        }
+    }
+}
+
+#[test]
+fn a_use_of_a_lowercase_enum_brings_only_the_variants_it_names_and_or_bindings_of_two_modes() {
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    // (`use bar::foo::{alpha, charlie};` does not bring beta: `alpha | beta` binds beta in one alternative (E0408))
+    let src = "mod bar {\n    #[allow(non_camel_case_types)]\n    pub enum foo {\n        alpha,\n        beta,\n        charlie,\n    }\n}\nfn main() {\n    use bar::foo::{alpha, charlie};\n    match alpha {\n        alpha | beta => {}\n        charlie => {}\n    }\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.2)), Some((12, "variable `beta` is not bound in all patterns (E0408)".to_string())));
+    // (`ref y` in one alternative and `y` in the other: the alternative's mismatch (rustc's E0308 at 5:22), not one
+    // inference finds at the scrutinee's literal)
+    let src = "fn main() {\n    let x = (0, 2);\n\n    match x {\n        (0, ref y) | (y, 0) => {}\n        _ => (),\n    }\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.1)), Some((5, 22)));
+}
+
+#[test]
+fn vec_from_and_into_a_vec_by_std_s_from_impls() {
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    // (an array, literal or not, a `&[T]` / `&[T; N]` / `&mut [T]`, a `&str`, a String, a Vec; `.into()` the same)
+    let src = "fn main() {\n    let a = [String::new()];\n    let s = [1u8, 2];\n    let mut m = [3, 4];\n    let _v: Vec<u32> = Vec::from([1, 2]);\n    let _ = Vec::from(a);\n    let _ = Vec::from(&s[..]);\n    let _ = Vec::from(&s);\n    let _ = Vec::from(&mut m[..]);\n    let _ = Vec::from(\"ab\");\n    let _ = Vec::from(String::new());\n    let _ = Vec::from(vec![1]);\n    let _: Vec<u8> = \"ab\".into();\n    let _: Vec<u16> = [1, 2].into();\n}\n";
+    assert_eq!(first(src), None);
+    // (E0277: `[foo]` is an array of foo's fn item type, so `Vec::from` of it is no `Vec<fn()>`; `vec![foo]` and an
+    // unannotated `Vec::from([foo])` are)
+    let src = "fn foo() {}\nfn main() {\n    let _: Vec<fn()> = vec![foo];\n    let _ = Vec::from([foo]);\n    let _: Vec<fn()> = Vec::from([foo as fn()]);\n    let _: Vec<fn()> = Vec::from([foo]);\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.1)), Some((6, 24)));
+    let src = "fn foo() {}\nfn main() {\n    let _v: Vec<(&str, fn())> = Vec::from([(\"foo\", foo)]);\n}\n";
+    assert_eq!(first(src).map(|x| x.0), Some(3));
+}
+
+#[test]
+fn a_dyn_call_s_where_clause_an_unsafe_drop_in_place_patterns_through_references_and_scans_of_names() {
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    // (E0277: a method `where Self::A: Foo` through a `dyn Tr<A = ()>` that does not meet it; met, it is called)
+    let src = "trait Foo {}\ntrait Tr { type A; fn m(&self) where Self::A: Foo; }\nimpl<T> Tr for T { type A = (); fn m(&self) where Self::A: Foo {} }\nfn main() {\n    let x: &dyn Tr<A = ()> = &5u8;\n    x.m();\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.2)), Some((6, "the trait bound `(): Foo` is not satisfied (E0277)".to_string())));
+    let src = "trait Foo {}\nimpl Foo for u8 {}\ntrait Tr { type A; fn m(&self) where Self::A: Foo; }\nimpl<T> Tr for T { type A = u8; fn m(&self) where Self::A: Foo {} }\nfn main() {\n    let x: &dyn Tr<A = u8> = &5u8;\n    x.m();\n}\n";
+    assert_eq!(first(src), None);
+    // (E0133: a raw pointer's `drop_in_place` outside `unsafe`)
+    let src = "fn main() {\n    let mut v = 5u32;\n    let p = &mut v as *mut u32;\n    unsafe { p.drop_in_place() };\n    p.drop_in_place();\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.2.contains("E0133"))), Some((5, true)));
+    // (a unit struct's name matches through a reference)
+    let src = "struct U;\nfn main() {\n    let U = &U;\n    let U = U;\n}\n";
+    assert_eq!(first(src), None);
+    // (`Vec::<u8>::from(x)`: x's elements must be u8s; `[foo, bar]` and `[foo as fn(), foo]` are arrays of fn pointers)
+    let src = "fn main() {\n    let _ = Vec::<u8>::from([1, 2]);\n    let _ = Vec::<u8>::from([300u16]);\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.2.contains("E0277"))), Some((3, true)));
+    let src = "fn foo() {}\nfn bar() {}\nfn main() {\n    let _f: Vec<fn()> = Vec::from([foo, bar]);\n    let _g: Vec<fn()> = Vec::from([foo as fn(), foo]);\n}\n";
+    assert_eq!(first(src), None);
+    // (a generic parameter named like a std collection is no use of it, beside another error)
+    let src = "fn f<HashMap>(_x: HashMap) {}\nfn main() {\n    let _x: u8 = \"s\";\n}\n";
+    assert_eq!(first(src).map(|x| x.0), Some(3));
+    // (a type alias with a where clause names the type, not its constructor)
+    let src = "struct W(u8);\ntype A where W: Sized = W;\nfn main() {\n    let a: A = W(3);\n    let _ = a.0;\n}\n";
+    assert_eq!(first(src).filter(|x| !x.2.starts_with("warning")), None);
+    // (a raw string's text is no named argument: `w` is the width's)
+    let src = "fn main() {\n    let width = 6;\n    let decoy = 1u8;\n    println!(\"{:w$}|\", r#\"\", w = decoy, \"\"#, w = width);\n    let _ = decoy;\n}\n";
+    assert_eq!(first(src), None);
+    // (`dbg!(a, b)` is the tuple of them)
+    let src = "fn main() {\n    assert_eq!((1u8, 2u32), dbg!(1, 2));\n}\n";
+    assert_eq!(first(src), None);
+    // (a string literal over a CR LF line end of the source holds a LF, as rustc reads the file normalized)
+    let src = "fn main() {\r\n    let s = b\"a\r\nb\";\r\n    let _: &[u8; 3] = s;\r\n    let t = r\"a\r\nb\";\r\n    assert_eq!(t.len(), 3);\r\n}\r\n";
+    assert_eq!(first(src), None);
+}
+
+#[test]
+fn a_transmute_of_fn_pointers_that_pass_differently_and_a_constant_array_s_len() {
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    // (a fn returning an enum, an aggregate zustc returns by address, as one returning a number in a register: a call
+    // through it would read the register as an address)
+    let src = "#[repr(u32)]\nenum Foo {\n    A = 0,\n    B = 23,\n}\nextern \"C\" fn foo(_x: usize) -> Foo {\n    Foo::B\n}\nfn main() {\n    let _f: extern \"C\" fn(usize) -> u32 = unsafe { std::mem::transmute(foo as extern \"C\" fn(usize) -> Foo) };\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.2.contains("is not supported"))), Some((10, true)));
+    let src = "fn f(x: u32) -> u32 {\n    x\n}\nfn main() {\n    let _g: fn(i32) -> i32 = unsafe { std::mem::transmute(f as fn(u32) -> u32) };\n}\n";
+    assert_eq!(first(src), None);
+    // (a struct literal whose type arguments nothing gives: an error, not the generic definition's fields (a double
+    // free at run time); with no field that names them, the definition stands)
+    let src = "trait X<T> {}\nstruct S<T> {\n    f: Box<dyn X<T>>,\n}\nstruct F;\nimpl X<isize> for F {}\nfn main() {\n    let _ = S { f: Box::new(F) };\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.2)), Some((8, "type annotations needed for `S<..>`".to_string())));
+    let src = "enum Register<const N: u16> {\n    A = 40,\n    B,\n}\nfn main() {\n    let _b = Register::<0>::B as u16;\n    let _a = Register::<1>::A as u16;\n}\n";
+    assert_eq!(first(src), None);
+    // (a constant array's length from its type: a 32 MiB array is not built on the stack for it)
+    let src = "const DATA: [u8; 32 * 1024 * 1024] = [42; 32 * 1024 * 1024];\nfn main() {\n    assert_eq!(DATA.len(), 32 << 20);\n    assert!(!DATA.is_empty());\n}\n";
+    assert_eq!(first(src), None);
+}
+
+#[test]
+fn a_method_of_a_trait_implemented_for_unit() {
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    // (a trait of the root's implemented for `()`: `().b()`, `B::b(())`, through a `&()`)
+    let src = "trait B {\n    fn b(self) -> u8;\n    fn r(&self) -> u8 {\n        4\n    }\n}\nimpl B for () {\n    fn b(self) -> u8 {\n        7\n    }\n}\nfn f(x: &()) -> u8 {\n    x.r() + x.b()\n}\nfn main() {\n    let _ = ().b() + B::b(()) + f(&());\n}\n";
+    assert_eq!(first(src), None);
+    // (more type arguments than the method has: E0107 at the method)
+    let src = "pub trait Ice {\n    fn f(&self, _: ());\n}\nimpl Ice for () {\n    fn f(&self, _: ()) {}\n}\nfn main() {\n    ().f::<()>(());\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.2.contains("method takes 0 generic arguments but 1 generic argument was supplied"))), Some((8, true)));
+    // (an opaque result where a `let` writes a type: E0308)
+    let src = "use std::fmt::Display;\ntrait Foo {\n    fn bar(&self) -> impl Display;\n}\nimpl Foo for () {\n    fn bar(&self) -> impl Display {\n        \"Hello\"\n    }\n}\nfn main() {\n    let _x: &str = ().bar();\n    println!(\"{}\", ().bar());\n}\n";
+    assert_eq!(first(src).map(|x| (x.0, x.2.contains("found opaque type"))), Some((11, true)));
+}
+
+#[test]
+fn a_mut_accessor_through_a_shared_slice_and_a_macro_call_after_a_string_with_slashes() {
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    // (`first_mut` / `last_mut` / `get_mut` (of an index or a range) of a `&[T]`: E0596 at the receiver, as rustc; of a `&mut [T]`, none)
+    for m in ["first_mut()", "last_mut()", "get_mut(0)", "get_mut(0..1)"] {
+        let src = format!("fn main() {{\n    let a = [1, 2, 3];\n    let s: &[i32] = &a;\n    let _ = s.{m};\n}}\n");
+        assert_eq!(first(&src).map(|x| (x.0, x.1, x.2.contains("E0596"))), Some((4, 13, true)), "{m}");
+        let src = format!("fn main() {{\n    let mut a = [1, 2, 3];\n    let s: &mut [i32] = &mut a;\n    let _ = s.{m};\n}}\n");
+        assert_eq!(first(&src), None, "{m}");
+        // (through a `&mut Vec` and a range index, which are borrowed `&mut` for the method: `v.get_mut(a..b)`)
+        let src = format!("fn main() {{\n    let mut v = vec![1, 2, 3];\n    let r = &mut v;\n    let _ = r.{m};\n    let _ = v[1..].{m};\n}}\n");
+        assert_eq!(first(&src), None, "{m}");
+    }
+    // (a parse error in a macro's expansion, at the rule's token: also when a string before the call has `//`)
+    let src = "macro_rules! bad { () => { let x = ; } }\nfn main() { let _ = \"https://host\"; bad!{} }\n";
+    assert_eq!(first(src).map(|x| (x.0, x.1)), Some((1, 36)));
+    // (the program's definition, not one in a comment before it (CodeRabbit on #224))
+    let src = "// macro_rules! bad { () => { let x = ; } }\nmacro_rules! bad { () => { let x = ; } }\nfn main() { bad!{} }\n";
+    assert_eq!(first(src).map(|x| (x.0, x.1)), Some((2, 36)));
 }
 
 /// unused_parens (#175), at rustc's places: denied by an item's own attribute (the issue's program, each of its five
@@ -3785,4 +4290,29 @@ fn derive_names_are_macros_not_glob_items() {
     // (an unknown derive beside a glob's alias of its name: by the name as written, at its line)
     let src = "mod a {\n    pub type Foo = u8;\n}\nmod b {\n    pub type Foo = u16;\n}\nuse a::*;\n#[derive(Debug, Foo)]\nstruct S;\nfn main() {\n    let _: Foo = 1;\n}\n";
     assert_eq!(first(src).map(|d| (d.0, d.2)), Some((8, "cannot find derive macro `Foo` in this scope".to_string())), "{src}");
+}
+
+/// `impl Trait` in a generic parameter's bound is rejected; an associated type bound naming the raw identifier
+/// `r#impl` is no `impl` (CodeRabbit on #224)
+#[test]
+fn impl_in_generics_but_not_a_raw_identifier() {
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| d.msg.clone())
+    };
+    assert_eq!(first("fn f<T: Iterator<Item = impl Copy>>() {}\nfn main() {}\n").as_deref(), Some("`impl Trait` is not allowed in generics"));
+    assert_eq!(first("trait r#impl {}\nfn f<T: Iterator<Item: r#impl>>() {}\nfn main() {}\n"), None);
+}
+
+/// `let _: Rc<dyn Tr> = ..` drops its annotation only for an Rc (an Arc for an Arc): another value is a mismatch, as
+/// rustc reports it (CodeRabbit on #224)
+#[test]
+fn a_wildcard_rc_of_dyn_annotation_checks_an_other_value() {
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    assert_eq!(first("use std::rc::Rc;\nfn main() {\n    let _: Rc<dyn Send> = 1u8;\n}\n"), Some((3, "mismatched types: expected `Rc<dyn Send>`, found `u8`".to_string())));
+    assert_eq!(first("use std::rc::Rc;\nuse std::fmt::Debug;\nfn main() {\n    let _: Rc<dyn Debug> = Rc::new(5u8);\n}\n"), None);
+    assert_eq!(first("use std::sync::Arc;\nuse std::fmt::Debug;\nfn main() {\n    let _: Arc<dyn Debug> = Arc::new(5u8);\n}\n"), None);
 }

@@ -110,10 +110,11 @@ LIMIT = ["prlimit", "--as=2147483648", "--"] if subprocess.run(["sh", "-c", "com
 
 def error_lines(text):
     """Lines that `//~ ERROR` annotations point at: `//~` this line, `//~^` one line up per caret, `//~v` one line down
-    per v, `//~|` the same line as the previous annotation"""
+    per v, `//~|` the same line as the previous annotation (of any kind, as compiletest: `//~^ NOTE` then `//~| ERROR`
+    is an error on the note's line)"""
     out, last = set(), None
     for i, line in enumerate(text.split("\n"), 1):
-        m = re.search(r"//~(\^+|v+|\||)\s*(ERROR|error)", line)
+        m = re.search(r"//~(\^+|v+|\||)\s*([A-Za-z]+)", line)
         if not m:
             continue
         mark = m.group(1)
@@ -123,9 +124,9 @@ def error_lines(text):
             at = i + len(mark)
         else:
             at = i - len(mark)
-        if at is not None:
+        last = at
+        if at is not None and m.group(2) in ("ERROR", "error"):
             out.add(at)
-            last = at
     return out
 
 
@@ -159,7 +160,38 @@ def edition(text):
     return m.group(1) if m else "2015"
 
 
+# (path -> why the test did not pass, for --reasons: zustc's first error, or how the run failed)
+REASONS = {}
+
+
+def first_error(stderr):
+    """zustc's first error message, without its `error: <file>: <line>:<col>: ` prefix"""
+    for line in stderr.splitlines():
+        if line.startswith("error"):
+            m = re.match(r"error(?:\[E\d+\])?: (?:\S+?\.rs:\s?)?(?:\d+:\d+:\s?)?(.*)", line)
+            return (m.group(1) if m else line)[:200]
+    return stderr.strip().splitlines()[0][:200] if stderr.strip() else "(no message)"
+
+
+def run_failure(p):
+    """How a built test's run failed: its panic message, else its first line of stderr, else its exit code"""
+    err = p.stderr.decode(errors="replace").splitlines()
+    for i, line in enumerate(err):
+        if "panicked at" in line and i + 1 < len(err):
+            return f"run: panicked: {err[i + 1][:160]}"
+    first = next((l for l in err if l.strip()), "")
+    return f"run: {first[:160]}" if first else f"run: exit code {p.returncode}"
+
+
 def run_one(path, kind, tmp):
+    r, why = run_one_inner(path, kind, tmp)
+    if r != "pass":
+        REASONS[path] = why
+    return r
+
+
+def run_one_inner(path, kind, tmp):
+    """(status, why it is not "pass")"""
     name = os.path.splitext(os.path.basename(path))[0]
     exe = os.path.join(tmp, re.sub(r"[^\w]", "_", os.path.relpath(path, TESTS)))
     text = open(path, errors="replace").read()
@@ -170,33 +202,33 @@ def run_one(path, kind, tmp):
         if kind in ("check-pass", "compile-fail"):
             r = subprocess.run([*LIMIT, ZUSTC, "check", "-j", "1", path, ed, *flags], capture_output=True, text=True, timeout=30)
             if crashed(r):
-                return "crash"
+                return "crash", "zustc crashed"
             ok = r.returncode == 0
             if kind == "check-pass":
-                return "pass" if ok else "fail"
+                return ("pass", "") if ok else ("fail", first_error(r.stderr))
             if ok:
-                return "fail"
+                return "fail", "accepted: no error reported"
             # (rejected: count it only when an error is reported on a line an annotation points at)
             want = error_lines(open(path, errors="replace").read())
             got = {int(m.group(1)) for m in re.finditer(r"^error: [^\n]*?:(\d+):\d+:", r.stderr, re.M)}
-            return "pass" if want & got else "wrong-line"
+            return ("pass", "") if want & got else ("wrong-line", first_error(r.stderr))
         libs = ["-L", HELPERS] if HELPERS else []
         r = subprocess.run([*LIMIT, ZUSTC, path, "-o", exe, "--no-cache", ed, *flags, *libs], capture_output=True, text=True, timeout=60)
         if crashed(r):
-            return "crash"
+            return "crash", "zustc crashed"
         if r.returncode != 0:
-            return "fail"
+            return "fail", first_error(r.stderr)
         if kind == "build-pass":
-            return "pass"
+            return "pass", ""
         p = subprocess.run([*LIMIT, exe], capture_output=True, timeout=20, cwd=tmp)
         if p.returncode != 0:
-            return "fail"
+            return "fail", run_failure(p)
         want = os.path.join(os.path.dirname(path), name + ".run.stdout")
         if os.path.exists(want) and p.stdout != open(want, "rb").read():
-            return "fail"
-        return "pass"
+            return "fail", "run: stdout differs from the .run.stdout file"
+        return "pass", ""
     except subprocess.TimeoutExpired:
-        return "timeout"
+        return "timeout", "timeout"
     finally:
         for suf in ("", ".o", ".cache", ".link"):
             try:
@@ -214,6 +246,7 @@ def main():
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     ap.add_argument("--json", default=os.path.join(ROOT, "out/rust_ui.json"))
     ap.add_argument("--results", default=os.path.join(ROOT, "out/rust_ui_results.txt"))
+    ap.add_argument("--reasons", default=None, help="write why each test that does not pass fails (status, kind, path, reason)")
     ap.add_argument("--baseline", default=None, help="list of passing tests (kind<TAB>path) to compare against")
     ap.add_argument("--check", action="store_true", help="with --baseline: exit 1 if a test in the baseline no longer passes, or zustc crashes on any test")
     ap.add_argument("--write-baseline", action="store_true", help="with --baseline: write the passing tests to it")
@@ -269,6 +302,12 @@ def main():
     with open(a.results, "w") as f:
         for p, k, r in sorted(res):
             f.write(f"{r}\t{k}\t{os.path.relpath(p, ui)}\n")
+    if a.reasons:
+        with open(a.reasons, "w") as f:
+            for p, k, r in sorted(res):
+                if r != "pass":
+                    why = REASONS.get(p, "").replace("\t", " ").replace("\n", " ")
+                    f.write(f"{r}\t{k}\t{os.path.relpath(p, ui)}\t{why}\n")
     if a.bench_json:
         rows = []
         for k, v in out["kinds"].items():

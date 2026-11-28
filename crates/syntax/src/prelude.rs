@@ -900,6 +900,43 @@ pub fn rename_shadowed(defined: &[&str], prelude: String) -> String {
     out
 }
 
+/// The mark in need of a path `Vec::from` (no prelude item has the name)
+const VEC_FROM: &str = "#Vec::from";
+
+/// Whether the identifier at `a` (a `from`) ends a path `Vec::from` or `Vec::<T>::from` (white space around `::` too)
+fn vec_path_before(b: &[u8], a: usize) -> bool {
+    let ws = |mut i: usize| {
+        while i > 0 && b[i - 1].is_ascii_whitespace() {
+            i -= 1;
+        }
+        i
+    };
+    let colons = |i: usize| (i >= 2 && &b[i - 2..i] == b"::").then(|| i - 2);
+    let Some(mut i) = colons(ws(a)) else { return false };
+    i = ws(i);
+    // (a turbofish: back to its `<`)
+    if i > 0 && b[i - 1] == b'>' {
+        let mut d = 0;
+        while i > 0 {
+            i -= 1;
+            match b[i] {
+                // (`->` in a `fn` type is not a closing `>`)
+                b'>' if !(i > 0 && b[i - 1] == b'-') => d += 1,
+                b'<' => {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(j) = colons(ws(i)).filter(|_| d == 0) else { return false };
+        i = ws(j);
+    }
+    i >= 3 && &b[i - 3..i] == b"Vec" && !(i > 3 && (b[i - 4].is_ascii_alphanumeric() || b[i - 4] == b'_'))
+}
+
 /// The program's std paths to a prelude type it shadows (a type of its own of the name, rename_shadowed):
 /// `std::time::Duration` / `::core::time::Duration` / `use std::time::Duration as StdDuration;` name the prelude's,
 /// renamed `__p_Duration`. Such a path becomes the renamed name, padded with spaces in front to the path's length, so
@@ -1282,6 +1319,15 @@ fn has_cstr_literal(src: &str) -> bool {
     false
 }
 
+/// An array's or a slice's first / last / get, which codegen makes without the prelude's fns of the names, return
+/// Option (out of select_with, whose code it would change)
+#[inline(never)]
+fn seq_accessor_option(need: &mut crate::fxhash::FxSet<&str>) {
+    if ["first", "last", "get", "get_mut", "first_mut", "last_mut"].iter().any(|n| need.contains(n)) {
+        need.insert("Option");
+    }
+}
+
 /// A float literal such as `1.5` (a `.` between digits) outside string literals: the `.` and `"` of the source are
 /// gone through with memchr (`str::find` of a char), not byte by byte, as a large program has none of the one and few
 /// of the other (a quote after `\\` or `'` does not open or close a string)
@@ -1412,6 +1458,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                 if *n == "clamp" && !method_call_at(bytes, a as usize, b as usize) {
                     continue;
                 }
+                // (`Vec::from(..)`: a mark, VEC_FROM)
+                if *n == "from" && vec_path_before(bytes, a as usize) && !names.contains(&VEC_FROM) {
+                    names.push(VEC_FROM);
+                }
                 if !names.contains(n) {
                     names.push(n);
                 }
@@ -1517,6 +1567,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if sc.has("Box") && box_from_path(sc.src) {
         need.extend(["to_vec", "__exr_slice_to_vec", "Vec", "into_boxed_slice"]);
     }
+    // (`Vec::from(x)` / `x.into()` into a Vec: an array's elements pushed, a copy of a slice, a str's bytes)
+    if need.contains(VEC_FROM) || need.contains("Vec") && need.contains("into") {
+        need.extend(["Vec", "with_capacity", "push", "to_vec", "__exr_slice_to_vec", "as_bytes", "into_bytes"]);
+    }
     if sc.has("Cow") {
         need.extend(["Cow", "__CowStr", "Deref", "deref", "into_owned", "to_vec", "__exr_slice_to_vec", "Vec", "String"]);
     }
@@ -1576,8 +1630,12 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     // (for a method name that integers, Option or iterators share, only when the program seems to use strings:
     //  String appears, or a string literal is the receiver (`"ab".repeat(3)`))
     // (or a `&str` / `&'static str` written: `NAME.to_ascii_lowercase()` with `static NAME: &'static str`)
+    // (a written `&str` counts for the ASCII ones only: `replace` / `repeat` are `mem::replace`'s, `Option::replace`'s
+    // too; and not in a no_std program, which has no String for them to give and uses them of bytes)
     let mut str_evidence = |n: &str| -> bool {
-        need.contains("String") || sc.has(&format!("\".{n}("))
+        need.contains("String")
+            || sc.has(&format!("\".{n}("))
+            || matches!(n, "to_ascii_uppercase" | "to_ascii_lowercase" | "eq_ignore_ascii_case") && (sc.has("&str") || sc.has("&'static str")) && !sc.has("no_std")
     };
     let found: Vec<&'static str> = need
         .iter()
@@ -1706,6 +1764,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if sc.has("checked_") || sc.has("overflowing_") {
         need.insert("Option");
     }
+    seq_accessor_option(&mut need);
     // In `vec![x; n]` with an x that seems not to be Copy (not a literal), fill with resize
     if need.contains("vec") && sc.any_pre("vec_repeat_nonliteral", &["vec!["], &vec_repeat_nonliteral) {
         need.extend(["resize", "new", "__exr_clone"]);

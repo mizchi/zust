@@ -22,11 +22,20 @@ pub enum TokKind {
 pub struct Tok {
     pub kind: TokKind,
     pub text: String,
-    /// Whether another punctuation character immediately follows (for assembling `>>` / `::` / `->`)
+    /// Whether another punctuation character immediately follows (for assembling `>>` / `::` / `->`). On an
+    /// identifier: a raw one, whose text is its name without the `r#` (unraw, is_raw)
     pub joint: bool,
     pub line: u32,
     pub col: u32,
     pub lo: u32,
+}
+
+impl Tok {
+    /// A raw identifier whose text is its name without the `r#` (unraw): a macro's text spells it with it
+    /// (`stringify!(r#foo)` is "r#foo")
+    pub fn is_raw(&self) -> bool {
+        self.kind == TokKind::Ident && self.joint
+    }
 }
 
 fn is_ident_start(c: char) -> bool {
@@ -46,6 +55,7 @@ fn is_ident_cont(c: char) -> bool {
 pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
     let b = src.as_bytes();
     let mut out: Vec<Tok> = Vec::new();
+    let mut raws: Vec<usize> = Vec::new();
     let mut i = 0;
     let mut line: u32 = 1;
     let mut line_start = 0;
@@ -226,6 +236,7 @@ pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
             kind = TokKind::Lit;
         } else if is_ident_start(ch) {
             if c == b'r' && b.get(i + 1) == Some(&b'#') {
+                raws.push(out.len());
                 i += 2;
                 // (`r#self` / `r#_`: a name no raw identifier can be)
                 if let Some(w) = reserved_raw(src, i) {
@@ -268,7 +279,32 @@ pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
         let joint = kind == TokKind::Punct && i < b.len() && is_punct_byte(b[i]);
         out.push(Tok { kind: kind, text: src[start..i].to_string(), joint: joint, line: tline, col: col, lo: start as u32 });
     }
+    // (`r#foo` is the name `foo`: only a keyword's raw form, `r#struct`, stays marked as one. Afterwards, so that the
+    // other tokens take no test for it)
+    if !raws.is_empty() {
+        unraw(&mut out, &raws);
+    }
     Ok(out)
+}
+
+/// The raw identifiers at `raws` (token indices) without their `r#`, but a keyword's (raw_kept)
+#[cold]
+#[inline(never)]
+fn unraw(out: &mut [Tok], raws: &[usize]) {
+    for &k in raws {
+        if let Some(t) = out.get_mut(k) {
+            if let Some(n) = t.text.strip_prefix("r#").filter(|n| !raw_kept(n)) {
+                t.text = n.to_string();
+                t.joint = true;
+            }
+        }
+    }
+}
+
+/// A raw identifier's name that keeps its `r#`: a keyword of any edition, reserved or weak (`r#struct`, `r#async`,
+/// `r#union`), which would read as the keyword without it
+fn raw_kept(n: &str) -> bool {
+    reserved_kw(n, true) || unused_kw(n) || matches!(n, "async" | "await" | "dyn" | "try" | "gen" | "union" | "macro_rules" | "default" | "auto" | "raw" | "safe")
 }
 
 /// The name after `r#` at src[i..] when it is one no raw identifier can be, `r#self` / `r#_`
@@ -470,6 +506,37 @@ pub struct Arm {
     pub pos: Pos,
     pub guard: Option<Expr>,
     pub body: Expr,
+}
+
+/// Where an expression starts, when it or its first part has a position (else none): for an error the syntax crate
+/// finds in it, an array length's or a discriminant's (typeck's expr_start for what it lowers)
+pub fn expr_pos(e: &Expr) -> Pos {
+    let first = |s: &Span, x: &Expr| if s.start.line != 0 { s.start } else { expr_pos(x) };
+    match e {
+        Expr::Lit(_, p) | Expr::Break(_, _, p) | Expr::Continue(_, p) | Expr::Closure(.., p) | Expr::Return(_, p) => *p,
+        Expr::Path(_, pa) | Expr::Struct(pa, ..) => pa.pos,
+        Expr::Unary(_, x, s) | Expr::Binary(_, x, _, s) | Expr::AssignOp(_, x, _, s) | Expr::MethodCall(x, _, _, _, s) | Expr::Index(x, _, s) | Expr::Field(x, _, s) => first(s, x),
+        Expr::Macro(_, _, s) => s.start,
+        Expr::Call(x, _) | Expr::Cast(x, _) | Expr::Try(x) | Expr::Paren(x) | Expr::Assign(x, _) | Expr::Ref(_, x) | Expr::RawRef(_, x) | Expr::Repeat(x, _) => expr_pos(x),
+        Expr::Let(_, x) | Expr::Match(x, _) | Expr::If(x, ..) | Expr::While(_, x, _) | Expr::For(_, _, x, _) | Expr::Range(Some(x), ..) => expr_pos(x),
+        Expr::Tuple(xs) | Expr::Array(xs) => xs.first().map(expr_pos).unwrap_or_default(),
+        // (a block's: its first statement's)
+        Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => match b.stmts.first() {
+            Some(Stmt::Let(.., p)) => *p,
+            Some(Stmt::Expr(x, _)) => Some(expr_pos(x)).filter(|p| p.line != 0).or_else(|| b.spos.get(0)).unwrap_or_default(),
+            _ => b.spos.get(0).unwrap_or_default(),
+        },
+        _ => Pos::default(),
+    }
+}
+
+/// An error at e (`line:col: msg`, the line in the item's own text, which the caller places), or with no position
+/// when e has none
+pub fn err_at_expr(e: &Expr, msg: &str) -> String {
+    match expr_pos(e) {
+        p if p.line != 0 => format!("{}:{}: {msg}", p.line, p.col + 1),
+        _ => msg.to_string(),
+    }
 }
 
 /// Where a pattern starts, when it has a path or holds one (else no position)
@@ -1100,6 +1167,10 @@ impl Parser {
                 }
             }
             first = false;
+            if t.is_raw() {
+                s.push_str("r#");
+                col += 2;
+            }
             s.push_str(&t.text);
             // (the line / column after a multi-line token (a string))
             let nl = t.text.bytes().filter(|&c| c == b'\n').count() as u32;
@@ -1127,7 +1198,7 @@ impl Parser {
                 TokKind::Close => depth -= 1,
                 _ => {}
             }
-            if !s.is_empty() && !(t.kind == TokKind::Punct && self.i > 0 && self.toks[self.i - 1].joint) {
+            if !s.is_empty() && !(t.kind == TokKind::Punct && self.i > 0 && self.toks[self.i - 1].kind != TokKind::Ident && self.toks[self.i - 1].joint) {
                 s.push(' ');
             }
             s.push_str(&t.text);

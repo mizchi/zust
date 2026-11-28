@@ -63,6 +63,15 @@ fn ident(p: &Path) -> Option<&str> {
     }
 }
 
+/// A literal's text as bytes, each CR LF a LF: rustc reads a source file with its line ends normalized, so a string that
+/// spans a line of a CRLF file holds a `\n` (`include_str!` reads the file as it is)
+fn crlf_to_lf(body: &str) -> Vec<u8> {
+    if !body.as_bytes().contains(&b'\r') {
+        return body.as_bytes().to_vec();
+    }
+    body.replace("\r\n", "\n").into_bytes()
+}
+
 /// The contents of a string / byte string literal (`"a\n"` / `r#"x"#` / `b"\x01"` / `br"y"`). (whether it is bytes, contents)
 pub fn str_lit(t: &str) -> Option<(bool, Vec<u8>)> {
     let (byte, rest) = match t.strip_prefix('b') {
@@ -74,17 +83,21 @@ pub fn str_lit(t: &str) -> Option<(bool, Vec<u8>)> {
         let body = &r[hashes..];
         let body = body.strip_prefix('"')?;
         let body = &body[..body.len().checked_sub(1 + hashes)?];
-        return Some((byte, body.as_bytes().to_vec()));
+        return Some((byte, crlf_to_lf(body)));
     }
     let body = rest.strip_prefix('"')?.strip_suffix('"')?;
     // (a string without escapes stays as is: do not build up a large string one char at a time)
     if !body.as_bytes().contains(&b'\\') {
-        return Some((byte, body.as_bytes().to_vec()));
+        return Some((byte, crlf_to_lf(body)));
     }
     let mut out = Vec::with_capacity(body.len());
     let mut cs = body.chars().peekable();
     while let Some(c) = cs.next() {
         if c != '\\' {
+            // (a line end written CR LF is a LF: see crlf_to_lf)
+            if c == '\r' && cs.peek() == Some(&'\n') {
+                continue;
+            }
             if (c as u32) < 0x80 {
                 out.push(c as u8);
             } else {
@@ -117,9 +130,10 @@ pub fn str_lit(t: &str) -> Option<(bool, Vec<u8>)> {
                 let ch = char::from_u32(u32::from_str_radix(&h, 16).ok()?)?;
                 out.extend_from_slice(ch.to_string().as_bytes());
             }
-            // A `\` at the end of a line: skip the newline and the whitespace at the start of the next line
+            // A `\` at the end of a line: skip the newline and the whitespace at the start of the next line, as rustc's
+            // lexer: spaces, tabs and line ends only (a form feed `\x0c` stays, with a warning in rustc)
             '\n' | '\r' => {
-                while cs.peek().is_some_and(|c| c.is_whitespace()) {
+                while cs.peek().is_some_and(|c| matches!(c, ' ' | '\t' | '\n' | '\r')) {
                     cs.next();
                 }
             }
