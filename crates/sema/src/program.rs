@@ -1151,8 +1151,12 @@ impl Insts {
                         }
                     }
                 }
+                // (the solver's answer, asked once: the check below asks the same goal again)
+                let mut held: Option<crate::traits::Ans> = None;
                 if own && !prog.has_param(t) && !prog.names_placeholder(t, 0) && !args.iter().any(|&a| prog.names_placeholder(a, 0) && tr.contains('<')) {
-                    match prog.tdb.holds_in(prog, t, tr, &gn, &args) {
+                    let h = prog.tdb.holds_in(prog, t, tr, &gn, &args);
+                    held = Some(h);
+                    match h {
                         crate::traits::Ans::No => {
                             return Err(format!("the trait bound `{}: {}` is not satisfied (for `{pn}`) {}", crate::traits::display_ty(prog, t), crate::traits::display_name(&crate::traits::bound_text(tr)), crate::traits::SOLVED_NO));
                         }
@@ -1189,7 +1193,7 @@ impl Insts {
                     let r = !blanket && !fn_of_ref && !unit_known && inst_tr().as_deref().is_none_or(|b| b == tr || !prog.implements(t, b));
                     r
                 };
-                if std_no || ((own || t == Ty::Unit) && !prog.has_param(t) && prog.tdb.holds_in(prog, t, tr, &gn, &args) == crate::traits::Ans::No) {
+                if std_no || ((own || t == Ty::Unit) && !prog.has_param(t) && held.unwrap_or_else(|| prog.tdb.holds_in(prog, t, tr, &gn, &args)) == crate::traits::Ans::No) {
                     return Err(format!(
                         "the trait bound `{}: {}` is not satisfied (for `{pn}`)",
                         prog.tn(t),
@@ -3416,6 +3420,23 @@ impl Program {
         self.prim_impls.contains(&k) && !self.prim_ref_only.contains(&k)
     }
 
+    /// A `dyn Any` (+ Send / Sync) with no Debug of its own: std's own Debug impl for it writes `Any { .. }` (a
+    /// thread's join error, a panic's payload). Only std's Any, the prelude's trait (`__p_Any` where a program defines
+    /// an `Any` of its own): a program's `trait Any` has no Debug (E0277)
+    pub fn dyn_any_debug(&self, s: &str) -> bool {
+        // (std's impls are for `dyn Any`, `dyn Any + Send` and `dyn Any + Send + Sync`: `dyn Any + Sync` has none)
+        let (n, send, sync) = dyn_autos(s);
+        if sync && !send {
+            return false;
+        }
+        let n = n.trim();
+        let last = n.rsplit("::").next().unwrap_or(n);
+        matches!(last, "Any" | "__p_Any")
+            && self.traits.get(n).or_else(|| self.traits.get(last)).is_some_and(|fs| {
+                !fs.is_empty() && fs.iter().all(|&f| self.item_of.get(f as usize).copied().flatten().is_some_and(|i| i >= self.prelude_from))
+            })
+    }
+
     pub fn implements(&self, t: Ty, tr: &str) -> bool {
         self.evaluate(t, tr) != Certainty::No
     }
@@ -3848,7 +3869,8 @@ impl Program {
                 let first = d.split('+').next().unwrap_or(d).trim();
                 let name = first.split(|c: char| c == '(' || c == '<').next().unwrap_or(first).trim();
                 self.dyn_impls.contains(&(tr.to_string(), name.rsplit("::").next().unwrap_or(name).to_string()))
-            }) || (!self.dyn_impls_exact.is_empty() && self.dyn_impls_exact.contains(&(tr.to_string(), dyn_first(d)))),
+            }) || (!self.dyn_impls_exact.is_empty() && self.dyn_impls_exact.contains(&(tr.to_string(), dyn_first(d))))
+                || (tr == "Debug" && self.dyn_any_debug(d)),
             // Fn pointers: the Fn traits (with a matching argument count) and Copy
             // (impls for fn pointers / raw pointers / `!`: the exact type, or a generic one (None) of that kind)
             Ty::Fn(_) | Ty::Ptr(..) | Ty::Never

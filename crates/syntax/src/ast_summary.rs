@@ -2055,8 +2055,34 @@ fn opaque_from(sig: &PSig) -> u64 {
     crate::types::OPAQUE_FROM | m24 | m21 << 31
 }
 
+/// A bound's reading, kept by its text for the thread: the readers below parse the bound as a file of its own each
+/// time, and the same bounds are read again and again (each instance of a generic fn reads its parameters' bounds,
+/// `F: Fn(u32) -> u32` once per call). Each reading is a function of the text alone
+fn memo<T: Clone + 'static>(cache: &'static std::thread::LocalKey<std::cell::RefCell<crate::fxhash::FxMap<String, T>>>, s: &str, read: impl FnOnce(&str) -> T) -> T {
+    if let Some(r) = cache.with(|c| c.borrow().get(s).cloned()) {
+        return r;
+    }
+    let r = read(s);
+    cache.with(|c| c.borrow_mut().insert(s.to_string(), r.clone()));
+    r
+}
+
+thread_local! {
+    static FN_BOUNDS: std::cell::RefCell<crate::fxhash::FxMap<String, Option<(String, Vec<TySyn>, TySyn)>>> = Default::default();
+    static BOUND_ARGS: std::cell::RefCell<crate::fxhash::FxMap<String, Option<(String, Vec<TySyn>)>>> = Default::default();
+    static ASSOC_BINDINGS: std::cell::RefCell<crate::fxhash::FxMap<String, Vec<(String, TySyn)>>> = Default::default();
+}
+
 /// (kind, arguments, return value) if it is a bound of the form `Fn(A, B) -> R`
 pub fn parse_fn_bound(s: &str) -> Option<(String, Vec<TySyn>, TySyn)> {
+    // (one that is no Fn bound is told by its first word, before the cache)
+    if !["FnOnce", "FnMut", "Fn"].into_iter().any(|k| s.starts_with(k) && s[k.len()..].trim_start().starts_with('(')) {
+        return None;
+    }
+    memo(&FN_BOUNDS, s, read_fn_bound)
+}
+
+fn read_fn_bound(s: &str) -> Option<(String, Vec<TySyn>, TySyn)> {
     let kind = ["FnOnce", "FnMut", "Fn"].into_iter().find(|k| s.starts_with(k) && s[k.len()..].trim_start().starts_with('('))?;
     let f = parse_file(&format!("type __B = dyn {s};")).ok()?;
     let ItemKind::Type(_, _, _, Some(PTy::Dyn(bs))) = &f.items.first()?.kind else { return None };
@@ -2080,6 +2106,10 @@ pub fn bound_args(s: &str) -> Option<(String, Vec<TySyn>)> {
         let n = s.trim();
         return Some((n.rsplit("::").next().unwrap_or(n).to_string(), vec![]));
     };
+    memo(&BOUND_ARGS, s, |s| read_bound_args(s, lt))
+}
+
+fn read_bound_args(s: &str, lt: usize) -> Option<(String, Vec<TySyn>)> {
     let f = parse_file(&format!("type __B = dyn {s};")).ok()?;
     let ItemKind::Type(_, _, _, Some(PTy::Dyn(bs))) = &f.items.first()?.kind else { return None };
     let Some(Bound::Trait(_, p)) = bs.first() else { return None };
@@ -2162,6 +2192,10 @@ pub fn fn_bound_ret_from(s: &str) -> Vec<usize> {
 
 /// The associated type bindings (name, type) of a bound `Iterator<Item = T>`
 pub fn assoc_bindings(s: &str) -> Vec<(String, TySyn)> {
+    memo(&ASSOC_BINDINGS, s, read_assoc_bindings)
+}
+
+fn read_assoc_bindings(s: &str) -> Vec<(String, TySyn)> {
     let mut out = Vec::new();
     let Ok(f) = parse_file(&format!("type __B = dyn {s};")) else { return out };
     let Some(it) = f.items.first() else { return out };
