@@ -4955,6 +4955,10 @@ impl Cx<'_> {
                 return None;
             }
             let kind = self.prog.trait_recv_kind(tr, method)?;
+            // (a bound naming another trait with the method decides: `t.value()` of `T: B` is B's)
+            if !concrete && self.prog.bound_picks_other(self.root, &self.env, tr, method, t) {
+                return None;
+            }
             let opaque = |u: Ty| !concrete && self.prog.param_bounded_by(self.root, &self.env, tr, u);
             let (st, n, adj) = self.prog.ref_param_probe(tr, method, kind, t, &opaque)?;
             Some((tr.clone(), st, n, adj))

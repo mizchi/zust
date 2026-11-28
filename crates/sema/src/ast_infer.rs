@@ -614,6 +614,10 @@ impl Inf<'_> {
         };
         let (tr, st) = prog.ref_param_impls.iter().find_map(|(tr, _)| {
             let kind = prog.trait_recv_kind(tr, n)?;
+            // (a bound naming another trait with the method decides, as the code generator's)
+            if !concrete && prog.bound_picks_other(root, env, tr, n, t) {
+                return None;
+            }
             let opaque = |u: Ty| !concrete && prog.param_bounded_by(root, env, tr, u);
             let (st, _, _) = prog.ref_param_probe(tr, n, kind, t, &opaque)?;
             Some((tr.clone(), st))

@@ -5841,6 +5841,18 @@ impl Program {
         })
     }
 
+    /// Whether a call `x.m()` with x of type t takes another trait's m than tr's by a bound: t is what a type parameter of
+    /// fn root stands for (or Self of a default) whose bounds name another trait with a method m, and none names tr.
+    /// `t.value()` of `T: B` is B's, beside `impl<X: A> A for &X` (ref_param_method_call, #144)
+    pub fn bound_picks_other(&self, root: u32, env: &TyEnv, tr: &str, m: &str, t: Ty) -> bool {
+        if self.param_bounded_by(root, env, tr, t) {
+            return false;
+        }
+        self.traits.iter().any(|(b, ids)| {
+            b != tr && ids.iter().any(|&d| self.names[d as usize].rsplit("::").next() == Some(m)) && self.param_bounded_by(root, env, b, t)
+        })
+    }
+
     /// Whether a type parameter of fn root bounded by tr (or a supertrait of tr's) stands for t in an instance with
     /// env, or t is Self of tr's default root: ref_param_probe's `opaque`
     pub fn param_bounded_by(&self, root: u32, env: &TyEnv, tr: &str, t: Ty) -> bool {
