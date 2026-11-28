@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795832482994,
+  "lastUpdate": 1795832485920,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -153725,6 +153725,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/94a89b977bf365e088adfb60cb644d3599eac596"
         },
         "date": 1795832056054,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 80.61,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1937,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 86.16,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1562,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 73.92,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5460,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "854295530bdd5a4ebd1d2b312512abc37d2ba430",
+          "message": "File::open / fs::metadata / fs::set_permissions with a &str or String path (#330)\n\nThe NUL check of a path (std's InvalidInput) was `p.iter().any(..)`: the\nslice's iterator is codegen's, which selection does not follow from a\nprelude body, so `File::open(\"/dev/null\")` and `File::open(s)` with a\nString failed to compile (\"`.iter()` is only supported directly in a\n`for` loop\"); only a `Path::new(..)` argument, which brought the iterator\nin by another way, compiled. The check is now `__exr_has_nul`, a loop.\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-28T11:09:06+09:00",
+          "tree_id": "d8d436c13f9d6292d92e8a15b1bf6d4276e2ac2d",
+          "url": "https://github.com/mizchi/zust/commit/854295530bdd5a4ebd1d2b312512abc37d2ba430"
+        },
+        "date": 1795832485313,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
