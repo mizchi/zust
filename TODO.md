@@ -367,10 +367,11 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
 test by test (`cratebench/test_result.md`). fnv, rustc-hash, cfg-if and adler2 match, and CI keeps them so
 (`--check`). Tracking issue for the rest: #200.
 
-- either does not build under zurgo yet. The first error is the deref coercion of its `deref` test,
-  `is_str(&value)` with `value: Either<String, &str>` (`impl Deref for Either<L, R> where L: Deref, R: Deref<Target
-  = L::Target>`): `expected &str, found &Either<String, &str>`. Its `fmt_traits` test (Binary / LowerHex / LowerExp
-  / Pointer ..) is right in a single file (tests/probe/fmt_radix_traits.rs). Then serde_core, through the dev-dependency serde_json: #197, #198, and std types
+- either does not build under zurgo yet. The first error is the empty array of its `seek` test,
+  `Left(io::Cursor::new([]))` (`type annotations needed for an empty array`): rustc takes the element type from the
+  other arm's `Right(io::Cursor::new(&mockdata[..]))` and the `Read` the reader is used as. Its `deref` test (the deref
+  coercion of `is_str(&value)` through `impl Deref for Either<L, R>`, tests/probe/deref_either.rs) and its `fmt_traits`
+  test (tests/probe/fmt_radix_traits.rs) are right in a single file. Then serde_core, through the dev-dependency serde_json: #197, #198, and std types
   the prelude lacks (`CString` / `CStr`, net addresses, `SystemTime`, `LinkedList`, `RwLock`, `Weak`, `Bound`).
 - A method of a trait with several impls for one type that differ only in the trait's arguments is not chosen by a
   bound: `fn f<T: AsMut<[u8]>>(t: &mut T) { t.as_mut() }` with `T = Either<..>` (either's `AsMut<str>` /
