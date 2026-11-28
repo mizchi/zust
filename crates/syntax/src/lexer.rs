@@ -1623,6 +1623,30 @@ pub fn tokenize(s: &[u8]) -> Vec<(u8, usize, usize)> {
     toks
 }
 
+/// The name a prelude item defines, from its identifiers (`idents`, ranges of src): a fn's, struct's, enum's, static's or
+/// const's (an associated const's too), or a type alias's (`normal`: an item not in an impl or trait), without the
+/// `__core_` of a core-only item. A member of an impl of a radix or exponent fmt trait (`impl LowerHex for u8`; header:
+/// its impl's identifiers) is looked up by the trait's name, which a program that uses the impls names, not by `fmt`,
+/// which every program that formats needs. (Here, not in prelude.rs: build.rs works the names out ahead of time)
+pub fn prelude_item_name<'a>(src: &'a str, idents: &[(u32, u32)], normal: bool, header: Option<&[(u32, u32)]>) -> Option<&'a str> {
+    if let Some(h) = header {
+        let mut hw = h.iter().map(|&(a, b)| &src[a as usize..b as usize]);
+        if let (Some("impl"), Some(t), Some("for")) = (hw.next(), hw.next(), hw.next()) {
+            if matches!(t, "Binary" | "Octal" | "LowerHex" | "UpperHex" | "LowerExp" | "UpperExp") {
+                return Some(t);
+            }
+        }
+    }
+    let mut ids = idents.iter().map(|&(a, b)| &src[a as usize..b as usize]);
+    ids.find(|w| matches!(*w, "fn" | "struct" | "enum" | "static" | "const") || (normal && *w == "type"))?;
+    let mut n = ids.next()?;
+    // (`const fn f`: f; `static mut X`: X, not `mut`, which almost every program names)
+    if n == "fn" || n == "mut" {
+        n = ids.next()?;
+    }
+    Some(n.strip_prefix("__core_").unwrap_or(n))
+}
+
 /// What a proc macro's expansion starts with (crate::pm): a comment, so the preprocessing knows that a line holds one
 pub const PM_MARK: &str = "/*zust:pm*/";
 

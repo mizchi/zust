@@ -3445,6 +3445,10 @@ impl Program {
                 Some(self.structs[sid as usize].args.first().is_some_and(|&a| self.implements(a, tr)))
             }
             (Ty::Box(_), "Deref" | "DerefMut") => Some(true),
+            // (std's Deref of a reference, a String and a Vec, which the compiler derefs itself: `L: Deref` of an
+            // `Either<String, &str>`)
+            (Ty::Ref(_, _), "Deref") | (Ty::Ref(true, _), "DerefMut") => Some(true),
+            (Ty::Struct(_), "Deref" | "DerefMut") if matches!(base_name(t), Some("String" | "Vec")) => Some(true),
             // (a derived Copy of a generic type holds when its arguments are Copy, as `#[derive(Copy)]` bounds them:
             // `Option<String>` is not Copy; PhantomData<T> always is)
             (Ty::Struct(sid), "Copy")
@@ -6531,6 +6535,9 @@ impl Program {
             ("Output", t) if prim(t) => Some(t),
             ("Output", Ty::Ref(_, i)) if prim(*i) => Some(*i),
             ("Target", Ty::Ref(_, i) | Ty::Box(i)) => Some(*i),
+            // (`<String as Deref>::Target` is str, `<Vec<T> as Deref>::Target` is [T]: their Deref is the compiler's)
+            ("Target", Ty::Struct(sid)) if self.structs[sid as usize].name == "String" && self.structs[sid as usize].base.is_none() => Some(Ty::Str),
+            ("Target", Ty::Struct(sid)) if self.structs[self.base_of(sid) as usize].name == "Vec" => self.structs[sid as usize].args.first().map(|&e| Ty::Slice(intern(e))),
             _ => None,
         }
     }

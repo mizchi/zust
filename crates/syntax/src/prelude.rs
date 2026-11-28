@@ -18,45 +18,39 @@ use std::sync::OnceLock;
 
 use crate::lexer::{ItemKind, SrcItem};
 
-/// The prelude's items (lexed only once): (item, the name it defines, whether it is usable only through core::)
-fn items() -> &'static [(SrcItem, Option<String>, bool)] {
-    static ITEMS: OnceLock<Vec<(SrcItem, Option<String>, bool)>> = OnceLock::new();
+/// A prelude item: SrcItem's fields, the identifiers borrowed from build.rs's table (copying them for every item was
+/// most of a small program's prelude setup)
+pub(crate) struct PItem {
+    pub start: usize,
+    pub end: usize,
+    pub line: usize,
+    pub hash: crate::key::Key,
+    pub idents: &'static [(u32, u32)],
+    pub kind: ItemKind,
+}
+
+/// The prelude's items (build.rs split them): (item, the name it defines, whether it is usable only through core::)
+fn items() -> &'static [(PItem, Option<&'static str>, bool)] {
+    static ITEMS: OnceLock<Vec<(PItem, Option<&'static str>, bool)>> = OnceLock::new();
     ITEMS.get_or_init(|| {
-        // (build.rs has already done the splitting)
         PRELUDE_ITEMS
             .iter()
-            .map(|&(start, end, line, k, a, idents)| SrcItem {
-                start: start as usize,
-                end: end as usize,
-                line: line as usize,
-                hash: 0,
-                idents: idents.to_vec(),
-                kind: match k {
-                    0 => ItemKind::Normal,
-                    1 => ItemKind::ImplHeader,
-                    2 => ItemKind::ImplMember(a),
-                    3 => ItemKind::TraitHeader,
-                    4 => ItemKind::TraitMember(a),
-                    _ => ItemKind::InnerAttr,
-                },
-            })
-            .map(|it| {
-                let mut name = defined_name(PRELUDE, &it);
-                // (a member of an impl of a radix or exponent fmt trait (`impl LowerHex for u8`): looked up by the
-                // trait's name, which a program that uses the impls names, not by `fmt`, which every program that
-                // formats needs: the first lookup of each round then passes over them, not their gate)
-                if let ItemKind::ImplMember(h) = it.kind {
-                    let mut hw = PRELUDE_ITEMS[h as usize].5.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]);
-                    if let (Some("impl"), Some(t), Some("for")) = (hw.next(), hw.next(), hw.next()) {
-                        if matches!(t, "Binary" | "Octal" | "LowerHex" | "UpperHex" | "LowerExp" | "UpperExp") {
-                            name = Some(t.to_string());
-                        }
-                    }
-                }
-                let core_only = it
-                    .idents
-                    .iter()
-                    .any(|&(a, b)| PRELUDE[a as usize..b as usize].starts_with("__core_"));
+            .map(|&(start, end, line, k, a, idents, hi, lo, name, core_only)| {
+                let it = PItem {
+                    start: start as usize,
+                    end: end as usize,
+                    line: line as usize,
+                    hash: (hi as u128) << 64 | lo as u128,
+                    idents,
+                    kind: match k {
+                        0 => ItemKind::Normal,
+                        1 => ItemKind::ImplHeader,
+                        2 => ItemKind::ImplMember(a),
+                        3 => ItemKind::TraitHeader,
+                        4 => ItemKind::TraitMember(a),
+                        _ => ItemKind::InnerAttr,
+                    },
+                };
                 (it, name, core_only)
             })
             .collect()
@@ -537,9 +531,9 @@ const ITER_NAMES: &[&str] = &[
 ];
 
 /// Adds a prelude item's identifiers to need (Iterator method names only in a method call's position)
-fn add_idents(need: &mut crate::fxhash::FxSet<&'static str>, it: &SrcItem) {
+fn add_idents(need: &mut crate::fxhash::FxSet<&'static str>, idents: &[(u32, u32)]) {
     let bytes = PRELUDE.as_bytes();
-    for &(a, b) in &it.idents {
+    for &(a, b) in idents {
         let w = &PRELUDE[a as usize..b as usize];
         if w != "Iterator" && ITER_NAMES.contains(&w) && !method_call_at(bytes, a as usize, b as usize) {
             continue;
@@ -615,21 +609,6 @@ fn owner(h: usize) -> Option<&'static str> {
 }
 
 /// The name of `fn x` / `struct X` / `enum X` (`__core_x` is looked up as x)
-fn defined_name(src: &str, it: &SrcItem) -> Option<String> {
-    // (called for every prelude item at startup, so it walks the identifiers without building a Vec)
-    let mut ids = it.idents.iter().map(|&(a, b)| &src[a as usize..b as usize]);
-    // (a type alias `pub type Path = str;` too, but not an associated type `type Item` in an impl)
-    let alias = matches!(it.kind, ItemKind::Normal);
-    // (an associated const `const ZERO: Duration` too; for a `const fn`, the fn's name)
-    ids.find(|w| matches!(*w, "fn" | "struct" | "enum" | "static" | "const") || (alias && *w == "type"))?;
-    let mut n = ids.next()?;
-    // (`const fn f`: f; `static mut X`: X, not `mut`, which almost every program names)
-    if n == "fn" || n == "mut" {
-        n = ids.next()?;
-    }
-    Some(n.strip_prefix("__core_").unwrap_or(n).to_string())
-}
-
 /// Returns, as source, only the prelude items the user's code may use (found by following identifiers).
 /// A program that does not use Option gets nothing added, so the cache does not grow either
 /// Prelude types a program may define for itself (no part of the compiler names them): when the program does, the
@@ -1120,6 +1099,10 @@ pub struct SelectCache {
     /// The source has std paths std_paths_to_shadowed rewrote to `__p_Name`: such identifiers are looked at (asked
     /// of every identifier only then)
     pub shadow_paths: bool,
+    /// The items of the last selection's text, as lexer::split would give them (positions in that text): the
+    /// prelude's, moved to where the text has them (None when the selection is empty). What front::with_prelude_in
+    /// appends, without splitting the text again
+    pub items: Option<Vec<SrcItem>>,
 }
 
 /// Checks each item instead of the whole user source (`contains` and so on), keeping results by item hash.
@@ -1345,6 +1328,7 @@ fn float_lit_in(src: &str) -> bool {
 
 pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCache) -> String {
     let all = items();
+    cache.items = None;
     // Collect only the user's identifiers that match a name the prelude defines (or a related name).
     // Building a set of every identifier costs ms per build on a large program, so look up in a small set
     // Compare directly with the few candidates per first character: no hashing, so large programs stay fast
@@ -2299,10 +2283,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                     if need.contains("__exr_seq_eq") && owner(h as usize).is_none_or(|o| need.contains(o)) {
                         chosen[i] = true;
                         changed = true;
-                        add_idents(&mut need, it);
+                        add_idents(&mut need, it.idents);
                         if !chosen[h as usize] {
                             chosen[h as usize] = true;
-                            add_idents(&mut need, &all[h as usize].0);
+                            add_idents(&mut need, all[h as usize].0.idents);
                         }
                     }
                     continue;
@@ -2339,7 +2323,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                 };
             // A variant name (Some and so on) needs its enum
             let wanted = err_impl || drop_member || match name {
-                Some(n) => need.contains(n.as_str()),
+                Some(n) => need.contains(*n),
                 None => false,
             } || (name.as_deref() == Some("Option")
                 && (need.contains("Some") || need.contains("None")))
@@ -2359,12 +2343,12 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             if wanted {
                 chosen[i] = true;
                 changed = true;
-                add_idents(&mut need, it);
+                add_idents(&mut need, it.idents);
                 if let ItemKind::ImplMember(h) | ItemKind::TraitMember(h) = it.kind {
                     if !chosen[h as usize] {
                         chosen[h as usize] = true;
                         let hit = &all[h as usize].0;
-                        add_idents(&mut need, hit);
+                        add_idents(&mut need, hit.idents);
                     }
                 }
             }
@@ -2377,6 +2361,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     let mut open_impl = false;
     // (items keep their prelude lines, newline-padded: panic lines never vary, so crates can share machine code)
     let mut cur_line = 1usize;
+    // (the items of `out`, as lexer::split would give them: each prelude item's, moved to where `out` has its text,
+    // its impl's or trait's header by its index here. `at[i]`: the index here of the prelude's item i)
+    let mut picked: Vec<SrcItem> = Vec::new();
+    let mut at: Vec<u32> = vec![u32::MAX; all.len()];
+    let mut whole = true;
     for (i, (it, _, _)) in all.iter().enumerate() {
         let in_impl = matches!(it.kind, ItemKind::ImplMember(_) | ItemKind::TraitMember(_));
         if open_impl && !in_impl {
@@ -2399,6 +2388,24 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             cur_line += 1;
         }
         let text = &PRELUDE[it.start..it.end];
+        let start = out.len();
+        let kind = match it.kind {
+            ItemKind::ImplMember(h) => ItemKind::ImplMember(at[h as usize]),
+            ItemKind::TraitMember(h) => ItemKind::TraitMember(at[h as usize]),
+            k => k,
+        };
+        // (a member whose header is not chosen: the text is split, as it was)
+        whole &= !matches!(kind, ItemKind::ImplMember(u32::MAX) | ItemKind::TraitMember(u32::MAX));
+        let shift = |p: u32| p - it.start as u32 + start as u32;
+        at[i] = picked.len() as u32;
+        picked.push(SrcItem {
+            start,
+            end: start + text.len(),
+            line: cur_line,
+            hash: it.hash,
+            idents: it.idents.iter().map(|&(a, b)| (shift(a), shift(b))).collect(),
+            kind,
+        });
         out.push_str(text);
         out.push('\n');
         cur_line += text.bytes().filter(|&c| c == b'\n').count() + 1;
@@ -2409,7 +2416,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if open_impl {
         out.push_str("}\n");
     }
-
+    if whole && !out.is_empty() {
+        cache.items = Some(picked);
+    }
     out
 }
 
