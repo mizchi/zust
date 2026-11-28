@@ -3,7 +3,10 @@ name: KPI
 # Every push to a pull request: the KPIs of bench/kpi_track.py (instruction counts of zustc on generated programs,
 # generic traits and cratebench's crates; one zust-analyzer session; build cache size) for the merge base and for the
 # head, measured on the same runner image, and one comment on the PR that shows the change and keeps the result of
-# every push (bench/kpi_pr.py). A change past +1% is a ::warning::; the job does not fail.
+# every push (bench/kpi_pr.py). A change past +1% is a ::warning::. A KPI above its ceiling in bench/kpi_ratchet.txt by
+# more than the ceiling's tolerance fails the job (bench/kpi_ratchet.py): a cost below the noise of one comparison with
+# the base adds up over pull requests, a ceiling does not move with them. Every push to main lowers the ceilings that
+# main measures below (the `ratchet` job, a commit of its own); only an edit of the file in a pull request raises one.
 #
 # The base's numbers are cached by what they depend on (the trees of the code and the benchmarks at the base, the
 # toolchain and valgrind's versions), so a push whose merge base was measured before builds and measures the head
@@ -64,7 +67,7 @@ jobs:
       - name: Install valgrind
         run: bash scripts/ci_install_valgrind.sh
       # (the key of a commit's KPIs: the files they are measured from (not the documents, nor the KPI log that main's
-      # commits append to; submodules by their commits), and what moves the counts besides them: the toolchain,
+      # commits append to, nor the ceilings the ratchet job lowers; submodules by their commits), and what moves the counts besides them: the toolchain,
       # valgrind, the runner's OS and its C library (cachegrind counts its instructions too). A commit that changes
       # only documents keeps its parent's key)
       - name: Find the merge base and the cache keys
@@ -78,7 +81,7 @@ jobs:
           kpi_key() {
             { echo "$env_now"
               git ls-tree -r "$1" -- crates src cratebench Cargo.toml Cargo.lock build.rs .cargo bench \
-                | grep -v -e '\.md$' -e 'bench/kpi_log\.'
+                | grep -v -e '\.md$' -e 'bench/kpi_log\.' -e 'bench/kpi_ratchet\.txt'
             } | sha256sum | cut -c1-24
           }
           if [ "${{ github.event_name }}" = pull_request ]; then
@@ -275,14 +278,68 @@ jobs:
         with:
           path: ~/kpi/base.txt
           key: ${{ needs.plan.outputs.head }}
+      # (the ceilings of the head's bench/kpi_ratchet.txt, the base's beside them to show the ones the pull request
+      # raises; the job fails after the comment is written)
       - name: Update the KPI comment on the PR
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PLANNED: ${{ needs.plan.outputs.env }}
+          BASE_SHA: ${{ needs.plan.outputs.base_sha }}
         run: |
           echo "base: ${{ needs.plan.outputs.base_hit == 'true' && 'from the cache' || 'measured in this run' }} (${{ needs.plan.outputs.base }})"
+          ratchet_base=()
+          if git fetch -q --depth=1 origin "$BASE_SHA" && git show "$BASE_SHA:bench/kpi_ratchet.txt" > "$RUNNER_TEMP/ratchet-base.txt" 2>/dev/null; then
+            ratchet_base=(--ratchet-base "$RUNNER_TEMP/ratchet-base.txt")
+          fi
+          status=0
           python3 bench/kpi_pr.py --base ~/kpi/base.txt --head ~/kpi/head.txt \
-            --base-sha ${{ needs.plan.outputs.base_sha }} --head-sha ${{ github.event.pull_request.head.sha }} \
+            --base-sha "$BASE_SHA" --head-sha ${{ github.event.pull_request.head.sha }} \
             --pr ${{ github.event.pull_request.number }} --repo ${{ github.repository }} \
-            --out "$RUNNER_TEMP/kpi.md"
+            --ratchet bench/kpi_ratchet.txt "${ratchet_base[@]}" --env "$PLANNED" \
+            --out "$RUNNER_TEMP/kpi.md" || status=$?
           cat "$RUNNER_TEMP/kpi.md" >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+  # (every push to main: the ceilings of bench/kpi_ratchet.txt that main measures below by more than half their
+  # tolerance become what it measured, and in another environment all of them do, in a commit on main that skips CI. The
+  # only job that writes to the repository; it runs main's code. A ceiling changed on main since this commit is left as
+  # it is: the next push's run lowers from there)
+  ratchet:
+    needs: [plan, report]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: kpi-head-*
+          path: ${{ runner.temp }}/parts
+          merge-multiple: true
+      - name: Lower the ceilings to main's KPIs
+        env:
+          PLANNED: ${{ needs.plan.outputs.env }}
+        run: |
+          cat "$RUNNER_TEMP"/parts/head-*.txt > "$RUNNER_TEMP/head.txt"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3 4; do
+            git fetch -q origin main
+            if ! git diff --quiet "$GITHUB_SHA" FETCH_HEAD -- bench/kpi_ratchet.txt; then
+              echo "bench/kpi_ratchet.txt changed on main after ${GITHUB_SHA::7}: left to the next push"; exit 0
+            fi
+            git reset -q --hard FETCH_HEAD
+            python3 bench/kpi_ratchet.py tighten bench/kpi_ratchet.txt --head "$RUNNER_TEMP/head.txt" --env "$PLANNED" --sha "${GITHUB_SHA::8}" \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            if git diff --quiet -- bench/kpi_ratchet.txt; then exit 0; fi
+            git commit -q -m "KPI ratchet: ceilings measured on ${GITHUB_SHA::7} [skip ci]" bench/kpi_ratchet.txt
+            if git push -q origin HEAD:main; then exit 0; fi
+            sleep $((i * 5))
+          done
+          echo "::warning::could not push bench/kpi_ratchet.txt (main moved on); the next push to main lowers the ceilings"
