@@ -669,6 +669,27 @@ impl Cx<'_> {
                 self.method_privacy(sid, method, msp.at)?;
             }
         }
+        // (`(*s).m()` / `(**self).m()` reaching a `str` or a slice: its method takes it by reference, so the receiver is
+        // the reference again, `(&*s).m()` (`&mut *s` through a `&mut`), not `*s` as a value (whose size is not known).
+        // A trait object's place has its own lowering (dyn_method_call_on))
+        if let Expr::Unary(op, inner, _) = strip_paren(recv) {
+            if op == "*" {
+                if let Some(Ty::Ref(m, u)) = self.peek(inner) {
+                    if matches!(*u, Ty::Str | Ty::Slice(_)) {
+                        // (through a `&mut`, borrowed mutably only for a method that takes `&mut self`: `(*s).len()`
+                        // reads, so a shared loan of `*s` beside it stays fine. A program's method is the one of its
+                        // impl for the str / slice (`impl Halve for [i32]`), not another trait's of the name)
+                        let mutates = || match self.prog.prim_method(*u, method) {
+                            Some(i) => matches!(self.prog.sigs[i as usize].params.first(), Some(Ty::Ref(true, _))),
+                            None => MUT_SLICE_METHODS.contains(&method.as_str()) || method.ends_with("_mut"),
+                        };
+                        let r = Expr::Ref(m && mutates(), Box::new(strip_paren(recv).clone()));
+                        let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(r), method.clone(), gargs.clone(), margs.clone(), msp));
+                        return self.expr(ne, expected);
+                    }
+                }
+            }
+        }
         // (#144: a method of `impl<T: B> Tr for &T` that rustc's probe takes for this receiver, which runs the impl's
         // own code (or the trait's default with Self = &X): `n.name()` of `n: N` with N = &S)
         if !self.prog.ref_dispatch.is_empty() {
@@ -4994,70 +5015,23 @@ impl Cx<'_> {
     /// x's (not a reference's) own method named m, which a receiver `&x` reaches before an impl for `&T`: how it takes
     /// self (0 `self`, 1 `&self`, 2 `&mut self`, 3 otherwise)
     fn own_method(&self, x: Ty, m: &str) -> Option<u8> {
-        let id = match x {
+        match x {
             // (a type parameter's placeholder (zustc check): its bounds' methods)
-            Ty::Struct(sid) if self.prog.is_placeholder(sid) => self.placeholder_method(sid, m),
-            Ty::Struct(sid) => self.prog.self_method(sid, m).or_else(|| self.prog.self_default_method(sid, m)),
-            // (a trait object: its trait's methods and its supertraits', `d.name()` of `d: &dyn Name` is the object's)
-            Ty::Dyn(d) => {
-                let first = d.split('+').next().unwrap_or(d).trim();
-                let first = first.split(['<', '(']).next().unwrap_or(first).trim();
-                let mut seen = vec![first.rsplit("::").next().unwrap_or(first).to_string()];
-                let mut i = 0;
-                let mut found = None;
-                while i < seen.len() && seen.len() < 32 && found.is_none() {
-                    found = self.prog.traits.get(&seen[i]).and_then(|ds| ds.iter().copied().find(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(m)));
-                    for s in self.prog.trait_supers.get(&seen[i]).cloned().unwrap_or_default() {
-                        let s = s.split('<').next().unwrap_or(&s).trim().to_string();
-                        if !seen.contains(&s) {
-                            seen.push(s);
-                        }
-                    }
-                    i += 1;
-                }
-                found.or_else(|| self.prog.prim_self_method(x, m))
-            }
-            t => self.prog.prim_self_method(t, m),
-        }?;
-        Some(match self.prog.sigs[id as usize].params.first() {
-            Some(Ty::Ref(false, _)) => 1,
-            Some(Ty::Ref(true, _)) => 2,
-            Some(Ty::Struct(_) | Ty::Param(_)) => 0,
-            _ => 3,
-        })
+            Ty::Struct(sid) if self.prog.is_placeholder(sid) => self.placeholder_method(sid, m).map(|id| self.prog.recv_code(id)),
+            x => self.prog.ref_own_method(x, m),
+        }
     }
 
-    /// x meets the bounds bs (T's of an impl for `&T`): a trait with an impl for references to a type parameter, of
-    /// which Program::evaluate's blanket answer holds any type, by that impl's bounds for a reference (`&&S: Name` of
-    /// `S: Name`) and by x's own impls otherwise; any other bound as evaluate answers it
-    fn ref_bounds_hold(&self, x: Ty, bs: &[String], depth: u32) -> bool {
-        bs.iter().all(|b| {
-            let b = b.trim();
-            if b.starts_with('?') || b.starts_with('\'') || b.starts_with("for<") || b.contains('(') {
-                return true;
-            }
-            let n = b.split('<').next().unwrap_or(b).trim();
-            let n = n.rsplit("::").next().unwrap_or(n);
-            match self.prog.ref_impls_of.get(n) {
-                None => self.prog.implements(x, n),
-                Some(_) if depth > 8 => true,
-                Some(impls) => match x {
-                    Ty::Ref(m, y) if impls.iter().any(|i| i.0 == m) => impls.iter().any(|i| i.0 == m && self.ref_bounds_hold(*y, &i.1, depth + 1)),
-                    _ => self.prog.implements_concrete(x, n),
-                },
-            }
-        })
+    /// ref_impl_pick's walk (Program::ref_impl_walk) in this fn: root's generics, the trait a path call named
+    fn ref_impl_walk(&self, all: &[crate::program::RefImplFn], rt: Ty, method: &str, param: Option<usize>, k: usize) -> Option<(u32, usize, Option<bool>)> {
+        let gens = self.prog.sigs.get(self.root as usize).map(|s| s.generics.as_slice()).unwrap_or(&[]);
+        let named = self.explicit_trait.as_ref().filter(|(m, _)| m == method).map(|(_, t)| t.as_str());
+        self.prog.ref_impl_walk(all, rt, method, param, k, gens, named, &|x| self.own_method(x, method))
     }
 
-    /// The fn c runs for Self = the reference st (`&X` of an impl for `&T`, `&mut X` of one for `&mut T`) when c's
-    /// bounds of T hold of X: the impl's method, or the trait's default it leaves out
+    /// Program::ref_impl_fn
     fn ref_impl_fn(&self, cs: &[&crate::program::RefImplFn], method: &str, st: Ty) -> Option<u32> {
-        let Ty::Ref(ms, x) = st else { return None };
-        // (a blanket impl's method: Self is the reference itself, when it meets the impl's bounds)
-        let c = cs.iter().find(|c| if c.blanket { self.ref_bounds_hold(st, &c.bounds, 0) } else { c.mutable == ms && self.ref_bounds_hold(*x, &c.bounds, 0) })?;
-        c.f.or_else(|| {
-            self.prog.traits.get(&c.tr)?.iter().copied().find(|&d| self.prog.sigs[d as usize].has_body && self.prog.names[d as usize].rsplit("::").next() == Some(method))
-        })
+        self.prog.ref_impl_fn(cs, method, st)
     }
 
     /// #144: the method of an impl for references to a type parameter (`impl<T: B> Tr for &T`, Program::ref_dispatch)
@@ -5071,7 +5045,9 @@ impl Cx<'_> {
     /// first step, and `(&&s).name()` the impl's for `&S`. At each step the method's `self` matches the type by value
     /// first (`&self` of Self = what a `&` points to), then by an autoref (Self = the type)
     ///
-    /// A receiver gen_ty cannot follow (a closure's capture, a pattern's binding, a method's result) whose type is what
+    /// (In a closure's body gen_ty follows its captures of the fn's parameters and its own parameters annotated with
+    /// the fn's type parameters, gen_params_of.) A receiver gen_ty cannot follow (another capture, a closure parameter
+    /// whose type is inferred, a pattern's binding, a method's result) whose type is what
     /// a type parameter P of this instance stands for, a reference: as a value of P it would call P's bound's method,
     /// as a value of that type of its own what the walk finds. Where the two differ the call is reported (Err), not
     /// run as one of them
@@ -5123,100 +5099,6 @@ impl Cx<'_> {
             }
         }
         Ok(pick)
-    }
-
-    /// ref_impl_pick's walk of the probe's steps for a receiver of type rt: of a type parameter (the index of root's
-    /// generics) under k references, or of a type of its own (param None)
-    fn ref_impl_walk(&self, all: &[crate::program::RefImplFn], rt: Ty, method: &str, param: Option<usize>, k: usize) -> Option<(u32, usize, Option<bool>)> {
-        let mut k = k;
-        // (a value of P: of the traits P's bounds name; a call that named its trait, that one's)
-        let gens = self.prog.sigs.get(self.root as usize).map(|s| s.generics.as_slice()).unwrap_or(&[]);
-        // (a bound's trait, or one of its supertraits: `<P as Name>::name` of `P: Loud` with `trait Loud: Name`)
-        let supers = |b: &str, tr: &str| {
-            let mut seen: Vec<&str> = vec![b];
-            let mut i = 0;
-            while i < seen.len() && seen.len() < 32 {
-                if seen[i] == tr {
-                    return true;
-                }
-                for s in self.prog.trait_supers.get(seen[i]).map(|v| v.as_slice()).unwrap_or(&[]) {
-                    let s = s.split('<').next().unwrap_or(s).trim();
-                    let s = s.rsplit("::").next().unwrap_or(s);
-                    if !seen.contains(&s) {
-                        seen.push(s);
-                    }
-                }
-                i += 1;
-            }
-            false
-        };
-        let bound = |tr: &str| {
-            param.is_none_or(|i| i == OPAQUE as usize || gens.get(i).is_some_and(|g| g.1.iter().any(|b| {
-                let b = b.trim();
-                let b = b.split('<').next().unwrap_or(b).trim();
-                supers(b.rsplit("::").next().unwrap_or(b), tr)
-            })))
-        };
-        let named = |tr: &str| self.explicit_trait.as_ref().is_none_or(|(m, t)| m != method || t == tr);
-        let cs: Vec<&crate::program::RefImplFn> = all.iter().filter(|c| (c.blanket || bound(&c.tr)) && named(&c.tr)).collect();
-        // (one trait's: two traits' impls for references with the method are left to the lookup)
-        let first = cs.first()?;
-        if cs.iter().any(|c| c.tr != first.tr) {
-            return None;
-        }
-        let kind = first.recv;
-        if param.is_none() {
-            k = 0;
-            let mut t = rt;
-            while let Ty::Ref(_, i) = t {
-                t = *i;
-                k += 1;
-            }
-        }
-        let (mut cur, mut depth, mut s) = (rt, k, 0usize);
-        // (`self` by value: Self is the type at the first step, or P's)
-        if kind == 0 {
-            if param.is_some() && k > 0 {
-                return None;
-            }
-            // (`(&s).take()`: S's own `take(&self)` comes first)
-            if let (None, 1, Ty::Ref(m, x)) = (param, k, rt) {
-                if self.own_method(*x, method) == Some(1 + m as u8) {
-                    return None;
-                }
-            }
-            return self.ref_impl_fn(&cs, method, rt).map(|f| (f, 0, None));
-        }
-        let want_mut = kind == 2;
-        loop {
-            if depth == 0 {
-                // (at P: Self is what P stands for, by the autoref; a type of its own: X's method, the lookup's)
-                return if param.is_some() { self.ref_impl_fn(&cs, method, cur).map(|f| (f, s, Some(want_mut))) } else { None };
-            }
-            let Ty::Ref(mc, inner) = cur else { return None };
-            if mc == want_mut {
-                // (by value: Self is what cur points to)
-                if depth == 1 {
-                    if param.is_some() {
-                        // (P itself, `n.name()` of `n: &N`: an impl for references when P stands for one)
-                        return self.ref_impl_fn(&cs, method, *inner).map(|f| (f, s, None));
-                    }
-                    // (X's own method, `(&s).name()`; else the impl's for `&X` by the autoref below (#143))
-                    if self.own_method(*inner, method).is_some() {
-                        return None;
-                    }
-                } else if let Some(f) = self.ref_impl_fn(&cs, method, *inner) {
-                    return Some((f, s, None));
-                }
-            }
-            // (by the autoref: Self is cur, `r.get()` of `r: &mut C` with `impl Counter for &mut T`'s `get(&self)`)
-            if let Some(f) = self.ref_impl_fn(&cs, method, cur) {
-                return Some((f, s, Some(want_mut)));
-            }
-            cur = *inner;
-            depth -= 1;
-            s += 1;
-        }
     }
 
     /// The call ref_impl_pick chose: the receiver through its derefs and the autoref (a `&mut` passed on as it is is
@@ -5308,7 +5190,8 @@ impl Cx<'_> {
         let (Some(c0), Some(at)) = (cs.first(), self.peek(first)) else { return Ok(None) };
         let st = match (c0.recv, at) {
             (0, t) => t,
-            (1, Ty::Ref(false, i)) | (2, Ty::Ref(true, i)) => *i,
+            // (a `&mut X` passed for `&self` is reborrowed shared, `&X`: Self is X)
+            (1, Ty::Ref(_, i)) | (2, Ty::Ref(true, i)) => *i,
             _ => return Ok(None),
         };
         let Some(f) = self.ref_impl_fn(&cs, method, st) else { return Ok(None) };
@@ -5420,7 +5303,12 @@ impl Cx<'_> {
                         // trait named (radix_fmt_method); its receiver keeps its `&`, as `Pointer::fmt(&rr, f)` of a `&&u8`
                         // writes rr itself, not *rr)
                         let std_fmt = ms == "fmt" && tr == if self.prog.traits.contains_key("__p_Pointer") { "__p_Pointer" } else { "Pointer" };
+                        // (and a trait with an impl for references to a type parameter keeps it, as ufcs_ref_recv
+                        // writes it: `Tr::m(&x)` is `(&x).m()`, whose probe makes Self x's type, as the path call's
+                        // Self is, also of a `&mut X` coerced to `&Self` (#144))
+                        let ref_tr = self.prog.ref_impls_of.contains_key(tr.as_str());
                         let recv = match a0 {
+                            _ if ref_tr => crate::ast_infer::ufcs_ref_recv(a0, self.prog.trait_recv_kind(&tr, &ms).flatten()),
                             Expr::Ref(_, e) if !std_fmt => paren((**e).clone()),
                             _ => paren(a0.clone()),
                         };

@@ -22,7 +22,7 @@ pub fn stmt_key(st: &Stmt) -> usize {
 pub type Full = (LetTypes, Option<Ty>, Vec<Option<Ty>>);
 
 /// 整数 / &str / 生ポインタの組み込みメソッド名 (infer.rs と同じ)
-fn is_builtin_scalar_method(n: &str) -> bool {
+pub fn is_builtin_scalar_method(n: &str) -> bool {
     matches!(
         n,
         "wrapping_add"
@@ -148,6 +148,21 @@ fn seg(name: &str) -> crate::parse::Seg {
     crate::parse::Seg { name: name.to_string(), args: vec![], fn_args: None, text: name.to_string() }
 }
 
+/// The receiver of the method call `Tr::m(a0, ..)` is written as, for a trait with an impl for references to a type
+/// parameter (`impl<T: Tr> Tr for &T`), whose method m takes self as `kind` (`&self`: Some(false), `&mut self`:
+/// Some(true), `self`: None): one whose method probe makes Self what the path call's is, a0's referent for a `&self` /
+/// `&mut self` method (`&x` / `&*r` as `&self` of X, also of an `&mut` argument coerced to `&Self`), a0's type for `self`
+/// (#144)
+pub fn ufcs_ref_recv(a0: &Expr, kind: Option<bool>) -> Expr {
+    let star = |e: &Expr| Expr::Unary("*".to_string(), Box::new(Expr::Paren(Box::new(e.clone()))), Default::default());
+    match (kind, a0) {
+        (Some(false), Expr::Ref(_, e)) => Expr::Ref(false, e.clone()),
+        (Some(true), Expr::Ref(true, _)) => Expr::Paren(Box::new(a0.clone())),
+        (Some(m), a) => Expr::Ref(m, Box::new(star(a))),
+        (None, a) => Expr::Paren(Box::new(a.clone())),
+    }
+}
+
 fn mcall(recv: Expr, name: &str, args: Vec<Expr>) -> Expr {
     Expr::MethodCall(Box::new(Expr::Paren(Box::new(recv))), name.to_string(), vec![], args, crate::parse::Span::default())
 }
@@ -229,6 +244,20 @@ struct Inf<'p> {
     asref: Vec<String>,
     /// the same of the `AsMut<X>` bounds
     asmut: Vec<String>,
+    /// #144: the generic fn whose body this is (or a closure's in it), whose bindings' types gen_vars has
+    gen_root: Option<u32>,
+    /// the bindings (their variables) whose types the generic body writes with a type parameter of gen_root's, as it
+    /// writes them (a parameter `b: B`, `let r: &mut B`, a closure's capture of the fn's parameter): the code
+    /// generator's gen_ty
+    gen_vars: Vec<(u32, Ty)>,
+    /// closures whose bodies are being inferred within the fn's: their calls are taken as on types of their own (the
+    /// closure's body, inferred on its own with its gen_params_of, is what the code generator runs)
+    clo_depth: u32,
+    /// the receiver ref_impl_method inferred, for the lookup that takes the call over (not inferred twice)
+    pre_recv: Option<(usize, u32)>,
+    /// (method, trait) of a path call `Tr::m(x)` the method call it becomes keeps to (the code generator's
+    /// explicit_traits)
+    named_trait: Option<(String, String)>,
 }
 
 impl<'p> std::ops::Deref for Inf<'p> {
@@ -270,7 +299,7 @@ pub fn infer_ctx(
     ret: Option<Ty>,
     root: Option<(u32, u32)>,
 ) -> Full {
-    infer_ctx_margs(prog, recv, params, body, sig, env, extra, ret, root).0
+    infer_ctx_margs(prog, recv, params, body, sig, env, extra, ret, root, &[]).0
 }
 
 /// infer_ctx と同じで、読んだマクロの引数も返す
@@ -285,6 +314,7 @@ pub fn infer_ctx_margs(
     extra: &[(String, Ty)],
     ret: Option<Ty>,
     root: Option<(u32, u32)>,
+    gen_params: &[(String, Ty)],
 ) -> (Full, MacroArgs, TextTypes) {
 
     let clo_root = root.map(|(r, base)| (r, base, body as *const Block));
@@ -310,7 +340,27 @@ pub fn infer_ctx_margs(
     if let Some((r, _)) = root {
         as_targets(&prog.sigs[r as usize].generics);
     }
-    let mut s = Inf { s: Solver::new(prog, env), pending: vec![], keep: vec![], turbofish: None, clo_root, clo_keys: None, margs: Default::default(), exprs: vec![], mbase: Default::default(), asref, asmut };
+    // (#144: the bindings whose types the generic body writes with root's type parameters, the code generator's
+    // gen_params_of)
+    let gen_root = root.filter(|_| !gen_params.is_empty()).map(|r| r.0);
+    let mut s = Inf {
+        s: Solver::new(prog, env),
+        pending: vec![],
+        keep: vec![],
+        turbofish: None,
+        clo_root,
+        clo_keys: None,
+        margs: Default::default(),
+        exprs: vec![],
+        mbase: Default::default(),
+        asref,
+        asmut,
+        gen_root,
+        gen_vars: vec![],
+        clo_depth: 0,
+        pre_recv: None,
+        named_trait: None,
+    };
     s.ret = match ret {
         Some(t) if prog.has_param(t) => s.known_g(t, &mut vec![]),
         Some(t) => s.known(t),
@@ -340,6 +390,11 @@ pub fn infer_ctx_margs(
         let v = if prog.has_param(t) { s.var() } else { s.known(t) };
         pvars.push(v);
         s.scopes[0].push((name, v));
+    }
+    for (n, t) in gen_params {
+        if let Some(v) = s.lookup(n) {
+            s.gen_vars.push((v, *t));
+        }
     }
     let tail = s.block(body);
     let ret = s.ret;
@@ -750,7 +805,9 @@ impl Inf<'_> {
         }
         let saved = self.ret;
         self.ret = rv;
+        self.clo_depth += 1;
         let b = self.expr(body);
+        self.clo_depth -= 1;
         self.unify(b, rv);
         self.ret = saved;
         self.scopes.pop();
@@ -1000,6 +1057,18 @@ impl Inf<'_> {
                     if self.no_record == 0 {
                         self.lets.push((stmt_key(st), v));
                     }
+                    // (#144: the binding's type as the generic body writes it, the code generator's gen_ann / gen_ty)
+                    if self.gen_root.is_some() && self.clo_depth == 0 {
+                        if let Pat::Ident(false, _, _, None) = pat {
+                            let g = match ann_ty {
+                                Some(t) => self.gen_ann(t),
+                                None => init.as_ref().and_then(|i| self.gen_ty(i, 0)),
+                            };
+                            if let Some(g) = g {
+                                self.gen_vars.push((v, g));
+                            }
+                        }
+                    }
                     match pat {
                         // (`let ref x = e;` binds a reference to e's value: as a pattern)
                         Pat::Ident(false, _, n, None) => self.scopes.last_mut().unwrap().push((n.clone(), v)),
@@ -1040,6 +1109,12 @@ impl Inf<'_> {
 
     /// 式の型変数。値を作る式 (リテラル・構築・呼び出し) は結果の型も記録する
     fn expr(&mut self, e: &Expr) -> u32 {
+        if let Some((a, v)) = self.pre_recv {
+            if a == e as *const Expr as usize {
+                self.pre_recv = None;
+                return v;
+            }
+        }
         let call = matches!(e, Expr::Call(..) | Expr::MethodCall(..));
         let mark = self.pending.len();
         if call {
@@ -1271,7 +1346,11 @@ impl Inf<'_> {
                         .iter()
                         .any(|&d| self.prog.sigs[d as usize].has_self && self.prog.names[d as usize].rsplit("::").next() == Some(ms.as_str()));
                     if selfm && !matches!(tr.as_str(), "Ord" | "PartialOrd" | "PartialEq" | "Eq") {
+                        // (a trait with an impl for references to a type parameter: the receiver as ufcs_ref_recv
+                        // writes it, whose probe makes Self the path call's (#144))
+                        let ref_tr = self.prog.ref_impls_of.contains_key(tr.as_str());
                         let recv = match &args[0] {
+                            a if ref_tr => ufcs_ref_recv(a, self.prog.trait_recv_kind(tr, ms).flatten()),
                             Expr::Ref(_, e) => (**e).clone(),
                             a => a.clone(),
                         };
@@ -1933,6 +2012,17 @@ impl Inf<'_> {
             }
         }
         if let Some(x) = self.prim_method_call(f, args) {
+            // (`A::get(&&s)` of a trait with an impl for references: the method call it becomes is A's, which
+            // ref_impl_method keeps to (as the code generator's explicit_traits))
+            if !self.prog.ref_dispatch.is_empty() {
+                if let Expr::Path(None, p) = f {
+                    let pp = PPath::of(p);
+                    let q = self.prog.strip_mods_p(&pp).unwrap_or(pp);
+                    if q.segs.len() == 2 && self.prog.ref_impls_of.contains_key(q.segs[0].name.as_str()) {
+                        self.named_trait = Some((q.segs[1].name.clone(), q.segs[0].name.clone()));
+                    }
+                }
+            }
             self.pos_record += 1;
             let v = self.expr_kept(x, false);
             self.pos_record -= 1;
@@ -2360,6 +2450,131 @@ impl Inf<'_> {
     }
 
     fn method_call(&mut self, recv: &Expr, n: &str, tf: &Vec<GArg>, args: &[Expr]) -> u32 {
+        // (this call's, not one in its receiver or arguments)
+        let named = self.named_trait.take().filter(|(m, _)| m == n).map(|(_, t)| t);
+        // (a method of an impl for references to a type parameter that rustc's probe takes: that impl's fn, or the
+        // trait's default with Self the reference, as the code generator's ref_impl_pick (#144))
+        if !self.prog.ref_dispatch.is_empty() && self.prog.ref_dispatch.contains_key(n) {
+            if let Some(r) = self.ref_impl_method(recv, n, tf, args, named.as_deref()) {
+                return r;
+            }
+            let r = self.method_call_rest(recv, n, tf, args);
+            self.pre_recv = None;
+            return r;
+        }
+        self.method_call_rest(recv, n, tf, args)
+    }
+
+    /// method_call's for a method in Program::ref_dispatch: the probe's walk (Program::ref_impl_walk) of the receiver's
+    /// type, of a type parameter as the generic body writes it (gen_ty) or of a type of its own. None where it takes
+    /// another method, method_call_rest's (the receiver inferred is kept for it, pre_recv)
+    #[cold]
+    #[inline(never)]
+    fn ref_impl_method(&mut self, recv: &Expr, n: &str, tf: &Vec<GArg>, args: &[Expr], named: Option<&str>) -> Option<u32> {
+        let prog = self.prog;
+        let all = prog.ref_dispatch.get(n)?;
+        let r = self.expr(recv);
+        self.pre_recv = Some((recv as *const Expr as usize, r));
+        let t = self.resolve(r).filter(|t| !prog.has_param(*t))?;
+        let g = if self.clo_depth == 0 { self.gen_ty(recv, 0) } else { None };
+        let (mut param, mut k) = (None, 0usize);
+        if let Some(mut g) = g {
+            while let Ty::Ref(_, i) = g {
+                g = *i;
+                k += 1;
+            }
+            if let Ty::Param(i) = g {
+                param = Some(i as usize);
+            }
+        }
+        let gens = self.gen_root.and_then(|r| prog.sigs.get(r as usize)).map(|s| s.generics.as_slice()).unwrap_or(&[]);
+        let (f, derefs, autoref) = prog.ref_impl_walk(all, t, n, param, k, gens, named, &|x| prog.ref_own_method(x, n))?;
+        // (Self: the receiver through its derefs and the autoref, or what that points to for a `&self` / `&mut self`)
+        let mut st = t;
+        for _ in 0..derefs {
+            st = match st {
+                Ty::Ref(_, i) => *i,
+                _ => return None,
+            };
+        }
+        if let Some(m) = autoref {
+            st = Ty::Ref(m, intern(st));
+        }
+        if matches!(prog.recv_code(f), 1 | 2) {
+            st = match st {
+                Ty::Ref(_, i) => *i,
+                _ => return None,
+            };
+        }
+        self.pre_recv = None;
+        let avs: Vec<u32> = args.iter().map(|a| self.expr(a)).collect();
+        let sv = self.known(st);
+        self.turbofish = if tf.is_empty() { None } else { Some(tf as *const Vec<GArg>) };
+        let r = self.apply_recv(Some(f), avs, sv);
+        self.turbofish = None;
+        Some(r)
+    }
+
+    /// The type of e as the generic body writes it (the code generator's gen_ty): a binding gen_vars has, through `&`,
+    /// `*` and the fields of such a value
+    fn gen_ty(&self, e: &Expr, depth: u32) -> Option<Ty> {
+        if depth > 8 {
+            return None;
+        }
+        match e {
+            Expr::Paren(i) => self.gen_ty(i, depth + 1),
+            Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => {
+                let v = self.lookup(&p.segs[0].name)?;
+                self.gen_vars.iter().rev().find(|g| g.0 == v).map(|g| g.1)
+            }
+            Expr::Unary(op, i, _) if op == "*" => match self.gen_ty(i, depth + 1)? {
+                Ty::Ref(_, t) => Some(*t),
+                _ => None,
+            },
+            Expr::Ref(m, i) => self.gen_ty(i, depth + 1).map(|t| Ty::Ref(*m, intern(t))),
+            Expr::Field(b, f, _) => {
+                let mut t = self.gen_ty(b, depth + 1)?;
+                while let Ty::Ref(_, i) = t {
+                    t = *i;
+                }
+                let Ty::Struct(sid) = t else { return None };
+                let sd = &self.prog.structs[sid as usize];
+                if let Some(x) = sd.fields.iter().find(|x| x.0 == *f) {
+                    return Some(x.1);
+                }
+                // (an instance whose fields are not laid out: the definition's field, a type parameter of the
+                // definition under references, as the code generator's)
+                let base = &self.prog.structs[sd.base? as usize];
+                let ft = base.fields.iter().find(|x| x.0 == *f)?.1;
+                let mut refs = vec![];
+                let mut b = ft;
+                while let Ty::Ref(m, i) = b {
+                    refs.push(m);
+                    b = *i;
+                }
+                let Ty::Param(k) = b else { return None };
+                let mut out = *sd.args.get(k as usize)?;
+                for m in refs.into_iter().rev() {
+                    out = Ty::Ref(m, intern(out));
+                }
+                Some(out)
+            }
+            _ => None,
+        }
+    }
+
+    /// A `let`'s annotation as the generic body writes it (the code generator's gen_ann): a type parameter of
+    /// gen_root's under references
+    fn gen_ann(&self, t: &PTy) -> Option<Ty> {
+        let gens = &self.prog.sigs.get(self.gen_root? as usize)?.generics;
+        match t {
+            PTy::Ref(_, m, i) => Some(Ty::Ref(*m, intern(self.gen_ann(i)?))),
+            PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => gens.iter().position(|g| g.0 == p.segs[0].name).map(|i| Ty::Param(i as u8)),
+            _ => None,
+        }
+    }
+
+    fn method_call_rest(&mut self, recv: &Expr, n: &str, tf: &Vec<GArg>, args: &[Expr]) -> u32 {
         // (a Vec's `as_ref()` / `as_mut()`: `&[T]` / `&mut [T]` where the bounds in scope ask for slices alone, as the
         // code generator's (a Vec is AsRef<Vec<T>> / AsMut<Vec<T>> too))
         if matches!(n, "as_ref" | "as_mut") && args.is_empty() {

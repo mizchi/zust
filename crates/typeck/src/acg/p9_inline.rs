@@ -85,7 +85,7 @@ impl<'p> Cx<'p> {
             Some(x) => x,
             None => {
                 let ((lets, _, _), margs, texts) =
-                    crate::ast_infer::infer_ctx_margs(self.prog, f.sig.recv.is_some(), &f.sig.params, &f.block, sig, &env, &extra, Some(sig.ret), Some((root, base_k)));
+                    crate::ast_infer::infer_ctx_margs(self.prog, f.sig.recv.is_some(), &f.sig.params, &f.block, sig, &env, &extra, Some(sig.ret), Some((root, base_k)), &gen_params_of(self.prog, f, root, body_id));
                 self.inl.inferred.lock().unwrap().insert(target, (lets.clone(), margs.clone(), texts.clone()));
                 (lets, margs, texts)
             }
@@ -121,7 +121,7 @@ impl<'p> Cx<'p> {
         let s_root = std::mem::replace(&mut self.root, root);
         // (the callee's own: its parameters declared as its type parameters)
         let s_gargs = std::mem::replace(&mut self.generic_args, generic_args_of(self.prog, &f.sig.params, root));
-        let s_gparams = std::mem::replace(&mut self.gen_params, gen_params_of(self.prog, f, root, root == body_id));
+        let s_gparams = std::mem::replace(&mut self.gen_params, gen_params_of(self.prog, f, root, body_id));
         let s_glets = std::mem::take(&mut self.gen_lets);
         let s_gpend = self.gen_pending.take();
         let s_cix = std::mem::take(&mut self.closure_ix);
