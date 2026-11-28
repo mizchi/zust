@@ -4449,7 +4449,16 @@ impl Program {
                     return None;
                 }
                 let o = own(rt);
-                if o == Some(0) {
+                // (a std prelude trait's method taking self by value, which the value's step takes before the autoref:
+                // `x.min(2)` of `x: u32` is Ord's, `x.into()` and `x.try_into()` the blanket impls' of every type,
+                // `a.into_iter()` IntoIterator's)
+                let std_by_value = match method {
+                    "into" | "try_into" => true,
+                    "min" | "max" | "clamp" => rt.is_int() || matches!(rt, Ty::Bool | Ty::Char) || self.implements(rt, "Ord"),
+                    "into_iter" => matches!(rt, Ty::Array(..)) || self.implements(rt, "IntoIterator") || self.implements(rt, "Iterator"),
+                    _ => false,
+                };
+                if o == Some(0) || std_by_value {
                     return None;
                 }
                 if o != Some(1) {

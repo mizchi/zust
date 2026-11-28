@@ -87,6 +87,24 @@ impl<T> Ua for &T {
         99
     }
 }
+trait Mn {
+    fn min(self, o: u32) -> u32;
+}
+impl<T> Mn for &T {
+    fn min(self, _o: u32) -> u32 {
+        99
+    }
+}
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
+struct Key(u32);
+trait Mx {
+    fn max(self, o: Key) -> Key;
+}
+impl<T> Mx for &T {
+    fn max(self, _o: Key) -> Key {
+        Key(99)
+    }
+}
 struct Own;
 impl Own {
     fn val(&self) -> u32 {
@@ -117,4 +135,6 @@ fn main() {
     println!("{} {}", p.is_null(), (&p).is_null());
     let n = -3i32;
     println!("{} {}", n.unsigned_abs(), (&n).unsigned_abs());
+    // (Ord's `min(self)` / `max(self)` at the value, before the impl's by the autoref)
+    println!("{} {:?}", 3u32.min(2), Key(1).max(Key(5)));
 }
