@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795831361400,
+  "lastUpdate": 1795831363718,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -126967,6 +126967,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/f0bd20642f821ef03f0e93ae314797ff79ca93e7"
         },
         "date": 1795829537019,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 77.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 71.875,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 92.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.106,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "98ced550b5781d76d3472cc3e1131ab31622619f",
+          "message": "prelude: std::sync's LockResult / TryLockResult / TryLockError; try_lock, try_read, try_write (#250) (#333)\n\n* prelude: std::sync's LockResult / TryLockResult / TryLockError; try_lock, try_read, try_write\n\n- The type aliases LockResult / TryLockResult and the enum TryLockError\n  (Debug and Display as std writes them, From<PoisonError<T>>).\n- Mutex::try_lock and RwLock::try_read / try_write on the futex locks:\n  WouldBlock when the lock is held, never a wait. is_poisoned /\n  clear_poison (no lock is ever poisoned: a panic does not unwind).\n- RwLock's read / write / into_inner / get_mut and Condvar's wait /\n  wait_while give std's PoisonError as their Err, as Mutex's lock already\n  did, so `Err(e) => e.into_inner()` and `unwrap_or_else(|e| e.into_inner())`\n  work on them.\n\n(#250: crossbeam-utils' ShardedLock)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n* rust-ui: drop/dropck_legal_cycles.rs passes (run-pass 1937)\n\nIts RwLock / Mutex uses take std's LockResult now (`read()` / `write()`\nwith a PoisonError Err).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-28T10:54:42+09:00",
+          "tree_id": "93403260867c2879b6914f7da5698d26ef2e5cc3",
+          "url": "https://github.com/mizchi/zust/commit/98ced550b5781d76d3472cc3e1131ab31622619f"
+        },
+        "date": 1795831363356,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
