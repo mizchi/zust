@@ -17855,7 +17855,8 @@ impl Debug for Instant {
         // taken off)
         let t = self.__in_d.as_secs();
         let (sign, mag) = if t < __EXR_INSTANT_BASE { ("-", __EXR_INSTANT_BASE - t) } else { ("", t - __EXR_INSTANT_BASE) };
-        let s = format!("Instant {{ tv_sec: {}{}, tv_nsec: {} }}", sign, mag, self.__in_d.subsec_nanos());
+        // (`\x49` for the `I`: a program's own `Instant` renames this one, word by word, as in Layout's and Thread's)
+        let s = format!("\x49nstant {{ tv_sec: {}{}, tv_nsec: {} }}", sign, mag, self.__in_d.subsec_nanos());
         f.pad(&s)
     }
 }
