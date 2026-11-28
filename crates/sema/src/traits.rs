@@ -88,6 +88,9 @@ pub struct Clause {
     pub where_ok: bool,
     /// the associated types the impl defines (`type Assoc = u32;`), over its parameters
     pub assocs: Vec<(String, Ty)>,
+    /// the head as written, when it names a std type the prelude makes an alias of another (`OsString`, `Path`,
+    /// `OsStr`): aliased_head
+    pub alias: Option<String>,
 }
 
 /// The program's impls of its own traits, by trait name
@@ -340,13 +343,8 @@ impl TraitDb {
                 args = None;
                 exact = false;
             }
-            // (a head that names a std type the prelude writes as another's: `OsString` is String there, `Path` and
-            // `OsStr` str. stable_deref_trait's `impl StableDeref for OsString` and `.. for String` are two impls for
-            // two types; their heads are one here, so neither is exact (no E0119 between them))
-            if s.impl_self_ty.iter().chain(&s.impl_trait_args).any(|t| aliased_std(p, t, user, 0)) {
-                exact = false;
-            }
-            db.clauses.entry(tr).or_default().push(Clause { n: gn.len(), self_ty, args, body, item: ii, exact, where_ok: s.where_types.is_empty(), assocs });
+            let alias = aliased_head(p, s, &gn, user);
+            db.clauses.entry(tr).or_default().push(Clause { n: gn.len(), self_ty, args, body, item: ii, exact, where_ok: s.where_types.is_empty(), assocs, alias });
         }
         db
     }
@@ -637,6 +635,9 @@ impl TraitDb {
                 }
                 for i in earlier {
                     let a = &cs[i];
+                    if two_written(p, a, b) {
+                        continue;
+                    }
                     if let Some(g) = self.both_apply(p, a, b).filter(|_| read_all(a.item) && read_all(b.item)) {
                         let (x, y) = if a.item > b.item { (a.item, b.item) } else { (b.item, a.item) };
                         return Some((x, y, tr.clone(), g));
@@ -739,28 +740,94 @@ fn two_reps(p: &Program, t: Ty, depth: u32) -> bool {
     }
 }
 
-/// t names one of the std types the prelude makes an alias of another (`type OsString = String`, `type Path = str`,
-/// `type OsStr = str`), and not a type of the program's of that name (its first `user` items are the program's)
-fn aliased_std(p: &Program, t: &crate::types::TySyn, user: usize, depth: u32) -> bool {
+/// The head of impl s (its self type and trait arguments) as written, when it names one of the std types the prelude
+/// makes an alias of another (`type OsString = String`, `type Path = str`, `type OsStr = str`): not a parameter of the
+/// impl (gn) of that name, nor a type of the program's (its first `user` items are the program's)
+fn aliased_head(p: &Program, s: &Summary, gn: &[&str], user: usize) -> Option<String> {
     use crate::types::TySyn as S;
-    if depth > 32 {
-        return false;
-    }
-    let named = |n: &str| {
-        let last = n.rsplit("::").next().unwrap_or(n);
-        matches!(last, "OsString" | "OsStr" | "Path") && match p.resolve_g(&S::Named(n.to_string()), &[]) {
-            Ok(Ty::Str) => last != "OsString",
-            Ok(Ty::Struct(s)) => last == "OsString" && p.struct_index.get("String") == Some(&s) && p.struct_item.get(s as usize).is_some_and(|&i| i as usize >= user),
+    fn names(p: &Program, t: &S, gn: &[&str], user: usize, depth: u32) -> bool {
+        if depth > 32 {
+            return false;
+        }
+        let named = |n: &str| {
+            let last = n.rsplit("::").next().unwrap_or(n);
+            matches!(last, "OsString" | "OsStr" | "Path")
+                && !gn.contains(&n)
+                && match p.resolve_g(&S::Named(n.to_string()), &[]) {
+                    Ok(Ty::Str) => last != "OsString",
+                    Ok(Ty::Struct(s)) => last == "OsString" && p.struct_index.get("String") == Some(&s) && p.struct_item.get(s as usize).is_some_and(|&i| i as usize >= user),
+                    _ => false,
+                }
+        };
+        match t {
+            S::Named(n) => named(n),
+            S::App(n, xs) => named(n) || xs.iter().any(|x| names(p, x, gn, user, depth + 1)),
+            S::Ref(_, x) | S::Ptr(_, x) | S::Slice(x) | S::Array(x, _) | S::Assoc(x, _) => names(p, x, gn, user, depth + 1),
+            S::Tuple(xs) | S::FnPtr(xs) => xs.iter().any(|x| names(p, x, gn, user, depth + 1)),
             _ => false,
         }
-    };
-    match t {
-        S::Named(n) => named(n),
-        S::App(n, xs) => named(n) || xs.iter().any(|x| aliased_std(p, x, user, depth + 1)),
-        S::Ref(_, x) | S::Ptr(_, x) | S::Slice(x) | S::Array(x, _) | S::Assoc(x, _) => aliased_std(p, x, user, depth + 1),
-        S::Tuple(xs) | S::FnPtr(xs) => xs.iter().any(|x| aliased_std(p, x, user, depth + 1)),
-        _ => false,
     }
+    // (the text with each path's last segment: `std::ffi::OsString` and `OsString` are one type)
+    fn text(t: &S, out: &mut String, depth: u32) {
+        if depth > 32 {
+            return;
+        }
+        let list = |xs: &[S], out: &mut String| {
+            for (k, x) in xs.iter().enumerate() {
+                if k > 0 {
+                    out.push(',');
+                }
+                text(x, out, depth + 1);
+            }
+        };
+        match t {
+            S::Named(n) => out.push_str(n.rsplit("::").next().unwrap_or(n)),
+            S::App(n, xs) => {
+                out.push_str(n.rsplit("::").next().unwrap_or(n));
+                out.push('<');
+                list(xs, out);
+                out.push('>');
+            }
+            S::Ref(m, x) => {
+                out.push_str(if *m { "&mut " } else { "&" });
+                text(x, out, depth + 1);
+            }
+            S::Slice(x) => {
+                out.push('[');
+                text(x, out, depth + 1);
+                out.push(']');
+            }
+            S::Tuple(xs) => {
+                out.push('(');
+                list(xs, out);
+                out.push(')');
+            }
+            t => out.push_str(&format!("{t:?}")),
+        }
+    }
+    let heads: Vec<&S> = s.impl_self_ty.iter().chain(&s.impl_trait_args).collect();
+    if !heads.iter().any(|t| names(p, t, gn, user, 0)) {
+        return None;
+    }
+    let mut out = String::new();
+    for t in heads {
+        text(t, &mut out, 0);
+        out.push(';');
+    }
+    Some(out)
+}
+
+/// Two impls whose heads are one type here only because the prelude makes a std type an alias of another: neither head
+/// names a parameter, and they are written as two types, at least one through such an alias (stable_deref_trait's `impl
+/// StableDeref for OsString` and `.. for String`, `.. for Cow<'a, Path>` and `.. for Cow<'a, OsStr>`). No conflict
+/// (E0119) between them. A generic impl is compared as any other: `impl<T: Marker> Tr for T` with `impl Marker for
+/// OsString` conflicts with `impl Tr for OsString`
+fn two_written(p: &Program, a: &Clause, b: &Clause) -> bool {
+    if a.alias.is_none() && b.alias.is_none() {
+        return false;
+    }
+    let ground_head = |c: &Clause| c.self_ty.is_some_and(|t| !p.has_param(t)) && c.args.as_ref().is_some_and(|v| v.iter().all(|&t| !p.has_param(t)));
+    a.alias != b.alias && ground_head(a) && ground_head(b)
 }
 
 /// t holds an associated type

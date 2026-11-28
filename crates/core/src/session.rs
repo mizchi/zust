@@ -2769,7 +2769,9 @@ impl Session {
         }
         if let Some((later, _, tr, g)) = prog.tdb.conflict(&prog, &read_all) {
             let line = items.get(later).map_or(1, |it| it.line);
-            let ty = g.map(|g| format!(" for type `{}`", prog.tn(g).replace("__u_", ""))).unwrap_or_default();
+            // (a self type written as a std type the prelude makes an alias of another: as written, `OsString`)
+            let written = prog.tdb.clauses.get(&tr).and_then(|cs| cs.iter().find(|c| c.item == later && c.self_ty == g)).and_then(|c| c.alias.as_deref()?.split(';').next());
+            let ty = g.map(|g| format!(" for type `{}`", written.map_or_else(|| prog.tn(g).replace("__u_", ""), str::to_string))).unwrap_or_default();
             return Err(format!("{line}:1: conflicting implementations of trait `{tr}`{ty} (E0119)"));
         }
         // (E0107: an impl giving one of the program's traits the wrong number of generic arguments; only with a trait

@@ -2506,45 +2506,71 @@ impl Cx<'_> {
     }
 
     /// `recv.borrow()` by std's Borrow impls, and the `&Q` it is: `T: Borrow<T>` and `&T: Borrow<T>` (recv itself, as
-    /// a `&Q`), `String: Borrow<str>` (`recv.as_str()`), `Vec<T>: Borrow<[T]>` (`&recv[..]`). Q is what the bound `K:
-    /// Borrow<Q>` of the function on the receiver's type parameter says (equivalent's `PartialEq::eq(self,
-    /// key.borrow())`, with `K = String` and `Q = str`), or else the expected type `&Q`. None for a type with a
-    /// `borrow` of its own (a RefCell's, a program's impl), or a Q none of these give: as before
+    /// a `&Q`), `String: Borrow<str>` (`recv.as_str()`), `Vec<T>: Borrow<[T]>` (`&recv[..]`). Q is what the expected
+    /// type `&Q` says, or the bound `K: Borrow<Q>` of the function on the type parameter the receiver is declared with
+    /// (equivalent's `PartialEq::eq(self, key.borrow())` of `key: &K`, with `K = String` and `Q = str`). None where a
+    /// `borrow` of the program's own may be the one called (a RefCell's, `impl MyBorrow for u32`), or a Q none of these
+    /// give: as before
     pub(crate) fn borrow_rewrite(&self, recv: &Expr, expected: Option<Ty>) -> Option<(Expr, Ty)> {
         // (a local's type as it is bound, `key: &K`: a copy of the path made by a rewrite (`PartialEq::eq(self,
         // key.borrow())` as `==`) is not one peek knows in an inlined body)
-        let local = match strip_paren(recv) {
-            Expr::Path(None, rp) => ident_of(rp).and_then(|n| self.lookup(n)).map(|x| x.1),
+        let name = match strip_paren(recv) {
+            Expr::Path(None, rp) => ident_of(rp),
             _ => None,
         };
-        let t = local.or_else(|| self.peek(recv))?;
+        let t = name.and_then(|n| self.lookup(n)).map(|x| x.1).or_else(|| self.peek(recv))?;
         let base = self.strip_refs(t);
         if let Ty::Struct(sid) = base {
             if self.prog.method(sid, "borrow").is_some() {
                 return None;
             }
         }
-        // (the bound first: an expected type may be a guess from the receiver, `&&str` for `self.cmp(key.borrow())`
-        // with `self: &str`)
-        let bound = self.prog.sigs[self.root as usize].generics.iter().find_map(|(pn, bs)| {
-            let pt = self.env.params.iter().find(|(n, _)| n == pn)?.1;
-            if pt != t && self.strip_refs(pt) != base {
-                return None;
-            }
+        // (a method `borrow` of the program's that may be the receiver's: of an impl for its type, or a blanket impl's or
+        // a trait's default (with a body: a trait's declaration alone is no method). std's Borrow is not in the
+        // prelude, so rustc's lookup finds the program's)
+        let prog = self.prog;
+        let own = prog.fns_named("borrow").is_some_and(|fs| {
+            fs.iter().any(|&c| {
+                let s = &prog.sigs[c as usize];
+                s.has_self
+                    && s.has_body
+                    && prog.item_of.get(c as usize).copied().flatten().is_some_and(|i| i < prog.prelude_from)
+                    && match s.self_ty {
+                        Some(Ty::Param(_)) | None => true,
+                        Some(st) => {
+                            let st = self.strip_refs(st);
+                            st == base || matches!((st, base), (Ty::Struct(a), Ty::Struct(b)) if prog.base_of(a) == prog.base_of(b))
+                        }
+                    }
+            })
+        });
+        if own {
+            return None;
+        }
+        // (the bound of the type parameter the receiver is declared with, `key: &K` with `K: Borrow<Q>`: not another
+        // parameter's that has the same type in this instance)
+        let declared = name.and_then(|n| self.generic_args.iter().find(|a| a.0 == n)).map(|a| a.1.as_str());
+        let inst = |pn: &str| self.env.params.iter().find(|(n, _)| n == pn).map(|p| p.1);
+        let bound = declared.and_then(|dn| {
+            let (_, bs) = self.prog.sigs[self.root as usize].generics.iter().find(|(pn, _)| pn == dn)?;
             bs.iter().find_map(|b| {
                 let b: String = b.chars().filter(|c| !c.is_whitespace()).collect();
                 let x = b.strip_prefix("Borrow<")?.strip_suffix('>')?.to_string();
-                match self.env.params.iter().find(|(n, _)| *n == x) {
-                    Some(&(_, xt)) => Some(xt),
-                    None => self.prog.resolve_g(&crate::ast_summary::ty_of_text(&x, None)?, &[]).ok(),
-                }
+                inst(&x).or_else(|| self.prog.resolve_g(&crate::ast_summary::ty_of_text(&x, None)?, &[]).ok())
             })
         });
         let wanted = match expected {
             Some(Ty::Ref(false, q)) => Some(*q),
             _ => None,
         };
-        bound.into_iter().chain(wanted).find_map(|q| self.borrow_as(recv, t, base, q))
+        // (the expected type first; for a receiver of a bounded parameter, only where it is one of the two impls the
+        // bound leaves, its target or the parameter itself (`K: Borrow<K>`): else it is a guess from the call around
+        // it, `&&str` for `self.cmp(key.borrow())` with `self: &str`)
+        let wanted = match (declared, bound) {
+            (Some(dn), Some(bq)) => wanted.filter(|&w| w == bq || Some(w) == inst(dn)),
+            _ => wanted,
+        };
+        wanted.into_iter().chain(bound).find_map(|q| self.borrow_as(recv, t, base, q))
     }
 
     /// recv (of type t, base what its references reach) as a `&q` by one of std's Borrow impls (borrow_rewrite)
@@ -2557,9 +2583,11 @@ impl Cx<'_> {
         }
         let mut x = r.clone();
         let mut u = t;
-        while let Ty::Ref(_, i) = u {
+        while let Ty::Ref(m, i) = u {
             if *i == q {
-                return Some((x, qr));
+                // (a `&mut Q` reborrowed shared, `&*x`, as `borrow(&self)` takes it: the receiver is not moved)
+                let e = if m { Expr::Ref(false, Box::new(paren(Expr::Unary("*".into(), Box::new(x), Default::default())))) } else { x };
+                return Some((e, qr));
             }
             x = paren(Expr::Unary("*".into(), Box::new(x), Default::default()));
             u = *i;
@@ -5078,7 +5106,9 @@ impl Cx<'_> {
             let no_eq = |t: Ty| {
                 t.is_int() || t.is_float() || matches!(t, Ty::Str | Ty::Slice(_) | Ty::Bool | Ty::Char) || matches!(t, Ty::Struct(sid) if self.prog.method(sid, "eq").is_none())
             };
-            if matches!(m.as_str(), "eq" | "ne") && self.peek(&cargs[0]).is_some_and(|t| matches!(t, Ty::Ref(..)) && no_eq(self.strip_refs(t))) {
+            // (std's PartialEq only: not a trait of the program's of one of these names, whose `eq` is its own)
+            let std_trait = ty == "PartialEq" && !self.prog.user_traits.iter().any(|t| t.rsplit("::").next() == Some(ty));
+            if std_trait && matches!(m.as_str(), "eq" | "ne") && self.peek(&cargs[0]).is_some_and(|t| matches!(t, Ty::Ref(..)) && no_eq(self.strip_refs(t))) {
                 let op = if m == "eq" { "==" } else { "!=" };
                 return Some(Expr::Binary(op.into(), Box::new(paren(cargs[0].clone())), Box::new(paren(cargs[1].clone())), crate::parse::Span::default()));
             }
