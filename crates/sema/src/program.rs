@@ -4530,10 +4530,13 @@ impl Program {
 
     /// How fn id takes self, as ref_own_method says it (0 `self`, 1 `&self`, 2 `&mut self`, 3 otherwise)
     pub fn recv_code(&self, id: u32) -> u8 {
-        match self.sigs[id as usize].params.first() {
+        let sig = &self.sigs[id as usize];
+        match sig.params.first() {
             Some(Ty::Ref(false, _)) => 1,
             Some(Ty::Ref(true, _)) => 2,
+            // (self by value, of any type: a struct's, a type parameter's, a number's `impl A for u32 { fn value(self) }`)
             Some(Ty::Struct(_) | Ty::Param(_)) => 0,
+            Some(_) if sig.has_self => 0,
             _ => 3,
         }
     }

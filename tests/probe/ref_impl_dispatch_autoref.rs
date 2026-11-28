@@ -3,7 +3,8 @@
 // array is the impl's), a number's name is not a str's (`"abc".abs()` is the impl's), and a struct's own method
 // comes first where its receiver is the try's (`self` by value, `&self` at the `&` autoref), not one taking
 // `&mut self`; a scalar's builtins are its type's own (`is_ascii` a u8's, not an i32's; `abs` not a u32's; a
-// float's `sqrt` and a char's `is_alphabetic` at the value, the impl's at a reference)
+// float's `sqrt` and a char's `is_alphabetic` at the value, the impl's at a reference); a number's trait method taking
+// self by value comes first at the value (`x.pv()` is u32's `A::pv`, not B's impl for `&T` by the autoref)
 trait Tr {
     fn abs(self) -> u32;
 }
@@ -52,6 +53,23 @@ impl<T> Ch for &T {
         false
     }
 }
+trait Pa {
+    fn pv(self) -> u32;
+}
+impl Pa for u32 {
+    fn pv(self) -> u32 {
+        1
+    }
+}
+#[allow(dead_code)]
+trait Pb {
+    fn pv(self) -> u32;
+}
+impl<T> Pb for &T {
+    fn pv(self) -> u32 {
+        2
+    }
+}
 struct Own;
 impl Own {
     fn val(&self) -> u32 {
@@ -77,4 +95,5 @@ fn main() {
     println!("{} {} {} {}", (&x).is_ascii(), (&c).is_ascii(), (&u).abs(), u.abs());
     let (f, ch) = (4.0f64, 'a');
     println!("{} {} {} {}", f.sqrt(), (&f).sqrt(), ch.is_alphabetic(), (&ch).is_alphabetic());
+    println!("{}", u.pv());
 }
