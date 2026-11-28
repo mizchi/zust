@@ -8680,6 +8680,9 @@ impl Program {
                 // (not a program's own `ptr` type's or module's)
                 ("ptr", "eq") if !self.index.contains_key("ptr::eq") => Some("__exr_ptr_eq"),
                 ("ptr", "swap") if !self.index.contains_key("ptr::swap") => Some("__core_ptr_swap"),
+                // (`slice::from_ref(r)`: a one-value slice, not `ptr::from_ref`'s raw pointer)
+                ("slice", "from_ref") if !self.index.contains_key("slice::from_ref") => Some("__core_slice_from_ref"),
+                ("slice", "from_mut") if !self.index.contains_key("slice::from_mut") => Some("__core_slice_from_mut"),
                 ("array", "from_fn") => Some("__exr_array_from_fn"),
                 // (RefCell's guards: associated functions of the prelude's Ref / RefMut, unless the program has its own)
                 ("Ref", "map") if !self.index.contains_key("Ref::map") => Some("__exr_ref_map"),

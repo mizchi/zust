@@ -3426,6 +3426,16 @@ impl Cx<'_> {
                 }
             }
         }
+        // (an integer literal, `Ipv4Addr::from(0)` beside `From<[u8; 4]>` and `From<u32>`: `{integer}` is the one
+        // candidate's that takes an integer, as rustc infers it; with two, or one taking `i32`, the literal is the `i32`
+        // it defaults to, below)
+        if recv.is_none() && !own.has_self && args.first().is_some_and(|a| is_int_lit(a)) {
+            let int_param = |c: &u32| self.prog.sigs[*c as usize].params.first().is_some_and(|p| p.is_int());
+            let mut ints = cands.iter().copied().filter(int_param);
+            if let (Some(one), None) = (ints.next(), ints.next()) {
+                return one;
+            }
+        }
         let Some(at) = recv.or_else(|| args.first().and_then(|a| self.peek(a))) else {
             return id;
         };
@@ -4481,6 +4491,9 @@ impl Cx<'_> {
                 (Ty::Ref(m1, a), Ty::Ptr(m2, b)) if a == b && (m1 || !m2) && !a.is_fat() => (v, pt),
                 // (a `&mut [T]` for a generic `&T`, `size_of_val(iv_dst)`: the same value, thin or fat)
                 (Ty::Ref(true, a), Ty::Ref(false, b)) if a == b => (v, pt),
+                // (a `*mut T` for a `*const T` parameter, `ptr::copy(p.add(1), p, n)` with p: *mut u8: the same
+                // pointer)
+                (Ty::Ptr(true, a), Ty::Ptr(false, b)) if a == b => (v, pt),
                 _ => (v, t),
             };
             self.same(sp, t, pt)?;

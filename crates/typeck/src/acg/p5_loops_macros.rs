@@ -1908,10 +1908,19 @@ impl Cx<'_> {
             let (ev, _) = self.read(fp);
             // A different error type is converted with `From::from` (`impl From<ParseIntError> for AppError`)
             let ev = if ety != rety {
+                let takes = |id: &u32, exact: bool| {
+                    let sg = &self.prog.sigs[*id as usize];
+                    !sg.has_self && sg.params.len() == 1 && (sg.params[0] == ety || (!exact && self.prog.has_param(sg.params[0])))
+                };
+                // (of the error type's `from`s, the impl of the type converted: `impl From<Utf8Error> for E` beside
+                // `impl From<LenError> for E`, not the group's first; then one generic in it)
                 let conv = match rety {
-                    Ty::Struct(rs) => self.prog.method(rs, "from").filter(|&id| {
-                        let sg = &self.prog.sigs[id as usize];
-                        !sg.has_self && sg.params.len() == 1 && (sg.params[0] == ety || self.prog.has_param(sg.params[0]))
+                    Ty::Struct(rs) => self.prog.method(rs, "from").and_then(|id| {
+                        let gname = &self.prog.names[id as usize];
+                        let group = self.prog.overloads.get(gname.split('#').next().unwrap_or(gname));
+                        // (the group's of this error type: its result is it)
+                        let all = || [id].into_iter().chain(group.into_iter().flatten().copied().filter(|&c| self.prog.sigs[c as usize].ret == rety));
+                        all().find(|c| takes(c, true)).or_else(|| all().find(|c| takes(c, false)))
                     }),
                     _ => None,
                 };

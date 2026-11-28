@@ -1948,6 +1948,7 @@ check-pass	consts/const-eval/promote_mutable_zst_mir_borrowck.rs
 compile-fail	consts/const-eval/promoted_const_fn_fail.rs
 compile-fail	consts/const-eval/promoted_const_fn_fail_deny_const_err.rs
 compile-fail	consts/const-eval/promoted_raw_ptr_ops.rs
+run-pass	consts/const-eval/ptr_fragments.rs
 check-pass	consts/const-eval/simple_with_undef.rs
 check-pass	consts/const-eval/stable-metric/dominators-edge-case.rs
 compile-fail	consts/const-eval/transmute-const-promotion.rs
@@ -2124,6 +2125,7 @@ check-pass	consts/min_const_fn/allow_raw_ptr_dereference_const_fn.rs
 check-pass	consts/min_const_fn/cast_fn.rs
 compile-fail	consts/min_const_fn/cmp_fn_pointers.rs
 check-pass	consts/min_const_fn/min_const_fn_dyn.rs
+check-pass	consts/min_const_fn/min_const_fn_unsafe_ok.rs
 compile-fail	consts/min_const_fn/promotion.rs
 compile-fail	consts/missing_assoc_const_type.rs
 compile-fail	consts/missing_assoc_const_type2.rs

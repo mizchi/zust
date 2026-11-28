@@ -230,6 +230,8 @@ impl<'p> Cx<'p> {
             self.b.ins().trap(TrapCode::unwrap_user(1));
             return Ok(());
         }
+        // (the coercions of the body's value to the result type, as `body` makes them: `*mut T` for a `*const T`)
+        let (v, t) = if t != self.ret { self.deref_coerce(v, t, self.ret) } else { (v, t) };
         self.same(SP, t, self.ret)?;
         self.drop_for_exit(0, 0);
         self.emit_return(v);

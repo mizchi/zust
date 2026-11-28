@@ -2082,6 +2082,9 @@ impl Inf<'_> {
         for a in args {
             avs.push(self.expr(a));
         }
+        // (`Name::try_from(bytes)` with `impl TryFrom<&str> for Name` beside `impl TryFrom<&[u8]> for Name`: the impl of
+        // the argument's type)
+        let callee = callee.map(|id| self.pick_by_trait_args(id, &avs, 0));
         if let Expr::Path(None, p) = f {
             let n = p.segs.len();
             if callee.is_none() && n >= 2 && p.segs[n - 1].name == "new" && p.segs[n - 2].name == "Box" && avs.len() == 1 {
@@ -2258,6 +2261,46 @@ impl Inf<'_> {
             self.closure_body(c, &vs, rv);
         }
         self.with(Shape::Clo(st, n))
+    }
+
+    /// Of the impls of one trait with different arguments for one type (`impl IpSub<Ipv4Addr> for Ipv4Addr` / `impl
+    /// IpSub<u32> for Ipv4Addr`, `impl TryFrom<&str> for N` / `impl TryFrom<&[u8]> for N`), the one whose parameters
+    /// after the first `skip` (a method call's receiver) take the arguments' types `avs`, when only one does; `id`
+    /// otherwise. Not the group's first, whose result type the lowering would then expect
+    fn pick_by_trait_args(&mut self, id: u32, avs: &[u32], skip: usize) -> u32 {
+        let prog = self.prog;
+        let base = |c: u32| prog.sigs[c as usize].impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
+        let s0 = &prog.sigs[id as usize];
+        let same = |c: &u32| {
+            let s = &prog.sigs[*c as usize];
+            s.has_self == s0.has_self && s.self_ty == s0.self_ty && base(*c).is_some() && base(*c) == base(id) && s.params.len() == s0.params.len()
+        };
+        let Some(cands) = prog.overloads.get(prog.names[id as usize].split('#').next().unwrap_or("")).filter(|c| c.len() > 1 && c.iter().all(same)) else {
+            return id;
+        };
+        // (an integer literal not known yet, `r.end.saturating_sub(2)`: `{integer}`, which an integer parameter takes)
+        let ats: Vec<(Option<Ty>, bool)> = avs
+            .iter()
+            .map(|&a| {
+                let r = self.find(a);
+                let lit = self.shape[r as usize].is_none() && self.int_lit[r as usize];
+                (if lit { None } else { self.resolve(a) }, lit)
+            })
+            .collect();
+        let takes = |c: u32| {
+            let sig = &prog.sigs[c as usize];
+            let mut sol = vec![None; sig.generics.len()];
+            sig.params.iter().skip(skip).zip(&ats).all(|(&pt, &(a, lit))| match a {
+                _ if lit => pt.is_int() || prog.has_param(pt),
+                Some(t) => prog.has_param(t) || prog.match_ty(pt, t, &mut sol),
+                None => true,
+            })
+        };
+        let mut fit = cands.iter().copied().filter(|&c| takes(c));
+        match (fit.next(), fit.next()) {
+            (Some(one), None) => one,
+            _ => id,
+        }
     }
 
     /// Of the inherent methods with `self` overloading `id` (Program's overloads: impls for other instances of the
@@ -2446,7 +2489,7 @@ impl Inf<'_> {
             if let Some(id) = sid.and_then(|s| self.prog.self_method(s, n)) {
                 // (a method of the program's own type that has a scalar method's name (`checked_add`): its overloads too,
                 // as below)
-                let id = self.pick_inherent_overload(id, rv);
+                let id = self.pick_inherent_overload(id, rv).map(|id| self.pick_by_trait_args(id, &avs, 1));
                 return self.apply_recv(id, avs, rv);
             }
             return self.scalar_method(n, tf, args, r, rv, avs);
@@ -2855,6 +2898,7 @@ impl Inf<'_> {
                 }
             }
         }
+        let callee = callee.map(|id| self.pick_by_trait_args(id, &avs, 1));
         self.turbofish = if tf.is_empty() { None } else { Some(tf as *const Vec<GArg>) };
         let r = self.apply_recv(callee, avs, rv);
         self.turbofish = None;

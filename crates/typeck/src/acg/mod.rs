@@ -2255,6 +2255,12 @@ impl Cx<'_> {
 
     /// `&&T` (`&&&T` ..) を `&T` の場所に渡すときの deref の強制変換
     pub fn deref_coerce(&mut self, mut v: Option<Value>, mut t: Ty, want: Ty) -> (Option<Value>, Ty) {
+        // (`*mut T` where a `*const T` is wanted: the same pointer, thin or fat)
+        if let (Ty::Ptr(false, w), Ty::Ptr(true, a)) = (want, t) {
+            if w == a {
+                return (v, want);
+            }
+        }
         while let (Ty::Ref(wm, _), Ty::Ref(om, inner @ Ty::Ref(..)), Some(val)) = (want, t, v) {
             // (a `&mut` is not reached through a shared reference: `&&mut u8` is no `&mut u8`)
             if t == want || t.is_fat() || (wm && !om) {
