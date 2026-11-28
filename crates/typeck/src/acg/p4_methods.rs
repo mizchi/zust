@@ -810,8 +810,17 @@ impl Cx<'_> {
         // (and `div_ceil` / `wrapping_add_signed` of a signed type (the one unstable in std, the other unsigned-only), of
         // a char or bool; `div_ceil` of a 128-bit one, which Cranelift cannot divide)
         let unsigned_only = matches!(name.as_str(), "div_ceil" | "wrapping_add_signed");
+        // (the checked / wrapping / overflowing Euclidean division of a 128-bit one likewise: its arms below take
+        // narrower types only)
+        let euclid_128 = t.is_int()
+            && t.bits() == 128
+            && matches!(
+                name.as_str(),
+                "checked_div_euclid" | "checked_rem_euclid" | "wrapping_div_euclid" | "wrapping_rem_euclid" | "overflowing_div_euclid" | "overflowing_rem_euclid"
+            );
         if matches!((name.as_str(), t.signed()), ("saturating_abs" | "saturating_neg", false) | ("next_multiple_of", true))
             || (unsigned_only && (t.signed() || !t.is_int() || (name == "div_ceil" && t.bits() == 128)))
+            || euclid_128
         {
             return Ok(None);
         }
