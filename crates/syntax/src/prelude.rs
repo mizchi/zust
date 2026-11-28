@@ -594,7 +594,7 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList" | "Thread" | "Builder" | "__ThreadPanic" | "__TlsKey" | "AccessError" | "SendError" | "RecvError" | "TryRecvError" | "RecvTimeoutError" | "__RecvIntoIter" | "Barrier" | "BarrierWaitResult" | "Once" | "OnceState"
                         | "Layout" | "LayoutError" | "__LayoutAlign" | "Infallible" | "Condvar" | "ControlFlow"
                         | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError"
-                        | "SplitNStr" | "SliceSplitN" | "PoisonError"
+                        | "SplitNStr" | "SliceSplitN" | "PoisonError" | "TryLockError"
                         | "File" | "OpenOptions" | "Metadata" | "FileType" | "Permissions" | "FpCategory"
                         | "Instant" => Some(w),
                         // (std::num's NonZero types: their impls only with them)
@@ -1721,6 +1721,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     // (one scan of the source when `io::` is not written; the two below only after it)
     if sc.has("io::") && (sc.has("io::Error") || sc.has("io::Result")) {
         need.extend(["IoError", "Result"]);
+    }
+    // (`thread::Result<T>` is a join's result: the prelude's __ThreadPanic is its Err)
+    if sc.has("thread::Result") {
+        need.extend(["__ThreadPanic", "Result", "Debug"]);
     }
     // (a FusedIterator impl comes with an Iterator impl: the source is scanned only then)
     if (need.contains("Iterator") || need.contains("next")) && sc.has("FusedIterator") {

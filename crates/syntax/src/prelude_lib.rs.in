@@ -4062,9 +4062,8 @@ fn __exr_str_chars<G>(s: &str) -> Chars {
 // マクロは codegen が展開し、値ごとに `__exr_display::<T>` / `__exr_debug::<T>` (型ごとに codegen が
 // 本体を作る) を呼ぶ。数値・文字列の書き出しとパディング、Debug の整形はここの関数が行う
 
-pub struct __FmtError {
-    _p: u8,
-}
+// `std::fmt::Error`: a unit struct, as std's (`Err(fmt::Error)`)
+pub struct __FmtError;
 
 pub struct Formatter {
     buf: &mut String,
@@ -11636,6 +11635,50 @@ impl<T> Mutex<T> {
     pub fn get_mut(&mut self) -> Result<&mut T, PoisonError<&mut T>> {
         Ok(&mut self.val)
     }
+    // (the lock now if it is free, as std's: WouldBlock while another thread holds it)
+    pub fn try_lock(&self) -> Result<MutexGuard<T>, TryLockError<MutexGuard<T>>> {
+        let m = self.__m();
+        if __exr_atomic_cas(m, 0, 1) != 0 {
+            return Err(TryLockError::WouldBlock);
+        }
+        Ok(MutexGuard { p: &self.val as *const T as *mut T, m: m })
+    }
+    // (a panic does not unwind, so no lock is poisoned)
+    pub fn is_poisoned(&self) -> bool {
+        false
+    }
+    pub fn clear_poison(&self) {}
+}
+
+// `std::sync::LockResult` / `TryLockResult`: a lock's results, as std's
+pub type LockResult<Guard> = Result<Guard, PoisonError<Guard>>;
+pub type TryLockResult<Guard> = Result<Guard, TryLockError<Guard>>;
+
+// `std::sync::TryLockError`: a `try_lock` (`try_read`, `try_write`) that would wait, or of a poisoned lock
+pub enum TryLockError<T> {
+    Poisoned(PoisonError<T>),
+    WouldBlock,
+}
+
+impl<T> Debug for TryLockError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        match self {
+            // (std's: the variant's name as a string's Debug, with its quotes)
+            TryLockError::Poisoned(_) => __exr_fmt_str::<()>(f, "\"Poisoned(..)\""),
+            TryLockError::WouldBlock => __exr_fmt_str::<()>(f, "\"WouldBlock\""),
+        }
+        Ok(())
+    }
+}
+
+impl<T> Display for TryLockError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        match self {
+            TryLockError::Poisoned(_) => __exr_fmt_str::<()>(f, "poisoned lock: another task failed inside"),
+            TryLockError::WouldBlock => __exr_fmt_str::<()>(f, "try_lock failed because the operation would block"),
+        }
+        Ok(())
+    }
 }
 
 // `std::sync::PoisonError`, the Err of a Mutex's lock: none comes here (a panic does not unwind, so no lock is
@@ -11862,7 +11905,7 @@ impl<T> RwLock<T> {
     fn __l(&self) -> *mut __RwState {
         &self.__rw as *const __RwState as *mut __RwState
     }
-    pub fn read(&self) -> Result<RwLockReadGuard<T>, ()> {
+    pub fn read(&self) -> Result<RwLockReadGuard<T>, PoisonError<RwLockReadGuard<T>>> {
         let l = self.__l();
         let st = unsafe { &mut (*l).st as *mut u32 };
         loop {
@@ -11877,7 +11920,7 @@ impl<T> RwLock<T> {
         }
         Ok(RwLockReadGuard { p: &self.val as *const T, l: l })
     }
-    pub fn write(&self) -> Result<RwLockWriteGuard<T>, ()> {
+    pub fn write(&self) -> Result<RwLockWriteGuard<T>, PoisonError<RwLockWriteGuard<T>>> {
         let l = self.__l();
         let st = unsafe { &mut (*l).st as *mut u32 };
         while __exr_atomic_cas(st, 0, 4294967295) != 0 {
@@ -11885,12 +11928,40 @@ impl<T> RwLock<T> {
         }
         Ok(RwLockWriteGuard { p: &self.val as *const T as *mut T, l: l })
     }
-    pub fn into_inner(self) -> Result<T, ()> {
+    pub fn into_inner(self) -> Result<T, PoisonError<T>> {
         Ok(self.val)
     }
-    pub fn get_mut(&mut self) -> Result<&mut T, ()> {
+    pub fn get_mut(&mut self) -> Result<&mut T, PoisonError<&mut T>> {
         Ok(&mut self.val)
     }
+    // (a read lock now unless a writer holds it, as std's: WouldBlock then)
+    pub fn try_read(&self) -> Result<RwLockReadGuard<T>, TryLockError<RwLockReadGuard<T>>> {
+        let l = self.__l();
+        let st = unsafe { &mut (*l).st as *mut u32 };
+        loop {
+            let s = __exr_atomic_load(st);
+            if s >= 4294967294 {
+                return Err(TryLockError::WouldBlock);
+            }
+            if __exr_atomic_cas(st, s, s + 1) == s {
+                return Ok(RwLockReadGuard { p: &self.val as *const T, l: l });
+            }
+        }
+    }
+    // (the write lock now if no one holds the lock)
+    pub fn try_write(&self) -> Result<RwLockWriteGuard<T>, TryLockError<RwLockWriteGuard<T>>> {
+        let l = self.__l();
+        let st = unsafe { &mut (*l).st as *mut u32 };
+        if __exr_atomic_cas(st, 0, 4294967295) != 0 {
+            return Err(TryLockError::WouldBlock);
+        }
+        Ok(RwLockWriteGuard { p: &self.val as *const T as *mut T, l: l })
+    }
+    // (a panic does not unwind, so no lock is poisoned)
+    pub fn is_poisoned(&self) -> bool {
+        false
+    }
+    pub fn clear_poison(&self) {}
 }
 
 impl<T> Deref for RwLockReadGuard<T> {
@@ -12291,6 +12362,15 @@ impl Error for LayoutError {
 impl Error for Infallible {
     fn __err_mark(&self) {}
 }
+impl Error for __FmtError {
+    fn __err_mark(&self) {}
+}
+impl<T> Error for PoisonError<T> {
+    fn __err_mark(&self) {}
+}
+impl<T> Error for TryLockError<T> {
+    fn __err_mark(&self) {}
+}
 
 // `Box<dyn Error>`: 変換した時点で表示 ({}) と Debug ({:?}) の文字列にしておく
 pub struct __DynError {
@@ -12301,6 +12381,14 @@ pub struct __DynError {
 impl Display for __DynError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
         __exr_fmt_str::<()>(f, self.msg.as_str());
+        Ok(())
+    }
+}
+
+// (std's text for `fmt::Error`)
+impl Display for __FmtError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        __exr_fmt_str::<()>(f, "an error occurred when formatting an argument");
         Ok(())
     }
 }

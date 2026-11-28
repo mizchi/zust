@@ -4,7 +4,8 @@
 //! (nested), a program with no threads at all (single), many threads at once on every primitive, where a total is
 //! exact only when each operation is atomic (parallel), a panic in a spawned thread (panic), thread_local! values of
 //! each thread (tls), what a panic, a disconnect or a lock does at the edges (edges), and `thread::Builder`,
-//! `recv_timeout`, a `Barrier` and a closure that is Sync through what it borrows (builder).
+//! `recv_timeout`, a `Barrier` and a closure that is Sync through what it borrows (builder), and std's lock results,
+//! `try_lock` / `try_read` / `try_write`, a static `AtomicPtr` and `fmt::Error` as an error (locks).
 #![cfg(feature = "acg")]
 
 #[path = "common/par.rs"]
@@ -63,7 +64,7 @@ fn run_with_deadline(exe: &std::path::Path, secs: u64) -> Result<std::process::O
 fn threads_like_rustc() {
     let dir = std::env::temp_dir().join(format!("threads_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let names = ["channel", "pingpong", "producers", "mutex", "flag", "nested", "single", "parallel", "panic", "tls", "edges", "builder"];
+    let names = ["channel", "pingpong", "producers", "mutex", "flag", "nested", "single", "parallel", "panic", "tls", "edges", "builder", "locks"];
     let cases: Vec<(&str, bool)> = names.iter().flat_map(|&n| [(n, false), (n, true)]).collect();
     let bad: Vec<String> = par::par_map(&cases, |&(name, cl)| -> Option<String> {
         let src = std::fs::read_to_string(format!("tests/threads/{name}.rs")).unwrap();

@@ -457,6 +457,13 @@ fn path_ty(p: &Path, self_ty: Option<&TySyn>) -> R<TySyn> {
         };
         return Ok(TySyn::App("Result".into(), vec![tysyn(a, self_ty)?, io_err]));
     }
+    // `thread::Result<T>` (a join's result: Err is the panic's payload, the prelude's __ThreadPanic)
+    if n >= 2 && p.segs[n - 2].name == "thread" && last.name == "Result" {
+        let Some(GArg::Ty(a)) = last.args.first() else {
+            return Err("`thread::Result` needs a type argument".to_string());
+        };
+        return Ok(TySyn::App("Result".into(), vec![tysyn(a, self_ty)?, TySyn::Named("__ThreadPanic".into())]));
+    }
     // (`Result<T>` with one argument: `std::io::Result` imported by name (`use std::io::{self, Result};`), which is
     // the only way a one-argument `Result` names a type)
     if n == 1 && last.name == "Result" && last.args.len() == 1 {
