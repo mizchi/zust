@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795865736128,
+  "lastUpdate": 1795865738372,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -131320,6 +131320,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 90.28,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c7cbe59bf4a86594078f0c48a45b00ef1943d5f1",
+          "message": "traits: an impl's where clauses and std's Deref impls in supertrait goals; Borrow for the blanket impl: false E0277 for equivalent and stable_deref_trait (#335)\n\nFalse E0277 for equivalent (`Q: Equivalent<K>` through a blanket impl with `Borrow` bounds) and stable_deref_trait (`String: Deref` as a supertrait goal): an impl's where clauses and std's Deref impls of its strings, collections and smart pointers count in supertrait goals, and zero-argument `borrow()` goes through std's Borrow impls when `Borrow` is in scope. Impls for OsString / Path / OsStr are no longer reported as conflicting with String / str (they are distinct std types), while a blanket impl or a program's own alias of the same type still conflicts (E0119, naming the type as written).\n\nFixes #261\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-28T11:24:50Z",
+          "tree_id": "be84a149a87c0be11d41e5c1cf168df7359f43e0",
+          "url": "https://github.com/mizchi/zust/commit/c7cbe59bf4a86594078f0c48a45b00ef1943d5f1"
+        },
+        "date": 1795865738102,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 97.059,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 85,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 82.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 94.118,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 82.353,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.021,
             "unit": "%"
           }
         ]
