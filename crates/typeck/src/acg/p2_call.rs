@@ -4883,20 +4883,29 @@ impl Cx<'_> {
             },
             // (the result of a fn that returns an opaque type, `make(&s)` of `fn make(s: &S) -> impl Name`: as a value of
             // a type parameter, whose bound's method rustc calls whatever type the fn returns (OPAQUE))
-            Expr::Call(f, _) if !self.prog.opaque.is_empty() => {
+            // (a declared result with no type parameter in it is that type, which no opaque type stands for)
+            Expr::Call(f, _) => {
                 let (id, _) = self.callee(f)?;
-                self.prog.opaque.contains(&id).then_some(Ty::Param(OPAQUE))
+                self.declared_ret(id)
             }
-            Expr::MethodCall(r, m, ..) if !self.prog.opaque.is_empty() => {
+            Expr::MethodCall(r, m, ..) => {
                 let sid = match self.peek(r).map(|t| self.strip_refs(t)) {
                     Some(Ty::Struct(sid)) => sid,
                     _ => return None,
                 };
                 let id = self.prog.method(sid, m)?;
-                self.prog.opaque.contains(&id).then_some(Ty::Param(OPAQUE))
+                self.declared_ret(id)
             }
             Expr::Field(b, f, _) => {
-                let mut t = self.gen_ty(b, depth + 1)?;
+                // (a field of a struct with no type parameters, however the struct was reached: its declared type)
+                let Some(mut t) = self.gen_ty(b, depth + 1) else {
+                    let Some(Ty::Struct(sid)) = self.peek(b).map(|t| self.strip_refs(t)) else { return None };
+                    let base = self.prog.base_of(sid);
+                    if !self.prog.structs[base as usize].generics.is_empty() {
+                        return None;
+                    }
+                    return self.prog.structs[sid as usize].fields.iter().find(|x| x.0 == *f).map(|x| x.1);
+                };
                 while let Ty::Ref(_, i) = t {
                     t = *i;
                 }
@@ -4924,6 +4933,37 @@ impl Cx<'_> {
             }
             _ => None,
         }
+    }
+
+    /// gen_ty of a call of fn id: OPAQUE for an opaque result type, the declared type when it names no type parameter
+    fn declared_ret(&self, id: u32) -> Option<Ty> {
+        if self.prog.opaque.contains(&id) {
+            return Some(Ty::Param(OPAQUE));
+        }
+        let r = self.prog.sigs.get(id as usize)?.ret;
+        (!self.prog.has_param(r)).then_some(r)
+    }
+
+    /// A value of type t may be one of an opaque type (`-> impl Name`): an opaque fn's result is t or holds it
+    /// (`Option<&S>`), or a generic one's, whose instances' types are made as they are requested, may be anything
+    fn may_be_opaque(&self, t: Ty) -> bool {
+        fn holds(prog: &crate::program::Program, r: Ty, t: Ty, depth: u32) -> bool {
+            if r == t {
+                return true;
+            }
+            if depth > 6 {
+                return false;
+            }
+            match r {
+                Ty::Ref(_, i) | Ty::Box(i) | Ty::Ptr(_, i) | Ty::Slice(i) | Ty::Array(i, _) => holds(prog, *i, t, depth + 1),
+                Ty::Struct(sid) => prog.structs[sid as usize].args.iter().any(|&a| holds(prog, a, t, depth + 1)),
+                _ => false,
+            }
+        }
+        self.prog.opaque.iter().any(|&id| {
+            let r = self.prog.sigs[id as usize].ret;
+            self.prog.has_param(r) || holds(self.prog, r, t, 0)
+        })
     }
 
     /// A `let`'s annotation as the generic body has it: a type parameter of the fn's (`B`), under references (`&mut B`),
@@ -5061,6 +5101,19 @@ impl Cx<'_> {
                         self.prog.tn(rt)
                     ));
                 }
+            }
+        }
+        // (and one that may be a value of an opaque type: as one, it would call through the opaque type's bound)
+        if g.is_none() && matches!(rt, Ty::Ref(..)) && !self.prog.opaque.is_empty() && self.may_be_opaque(rt) {
+            let alt = self.ref_impl_walk(all, rt, method, Some(OPAQUE as usize), 0);
+            if let Some((f, ..)) = alt.filter(|_| alt != pick) {
+                let s = &self.prog.sigs[f as usize];
+                let tr = s.impl_trait.as_deref().or(s.trait_of.as_deref()).unwrap_or("");
+                let tr = tr.split('<').next().unwrap_or(tr).trim();
+                return Err(format!(
+                    "calls on a value of an opaque type (`impl Trait`) reached in this form (a closure's result, a pattern's binding, a method's result) are not supported for `impl<T> {tr} for &T` (#144): this `{}` may be one, whose `.{method}()` runs the impl's",
+                    self.prog.tn(rt)
+                ));
             }
         }
         Ok(pick)

@@ -1,0 +1,1 @@
+24:24: calls on a value of an opaque type (`impl Trait`) reached in this form (a closure's result, a pattern's binding, a method's result) are not supported for `impl<T> Name for &T` (#144): this `&S` may be one, whose `.name()` runs the impl's
