@@ -1536,6 +1536,79 @@ impl Session {
                 }
             }
         }
+        // (a `Drop` impl of one of the program's structs, enums or unions: its self type's arguments are its own
+        // parameters (E0366), and it requires of them only what the definition does (E0367): the definitions are known
+        // now. Only the program's `impl Drop for` headers are read again)
+        {
+            let short = |n: &str| n.rsplit("::").next().unwrap_or(n).to_string();
+            let drops: Vec<usize> = (0..user_src).filter(|&i| sums[i].impl_trait.as_deref() == Some("Drop") && sums[i].impl_self.is_some()).collect();
+            if !drops.is_empty() {
+                let mut adts: crate::fxhash::FxMap<String, (usize, u32)> = Default::default();
+                for (i, sm) in sums[..user_src].iter().enumerate() {
+                    for n in sm.structs.iter().map(|s| s.0.as_str()).chain(sm.enums.iter().map(|e| e.0.as_str())) {
+                        let e = adts.entry(short(n)).or_insert((i, 0));
+                        e.1 += 1;
+                    }
+                }
+                let mut supers: crate::fxhash::FxMap<String, Vec<String>> = sums
+                    .iter()
+                    .filter_map(|sm| {
+                        let t = sm.trait_decl.as_deref()?;
+                        let s = sm.trait_generics.iter().find(|(n, _)| n == "#supers")?;
+                        Some((short(t), s.1.iter().map(|x| short(x.split('<').next().unwrap_or(x).trim())).collect()))
+                    })
+                    .collect();
+                // (the program's own traits: their supertraits are not all recorded (`#supers` leaves out Debug, Clone
+                // ..), so a parameter bounded by one is not checked for the trait bounds a Drop impl adds: "#?")
+                // (and the markers its header names before its body, which `#supers` leaves out: `trait Tr: Sized`,
+                // `trait Tr: Clone`, `where Self: Sized`, so that a Sized one is known)
+                for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
+                    if let Some(t) = sm.trait_decl.as_deref() {
+                        let e = supers.entry(short(t)).or_default();
+                        e.push("#?".to_string());
+                        let head = src.get(it.start..it.end).map(|x| x.split('{').next().unwrap_or(x)).unwrap_or("");
+                        let words: Vec<&str> = head.split(|c: char| !(c.is_alphanumeric() || c == '_')).collect();
+                        for m in ["Sized", "Clone", "Copy", "Default"] {
+                            if words.contains(&m) && !e.iter().any(|x| x == m) {
+                                e.push(m.to_string());
+                            }
+                        }
+                    }
+                }
+                // (std's supertraits, which the prelude's declarations leave out: `T: Ord` gives `T: PartialOrd`)
+                for (t, sup) in [
+                    ("Ord", &["Eq", "PartialOrd"][..]),
+                    ("Eq", &["PartialEq"]),
+                    ("PartialOrd", &["PartialEq"]),
+                    ("Copy", &["Clone"]),
+                    ("Fn", &["FnMut"]),
+                    ("FnMut", &["FnOnce"]),
+                    ("Error", &["Debug", "Display"]),
+                    ("DoubleEndedIterator", &["Iterator"]),
+                    ("ExactSizeIterator", &["Iterator"]),
+                    ("FusedIterator", &["Iterator"]),
+                    ("DerefMut", &["Deref"]),
+                    ("IndexMut", &["Index"]),
+                    ("BufRead", &["Read"]),
+                ] {
+                    let e = supers.entry(t.to_string()).or_default();
+                    for x in sup {
+                        if !e.iter().any(|y| y == x) {
+                            e.push(x.to_string());
+                        }
+                    }
+                }
+                for &i in &drops {
+                    // (a name two of the program's types have is not followed: which one the impl means is not known here)
+                    let Some(&(ai, 1)) = sums[i].impl_self.as_deref().and_then(|n| adts.get(&short(n))) else { continue };
+                    if let Some((rel, m)) = crate::ast_summary::drop_impl_unmet(&src, &items[i], &items[ai], &supers) {
+                        let line = items[i].line + rel.max(1) - 1;
+                        let line = crate::prep::hoisted_at(&crate::prep::hoist_marks(&src), line).unwrap_or(line);
+                        return Err(format!("{line}:1: {m}"));
+                    }
+                }
+            }
+        }
         // (what the program's types require of traits' `Self: 'x` bounds (E0478, E0310): the traits are known now)
         {
             let mut so: crate::fxhash::FxMap<&str, &[String]> = sums

@@ -2415,6 +2415,8 @@ run-pass	drop/trait-object-drop-10802.rs
 run-pass	dropck/cleanup-arm-conditional.rs
 run-pass	dropck/compound-type-of-raw-pointers.rs
 check-pass	dropck/constrained_by_assoc_type_equality.rs
+compile-fail	dropck/constrained_by_assoc_type_equality_and_self_ty.rs
+compile-fail	dropck/drop-impl-sized-bound-mismatch.rs
 compile-fail	dropck/drop-on-non-struct.rs
 compile-fail	dropck/drop-with-active-borrows-1.rs
 compile-fail	dropck/drop-with-active-borrows-2.rs
@@ -2430,10 +2432,13 @@ run-pass	dropck/dropck_traits.rs
 compile-fail	dropck/eager-by-ref-binding-for-guards.rs
 run-pass	dropck/issue-29844.rs
 run-pass	dropck/issue-34053.rs
+compile-fail	dropck/issue-38868.rs
 check-pass	dropck/issue-54943-1.rs
 check-pass	dropck/issue-54943-2.rs
 compile-fail	dropck/let-else-more-permissive.rs
 check-pass	dropck/no-dropck-overflow-on-deep-nesting.rs
+compile-fail	dropck/reject-specialized-drops-8142.rs
+compile-fail	dropck/relate_lt_in_type_outlives_bound.rs
 run-pass	dropck/self-referential-struct-with-boxed-closure.rs
 check-pass	dropck/transitive-outlives-2.rs
 compile-fail	dropck/unconstrained_const_param_on_drop.rs

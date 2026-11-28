@@ -1178,6 +1178,218 @@ fn unsized_elem(t: &PTy) -> Option<String> {
 /// program that bounds that parameter by 'static (`bar: Bar<U>` with `struct Bar<T: 'static>`). Unlike `T: 'a`,
 /// rustc does not infer `U: 'static` from the fields: the item must declare it (E0310). statics: the short names of
 /// such structs and enums, and the indexes of their type and const parameters that must be 'static. (line, col, msg)
+/// A `Drop` impl (its header imp) against the definition of its struct, enum or union (adt): its self type's arguments
+/// are its own parameters, each once (E0366), and what its header and where clauses require of them is what the
+/// definition requires, or what its fields imply (E0367, as rustc's `ensure_drop_predicates_are_implied_by_item_defn`).
+/// supers: each of the program's traits' supertraits. The line in imp's text, and the message
+pub fn drop_impl_unmet(src: &str, imp: &SrcItem, adt: &SrcItem, supers: &crate::fxhash::FxMap<String, Vec<String>>) -> Option<(usize, String)> {
+    use crate::parse::GArg;
+    let it = format!("{}}}", src.get(imp.start..imp.end)?);
+    let f = parse_file(&it).ok()?;
+    let ItemKind::Impl(ig, Some((false, tp)), PTy::Path(None, sp), _) = &f.items.first()?.kind else { return None };
+    if tp.segs.last().is_none_or(|s| s.name != "Drop") {
+        return None;
+    }
+    let at = src.get(adt.start..adt.end)?;
+    let af = parse_file(at).ok()?;
+    let ad = af.items.first()?;
+    let (aname, ag, tys, what): (&String, &Generics, Vec<&PTy>, &str) = match &ad.kind {
+        ItemKind::Struct(n, g, fields) | ItemKind::Union(n, g, fields) => (n, g, match fields {
+            Fields::Named(v) => v.iter().map(|x| &x.1).collect(),
+            Fields::Tuple(v) => v.iter().collect(),
+            Fields::Unit => vec![],
+        }, if matches!(ad.kind, ItemKind::Union(..)) { "union" } else { "struct" }),
+        ItemKind::Enum(n, g, vs) => (n, g, vs.iter().flat_map(|v| match &v.1 {
+            Fields::Named(f) => f.iter().map(|x| &x.1).collect::<Vec<_>>(),
+            Fields::Tuple(f) => f.iter().collect(),
+            Fields::Unit => vec![],
+        }).collect(), "enum"),
+        _ => return None,
+    };
+    let seg = sp.segs.last()?;
+    if sp.segs.len() != 1 || seg.name != *aname || seg.fn_args.is_some() {
+        return None;
+    }
+    // (the definition's parameters: lifetimes, then the others in their order, as a path writes its arguments)
+    let a_lts: Vec<&str> = ag.params.iter().filter_map(|p| if let GParam::Lifetime(l) = p { Some(l.as_str()) } else { None }).collect();
+    let a_rest: Vec<&str> = ag.params.iter().filter_map(|p| match p {
+        GParam::Ty(n, ..) | GParam::Const(n, _) => Some(n.as_str()),
+        GParam::Lifetime(_) => None,
+    }).collect();
+    let w_lts: Vec<&str> = seg.args.iter().filter_map(|a| if let GArg::Lifetime(l) = a { Some(l.as_str()) } else { None }).collect();
+    let w_rest: Vec<&GArg> = seg.args.iter().filter(|a| !matches!(a, GArg::Lifetime(_) | GArg::Bind(..))).collect();
+    // (lifetimes left out (`impl Drop for M`) or another count: other errors' (E0726, E0107))
+    if w_lts.len() != a_lts.len() || w_rest.len() != a_rest.len() {
+        return None;
+    }
+    let i_lts: Vec<&str> = ig.params.iter().filter_map(|p| if let GParam::Lifetime(l) = p { Some(l.as_str()) } else { None }).collect();
+    let i_rest: Vec<&str> = ig.params.iter().filter_map(|p| match p {
+        GParam::Ty(n, ..) | GParam::Const(n, _) => Some(n.as_str()),
+        GParam::Lifetime(_) => None,
+    }).collect();
+    // (E0366: each argument one of the impl's parameters, each once; `'_` is one of its own)
+    let mut map: Vec<(String, String)> = vec![];
+    let specialized = "`Drop` impls cannot be specialized (E0366)".to_string();
+    for (w, a) in w_lts.iter().zip(&a_lts) {
+        if *w == "'_" {
+            continue;
+        }
+        if !i_lts.contains(w) || map.iter().any(|(x, _)| x == w) {
+            return Some((1, specialized));
+        }
+        map.push((w.to_string(), a.to_string()));
+    }
+    for (w, a) in w_rest.iter().zip(&a_rest) {
+        let n = match w {
+            GArg::Ty(PTy::Path(None, p)) if p.segs.len() == 1 && p.segs[0].args.is_empty() && p.segs[0].fn_args.is_none() => p.segs[0].name.as_str(),
+            GArg::Const(crate::parse::Expr::Path(_, p)) if p.segs.len() == 1 => p.segs[0].name.as_str(),
+            _ => return Some((1, specialized)),
+        };
+        if !i_rest.contains(&n) || map.iter().any(|(x, _)| x == n) {
+            return Some((1, specialized));
+        }
+        map.push((n.to_string(), a.to_string()));
+    }
+    let to_adt = |n: &str| map.iter().find(|(x, _)| x == n).map(|(_, a)| a.clone());
+    // (what the definition gives: its bounds and where clauses, and what its fields imply (RFC 2093's inferred
+    // outlives: `&'a T` gives T: 'a))
+    let mut k = crate::wf::Known::default();
+    k.add_generics(ag);
+    for t in &tys {
+        k.implied(t, 0);
+    }
+    // (each parameter's trait bounds there, with their supertraits)
+    let short = |p: &Path| p.segs.last().map(|s| s.name.clone()).unwrap_or_default();
+    let mut a_traits: Vec<(String, String, bool)> = vec![];
+    let mut a_unsized: Vec<String> = vec![];
+    let note = |n: &str, bs: &[Bound], a_traits: &mut Vec<(String, String, bool)>, a_unsized: &mut Vec<String>| {
+        for b in bs {
+            if let Bound::Trait(maybe, p) = b {
+                if *maybe {
+                    a_unsized.push(n.to_string());
+                    continue;
+                }
+                let binds = p.segs.last().is_some_and(|s| s.args.iter().any(|a| matches!(a, GArg::Bind(..))));
+                let mut todo = vec![short(p)];
+                let first = short(p);
+                while let Some(t) = todo.pop() {
+                    // (the same trait again (`T: Iterator` and `where T: Iterator<Item = u8>`): its equations too)
+                    if let Some(x) = a_traits.iter_mut().find(|x| x.0 == n && x.1 == t) {
+                        x.2 |= binds && t == first;
+                        continue;
+                    }
+                    todo.extend(supers.get(&t).into_iter().flatten().cloned());
+                    a_traits.push((n.to_string(), t.clone(), binds && t == first));
+                }
+            }
+        }
+    };
+    for p in &ag.params {
+        if let GParam::Ty(n, bs, _) = p {
+            note(n, bs, &mut a_traits, &mut a_unsized);
+        }
+    }
+    for (t, bs) in &ag.preds {
+        if let PTy::Path(None, p) = t {
+            if let [s] = p.segs.as_slice() {
+                if s.args.is_empty() && !s.name.starts_with('\'') {
+                    note(&s.name, bs, &mut a_traits, &mut a_unsized);
+                }
+            }
+        }
+    }
+    let unmet = |pred: String| format!("`Drop` impl requires `{pred}` but the {what} it is implemented for does not (E0367)");
+    // (the impl's requirements, of a parameter of its self type: one not there may be any (`impl<'r, T: 'r> Drop for
+    // R<T>`))
+    let mut preds: Vec<(&str, &[Bound], u32)> = vec![];
+    let mut i_unsized: Vec<&str> = vec![];
+    for p in &ig.params {
+        if let GParam::Ty(n, bs, _) = p {
+            preds.push((n.as_str(), bs.as_slice(), 0));
+        }
+    }
+    for (t, bs) in &ig.preds {
+        if let PTy::Path(None, p) = t {
+            if let [s] = p.segs.as_slice() {
+                if s.args.is_empty() && s.fn_args.is_none() {
+                    preds.push((s.name.as_str(), bs.as_slice(), p.pos.line));
+                }
+            }
+        }
+    }
+    for &(n, bs, _) in &preds {
+        if bs.iter().any(|b| matches!(b, Bound::Trait(true, _))) {
+            i_unsized.push(n);
+        }
+    }
+    for &(n, bs, line) in &preds {
+        let Some(an) = to_adt(n) else { continue };
+        let at_line = if line == 0 { 1 } else { line as usize };
+        for b in bs {
+            match b {
+                Bound::Lifetime(l) => {
+                    if l == "'static" {
+                        if !k.outlives(&an, "'static") {
+                            return Some((at_line, unmet(format!("{n}: {l}"))));
+                        }
+                        continue;
+                    }
+                    let Some(al) = to_adt(l) else { continue };
+                    if !k.outlives(&an, &al) {
+                        // (one lifetime outliving another: at the impl, as rustc has it)
+                        let ln = if n.starts_with('\'') { 1 } else { at_line };
+                        return Some((ln, unmet(format!("{n}: {l}"))));
+                    }
+                }
+                Bound::Trait(true, _) => {}
+                Bound::Trait(false, p) => {
+                    let t = short(p);
+                    // (a marker std gives every type it may (Sized aside, below): not looked at)
+                    if matches!(t.as_str(), "Sized") {
+                        continue;
+                    }
+                    let binds = p.segs.last().is_some_and(|s| s.args.iter().any(|a| matches!(a, GArg::Bind(..))));
+                    match a_traits.iter().find(|x| x.0 == an && x.1 == t) {
+                        // (a parameter bounded by one of the program's traits, whose supertraits are not all known:
+                        // a trait not found is not reported)
+                        None if a_traits.iter().any(|x| x.0 == an && x.1 == "#?") => {}
+                        None => return Some((at_line, unmet(format!("{n}: {t}")))),
+                        // (an equation whose value is a parameter of the impl not in the self type may hold:
+                        // `impl<T: Trait<Assoc = U>, U> Drop for Foo<T>`)
+                        Some(x) if binds && !x.2 && !p.segs.last().is_some_and(|s| s.args.iter().all(|a| match a {
+                            GArg::Bind(_, PTy::Path(None, v)) => v.segs.len() == 1 && v.segs[0].args.is_empty() && i_rest.contains(&v.segs[0].name.as_str()) && to_adt(&v.segs[0].name).is_none(),
+                            GArg::Bind(..) => false,
+                            _ => true,
+                        })) => {
+                            let bind = p.segs.last().and_then(|s| s.args.iter().find_map(|a| if let GArg::Bind(an, PTy::Path(None, v)) = a { Some((an.clone(), v.segs.last().map(|s| s.name.clone()).unwrap_or_default())) } else { None }));
+                            let m = match bind {
+                                Some((an, v)) => format!("<{n} as {t}>::{an} == {v}"),
+                                None => format!("{n}: {t}"),
+                            };
+                            return Some((at_line, unmet(m)));
+                        }
+                        Some(_) => {}
+                    }
+                }
+            }
+        }
+    }
+    // (an impl's type parameter is Sized unless it says `?Sized`: the definition's `?Sized` one is not)
+    for p in &ig.params {
+        if let GParam::Ty(n, ..) = p {
+            if let Some(an) = to_adt(n) {
+                // (unless a bound there makes it Sized: `T: ?Sized + Clone`, or one of the program's traits whose header
+                // names Sized or such a trait (`trait Tr: Sized`), through the supertraits)
+                let sized_by_bound = a_traits.iter().any(|x| x.0 == an && matches!(x.1.as_str(), "Clone" | "Copy" | "Default" | "Sized"));
+                if a_unsized.contains(&an) && !i_unsized.contains(&n.as_str()) && !sized_by_bound {
+                    return Some((1, unmet(format!("{n}: Sized"))));
+                }
+            }
+        }
+    }
+    None
+}
+
 pub fn static_field_unmet(src: &str, it: &SrcItem, statics: &crate::fxhash::FxMap<&str, Vec<usize>>) -> Option<(usize, usize, String)> {
     let text = src.get(it.start..it.end)?;
     let f = parse_file(text).ok()?;

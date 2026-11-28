@@ -138,3 +138,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-27 | [`std::thread` as OS threads](2026-11-27-01-native-threads.md) |
 | 2026-11-27 | [rustc's thread tests on OS threads: `thread::Builder`, `recv_timeout`, `park_timeout`, `Barrier`, closures that are Sync through what they borrow](2026-11-27-02-threads-ui.md) |
 | 2026-11-27 | [Trait objects keep their auto traits: `dyn Tr + Send` / `+ Sync`](2026-11-27-03-dyn-auto-traits.md) |
+| 2026-11-27 | [Region (lifetime) checking, part 41: Drop impls that specialize or require more than their type, and `ref` bindings of owned places](2026-11-27-04-region-check-41.md) |

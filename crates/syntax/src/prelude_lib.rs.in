@@ -11779,14 +11779,14 @@ impl Condvar {
     fn __p(&self) -> *mut u32 {
         &self.__cv_n as *const u32 as *mut u32
     }
-    pub fn wait<T>(&self, guard: MutexGuard<T>) -> Result<MutexGuard<T>, ()> {
+    pub fn wait<T>(&self, guard: MutexGuard<T>) -> Result<MutexGuard<T>, PoisonError<MutexGuard<T>>> {
         let n = __exr_atomic_load(self.__p());
         __exr_unlock(guard.m);
         __exr_futex_wait(self.__p(), n);
         __exr_lock(guard.m);
         Ok(guard)
     }
-    pub fn wait_while<T, F: FnMut(&mut T) -> bool>(&self, guard: MutexGuard<T>, condition: F) -> Result<MutexGuard<T>, ()> {
+    pub fn wait_while<T, F: FnMut(&mut T) -> bool>(&self, guard: MutexGuard<T>, condition: F) -> Result<MutexGuard<T>, PoisonError<MutexGuard<T>>> {
         let mut g = guard;
         let mut condition = condition;
         while condition(unsafe { &mut *g.p }) {
@@ -17959,4 +17959,86 @@ impl<'a> dyn Any + Send + Sync + 'a {
     pub fn is<T: 'static>(&self) -> bool {
         self.type_id() == TypeId::of::<T>()
     }
+}
+
+// `std::sync::LockResult` / `TryLockResult` / `TryLockError`: what lock / read / write and their try_ forms give. No
+// lock is ever poisoned here (a panic does not unwind), so the Err of a try_ form is WouldBlock: the lock is held
+pub type LockResult<Guard> = Result<Guard, PoisonError<Guard>>;
+pub type TryLockResult<Guard> = Result<Guard, TryLockError<Guard>>;
+
+pub enum TryLockError<T> {
+    Poisoned(PoisonError<T>),
+    WouldBlock,
+}
+
+impl<T> Debug for TryLockError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        match self {
+            // (std writes the name as a str's Debug, quoted)
+            TryLockError::Poisoned(_) => __exr_fmt_str_debug::<()>(f, "Poisoned(..)"),
+            TryLockError::WouldBlock => __exr_fmt_str_debug::<()>(f, "WouldBlock"),
+        }
+        Ok(())
+    }
+}
+
+impl<T> Display for TryLockError<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        match self {
+            TryLockError::Poisoned(_) => __exr_fmt_str::<()>(f, "poisoned lock: another task failed inside"),
+            TryLockError::WouldBlock => __exr_fmt_str::<()>(f, "try_lock failed because the operation would block"),
+        }
+        Ok(())
+    }
+}
+
+impl<T> From<PoisonError<T>> for TryLockError<T> {
+    fn from(e: PoisonError<T>) -> TryLockError<T> {
+        TryLockError::Poisoned(e)
+    }
+}
+
+impl<T> Mutex<T> {
+    pub fn try_lock(&self) -> Result<MutexGuard<T>, TryLockError<MutexGuard<T>>> {
+        let m = self.__m();
+        if __exr_atomic_cas(m, 0, 1) != 0 {
+            return Err(TryLockError::WouldBlock);
+        }
+        Ok(MutexGuard { p: &self.val as *const T as *mut T, m: m })
+    }
+    pub fn is_poisoned(&self) -> bool {
+        false
+    }
+    pub fn clear_poison(&self) {}
+}
+
+impl<T> RwLock<T> {
+    // (a writer holds it: WouldBlock, never a wait)
+    pub fn try_read(&self) -> Result<RwLockReadGuard<T>, TryLockError<RwLockReadGuard<T>>> {
+        let l = self.__l();
+        let st = unsafe { &mut (*l).st as *mut u32 };
+        loop {
+            let s = __exr_atomic_load(st);
+            if s >= 4294967294 {
+                return Err(TryLockError::WouldBlock);
+            }
+            if __exr_atomic_cas(st, s, s + 1) == s {
+                break;
+            }
+        }
+        Ok(RwLockReadGuard { p: &self.val as *const T, l: l })
+    }
+    // (a writer or a reader holds it: WouldBlock)
+    pub fn try_write(&self) -> Result<RwLockWriteGuard<T>, TryLockError<RwLockWriteGuard<T>>> {
+        let l = self.__l();
+        let st = unsafe { &mut (*l).st as *mut u32 };
+        if __exr_atomic_cas(st, 0, 4294967295) != 0 {
+            return Err(TryLockError::WouldBlock);
+        }
+        Ok(RwLockWriteGuard { p: &self.val as *const T as *mut T, l: l })
+    }
+    pub fn is_poisoned(&self) -> bool {
+        false
+    }
+    pub fn clear_poison(&self) {}
 }
