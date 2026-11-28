@@ -1,0 +1,1 @@
+5:1: impls for references to a type parameter (`impl<T> Tr for &T`) are supported only when they define each default method of the trait, forwarding to T's: `value` is left out

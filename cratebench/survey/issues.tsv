@@ -20,6 +20,7 @@ missing generics for `	260	`missing generics for` a type used without its parame
 the trait bound `[^`]*` is not satisfied \(E0277\)	261	false E0277: a bound zustc does not see
 cannot infer the `[^`]*` return type of	262	cannot infer an `impl Trait` return type
 impl has stricter requirements than trait	264	false E0276 in bitflags' impls
-cannot find value \(unsupported path\)	265	value paths zustc cannot resolve
+cannot find value (`[^`]*` )?\(unsupported path\)	265	value paths zustc cannot resolve
 takes \d+ type arguments?, but \d+ (were|was) given	266	std iterator adapters' arity (`Copied`, `Cloned`, `Map`)
 not all trait items implemented	298	a std trait's default method zustc requires
+duplicate definition of	297	duplicate associated items of two impls

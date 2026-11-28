@@ -3114,8 +3114,19 @@ fn summarize_assoc_fn(owner: Option<&Owner>, sm: &mut Summary, fs: &PSig, body: 
                 sm.ref_impl_fns.push(fs.name.clone());
                 let bounded = ow.generics.iter().any(|g| g.0 == *param && g.1.iter().any(|b| b.split('<').next().unwrap_or(b).trim() == trn));
                 let mut_ref = matches!(&ow.self_ty, TySyn::Ref(true, _));
-                if bounded && fs.recv.is_some() && !forwards_to_referent(fs, body, param, trn, mut_ref) {
-                    sm.ref_impl_bad.push(fs.name.clone());
+                if bounded && fs.recv.is_some() {
+                    if !forwards_to_referent(fs, body, param, trn, mut_ref) {
+                        sm.ref_impl_bad.push(fs.name.clone());
+                    } else {
+                        // (a `_` parameter it gives the path of its type: a forward if that names a unit struct)
+                        for (p, t) in &fs.params {
+                            if let (Pat::Wild, PTy::Path(None, tp)) = (p, t) {
+                                if let Some(l) = tp.segs.last() {
+                                    sm.ref_impl_unit_args.push((fs.name.clone(), l.name.clone()));
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -3969,27 +3980,70 @@ fn const_param_in_op(t: &PTy, consts: &[&str]) -> bool {
 /// `&mut T`: `*self` is the `&mut T`, whose method lookup takes the impl's own `m` (through `&&mut T`) before T's, so
 /// it calls itself (mut_ref: the impl is for `&mut T`)
 fn forwards_to_referent(fs: &PSig, body: &Block, param: &str, tr: &str, mut_ref: bool) -> bool {
-    if !matches!(fs.recv.as_deref(), Some("&self" | "&mut self")) {
-        return false;
+    // (the receiver: `&self` / `&mut self` (with a lifetime, `&'b self`, too), or a pinned one, `self: Pin<&mut Self>`
+    // (futures' and tokio's poll methods), which forwards through `Pin::new(&mut **self)`)
+    #[derive(PartialEq)]
+    enum Recv {
+        Ref(bool),
+        PinMut,
+    }
+    let self_ty = |t: &PTy| matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "Self" && p.segs[0].args.is_empty());
+    let recv = match fs.recv_ty.as_ref() {
+        Some(PTy::Ref(_, m, i)) if self_ty(i) => Recv::Ref(*m),
+        Some(PTy::Path(None, p))
+            if p.segs.last().is_some_and(|s| s.name == "Pin")
+                && matches!(p.segs.last().unwrap().args.as_slice(), [crate::parse::GArg::Ty(PTy::Ref(_, true, i))] if self_ty(i)) =>
+        {
+            Recv::PinMut
+        }
+        _ => return false,
+    };
+    fn strip(mut e: &Expr) -> &Expr {
+        loop {
+            match e {
+                Expr::Paren(i) => e = i,
+                // (`unsafe { (**self).m(..) }`, allocator-api2's: a block of the one expression)
+                Expr::Block(None, _, b) if b.stmts.len() == 1 => match &b.stmts[0] {
+                    Stmt::Expr(i, false) => e = i,
+                    _ => return e,
+                },
+                _ => return e,
+            }
+        }
     }
     let [st] = body.stmts.as_slice() else { return false };
     let e = match st {
         Stmt::Expr(e, semi) if !*semi || fs.ret.is_none() => e,
         _ => return false,
     };
-    fn strip(mut e: &Expr) -> &Expr {
-        while let Expr::Paren(i) = e {
-            e = i;
-        }
-        e
-    }
     let one = |e: &Expr, n: &str| matches!(strip(e), Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == n && p.segs[0].args.is_empty());
     let deref1 = |e: &Expr| matches!(strip(e), Expr::Unary(o, j, _) if o == "*" && one(j, "self"));
     let deref2 = |e: &Expr| matches!(strip(e), Expr::Unary(o, i, _) if o == "*" && deref1(i));
-    let Some(names) = fs.params.iter().map(|(p, _)| if let Pat::Ident(_, false, n, None) = p { Some(n.as_str()) } else { None }).collect::<Option<Vec<&str>>>() else {
+    // (a parameter `_` the impl cannot pass on: in its place the path of its type itself, as a value, is the unit
+    // struct's one value (tokio's `_: sealed::Internal` passed as `(**self).to_socket_addrs(sealed::Internal)`); no
+    // other value is taken (a const, or `Mode::Fast` of an enum, may differ from the caller's))
+    let Some(names) = fs
+        .params
+        .iter()
+        .map(|(p, t)| match (p, t) {
+            (Pat::Ident(_, false, n, None), _) => Some(Ok(n.as_str())),
+            (Pat::Wild, PTy::Path(None, tp)) if tp.segs.iter().all(|s| s.args.is_empty()) => Some(Err(tp)),
+            _ => None,
+        })
+        .collect::<Option<Vec<Result<&str, &crate::parse::Path>>>>()
+    else {
         return false;
     };
-    let args_ok = |args: &[Expr]| args.len() == names.len() && args.iter().zip(&names).all(|(a, n)| one(a, n));
+    let same_path = |e: &Expr, tp: &crate::parse::Path| {
+        matches!(strip(e), Expr::Path(None, p) if p.segs.len() == tp.segs.len() && p.segs.iter().zip(&tp.segs).all(|(a, b)| a.name == b.name && a.args.is_empty()))
+    };
+    let args_ok = |args: &[Expr]| {
+        args.len() == names.len()
+            && args.iter().zip(&names).all(|(a, n)| match n {
+                Ok(n) => one(a, n),
+                Err(tp) => same_path(a, tp),
+            })
+    };
     // (a turbofish passes the method's own type and const parameters, in their order, or there is none)
     let own: Vec<&str> = fs.generics.params.iter().filter_map(|g| match g {
         GParam::Ty(n, ..) | GParam::Const(n, _) => Some(n.as_str()),
@@ -4004,20 +4058,64 @@ fn forwards_to_referent(fs: &PSig, body: &Block, param: &str, tr: &str, mut_ref:
                     _ => false,
                 }))
     };
+    // (`Pin::new(&mut **self)` (or of `self.get_mut()`): the pinned referent, T's own receiver)
+    let pinned = |e: &Expr| {
+        let Expr::Call(f, a) = strip(e) else { return false };
+        let pin_new = matches!(strip(f), Expr::Path(None, p) if p.segs.len() == 2 && p.segs[0].name == "Pin" && p.segs[1].name == "new");
+        let inner = |e: &Expr| {
+            deref2(e)
+                || matches!(strip(e), Expr::Unary(o, i, _) if o == "*"
+                    && matches!(strip(i), Expr::Unary(o2, j, _) if o2 == "*"
+                        && matches!(strip(j), Expr::MethodCall(r, m, t, a, _) if m == "get_mut" && t.is_empty() && a.is_empty() && one(r, "self"))))
+        };
+        pin_new && matches!(a.as_slice(), [x] if matches!(strip(x), Expr::Ref(true, i) if inner(i)))
+    };
+    // (the head of a path call: `T::m`, `Tr::m`, or `<T as Tr>::m` (futures-core's and quote's))
+    let path_head = |f: &Expr| match strip(f) {
+        Expr::Path(None, p) => p.segs.len() == 2 && (p.segs[0].name == param || p.segs[0].name == tr) && p.segs[1].name == fs.name && targs_ok(&p.segs[1].args),
+        Expr::Path(Some(q), p) => {
+            matches!(&**q, PTy::Path(None, qp) if qp.segs.len() == 1 && qp.segs[0].name == param && qp.segs[0].args.is_empty())
+                && p.segs.last().is_some_and(|s| s.name == fs.name && targs_ok(&s.args))
+                && p.segs.iter().rev().nth(1).is_none_or(|s| s.name == tr)
+        }
+        _ => false,
+    };
+    if recv == Recv::PinMut {
+        return match strip(e) {
+            Expr::MethodCall(r, m, targs, args, _) => *m == fs.name && pinned(r) && targs_ok(targs) && args_ok(args),
+            // (`S::poll_next(Pin::new(&mut **self), cx)`, futures-core's)
+            Expr::Call(f, args) => path_head(f) && args.first().is_some_and(pinned) && args_ok(&args[1..]),
+            _ => false,
+        };
+    }
+    // (`Pin::new(&**self).m(..)` of a `&self` method, http-body's: the referent behind a shared pin, whose `&self` method
+    // is T's through Pin's deref)
+    let pinned_shared = |e: &Expr| {
+        let Expr::Call(f, a) = strip(e) else { return false };
+        matches!(strip(f), Expr::Path(None, p) if p.segs.len() == 2 && p.segs[0].name == "Pin" && p.segs[1].name == "new")
+            && matches!(a.as_slice(), [x] if matches!(strip(x), Expr::Ref(false, i) if deref2(i)))
+    };
     // (`(*self).m(..)`: `*self` is the `&T`, whose own method is T's through the deref too; but not the `&mut T` of a
     // `&self` method, see above)
-    let deref1_recv = !(mut_ref && fs.recv.as_deref() == Some("&self"));
+    let deref1_recv = !(mut_ref && recv == Recv::Ref(false));
+    // (the first argument of a path call: `&**self` / `&mut **self`, `*self`, or, where the head names T (`T::m`, `<T
+    // as Tr>::m`), `self` itself, which coerces to T's receiver through the deref (`T::read(self, buf)`, embedded-io's;
+    // `Sp::spawn_obj(self, ..)`, futures-task's). Not after the trait's name: `Tr::m(self)` takes Self = `&T`, this impl
+    // again)
+    let names_param = |f: &Expr| match strip(f) {
+        Expr::Path(None, p) => p.segs.first().is_some_and(|s| s.name == param),
+        Expr::Path(Some(_), _) => true,
+        _ => false,
+    };
+    let first_ok = |f: &Expr, a: &Expr| matches!(strip(a), Expr::Ref(_, i) if deref2(i)) || deref1(a) || (names_param(f) && one(a, "self"));
     match strip(e) {
-        Expr::MethodCall(r, m, targs, args, _) => *m == fs.name && (deref2(r) || (deref1_recv && deref1(r))) && targs_ok(targs) && args_ok(args),
-        Expr::Call(f, args) => {
-            let Expr::Path(None, p) = strip(f) else { return false };
-            p.segs.len() == 2
-                && (p.segs[0].name == param || p.segs[0].name == tr)
-                && p.segs[1].name == fs.name
-                && targs_ok(&p.segs[1].args)
-                && args.first().is_some_and(|a| matches!(strip(a), Expr::Ref(_, i) if deref2(i)) || deref1(a))
-                && args_ok(&args[1..])
+        Expr::MethodCall(r, m, targs, args, _) => {
+            *m == fs.name
+                && (deref2(r) || (deref1_recv && deref1(r)) || (recv == Recv::Ref(false) && pinned_shared(r)))
+                && targs_ok(targs)
+                && args_ok(args)
         }
+        Expr::Call(f, args) => path_head(f) && args.first().is_some_and(|a| first_ok(f, a)) && args_ok(&args[1..]),
         _ => false,
     }
 }

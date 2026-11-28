@@ -157,6 +157,23 @@ fn let_stmt(name: &str, init: Expr) -> Stmt {
     Stmt::Let(Pat::Ident(false, false, name.to_string(), None), None, Some(init), None, Default::default())
 }
 
+/// A value path no reading answers, named as written, as rustc's E0425 / E0433 name theirs: ``cannot find value
+/// `core::char::REPLACEMENT_CHARACTER` (unsupported path)`` (#265). `<T as Tr>::C` keeps its qualified self (the
+/// trait's path is the segments before the last). Made only here, on the error, so the readings above pay nothing
+#[cold]
+#[inline(never)]
+fn unsupported_path<T>(q: Option<&crate::parse::Ty>, p: &Path) -> R<T> {
+    let path = match (q, p.segs.split_last()) {
+        (Some(q), Some((last, []))) => format!("<{}>::{}", crate::parse::ty_text(q), last.name),
+        (Some(q), Some((last, tr))) => {
+            let tr = Path { global: p.global, segs: tr.to_vec(), pos: p.pos };
+            format!("<{} as {}>::{}", crate::parse::ty_text(q), crate::parse::path_text(&tr), last.name)
+        }
+        _ => crate::parse::path_text(p),
+    };
+    err(SP, format!("cannot find value `{path}` (unsupported path)"))
+}
+
 /// The walk of hoist_index_bases (outside the function: zustc's hoisting of nested items cannot handle an impl)
 struct HoistScan {
     /// Index chains seen: (root name, receiver expressions (`x`, `x[i]`, ..), whether on an assignment's left side)
@@ -2299,7 +2316,7 @@ impl Cx<'_> {
             }
         }
         let id = match self.prog.fn_by_p(&PPath::of(p), self.self_sid) {
-            Some(id) => id,
+            Some(id) => self.prog.fn_of_path_self(id, p, &self.env),
             // (`S::f` where f is a default fn of a trait S implements)
             None => match self.path_self_ty(p)? {
                 Ty::Struct(sid) => self.prog.default_method(sid, &p.segs[1].name)?,
@@ -2409,12 +2426,31 @@ impl Cx<'_> {
                 if let Some(n) = by_trait.or_else(bare) {
                     tn = n.to_string();
                 }
+                // (an impl for a reference, `impl Tr for &S { const C }` (der's `&OctetStringRef`), or for a generic
+                // type's instance (`<W<u8>>::C`): under the name of the type, S or W, as the impl's own; pick_const
+                // chooses by t among those of more impls)
+                if matches!(t, Ty::Ref(..) | Ty::Struct(_)) && !self.prog.const_index.contains_key(&format!("{tn}::{}", last.name)) {
+                    let mut b = t;
+                    while let Ty::Ref(_, i) = b {
+                        b = *i;
+                    }
+                    let bn = self.ty_key(b);
+                    if self.prog.const_index.contains_key(&format!("{bn}::{}", last.name)) {
+                        tn = bn;
+                    }
+                }
                 // (`<Foo as Tr>::C` where Foo has an inherent `C` too: the trait impl's, by its qualified name)
                 if p.segs.len() >= 2 {
                     let tr = &p.segs[p.segs.len() - 2].name;
                     if let Some(&ci) = self.prog.const_index.get(&format!("{tn} as {tr}::{}", last.name)) {
+                        let ci = self.pick_const_qualified(ci, t, p, _expected);
                         return self.const_value(e, ci);
                     }
+                }
+                // (`<W<u8>>::C` / `<&S>::C` of a const of more impls: the one of t's)
+                if let Some(&ci) = self.prog.const_index.get(&format!("{tn}::{}", last.name)).filter(|ci| self.prog.const_group.contains_key(ci)) {
+                    let ci = self.pick_const_qualified(ci, t, p, _expected);
+                    return self.const_value(e, ci);
                 }
                 if self.prog.const_index.contains_key(&format!("{tn}::{}", last.name)) {
                     let seg = |n: &str| crate::parse::Seg { name: n.to_string(), args: vec![], fn_args: None, text: n.to_string() };
@@ -2449,6 +2485,7 @@ impl Cx<'_> {
             }
         }
         if let Some(ci) = self.const_of(e) {
+            let ci = self.pick_const_expr(e, ci, _expected);
             return self.const_value(e, ci);
         }
         if let Some(id) = self.fn_item(e) {
@@ -2534,7 +2571,8 @@ impl Cx<'_> {
         }
         // (`std::marker::PhantomData` / `m::S`: a unit struct through a module path)
         if segs.len() >= 2 && p.segs.iter().all(|s| s.args.is_empty()) {
-            let last = segs.last().unwrap();
+            let names: Vec<&str> = segs.iter().map(|s| s.as_str()).collect();
+            let last = &crate::types::std_unit_name(&names).to_string();
             let unit = self.prog.struct_index.get(last.as_str()).is_some_and(|&sid| {
                 let sd = &self.prog.structs[sid as usize];
                 !sd.is_enum && sd.fields.is_empty()
@@ -2594,7 +2632,7 @@ impl Cx<'_> {
                 }
             }
         }
-        err(SP, "cannot find value (unsupported path)")
+        unsupported_path(q.as_deref(), p)
     }
 
     /// If `m::S` / `crate::m::S` is a static in a module, the path without the modules
@@ -2667,6 +2705,28 @@ impl Cx<'_> {
 
     pub(crate) fn const_of_inner(&self, e: &Expr) -> Option<u32> {
         let Expr::Path(qself, p) = e else { return None };
+        // (`<&S>::C` / `<W<u8>>::C` / `<S as Tr>::C` as a place (`&<&S>::C`), of an impl for a reference (der's `impl
+        // FixedTag for &OctetStringRef`) or a const of more impls (const_groups): under the name of the type its impls
+        // give it, a reference's under its referent's, as path_value reads them; the trait impl's by its qualified
+        // name. Other qualified paths are read as before)
+        if let Some(q) = qself.as_ref().filter(|_| p.segs.len() <= 2 && p.segs.last().is_some_and(|s| self.prog.const_by_last.contains_key(&s.name))) {
+            let n = &p.segs.last()?.name;
+            if let Ok(t0) = self.parse_ty(q) {
+                let mut t = t0;
+                while let Ty::Ref(_, i) = t {
+                    t = *i;
+                }
+                let base = self.ty_key(t);
+                let key = match p.segs.len() {
+                    2 => format!("{base} as {}::{n}", p.segs[0].name),
+                    _ => format!("{base}::{n}"),
+                };
+                let found = self.prog.const_index.get(&key).copied().filter(|&ci| self.prog.consts[ci as usize].stat.is_none());
+                if let Some(ci) = found.filter(|ci| matches!(t0, Ty::Ref(..)) || self.prog.const_group.contains_key(ci)) {
+                    return Some(ci);
+                }
+            }
+        }
         // Associated constants `S::N` / `Self::N` / `T::N` (T a type parameter) / a trait's default `Tr::N`
         if qself.is_none() && p.segs.len() == 2 {
             let (a, n) = (p.segs[0].name.clone(), p.segs[1].name.clone());
@@ -2686,6 +2746,17 @@ impl Cx<'_> {
             }?;
             if let Some(&ci) = self.prog.const_index.get(&format!("{base}::{n}")) {
                 return Some(ci);
+            }
+            // (`T::C` with T a reference, of `impl Tr for &S { const C }` (der's `impl FixedTag for &OctetStringRef`):
+            // under S's name, as the impl's; path_value chooses among more impls by T)
+            if let Some(Ty::Ref(..)) = ty {
+                let mut b = ty.unwrap();
+                while let Ty::Ref(_, i) = b {
+                    b = *i;
+                }
+                if let Some(&ci) = self.prog.const_index.get(&format!("{}::{n}", self.ty_key(b))) {
+                    return Some(ci);
+                }
             }
             // (`V::BYTES` with V a vector type: its impl's const, under the name the impl wrote (`__m128i::BYTES`))
             if let Some(&ci) = ty.and_then(|t| crate::program::vector_names(t).iter().filter(|v| !self.prog.struct_index.contains_key(**v)).find_map(|v| self.prog.const_index.get(&format!("{v}::{n}")))) {
@@ -2710,6 +2781,75 @@ impl Cx<'_> {
         }
         let &ci = self.prog.const_index.get(id)?;
         self.prog.consts[ci as usize].stat.is_none().then_some(ci)
+    }
+
+    /// Of consts of one name in more impls (Program::const_groups), the one of the impl the path e names (ci as
+    /// const_of found it): pick_const_qualified / pick_const_of_path. ci when it has no group
+    pub(crate) fn pick_const_expr(&mut self, e: &Expr, ci: u32, expected: Option<Ty>) -> u32 {
+        if !self.prog.const_group.contains_key(&ci) {
+            return ci;
+        }
+        match e {
+            Expr::Path(Some(q), p) => match self.parse_ty(q) {
+                Ok(t) => self.pick_const_qualified(ci, t, p, expected),
+                Err(_) => ci,
+            },
+            Expr::Path(None, p) => self.pick_const_of_path(p, ci, expected),
+            _ => ci,
+        }
+    }
+
+    /// Program::pick_const for the const ci of a group that a path `T::C` / `Self::C` / `S::C` / `Alias::C` names: by the
+    /// self type the path names, and for a type parameter by the arguments of its bound on the const's trait in this
+    /// instance (time-core's `T::VALUE` with `T: MultipleOf<U, Output>`), else by the type expected
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn pick_const_of_path(&mut self, p: &Path, ci: u32, expected: Option<Ty>) -> u32 {
+        let n = p.segs.len();
+        let t = match n {
+            2 if p.segs[0].name == "Self" => self.env.self_ty.or(self.self_sid.map(Ty::Struct)),
+            _ => self.prog.path_self(p, &self.env),
+        };
+        let (mut tr, mut args) = (None, None);
+        if n == 2 && self.env.params.iter().any(|(g, _)| *g == p.segs[0].name) {
+            // (the fn's own bounds: `root`, also for a body inlined into another)
+            let g = &p.segs[0].name;
+            let bounds = self.prog.sigs.get(self.root as usize).and_then(|s| s.generics.iter().find(|x| x.0 == *g)).map(|x| x.1.clone()).unwrap_or_default();
+            let group = &self.prog.const_groups[self.prog.const_group[&ci] as usize];
+            let of_group = |b: &str| {
+                let b = b.split('<').next().unwrap_or(b).trim();
+                let b = b.rsplit("::").next().unwrap_or(b);
+                group.iter().any(|c| self.prog.const_impls.get(c).is_some_and(|im| im.trait_name.as_deref() == Some(b)))
+            };
+            if let Some(b) = bounds.iter().find(|b| of_group(b)) {
+                let (trn, a) = self.dyn_trait_args(b);
+                tr = Some(trn);
+                args = Some(a);
+            }
+        }
+        self.prog.pick_const(ci, t, tr.as_deref(), args.as_deref(), expected)
+    }
+
+    /// pick_const for the const ci a qualified path `<T as Tr<A>>::C` / `<T>::C` names: by T, and Tr and its arguments
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn pick_const_qualified(&mut self, ci: u32, t: Ty, p: &Path, expected: Option<Ty>) -> u32 {
+        if !self.prog.const_group.contains_key(&ci) {
+            return ci;
+        }
+        let trait_seg = p.segs.len().checked_sub(2).map(|k| &p.segs[k]);
+        let args: Option<Vec<Ty>> = trait_seg.filter(|s| !s.args.is_empty()).and_then(|s| {
+            s.args
+                .iter()
+                .filter(|a| !matches!(a, crate::parse::GArg::Lifetime(_) | crate::parse::GArg::Bind(..)))
+                .map(|a| match a {
+                    crate::parse::GArg::Ty(x) => self.parse_ty(x).ok(),
+                    _ => None,
+                })
+                .collect()
+        });
+        let tr = trait_seg.map(|s| s.name.clone());
+        self.prog.pick_const(ci, Some(t), tr.as_deref(), args.as_deref(), expected)
     }
 
     /// The address of an anonymous data / static symbol

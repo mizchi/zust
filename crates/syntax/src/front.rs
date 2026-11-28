@@ -162,11 +162,19 @@ pub fn with_prelude_in(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i3
         }
         None => pre,
     };
-    let src: &str = &pre;
+    // (the prelude's types the program defines for itself, renamed in the prelude below; the program's std paths to
+    // one name the prelude's: rewritten, and split again (rare: a type of the program's named as one, and a std path))
+    let defined = crate::prelude::shadowed_defs(&pre);
+    let to_shadowed = crate::prelude::std_paths_to_shadowed(&pre, &defined);
+    if let Some(r) = &to_shadowed {
+        items = split_inc(r, &mut cache.split)?;
+    }
+    let src: &str = to_shadowed.as_deref().unwrap_or(&pre);
     let user = items.len();
     tm.lap("split", String::new());
+    cache.sel.shadow_paths = to_shadowed.is_some();
     let extra = crate::prelude::select_with(src, &items, &mut cache.sel);
-    let extra = crate::prelude::rename_shadowed(src, extra);
+    let extra = crate::prelude::rename_shadowed(&defined, extra);
     tm.lap("prelude", String::new());
     if extra.is_empty() {
         return Ok((src.to_string(), items, user, 0));

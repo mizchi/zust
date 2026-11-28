@@ -1,0 +1,1 @@
+5:1: impls for references to a type parameter (`impl<T: Tr> Tr for &T`) are supported only with methods that forward to T's (`(**self).m(..)`), as calls through a bound reach T's through the deref: `m` does not
