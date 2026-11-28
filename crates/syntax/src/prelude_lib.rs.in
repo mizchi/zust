@@ -16766,7 +16766,7 @@ pub struct File {
 // (open(2) of a path with the flags and the mode a new file gets, retried when a signal interrupts it)
 fn __exr_file_open<G>(p: &[u8], flags: i32, mode: i32) -> Result<File, IoError> {
     // (a NUL inside the path would end it there: std's InvalidInput)
-    if p.iter().any(|&b| b == 0) {
+    if __exr_has_nul::<()>(p) {
         return Err(IoError { code: -8, os: false });
     }
     let c = __exr_c_path::<()>(p);
@@ -17162,7 +17162,7 @@ unsafe extern "C" {
 
 // `fs::set_permissions(p, perm)`: chmod(2)
 pub fn __core_set_permissions<P>(path: P, perm: Permissions) -> Result<(), IoError> {
-    if path.__as_bytes().iter().any(|&b| b == 0) {
+    if __exr_has_nul::<()>(path.__as_bytes()) {
         return Err(IoError { code: -8, os: false });
     }
     let c = __exr_c_path::<()>(path.__as_bytes());
@@ -17174,7 +17174,7 @@ pub fn __core_set_permissions<P>(path: P, perm: Permissions) -> Result<(), IoErr
 
 // `fs::metadata(p)`: stat(2), which follows a symlink
 pub fn __core_metadata<P>(path: P) -> Result<Metadata, IoError> {
-    if path.__as_bytes().iter().any(|&b| b == 0) {
+    if __exr_has_nul::<()>(path.__as_bytes()) {
         return Err(IoError { code: -8, os: false });
     }
     let c = __exr_c_path::<()>(path.__as_bytes());
@@ -17849,4 +17849,17 @@ impl<'a> dyn Any + Send + Sync + 'a {
     pub fn is<T: 'static>(&self) -> bool {
         self.type_id() == TypeId::of::<T>()
     }
+}
+
+// (a NUL inside a path would end it there: std's InvalidInput. A loop, not `p.iter().any(..)`: the slice's iterator is
+// codegen's, which selection does not follow from a prelude body, so `File::open("..")` failed to compile)
+fn __exr_has_nul<G>(p: &[u8]) -> bool {
+    let mut k = 0;
+    while k < p.len() {
+        if p[k] == 0 {
+            return true;
+        }
+        k += 1;
+    }
+    false
 }
