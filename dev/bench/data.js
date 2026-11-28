@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795852093441,
+  "lastUpdate": 1795852096324,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -96376,6 +96376,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 117.215,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ec7f25b4ad40b7f4be1c30b4cf2bab8a743c0703",
+          "message": "KPI ratchet: a ceiling per KPI that a pull request may not pass (#341)\n\nbench/kpi_ratchet.txt holds a ceiling, a tolerance (0.5% builds, 1% LSP,\n2% no-op builds) and the commit measured per KPI, with the environment\nthey hold in. bench/kpi_ratchet.py checks a pull request's head against\nthem (kpi_pr.py --ratchet: a ceiling column, the line that would raise\none, exit 1 past the tolerance) and lowers them on pushes to main past\ntheir tolerance (the `ratchet` job, a commit of its own), after warning\nwhen main is above one. Only an edit of the file raises a ceiling.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-28T16:40:17+09:00",
+          "tree_id": "e49d8ec4a1672b71afb8e521fe5ea8538e5416c4",
+          "url": "https://github.com/mizchi/zust/commit/ec7f25b4ad40b7f4be1c30b4cf2bab8a743c0703"
+        },
+        "date": 1795852095747,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.167,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.866,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 2.084,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 12.999,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.131,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.339,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 4.371,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 363.736,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 118.781,
             "unit": "MiB"
           }
         ]
