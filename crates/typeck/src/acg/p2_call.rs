@@ -75,6 +75,9 @@ pub(crate) fn vec_of(es: &[Expr]) -> Expr {
     Expr::Block(None, false, PBlock { stmts: lets, spos: Default::default() })
 }
 
+/// gen_ty's type parameter for a value of an opaque type (`-> impl Name`): its bound's methods are called through it
+const OPAQUE: u8 = u8::MAX;
+
 impl Cx<'_> {
     /// `recv.m(args)`: レシーバを自動 deref して struct を見つけ、
     /// メソッドの self 型に合わせて自動参照 (`&self` / `&mut self`) かコピー (`self`) で渡す
@@ -664,6 +667,15 @@ impl Cx<'_> {
         if self.prog.field_priv.as_deref().is_some_and(|fp| !fp.methods.is_empty()) {
             if let Some(Ty::Struct(sid)) = self.peek(recv).map(|t| self.strip_refs(t)) {
                 self.method_privacy(sid, method, msp.at)?;
+            }
+        }
+        // (#144: a method of `impl<T: B> Tr for &T` that rustc's probe takes for this receiver, which runs the impl's
+        // own code (or the trait's default with Self = &X): `n.name()` of `n: N` with N = &S)
+        if !self.prog.ref_dispatch.is_empty() {
+            match self.ref_impl_pick(recv, method) {
+                Ok(Some((f, derefs, autoref))) => return self.ref_impl_call(recv, f, derefs, autoref, gargs, margs, expected, msp),
+                Ok(None) => {}
+                Err(e) => return Err(self.at(msp.at, e)),
             }
         }
         if method == "fmt" && margs.len() == 1 && gargs.is_empty() {
@@ -3232,10 +3244,14 @@ impl Cx<'_> {
                         it => self.prog.tn(it),
                     };
                     let f = format!("{owner}::__ref_{m}");
-                    self.trait_candidate_where(&f, tr0.unwrap_or(""), |i| self.self_fits(i, t)).filter(|&i| {
-                        let it = self.prog.sigs[i as usize].impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
-                        it == tr0
-                    })
+                    self.trait_candidate_where(&f, tr0.unwrap_or(""), |i| self.self_fits(i, t))
+                        .filter(|&i| {
+                            let it = self.prog.sigs[i as usize].impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
+                            it == tr0
+                        })
+                        // (or an impl for references to a type parameter, `impl<T: Tr> Tr for &T`'s `T::__ref_m` (#144):
+                        // a `dyn Tr` made of a `&S`, `Tr::m(&&s)`)
+                        .or_else(|| tr0.filter(|tr| self.prog.ref_impls_of.contains_key(*tr)).and_then(|tr| self.ref_blanket_fn(t, &m, Some(tr))))
                 }
                 _ => None,
             };
@@ -4837,6 +4853,474 @@ impl Cx<'_> {
         } else {
             self.b.ins().iconst(clif_ty(ty).unwrap(), n as u64 as i64)
         }
+    }
+
+    /// The type of e as the generic fn's body has it, before the instance's type arguments (`n` of `n: N` is N, not the
+    /// `&S` N stands for here; #144): a parameter (`self` too) no `let` shadows, through parentheses, `*`, `&` and
+    /// fields. A borrow of what it cannot follow is the borrow's type here: for a reference to a type parameter the
+    /// probe's steps are the same either way (ref_impl_walk). None for any other expression, or where the program has
+    /// no impls for references to dispatch to
+    pub(crate) fn gen_ty(&self, e: &Expr, depth: u32) -> Option<Ty> {
+        if self.prog.ref_dispatch.is_empty() || depth > 8 {
+            return None;
+        }
+        match e {
+            Expr::Paren(i) => self.gen_ty(i, depth + 1),
+            Expr::Path(None, p) => {
+                let n = ident_of(p)?;
+                // (the innermost binding of the name: a `let` gen_lets has, or the parameter itself, the first binding of
+                // the fn's outermost scope)
+                let (si, loc) = self.scopes.iter().enumerate().rev().find_map(|(si, s)| s.iter().rev().find(|b| b.0 == n).map(|b| (si, b.1)))?;
+                if let Some(g) = self.gen_lets.iter().rev().find(|g| g.0 == loc) {
+                    return Some(g.1);
+                }
+                let param = si == 0 && self.scopes[0].iter().find(|b| b.0 == n).map(|b| b.1) == Some(loc);
+                param.then(|| self.gen_params.iter().find(|g| g.0 == n).map(|g| g.1)).flatten()
+            }
+            Expr::Unary(op, i, _) if op == "*" => match self.gen_ty(i, depth + 1)? {
+                Ty::Ref(_, t) => Some(*t),
+                _ => None,
+            },
+            Expr::Ref(m, i) => match self.gen_ty(i, depth + 1) {
+                Some(t) => Some(Ty::Ref(*m, intern(t))),
+                None => self.peek(e).filter(|t| matches!(t, Ty::Ref(..))),
+            },
+            // (the result of a fn that returns an opaque type, `make(&s)` of `fn make(s: &S) -> impl Name`: as a value of
+            // a type parameter, whose bound's method rustc calls whatever type the fn returns (OPAQUE))
+            // (a declared result with no type parameter in it is that type, which no opaque type stands for)
+            Expr::Call(f, _) => {
+                let (id, _) = self.callee(f)?;
+                self.declared_ret(id)
+            }
+            Expr::MethodCall(r, m, ..) => {
+                let sid = match self.peek(r).map(|t| self.strip_refs(t)) {
+                    Some(Ty::Struct(sid)) => sid,
+                    _ => return None,
+                };
+                let id = self.prog.method(sid, m)?;
+                self.declared_ret(id)
+            }
+            Expr::Field(b, f, _) => {
+                // (a field of a struct with no type parameters, however the struct was reached: its declared type)
+                let Some(mut t) = self.gen_ty(b, depth + 1) else {
+                    let Some(Ty::Struct(sid)) = self.peek(b).map(|t| self.strip_refs(t)) else { return None };
+                    let base = self.prog.base_of(sid);
+                    if !self.prog.structs[base as usize].generics.is_empty() {
+                        return None;
+                    }
+                    return self.prog.structs[sid as usize].fields.iter().find(|x| x.0 == *f).map(|x| x.1);
+                };
+                while let Ty::Ref(_, i) = t {
+                    t = *i;
+                }
+                let Ty::Struct(sid) = t else { return None };
+                let sd = &self.prog.structs[sid as usize];
+                if let Some(x) = sd.fields.iter().find(|x| x.0 == *f) {
+                    return Some(x.1);
+                }
+                // (an instance whose fields are not laid out (its arguments hold type parameters): the definition's
+                // field, when it is a type parameter of the definition under references, `inner: &'a mut T`)
+                let base = &self.prog.structs[sd.base? as usize];
+                let ft = base.fields.iter().find(|x| x.0 == *f)?.1;
+                let mut refs = vec![];
+                let mut b = ft;
+                while let Ty::Ref(m, i) = b {
+                    refs.push(m);
+                    b = *i;
+                }
+                let Ty::Param(k) = b else { return None };
+                let mut out = *sd.args.get(k as usize)?;
+                for m in refs.into_iter().rev() {
+                    out = Ty::Ref(m, intern(out));
+                }
+                Some(out)
+            }
+            _ => None,
+        }
+    }
+
+    /// gen_ty of a call of fn id: OPAQUE for an opaque result type, the declared type when it names no type parameter
+    fn declared_ret(&self, id: u32) -> Option<Ty> {
+        if self.prog.opaque.contains(&id) {
+            return Some(Ty::Param(OPAQUE));
+        }
+        let r = self.prog.sigs.get(id as usize)?.ret;
+        (!self.prog.has_param(r)).then_some(r)
+    }
+
+    /// A value of type t may be one of an opaque type (`-> impl Name`): an opaque fn's result is t or holds it
+    /// (`Option<&S>`), or a generic one's, whose instances' types are made as they are requested, may be anything
+    fn may_be_opaque(&self, t: Ty) -> bool {
+        fn holds(prog: &crate::program::Program, r: Ty, t: Ty, depth: u32) -> bool {
+            if r == t {
+                return true;
+            }
+            if depth > 6 {
+                return false;
+            }
+            match r {
+                Ty::Ref(_, i) | Ty::Box(i) | Ty::Ptr(_, i) | Ty::Slice(i) | Ty::Array(i, _) => holds(prog, *i, t, depth + 1),
+                Ty::Struct(sid) => prog.structs[sid as usize].args.iter().any(|&a| holds(prog, a, t, depth + 1)),
+                _ => false,
+            }
+        }
+        self.prog.opaque.iter().any(|&id| {
+            let r = self.prog.sigs[id as usize].ret;
+            self.prog.has_param(r) || holds(self.prog, r, t, 0)
+        })
+    }
+
+    /// A `let`'s annotation as the generic body has it: a type parameter of the fn's (`B`), under references (`&mut B`),
+    /// or a type that names none of them, as written
+    pub(crate) fn gen_ann(&self, t: &crate::parse::Ty) -> Option<Ty> {
+        let gens = &self.prog.sigs.get(self.root as usize)?.generics;
+        match t {
+            crate::parse::Ty::Ref(_, m, i) => Some(Ty::Ref(*m, intern(self.gen_ann(i)?))),
+            crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() && gens.iter().any(|g| g.0 == p.segs[0].name) => {
+                gens.iter().position(|g| g.0 == p.segs[0].name).map(|i| Ty::Param(i as u8))
+            }
+            t => {
+                let d = format!("{t:?}");
+                if gens.iter().any(|g| d.contains(&format!("\"{}\"", g.0))) {
+                    return None;
+                }
+                self.parse_ty(t).ok()
+            }
+        }
+    }
+
+    /// x's (not a reference's) own method named m, which a receiver `&x` reaches before an impl for `&T`: how it takes
+    /// self (0 `self`, 1 `&self`, 2 `&mut self`, 3 otherwise)
+    fn own_method(&self, x: Ty, m: &str) -> Option<u8> {
+        let id = match x {
+            // (a type parameter's placeholder (zustc check): its bounds' methods)
+            Ty::Struct(sid) if self.prog.is_placeholder(sid) => self.placeholder_method(sid, m),
+            Ty::Struct(sid) => self.prog.self_method(sid, m).or_else(|| self.prog.self_default_method(sid, m)),
+            // (a trait object: its trait's methods and its supertraits', `d.name()` of `d: &dyn Name` is the object's)
+            Ty::Dyn(d) => {
+                let first = d.split('+').next().unwrap_or(d).trim();
+                let first = first.split(['<', '(']).next().unwrap_or(first).trim();
+                let mut seen = vec![first.rsplit("::").next().unwrap_or(first).to_string()];
+                let mut i = 0;
+                let mut found = None;
+                while i < seen.len() && seen.len() < 32 && found.is_none() {
+                    found = self.prog.traits.get(&seen[i]).and_then(|ds| ds.iter().copied().find(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(m)));
+                    for s in self.prog.trait_supers.get(&seen[i]).cloned().unwrap_or_default() {
+                        let s = s.split('<').next().unwrap_or(&s).trim().to_string();
+                        if !seen.contains(&s) {
+                            seen.push(s);
+                        }
+                    }
+                    i += 1;
+                }
+                found.or_else(|| self.prog.prim_self_method(x, m))
+            }
+            t => self.prog.prim_self_method(t, m),
+        }?;
+        Some(match self.prog.sigs[id as usize].params.first() {
+            Some(Ty::Ref(false, _)) => 1,
+            Some(Ty::Ref(true, _)) => 2,
+            Some(Ty::Struct(_) | Ty::Param(_)) => 0,
+            _ => 3,
+        })
+    }
+
+    /// x meets the bounds bs (T's of an impl for `&T`): a trait with an impl for references to a type parameter, of
+    /// which Program::evaluate's blanket answer holds any type, by that impl's bounds for a reference (`&&S: Name` of
+    /// `S: Name`) and by x's own impls otherwise; any other bound as evaluate answers it
+    fn ref_bounds_hold(&self, x: Ty, bs: &[String], depth: u32) -> bool {
+        bs.iter().all(|b| {
+            let b = b.trim();
+            if b.starts_with('?') || b.starts_with('\'') || b.starts_with("for<") || b.contains('(') {
+                return true;
+            }
+            let n = b.split('<').next().unwrap_or(b).trim();
+            let n = n.rsplit("::").next().unwrap_or(n);
+            match self.prog.ref_impls_of.get(n) {
+                None => self.prog.implements(x, n),
+                Some(_) if depth > 8 => true,
+                Some(impls) => match x {
+                    Ty::Ref(m, y) if impls.iter().any(|i| i.0 == m) => impls.iter().any(|i| i.0 == m && self.ref_bounds_hold(*y, &i.1, depth + 1)),
+                    _ => self.prog.implements_concrete(x, n),
+                },
+            }
+        })
+    }
+
+    /// The fn c runs for Self = the reference st (`&X` of an impl for `&T`, `&mut X` of one for `&mut T`) when c's
+    /// bounds of T hold of X: the impl's method, or the trait's default it leaves out
+    fn ref_impl_fn(&self, cs: &[&crate::program::RefImplFn], method: &str, st: Ty) -> Option<u32> {
+        let Ty::Ref(ms, x) = st else { return None };
+        // (a blanket impl's method: Self is the reference itself, when it meets the impl's bounds)
+        let c = cs.iter().find(|c| if c.blanket { self.ref_bounds_hold(st, &c.bounds, 0) } else { c.mutable == ms && self.ref_bounds_hold(*x, &c.bounds, 0) })?;
+        c.f.or_else(|| {
+            self.prog.traits.get(&c.tr)?.iter().copied().find(|&d| self.prog.sigs[d as usize].has_body && self.prog.names[d as usize].rsplit("::").next() == Some(method))
+        })
+    }
+
+    /// #144: the method of an impl for references to a type parameter (`impl<T: B> Tr for &T`, Program::ref_dispatch)
+    /// that rustc's probe takes for `recv.m(..)`: (the fn: the impl's, or the trait's default it leaves out; the derefs
+    /// of the receiver; the autoref then taken, `&mut` or `&`). None where the probe takes another method, which the
+    /// lookup below finds.
+    ///
+    /// The probe walks the receiver's type as the generic fn has it (gen_ty): a value of a type parameter P, or a
+    /// reference to one, has the method of P's bound, `<P as Tr>::m`, whatever P stands for here. So `n.name()` of
+    /// `n: N` with N = &S is `<&S as Name>::name`, the impl's (T = S); `(&s).name()` takes S's own `name(&self)` at the
+    /// first step, and `(&&s).name()` the impl's for `&S`. At each step the method's `self` matches the type by value
+    /// first (`&self` of Self = what a `&` points to), then by an autoref (Self = the type)
+    ///
+    /// A receiver gen_ty cannot follow (a closure's capture, a pattern's binding, a method's result) whose type is what
+    /// a type parameter P of this instance stands for, a reference: as a value of P it would call P's bound's method,
+    /// as a value of that type of its own what the walk finds. Where the two differ the call is reported (Err), not
+    /// run as one of them
+    #[cold]
+    #[inline(never)]
+    fn ref_impl_pick(&self, recv: &Expr, method: &str) -> Result<Option<(u32, usize, Option<bool>)>, String> {
+        let (Some(all), Some(rt)) = (self.prog.ref_dispatch.get(method), self.peek(recv)) else { return Ok(None) };
+        // (the receiver as the generic body has it: a type parameter under k references, or a type of its own)
+        let g = self.gen_ty(recv, 0);
+        let mut param = None;
+        let mut k = 0usize;
+        if let Some(mut g) = g {
+            while let Ty::Ref(_, i) = g {
+                g = *i;
+                k += 1;
+            }
+            if let Ty::Param(i) = g {
+                param = Some(i as usize);
+            }
+        }
+        let pick = self.ref_impl_walk(all, rt, method, param, k);
+        if g.is_none() && matches!(rt, Ty::Ref(..)) && !self.env.params.is_empty() {
+            let gens = self.prog.sigs.get(self.root as usize).map(|s| s.generics.as_slice()).unwrap_or(&[]);
+            for (n, t) in &self.env.params {
+                let Some(i) = gens.iter().position(|g| g.0 == *n).filter(|_| *t == rt) else { continue };
+                let alt = self.ref_impl_walk(all, rt, method, Some(i), 0);
+                if let Some((f, ..)) = alt.filter(|_| alt != pick) {
+                    let s = &self.prog.sigs[f as usize];
+                    let tr = s.impl_trait.as_deref().or(s.trait_of.as_deref()).unwrap_or("");
+                    let tr = tr.split('<').next().unwrap_or(tr).trim();
+                    return Err(format!(
+                        "calls through a type parameter's bound on a receiver of this form (a closure's capture, a pattern's binding, a method's result) are not supported for `impl<T> {tr} for &T` (#144): this `{}` may be a value of `{n}`, whose `.{method}()` runs the impl's",
+                        self.prog.tn(rt)
+                    ));
+                }
+            }
+        }
+        // (and one that may be a value of an opaque type: as one, it would call through the opaque type's bound)
+        if g.is_none() && matches!(rt, Ty::Ref(..)) && !self.prog.opaque.is_empty() && self.may_be_opaque(rt) {
+            let alt = self.ref_impl_walk(all, rt, method, Some(OPAQUE as usize), 0);
+            if let Some((f, ..)) = alt.filter(|_| alt != pick) {
+                let s = &self.prog.sigs[f as usize];
+                let tr = s.impl_trait.as_deref().or(s.trait_of.as_deref()).unwrap_or("");
+                let tr = tr.split('<').next().unwrap_or(tr).trim();
+                return Err(format!(
+                    "calls on a value of an opaque type (`impl Trait`) reached in this form (a closure's result, a pattern's binding, a method's result) are not supported for `impl<T> {tr} for &T` (#144): this `{}` may be one, whose `.{method}()` runs the impl's",
+                    self.prog.tn(rt)
+                ));
+            }
+        }
+        Ok(pick)
+    }
+
+    /// ref_impl_pick's walk of the probe's steps for a receiver of type rt: of a type parameter (the index of root's
+    /// generics) under k references, or of a type of its own (param None)
+    fn ref_impl_walk(&self, all: &[crate::program::RefImplFn], rt: Ty, method: &str, param: Option<usize>, k: usize) -> Option<(u32, usize, Option<bool>)> {
+        let mut k = k;
+        // (a value of P: of the traits P's bounds name; a call that named its trait, that one's)
+        let gens = self.prog.sigs.get(self.root as usize).map(|s| s.generics.as_slice()).unwrap_or(&[]);
+        // (a bound's trait, or one of its supertraits: `<P as Name>::name` of `P: Loud` with `trait Loud: Name`)
+        let supers = |b: &str, tr: &str| {
+            let mut seen: Vec<&str> = vec![b];
+            let mut i = 0;
+            while i < seen.len() && seen.len() < 32 {
+                if seen[i] == tr {
+                    return true;
+                }
+                for s in self.prog.trait_supers.get(seen[i]).map(|v| v.as_slice()).unwrap_or(&[]) {
+                    let s = s.split('<').next().unwrap_or(s).trim();
+                    let s = s.rsplit("::").next().unwrap_or(s);
+                    if !seen.contains(&s) {
+                        seen.push(s);
+                    }
+                }
+                i += 1;
+            }
+            false
+        };
+        let bound = |tr: &str| {
+            param.is_none_or(|i| i == OPAQUE as usize || gens.get(i).is_some_and(|g| g.1.iter().any(|b| {
+                let b = b.trim();
+                let b = b.split('<').next().unwrap_or(b).trim();
+                supers(b.rsplit("::").next().unwrap_or(b), tr)
+            })))
+        };
+        let named = |tr: &str| self.explicit_trait.as_ref().is_none_or(|(m, t)| m != method || t == tr);
+        let cs: Vec<&crate::program::RefImplFn> = all.iter().filter(|c| (c.blanket || bound(&c.tr)) && named(&c.tr)).collect();
+        // (one trait's: two traits' impls for references with the method are left to the lookup)
+        let first = cs.first()?;
+        if cs.iter().any(|c| c.tr != first.tr) {
+            return None;
+        }
+        let kind = first.recv;
+        if param.is_none() {
+            k = 0;
+            let mut t = rt;
+            while let Ty::Ref(_, i) = t {
+                t = *i;
+                k += 1;
+            }
+        }
+        let (mut cur, mut depth, mut s) = (rt, k, 0usize);
+        // (`self` by value: Self is the type at the first step, or P's)
+        if kind == 0 {
+            if param.is_some() && k > 0 {
+                return None;
+            }
+            // (`(&s).take()`: S's own `take(&self)` comes first)
+            if let (None, 1, Ty::Ref(m, x)) = (param, k, rt) {
+                if self.own_method(*x, method) == Some(1 + m as u8) {
+                    return None;
+                }
+            }
+            return self.ref_impl_fn(&cs, method, rt).map(|f| (f, 0, None));
+        }
+        let want_mut = kind == 2;
+        loop {
+            if depth == 0 {
+                // (at P: Self is what P stands for, by the autoref; a type of its own: X's method, the lookup's)
+                return if param.is_some() { self.ref_impl_fn(&cs, method, cur).map(|f| (f, s, Some(want_mut))) } else { None };
+            }
+            let Ty::Ref(mc, inner) = cur else { return None };
+            if mc == want_mut {
+                // (by value: Self is what cur points to)
+                if depth == 1 {
+                    if param.is_some() {
+                        // (P itself, `n.name()` of `n: &N`: an impl for references when P stands for one)
+                        return self.ref_impl_fn(&cs, method, *inner).map(|f| (f, s, None));
+                    }
+                    // (X's own method, `(&s).name()`; else the impl's for `&X` by the autoref below (#143))
+                    if self.own_method(*inner, method).is_some() {
+                        return None;
+                    }
+                } else if let Some(f) = self.ref_impl_fn(&cs, method, *inner) {
+                    return Some((f, s, None));
+                }
+            }
+            // (by the autoref: Self is cur, `r.get()` of `r: &mut C` with `impl Counter for &mut T`'s `get(&self)`)
+            if let Some(f) = self.ref_impl_fn(&cs, method, cur) {
+                return Some((f, s, Some(want_mut)));
+            }
+            cur = *inner;
+            depth -= 1;
+            s += 1;
+        }
+    }
+
+    /// The call ref_impl_pick chose: the receiver through its derefs and the autoref (a `&mut` passed on as it is is
+    /// reborrowed, `&mut *b`, so that b is not moved), then f with Self = the reference
+    #[cold]
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
+    fn ref_impl_call(&mut self, recv: &Expr, f: u32, derefs: usize, autoref: Option<bool>, gargs: &[GArg], margs: &[Expr], expected: Option<Ty>, msp: crate::parse::Span) -> R<V> {
+        self.check_unsafe_call(f, msp.start)?;
+        let rt = self.peek(recv);
+        let mut t = rt;
+        let mut d = recv.clone();
+        let mut tys = vec![];
+        for _ in 0..derefs {
+            t = match t {
+                Some(Ty::Ref(_, i)) => Some(*i),
+                _ => None,
+            };
+            d = Expr::Unary("*".into(), Box::new(paren(d)), Default::default());
+            tys.push(t);
+        }
+        let r = match (autoref, t) {
+            (Some(m), _) => {
+                tys.push(t.map(|t| Ty::Ref(m, intern(t))));
+                Some(Expr::Ref(m, Box::new(paren(d))))
+            }
+            (None, Some(Ty::Ref(true, i))) => {
+                tys.push(Some(*i));
+                tys.push(t);
+                Some(Expr::Ref(true, Box::new(Expr::Unary("*".into(), Box::new(paren(d)), Default::default()))))
+            }
+            _ if derefs == 0 => None,
+            _ => Some(d),
+        };
+        let (v, vt) = match r {
+            None => self.expr(recv, None)?,
+            Some(r) => {
+                let r: &Expr = self.keep_expr(r);
+                // (the types of the new nodes, outermost first, and of the receiver's copy, for what looks them up)
+                let mut n = r;
+                for ty in tys.iter().rev() {
+                    if let Some(ty) = ty {
+                        self.lets.insert(n as *const Expr as usize, *ty);
+                    }
+                    n = match n {
+                        Expr::Unary(_, i, _) | Expr::Ref(_, i) => i,
+                        _ => break,
+                    };
+                    while let Expr::Paren(i) = n {
+                        n = i;
+                    }
+                }
+                if let Some(rt) = rt {
+                    self.lets.insert(n as *const Expr as usize, rt);
+                }
+                self.expr(r, None)?
+            }
+        };
+        if vt == Ty::Never {
+            return Ok((None, Ty::Never));
+        }
+        let Some(v) = v else { return Ok((None, Ty::Never)) };
+        let args: Vec<&Expr> = margs.iter().collect();
+        let tf: Option<&[GArg]> = (!gargs.is_empty()).then_some(gargs);
+        self.keep_overload.set(Some(f));
+        self.call_fn(f, Some((v, vt)), &args, tf, expected, SP)
+    }
+
+    /// #144: `Tr::m(x, ..)` (`crate::a::Tr::m` too) of a method a call on a reference dispatches to
+    /// (Program::ref_dispatch): Self is x's type as the method takes it, `&Self` of `&self`, with no autoderef, so
+    /// `Name::name(&&s)` is `<&S as Name>::name`, the impl's. None for another call, or a Self that is no reference
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn ref_impl_ufcs(&mut self, c: &Expr, expected: Option<Ty>) -> R<Option<V>> {
+        let Expr::Call(func, cargs) = c else { return Ok(None) };
+        let (Expr::Path(None, p), Some(first)) = (&**func, cargs.first()) else { return Ok(None) };
+        if p.segs.len() < 2 || !p.segs.last().is_some_and(|s| self.prog.ref_dispatch.contains_key(s.name.as_str())) {
+            return Ok(None);
+        }
+        let pp = PPath::of(p);
+        let q = self.prog.strip_mods_p(&pp);
+        let q = q.as_ref().unwrap_or(&pp);
+        if q.segs.len() != 2 || q.segs[0].args || !self.prog.traits.contains_key(&q.segs[0].name) {
+            return Ok(None);
+        }
+        let (tr, method) = (&q.segs[0].name, &q.segs[1].name);
+        let Some(all) = self.prog.ref_dispatch.get(method.as_str()) else { return Ok(None) };
+        let cs: Vec<&crate::program::RefImplFn> = all.iter().filter(|c| c.tr == *tr).collect();
+        let (Some(c0), Some(at)) = (cs.first(), self.peek(first)) else { return Ok(None) };
+        let st = match (c0.recv, at) {
+            (0, t) => t,
+            (1, Ty::Ref(false, i)) | (2, Ty::Ref(true, i)) => *i,
+            _ => return Ok(None),
+        };
+        let Some(f) = self.ref_impl_fn(&cs, method, st) else { return Ok(None) };
+        self.check_unsafe_call(f, p.pos)?;
+        let (v, vt) = self.expr(first, None)?;
+        if vt == Ty::Never {
+            return Ok(Some((None, Ty::Never)));
+        }
+        let Some(v) = v else { return Ok(Some((None, Ty::Never))) };
+        let args: Vec<&Expr> = cargs[1..].iter().collect();
+        let targs = &p.segs[p.segs.len() - 1].args;
+        let tf: Option<&[GArg]> = (!targs.is_empty()).then_some(&targs[..]);
+        self.keep_overload.set(Some(f));
+        self.call_fn(f, Some((v, vt)), &args, tf, expected, SP).map(Some)
     }
 
     /// `i32::pow(2, 10)` / `Trait::m(&x, a)` / `Ord::cmp(&a, &b)` / `HashMap::from([..])` などを
