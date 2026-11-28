@@ -1,7 +1,8 @@
 // A type whose const parameter has a default, used without arguments (#260: const-oid's `ObjectIdentifier<const
 // MAX_SIZE: usize = DEFAULT_MAX_SIZE>`): in an impl's self type, a trait impl's, a signature, a field, a `let`, an
-// alias; a default that names a const, a literal one, one after a type parameter's default, and on an enum. In an
-// expression's path the arguments are inferred, not the defaults (`let b: Buf<5> = Buf::default();`)
+// alias; a default that names a const, a literal one, one after a type parameter's default, one that names an earlier
+// const parameter, and on an enum. In an expression's path the arguments are inferred, not the defaults (`let b:
+// Buf<5> = Buf::default();`), and those it writes are the type's (`Cap::<5>::default()` is a `Cap<5>`)
 use std::str::FromStr;
 
 const DEFAULT_MAX: usize = 4;
@@ -89,6 +90,39 @@ impl<T> W<T> {
     }
 }
 
+// (a derived Default: `Cap::<5>::default()` is a Cap<5>, not the default Cap<3>)
+#[derive(Debug, Default)]
+struct Cap<const N: usize = 3> {
+    used: u8,
+}
+
+impl<const N: usize> Cap<N> {
+    fn cap(&self) -> usize {
+        N
+    }
+}
+
+// (M's default is N's argument: `Twice` is `Twice<2, 2>`, also in an impl whose own `N` is another)
+#[derive(Debug)]
+struct Twice<const N: usize = 2, const M: usize = N> {
+    a: [u8; N],
+    b: [u8; M],
+}
+
+impl<const N: usize, const M: usize> Twice<N, M> {
+    fn nm(&self) -> (usize, usize) {
+        (self.a.len() * 10 + N, self.b.len() * 10 + M)
+    }
+}
+
+struct Outer<const N: usize>;
+
+impl<const N: usize> Outer<N> {
+    fn bare(&self) -> Twice {
+        Twice { a: [N as u8, 0], b: [1, 2] }
+    }
+}
+
 type Short = Buf<1>;
 type Bytes<const N: usize = 2> = [u8; N];
 
@@ -124,4 +158,14 @@ fn main() {
     let v = W::new(5u64);
     let u: W = W::new(3);
     println!("{:?} {:?} {:?} {:?}", w, v, u, W::<u8>::default());
+    let c = Cap::<5>::default();
+    let d: Cap<7> = Cap::<7>::default();
+    let e: Cap = Cap::default();
+    println!("{} {} {} {} {}", c.cap(), d.cap(), e.cap(), Cap::<2>::default().cap(), c.used + d.used + e.used);
+    let h: Cap<6> = Cap::<_>::default();
+    let v: Vec<u8> = Vec::<_>::default();
+    println!("{} {:?}", h.cap(), v);
+    let t: Twice = Twice { a: [1, 2], b: [3, 4] };
+    let tw: Twice<3> = Twice { a: [1, 2, 3], b: [4, 5, 6] };
+    println!("{:?} {:?} {:?} {:?}", t.nm(), tw.nm(), Outer::<5>.bare().nm(), Outer::<5>.bare());
 }

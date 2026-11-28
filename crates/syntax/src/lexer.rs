@@ -3139,8 +3139,9 @@ pub fn rename_module_collisions_in(src: &str, crates: &[String]) -> Option<Strin
 /// Whether a `use` renames an item of std (`use std::cell::LazyCell as Lazy;`): the name it brings in is that path
 fn renames_std(src: &str) -> bool {
     // (the source can be large and most have none: `contains` first (it is much faster than `match_indices` over a
-    // large text), then the lines that have a `use `)
-    if !src.contains("use ") {
+    // large text), then the lines that have a `use`. The keyword is followed by any whitespace, a line's end too:
+    // `use\n    core::fmt::Result;` / `use\tstd::..`)
+    if !["use ", "use\n", "use\t", "use\r", "use\x0c"].iter().any(|kw| src.contains(kw)) {
         return false;
     }
     let b = src.as_bytes();
@@ -3148,15 +3149,18 @@ fn renames_std(src: &str) -> bool {
     for line in src.split('\n') {
         let start = off;
         off += line.len() + 1;
-        if !line.contains("use ") {
+        if !line.contains("use") {
             continue;
         }
-        for (j, _) in line.match_indices("use ") {
+        for (j, _) in line.match_indices("use") {
             let i = start + j;
             if i > 0 && (b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_') {
                 continue;
             }
-            let r = src[i + 4..].trim_start();
+            if !b.get(i + 3).is_some_and(|c| c.is_ascii_whitespace()) {
+                continue;
+            }
+            let r = src[i + 3..].trim_start();
             let r = r.strip_prefix("::").unwrap_or(r);
             if !(r.starts_with("std::") || r.starts_with("core::") || r.starts_with("alloc::")) {
                 continue;
@@ -3176,12 +3180,18 @@ fn renames_std(src: &str) -> bool {
     false
 }
 
-/// Whether std's item `module::name`, brought in by a `use` under its own name, is another item than the one zustc
-/// reads that bare name as: fmt's and io's `Result` / `Error` and thread's `Result` (`use core::fmt::{Formatter,
-/// Result};` makes `Result` fmt's alias, which has no parameters, not the prelude's enum). The scope's bare name is
-/// then written as the item's path, as for a `use` that renames an item of std
-fn std_shadows(module: &[u8], name: &[u8]) -> bool {
-    matches!((module, name), (b"fmt" | b"io", b"Result" | b"Error") | (b"thread", b"Result"))
+/// The namespaces of std's item `module::name` when, brought in by a `use` under its own name, it is another item
+/// than the one zustc reads that bare name as, or 0: fmt's and io's `Result` / `Error` and thread's `Result` (`use
+/// core::fmt::{Formatter, Result};` makes `Result` fmt's alias, which has no parameters, not the prelude's enum). The
+/// scope's bare name is then written as the item's path, as for a `use` that renames an item of std, in those
+/// namespaces only: the aliases and io's `Error` are types, fmt's `Error` a unit struct, its constructor a value too
+/// (a glob's `fn Result` beside `use core::fmt::Result;` is still the call `Result()`)
+fn std_shadows(module: &[u8], name: &[u8]) -> u8 {
+    match (module, name) {
+        (b"fmt", b"Error") => NS_ANY,
+        (b"fmt" | b"io" | b"thread", b"Result") | (b"io", b"Error") => NS_TYPE,
+        _ => 0,
+    }
 }
 
 pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>) -> Option<String> {
@@ -3803,10 +3813,15 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             // too, `pub use std::println as say;`: what `m::say!(..)` names, a macro only beside the module's own
             // `fn say`. Not in a block that way: there its bare `say()` would take the import)
             let own = def_set.contains(&(sc, local.clone()));
-            // (and one under its own name that std_shadows names: `use core::fmt::Result;`)
             let std_item = matches!(mpath[0].as_slice(), b"std" | b"core" | b"alloc");
-            let shadows = || local == name[0] && mpath.len() >= 2 && std_shadows(&mpath[mpath.len() - 1], &name[0]) && !own;
-            if std_item && (local != name[0] || shadows()) && local.as_slice() != b"_" && !(own && in_block.is_some()) {
+            let renames = local != name[0] && !(own && in_block.is_some());
+            // (and one under its own name that std_shadows names, `use core::fmt::Result;`, in that item's namespaces:
+            //  beside the scope's own item of another namespace (a `fn Result`), and in a block beside the module's
+            //  `type Result<T>` too, which it shadows there (at a module's level the two are an E0255))
+            let shadow_ns = if local == name[0] && mpath.len() >= 2 { std_shadows(&mpath[mpath.len() - 1], &name[0]) } else { 0 };
+            let clash = def_ns.get(&(sc, local.clone())).is_some_and(|&d| d & shadow_ns != 0);
+            let shadows = shadow_ns != 0 && (!clash || in_block.is_some());
+            if std_item && (renames || shadows) && local.as_slice() != b"_" {
                 let mut full = vec![];
                 for (i, seg) in path.iter().enumerate() {
                     if i > 0 {
@@ -3815,7 +3830,13 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                     full.extend_from_slice(seg);
                 }
                 // (a `self` entry, `use std::io::{self as sio};`, the module only: no macro)
-                let ns = if own { NS_MACRO } else { NS_ANY | NS_MACRO };
+                let ns = if shadows {
+                    shadow_ns
+                } else if own {
+                    NS_MACRO
+                } else {
+                    NS_ANY | NS_MACRO
+                };
                 let ns = if want == NS_TYPE { ns & NS_TYPE } else { ns };
                 if ns != 0 {
                     add(local, full, ns);

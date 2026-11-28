@@ -8164,7 +8164,19 @@ fn subst_tysyn(t: &TySyn, ps: &[String], args: &[TySyn]) -> TySyn {
         TySyn::Ref(m, i) => TySyn::Ref(*m, Box::new(r(i))),
         TySyn::Ptr(m, i) => TySyn::Ptr(*m, Box::new(r(i))),
         TySyn::Slice(i) => TySyn::Slice(Box::new(r(i))),
-        TySyn::Array(i, n) => TySyn::Array(Box::new(r(i)), n.clone()),
+        // (a length that is a const parameter takes its argument's: `struct S<const N: usize = 2, const M: usize = N>`
+        // used as `S` is `S<2, 2>`, M's default `[(); N]` written with N's argument, not a name of the user's scope)
+        TySyn::Array(i, n) => {
+            let len = match n {
+                ArrLen::Const(c) => match ps.iter().position(|p| p == c).map(|k| &args[k]) {
+                    Some(TySyn::Array(e, l)) if matches!(**e, TySyn::Prim(Ty::Unit)) => l.clone(),
+                    Some(TySyn::Named(x)) => ArrLen::Const(x.clone()),
+                    _ => n.clone(),
+                },
+                ArrLen::Lit(_) => n.clone(),
+            };
+            TySyn::Array(Box::new(r(i)), len)
+        }
         TySyn::Tuple(v) => TySyn::Tuple(v.iter().map(r).collect()),
         TySyn::FnPtr(v) => TySyn::FnPtr(v.iter().map(r).collect()),
         TySyn::Assoc(b, n) => TySyn::Assoc(Box::new(r(b)), n.clone()),

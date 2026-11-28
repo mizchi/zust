@@ -1737,6 +1737,7 @@ compile-fail	const-generics/const-param-type-depends-on-type-param-ungated.rs
 check-pass	const-generics/const_eval_unchecked_doesnt_fire_patterns.rs
 compile-fail	const-generics/default-ty-closure.rs
 run-pass	const-generics/defaults/const-default.rs
+run-pass	const-generics/defaults/const-param-as-default-value.rs
 compile-fail	const-generics/defaults/const-param-default-body-param-env-ice.rs
 compile-fail	const-generics/defaults/default-on-impl.rs
 compile-fail	const-generics/defaults/doesnt_infer.rs
