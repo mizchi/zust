@@ -4,7 +4,8 @@
 // comes first where its receiver is the try's (`self` by value, `&self` at the `&` autoref), not one taking
 // `&mut self`; a scalar's builtins are its type's own (`is_ascii` a u8's, not an i32's; `abs` not a u32's; a
 // float's `sqrt` and a char's `is_alphabetic` at the value, the impl's at a reference); a number's trait method taking
-// self by value comes first at the value (`x.pv()` is u32's `A::pv`, not B's impl for `&T` by the autoref)
+// self by value comes first at the value (`x.pv()` is u32's `A::pv`, not B's impl for `&T` by the autoref); a raw
+// pointer's `is_null(self)` at the pointer, the impl's at `&p`
 trait Tr {
     fn abs(self) -> u32;
 }
@@ -70,6 +71,14 @@ impl<T> Pb for &T {
         2
     }
 }
+trait Nl {
+    fn is_null(self) -> bool;
+}
+impl<T> Nl for &T {
+    fn is_null(self) -> bool {
+        false
+    }
+}
 struct Own;
 impl Own {
     fn val(&self) -> u32 {
@@ -96,4 +105,6 @@ fn main() {
     let (f, ch) = (4.0f64, 'a');
     println!("{} {} {} {}", f.sqrt(), (&f).sqrt(), ch.is_alphabetic(), (&ch).is_alphabetic());
     println!("{}", u.pv());
+    let p = 0usize as *const u8;
+    println!("{} {}", p.is_null(), (&p).is_null());
 }

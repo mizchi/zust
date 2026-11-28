@@ -4442,6 +4442,12 @@ impl Program {
             // `&mut a`) where no own method of the name comes first, one taking self by value at the value, one taking
             // `&self` at the `&` autoref (`&mut self` at the `&mut` one))
             if let (None, 0) = (param, k) {
+                // (only a type whose own methods are known here, a struct's (the program's and the prelude's), an
+                // array's, a slice's, a str's, a scalar's: another's (a raw pointer's `is_null(self)`, a Box's, a
+                // tuple's) are the lookup's)
+                if !(matches!(rt, Ty::Struct(_) | Ty::Array(..) | Ty::Slice(_) | Ty::Str | Ty::Bool | Ty::Char) || rt.is_int() || rt.is_float()) {
+                    return None;
+                }
                 let o = own(rt);
                 if o == Some(0) {
                     return None;
