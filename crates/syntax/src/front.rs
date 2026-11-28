@@ -172,6 +172,7 @@ pub fn with_prelude_in(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i3
     let src: &str = to_shadowed.as_deref().unwrap_or(&pre);
     let user = items.len();
     tm.lap("split", String::new());
+    cache.sel.shadow_paths = to_shadowed.is_some();
     let extra = crate::prelude::select_with(src, &items, &mut cache.sel);
     let extra = crate::prelude::rename_shadowed(&defined, extra);
     tm.lap("prelude", String::new());

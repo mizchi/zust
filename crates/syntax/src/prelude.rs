@@ -1110,6 +1110,9 @@ pub struct SelectCache {
     scan: crate::fxhash::FxMap<(crate::key::Key, u64), bool>,
     /// The number of user items in the last selection (the items after them are the prelude's)
     pub user_items: usize,
+    /// The source has std paths std_paths_to_shadowed rewrote to `__p_Name`: such identifiers are looked at (asked
+    /// of every identifier only then)
+    pub shadow_paths: bool,
 }
 
 /// Checks each item instead of the whole user source (`contains` and so on), keeping results by item hash.
@@ -1372,6 +1375,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     let mut need: crate::fxhash::FxSet<&str> = Default::default();
     let bytes = user_src.as_bytes();
     let mut chain = false;
+    let shadow_paths = cache.shadow_paths;
     let old = std::mem::take(&mut cache.map);
     for it in user_items {
         if let Some(r) = old.get(&it.hash) {
@@ -1381,10 +1385,18 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             continue;
         }
         let mut names: Vec<&'static str> = vec![];
+        // (`__p_Duration`, a std path to a prelude type the program shadows (std_paths_to_shadowed): the prelude's
+        // `Duration`, which the program's own name alone does not bring. A loop of its own, only for such a source)
+        if shadow_paths {
+            for &(a, b) in &it.idents {
+                if let Some(w) = user_src[a as usize..b as usize].strip_prefix("__p_").filter(|w| !w.is_empty()) {
+                    if let Some(n) = by_first[bucket(w.as_bytes()[0], w.len())].iter().find(|n| **n == w) {
+                        names.push(n);
+                    }
+                }
+            }
+        }
         for &(a, b) in &it.idents {
-            // (`__p_Duration`, a std path to a prelude type the program shadows (std_paths_to_shadowed): the prelude's
-            // `Duration`, which the program's own name alone does not bring)
-            let a = if b - a > 4 && bytes[a as usize] == b'_' && bytes[a as usize..b as usize].starts_with(b"__p_") { a + 4 } else { a };
             let cands = &by_first[bucket(bytes[a as usize], (b - a) as usize)];
             if cands.is_empty() {
                 continue;
