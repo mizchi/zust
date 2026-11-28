@@ -4943,13 +4943,19 @@ impl Cx<'_> {
     #[inline(never)]
     fn ref_param_method_call(&mut self, recv: &Expr, method: &str, gargs: &[GArg], margs: &[Expr], msp: crate::parse::Span, expected: Option<Ty>) -> R<Option<V>> {
         let Some(t) = self.peek(recv) else { return Ok(None) };
+        // (a parameter declared with a concrete type (`r: &S`) is not a value of a type parameter, whatever the
+        // instance makes that parameter, as ast_infer's ref_param_method takes it)
+        let concrete = match strip_paren(recv) {
+            Expr::Path(None, p) => ident_of(p).is_some_and(|n| self.concrete_params.iter().any(|c| c == n) && self.scopes.iter().rposition(|s| s.iter().any(|b| b.0 == n)) == Some(0)),
+            _ => false,
+        };
         let Some((tr, st, derefs, adj)) = self.prog.ref_param_impls.iter().find_map(|(tr, _)| {
             // (a call that named another trait (`Other::m(&x)`): that trait's)
             if self.explicit_trait.as_ref().is_some_and(|(m, t)| m == method && t != tr) {
                 return None;
             }
             let kind = self.prog.trait_recv_kind(tr, method)?;
-            let opaque = |u: Ty| self.prog.param_bounded_by(self.root, &self.env, tr, u);
+            let opaque = |u: Ty| !concrete && self.prog.param_bounded_by(self.root, &self.env, tr, u);
             let (st, n, adj) = self.prog.ref_param_probe(tr, method, kind, t, &opaque)?;
             Some((tr.clone(), st, n, adj))
         }) else {

@@ -501,6 +501,8 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         fake_reads: prog.closures.get(&body_id).map(|cd| cd.fake_reads.clone()).unwrap_or_default(),
         root,
         generic_args: generic_args_of(prog, &f.sig.params, root),
+        // (not a closure's: its parameters are written with the types inferred for them)
+        concrete_params: if base_k == 0 { crate::ast_infer::concrete_params(prog, &f.sig.params, root) } else { vec![] },
         closure_ix,
         explicit_traits: HashMap::default(),
         explicit_trait: None,
@@ -1228,6 +1230,9 @@ pub struct Cx<'p> {
     pub root: u32,
     /// The fn's parameters declared as one of its type parameters (`x: T` / `x: &T`): (name, type parameter)
     pub generic_args: Vec<(String, String)>,
+    /// The fn's parameters declared with a concrete type (`r: &S`): ref_param_method_call's receivers that are not a
+    /// type parameter's value (ast_infer::concrete_params)
+    pub concrete_params: Vec<String>,
     /// クロージャ式 (Debug の文字列) → 番号
     pub closure_ix: HashMap<String, u32>,
     /// `a::M::m(&x)` rewritten as `x.m()`: the kept method call (by address) -> the trait it named, so the call takes

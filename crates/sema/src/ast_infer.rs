@@ -148,6 +148,26 @@ fn seg(name: &str) -> crate::parse::Seg {
     crate::parse::Seg { name: name.to_string(), args: vec![], fn_args: None, text: name.to_string() }
 }
 
+/// The parameters (by name) of a fn whose declared type is written and names none of the type parameters of fn root
+/// (nor `Self`, nor an `impl Tr`):
+/// `r: &S` beside `T`, a value of a concrete type, which ref_param_probe does not take for a value of a type parameter
+/// whatever the instance makes that parameter
+pub fn concrete_params(prog: &Program, params: &[(Pat, PTy)], root: u32) -> Vec<String> {
+    let Some(rs) = prog.sigs.get(root as usize).filter(|rs| !rs.generics.is_empty() || rs.trait_of.is_some()) else { return vec![] };
+    params
+        .iter()
+        .filter_map(|(p, t)| {
+            let Pat::Ident(_, _, n, None) = p else { return None };
+            let text = format!("{t:?}");
+            let names = |g: &str| text.contains(&format!("name: {g:?}"));
+            // (not one whose type is left to inference (a closure's `|t|`), an `impl Tr` (a parameter of its own) or a
+            // macro's)
+            let open = text.contains("Infer") || text.contains("Impl(") || text.contains("Macro(");
+            (!open && !names("Self") && !rs.generics.iter().any(|g| names(&g.0))).then(|| n.clone())
+        })
+        .collect()
+}
+
 /// The receiver of the method call `Tr::m(a0, ..)` is written as, for a trait with an impl for references to a type
 /// parameter (`impl<T: Tr> Tr for &T`), whose method m takes self as `kind` (`&self`: Some(false), `&mut self`:
 /// Some(true), `self`: None): one whose method probe makes Self what the path call's is, a0's referent for a `&self` /
@@ -246,6 +266,11 @@ struct Inf<'p> {
     asmut: Vec<String>,
     /// the fn whose body (or whose closure's) this is: the generics a method call's ref_param_probe looks at
     root_fn: Option<u32>,
+    /// the parameters declared with a type that names none of root_fn's type parameters (concrete_params)
+    concrete_params: Vec<String>,
+    /// a receiver ref_param_method inferred and then left to method_call's other paths: (its address, its type),
+    /// which the next expr of it returns rather than infer it again
+    pre_recv: Option<(usize, u32)>,
 }
 
 impl<'p> std::ops::Deref for Inf<'p> {
@@ -327,7 +352,7 @@ pub fn infer_ctx_margs(
     if let Some((r, _)) = root {
         as_targets(&prog.sigs[r as usize].generics);
     }
-    let mut s = Inf { s: Solver::new(prog, env), pending: vec![], keep: vec![], turbofish: None, clo_root, clo_keys: None, margs: Default::default(), exprs: vec![], mbase: Default::default(), asref, asmut, root_fn: root.map(|r| r.0) };
+    let mut s = Inf { s: Solver::new(prog, env), pending: vec![], keep: vec![], turbofish: None, clo_root, clo_keys: None, margs: Default::default(), exprs: vec![], mbase: Default::default(), asref, asmut, root_fn: root.map(|r| r.0), concrete_params: root.filter(|r| r.1 == 0).map(|r| concrete_params(prog, params, r.0)).unwrap_or_default(), pre_recv: None };
     s.ret = match ret {
         Some(t) if prog.has_param(t) => s.known_g(t, &mut vec![]),
         Some(t) => s.known(t),
@@ -569,16 +594,32 @@ impl Inf<'_> {
             return None;
         }
         let r = self.expr(recv);
+        // (left to method_call's other paths: they take this receiver's type, not infer it again)
+        self.pre_recv = Some((recv as *const Expr as usize, r));
         let t = self.resolve(r).filter(|t| !prog.has_param(*t))?;
         let root = self.root_fn?;
         let env = self.s.env;
+        // (a parameter declared with a concrete type (`r: &S`) is not a value of a type parameter, whatever the
+        // instance makes that parameter)
+        let mut bare = recv;
+        while let Expr::Paren(i) = bare {
+            bare = i;
+        }
+        let concrete = match bare {
+            Expr::Path(None, p) if p.segs.len() == 1 => {
+                let n = &p.segs[0].name;
+                self.concrete_params.contains(n) && self.scopes.iter().rposition(|sc| sc.iter().any(|b| b.0 == *n)) == Some(0)
+            }
+            _ => false,
+        };
         let (tr, st) = prog.ref_param_impls.iter().find_map(|(tr, _)| {
             let kind = prog.trait_recv_kind(tr, n)?;
-            let opaque = |u: Ty| prog.param_bounded_by(root, env, tr, u);
+            let opaque = |u: Ty| !concrete && prog.param_bounded_by(root, env, tr, u);
             let (st, _, _) = prog.ref_param_probe(tr, n, kind, t, &opaque)?;
             Some((tr.clone(), st))
         })?;
         let id = prog.ref_param_fn(st, n, &tr)?;
+        self.pre_recv = None;
         let avs: Vec<u32> = args.iter().map(|a| self.expr(a)).collect();
         let sv = self.known(st);
         self.turbofish = if tf.is_empty() { None } else { Some(tf as *const Vec<GArg>) };
@@ -1084,6 +1125,12 @@ impl Inf<'_> {
 
     /// 式の型変数。値を作る式 (リテラル・構築・呼び出し) は結果の型も記録する
     fn expr(&mut self, e: &Expr) -> u32 {
+        if let Some((a, v)) = self.pre_recv {
+            if a == e as *const Expr as usize {
+                self.pre_recv = None;
+                return v;
+            }
+        }
         let call = matches!(e, Expr::Call(..) | Expr::MethodCall(..));
         let mark = self.pending.len();
         if call {
@@ -2414,7 +2461,14 @@ impl Inf<'_> {
             if let Some(r) = self.ref_param_method(recv, n, tf, args) {
                 return r;
             }
+            let r = self.method_call_rest(recv, n, tf, args);
+            self.pre_recv = None;
+            return r;
         }
+        self.method_call_rest(recv, n, tf, args)
+    }
+
+    fn method_call_rest(&mut self, recv: &Expr, n: &str, tf: &Vec<GArg>, args: &[Expr]) -> u32 {
         // (a Vec's `as_ref()` / `as_mut()`: `&[T]` / `&mut [T]` where the bounds in scope ask for slices alone, as the
         // code generator's (a Vec is AsRef<Vec<T>> / AsMut<Vec<T>> too))
         if matches!(n, "as_ref" | "as_mut") && args.is_empty() {

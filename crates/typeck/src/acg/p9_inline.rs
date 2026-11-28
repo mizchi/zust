@@ -121,6 +121,7 @@ impl<'p> Cx<'p> {
         let s_root = std::mem::replace(&mut self.root, root);
         // (the callee's own: its parameters declared as its type parameters)
         let s_gargs = std::mem::replace(&mut self.generic_args, generic_args_of(self.prog, &f.sig.params, root));
+        let s_cparams = std::mem::replace(&mut self.concrete_params, if base_k == 0 { crate::ast_infer::concrete_params(self.prog, &f.sig.params, root) } else { vec![] });
         let s_cix = std::mem::take(&mut self.closure_ix);
         let s_hint = self.closure_hint.take();
         let s_seg = self.seg_self.take();
@@ -159,6 +160,7 @@ impl<'p> Cx<'p> {
         self.caps = s_caps;
         self.root = s_root;
         self.generic_args = s_gargs;
+        self.concrete_params = s_cparams;
         self.closure_ix = s_cix;
         self.closure_hint = s_hint;
         self.seg_self = s_seg;
