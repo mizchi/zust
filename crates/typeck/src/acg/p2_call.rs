@@ -673,7 +673,14 @@ impl Cx<'_> {
             if op == "*" {
                 if let Some(Ty::Ref(m, u)) = self.peek(inner) {
                     if matches!(*u, Ty::Str | Ty::Slice(_)) {
-                        let r = Expr::Ref(m, Box::new(strip_paren(recv).clone()));
+                        // (through a `&mut`, borrowed mutably only for a method that takes `&mut self`: `(*s).len()`
+                        // reads, so a shared loan of `*s` beside it stays fine)
+                        let mutates = || {
+                            MUT_SLICE_METHODS.contains(&method.as_str())
+                                || method.ends_with("_mut")
+                                || self.prog.traits.keys().any(|tr| self.prog.trait_recv_kind(tr, method) == Some(Some(true)))
+                        };
+                        let r = Expr::Ref(m && mutates(), Box::new(strip_paren(recv).clone()));
                         let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(r), method.clone(), gargs.clone(), margs.clone(), msp));
                         return self.expr(ne, expected);
                     }
@@ -4995,12 +5002,13 @@ impl Cx<'_> {
                         // trait named (radix_fmt_method); its receiver keeps its `&`, as `Pointer::fmt(&rr, f)` of a `&&u8`
                         // writes rr itself, not *rr)
                         let std_fmt = ms == "fmt" && tr == if self.prog.traits.contains_key("__p_Pointer") { "__p_Pointer" } else { "Pointer" };
-                        // (and a trait with an impl for references to a type parameter keeps it too: `Tr::m(&x)` is
-                        // `(&x).m()`, whose probe makes Self x's type, as the path call's Self is, also when that is a
-                        // reference the impl covers (#144))
+                        // (and a trait with an impl for references to a type parameter keeps it, as ufcs_ref_recv
+                        // writes it: `Tr::m(&x)` is `(&x).m()`, whose probe makes Self x's type, as the path call's
+                        // Self is, also when that is a reference the impl covers (#144))
                         let ref_tr = self.prog.ref_param_impls.iter().any(|(t, _)| *t == tr);
                         let recv = match a0 {
-                            Expr::Ref(_, e) if !std_fmt && !ref_tr => paren((**e).clone()),
+                            _ if ref_tr => crate::ast_infer::ufcs_ref_recv(a0, self.prog.trait_recv_kind(&tr, &ms).flatten()),
+                            Expr::Ref(_, e) if !std_fmt => paren((**e).clone()),
                             _ => paren(a0.clone()),
                         };
                         // (a primitive receiver with an impl of this trait: `<u32 as Tr>::m(&x)`, which a builtin

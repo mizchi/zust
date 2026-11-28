@@ -148,6 +148,21 @@ fn seg(name: &str) -> crate::parse::Seg {
     crate::parse::Seg { name: name.to_string(), args: vec![], fn_args: None, text: name.to_string() }
 }
 
+/// The receiver of the method call `Tr::m(a0, ..)` is written as, for a trait with an impl for references to a type
+/// parameter (`impl<T: Tr> Tr for &T`), whose method m takes self as `kind` (`&self`: Some(false), `&mut self`:
+/// Some(true), `self`: None): one whose method probe makes Self what the path call's is, a0's referent for a `&self` /
+/// `&mut self` method (`&x` / `&*r` as `&self` of X, also of an `&mut` argument coerced to `&Self`), a0's type for `self`
+/// (#144)
+pub fn ufcs_ref_recv(a0: &Expr, kind: Option<bool>) -> Expr {
+    let star = |e: &Expr| Expr::Unary("*".to_string(), Box::new(Expr::Paren(Box::new(e.clone()))), Default::default());
+    match (kind, a0) {
+        (Some(false), Expr::Ref(_, e)) => Expr::Ref(false, e.clone()),
+        (Some(true), Expr::Ref(true, _)) => Expr::Paren(Box::new(a0.clone())),
+        (Some(m), a) => Expr::Ref(m, Box::new(star(a))),
+        (None, a) => Expr::Paren(Box::new(a.clone())),
+    }
+}
+
 fn mcall(recv: Expr, name: &str, args: Vec<Expr>) -> Expr {
     Expr::MethodCall(Box::new(Expr::Paren(Box::new(recv))), name.to_string(), vec![], args, crate::parse::Span::default())
 }
@@ -1300,7 +1315,11 @@ impl Inf<'_> {
                         .iter()
                         .any(|&d| self.prog.sigs[d as usize].has_self && self.prog.names[d as usize].rsplit("::").next() == Some(ms.as_str()));
                     if selfm && !matches!(tr.as_str(), "Ord" | "PartialOrd" | "PartialEq" | "Eq") {
+                        // (a trait with an impl for references to a type parameter: the receiver as ufcs_ref_recv
+                        // writes it, whose probe makes Self the path call's (#144))
+                        let ref_tr = self.prog.ref_param_impls.iter().any(|(t, _)| t == tr);
                         let recv = match &args[0] {
+                            a if ref_tr => ufcs_ref_recv(a, self.prog.trait_recv_kind(tr, ms).flatten()),
                             Expr::Ref(_, e) => (**e).clone(),
                             a => a.clone(),
                         };
