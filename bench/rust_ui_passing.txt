@@ -8921,6 +8921,7 @@ compile-fail	use/use-super-in-middle.rs
 compile-fail	variance/leaking-unnameables.rs
 check-pass	variance/smart-pointers-covariant.rs
 compile-fail	variance/type-resolve-error-two-structs-deep.rs
+compile-fail	variance/variance-associated-types2.rs
 compile-fail	variance/variance-cell-is-invariant.rs
 compile-fail	variance/variance-contravariant-arg-object.rs
 compile-fail	variance/variance-contravariant-arg-trait-match.rs
