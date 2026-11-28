@@ -1,8 +1,10 @@
 // std's lock results (LockResult, TryLockResult, TryLockError), try_lock / try_read / try_write against a lock another
 // thread holds, a static AtomicPtr to a type that is not Sync (as parking_lot_core's HASHTABLE), fmt::Error as a
-// std::error::Error (as serde's `impl ser::Error for fmt::Error`), and thread::Result (as crossbeam's and rayon's)
+// std::error::Error (as serde's `impl ser::Error for fmt::Error`), thread::Result (as crossbeam's and rayon's), and a
+// JoinHandle's pthread_t (std::os::unix::thread::JoinHandleExt, as crossbeam's ScopedJoinHandle)
 use std::cell::Cell;
 use std::fmt;
+use std::os::unix::thread::{JoinHandleExt, RawPthread};
 use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, LockResult, Mutex, PoisonError, RwLock, TryLockError, TryLockResult};
@@ -160,6 +162,35 @@ fn main() {
         Ok(v) => println!("thread::Result ok {v}"),
         Err(e) => println!("thread::Result err {e:?}"),
     }
+    pthreads();
+}
+
+unsafe extern "C" {
+    fn pthread_join(t: RawPthread, ret: *mut *mut u8) -> i32;
+}
+
+// (crossbeam's ScopedJoinHandle: its own JoinHandleExt over a std handle)
+struct Scoped<T> {
+    h: Option<thread::JoinHandle<T>>,
+}
+
+impl<T> JoinHandleExt for Scoped<T> {
+    fn as_pthread_t(&self) -> RawPthread {
+        self.h.as_ref().unwrap().as_pthread_t()
+    }
+    fn into_pthread_t(self) -> RawPthread {
+        self.as_pthread_t()
+    }
+}
+
+fn pthreads() {
+    let s = Scoped { h: Some(thread::spawn(|| 1u8)) };
+    println!("scoped pthread_t nonzero {}", s.as_pthread_t() != 0);
+    println!("scoped joined {}", s.h.unwrap().join().unwrap());
+    // (a handle given up for its pthread_t: the thread is joined through it)
+    let (tx, rx) = channel();
+    let pt = thread::spawn(move || tx.send(9u32).unwrap()).into_pthread_t();
+    println!("pthread_join {} got {}", unsafe { pthread_join(pt, std::ptr::null_mut()) }, rx.recv().unwrap());
 }
 
 fn fails(x: bool) -> fmt::Result {

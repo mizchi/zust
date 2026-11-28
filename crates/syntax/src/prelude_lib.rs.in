@@ -10209,6 +10209,28 @@ impl<T> JoinHandle<T> {
     }
 }
 
+// `std::os::unix::thread::RawPthread` / `JoinHandleExt`: a JoinHandle's pthread_t (an unsigned long on Linux)
+pub type RawPthread = u64;
+
+pub trait JoinHandleExt {
+    fn as_pthread_t(&self) -> RawPthread;
+    fn into_pthread_t(self) -> RawPthread;
+}
+
+impl<T> JoinHandleExt for JoinHandle<T> {
+    fn as_pthread_t(&self) -> RawPthread {
+        self.pt
+    }
+    // (as std's: the handle is given up, neither joined nor detached, so the caller may join the pthread_t)
+    fn into_pthread_t(self) -> RawPthread {
+        let (pt, pk, th) = (self.pt, self.pk, self.th.__th);
+        __core_forget(self);
+        __exr_thread_release(th);
+        __exr_packet_release(pk);
+        pt
+    }
+}
+
 // (a handle dropped without join: the thread is detached, and runs on alone)
 impl<T> Drop for JoinHandle<T> {
     fn drop(&mut self) {

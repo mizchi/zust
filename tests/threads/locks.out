@@ -18,3 +18,6 @@ an error occurred when formatting an argument / Error
 boxed: an error occurred when formatting an argument
 format fails: Err(Error)
 thread::Result ok 7
+scoped pthread_t nonzero true
+scoped joined 1
+pthread_join 0 got 9
