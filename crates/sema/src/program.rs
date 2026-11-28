@@ -4429,7 +4429,10 @@ impl Program {
         };
         // (`self` by value: Self is the type at the first step, or P's)
         if kind == 0 {
-            if builtin(rt) {
+            // (a value's own `&mut self` builtin comes after the `&` autoref, where an impl for `&T` may be taken:
+            // `(*s).as_mut_ptr()` of `s: &mut [u8]`)
+            let mut_builtin = param.is_none() && !matches!(rt, Ty::Ref(..)) && self.builtin_method(rt, method) == Some(Some(true));
+            if builtin(rt) && !mut_builtin {
                 return None;
             }
             if param.is_some() && k > 0 {
@@ -4448,7 +4451,7 @@ impl Program {
                         return Some((f, 0, Some(false)));
                     }
                 }
-                if !matches!(o, Some(1 | 2)) {
+                if !matches!(o, Some(1 | 2)) && !mut_builtin {
                     if let Some(f) = self.ref_impl_fn(&cs, method, Ty::Ref(true, intern(rt))) {
                         return Some((f, 0, Some(true)));
                     }

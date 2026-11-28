@@ -683,7 +683,12 @@ impl Cx<'_> {
                             Some(i) => matches!(self.prog.sigs[i as usize].params.first(), Some(Ty::Ref(true, _))),
                             None => MUT_SLICE_METHODS.contains(&method.as_str()) || method.ends_with("_mut"),
                         };
-                        let r = Expr::Ref(m && mutates(), Box::new(strip_paren(recv).clone()));
+                        // (an impl for references that rustc's probe takes at the `&` autoref of the place comes before
+                        // the str's / slice's `&mut self` method: `(*s).as_mut_ptr()` beside `impl<T: ?Sized> Tr for &T`'s
+                        // `as_mut_ptr(self)` borrows `&*s`)
+                        let shared_impl = self.user_code
+                            && self.prog.ref_dispatch.get(method.as_str()).is_some_and(|all| matches!(self.ref_impl_walk(all, *u, method, None, 0), Some((_, 0, Some(false)))));
+                        let r = Expr::Ref(m && !shared_impl && mutates(), Box::new(strip_paren(recv).clone()));
                         let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(r), method.clone(), gargs.clone(), margs.clone(), msp));
                         return self.expr(ne, expected);
                     }
