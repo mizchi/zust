@@ -4610,18 +4610,39 @@ impl Program {
                 // (each scalar type's own: the ASCII ones a u8's and a char's, `abs` a signed number's, the bit ones
                 // an integer's; a char's others the prelude's `__exr_char_` helpers)
                 let ascii = m.starts_with("is_ascii") || NUM_BY_REF.contains(&m);
+                // (std's own methods of a float, a char, a bool, an integer beyond the compiler's names, all taking
+                // self by value but `total_cmp(&self)`)
+                const FLOAT: &[&str] = &[
+                    "floor", "ceil", "round", "round_ties_even", "trunc", "fract", "abs", "signum", "copysign", "mul_add", "div_euclid", "rem_euclid", "powi",
+                    "powf", "sqrt", "exp", "exp2", "ln", "log", "log2", "log10", "cbrt", "hypot", "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
+                    "sin_cos", "exp_m1", "ln_1p", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh", "is_nan", "is_infinite", "is_finite", "is_subnormal",
+                    "is_normal", "classify", "is_sign_positive", "is_sign_negative", "next_up", "next_down", "recip", "to_degrees", "to_radians", "max", "min",
+                    "maximum", "minimum", "midpoint", "to_bits", "to_le_bytes", "to_be_bytes", "to_ne_bytes", "total_cmp", "clamp", "abs_sub",
+                    "to_int_unchecked",
+                ];
+                const CHAR: &[&str] = &[
+                    "is_alphabetic", "is_alphanumeric", "is_numeric", "is_whitespace", "is_lowercase", "is_uppercase", "is_control", "is_digit", "to_digit",
+                    "to_lowercase", "to_uppercase", "len_utf8", "len_utf16", "encode_utf8", "encode_utf16", "escape_debug", "escape_default", "escape_unicode",
+                ];
+                const INT: &[&str] = &[
+                    "ilog", "ilog2", "ilog10", "checked_ilog", "checked_ilog2", "checked_ilog10", "midpoint", "reverse_bits", "overflowing_div",
+                    "overflowing_rem", "wrapping_div", "wrapping_rem", "saturating_mul", "saturating_div", "checked_next_power_of_two",
+                    "checked_next_multiple_of", "checked_isqrt", "checked_div_euclid", "checked_rem_euclid", "wrapping_div_euclid", "wrapping_rem_euclid",
+                    "from_be", "from_le", "cast_signed", "cast_unsigned", "checked_add_signed", "saturating_add_signed", "overflowing_add_signed",
+                    "checked_sub_unsigned", "checked_add_unsigned", "saturating_add_unsigned", "wrapping_add_unsigned", "is_multiple_of",
+                ];
                 let known = match u {
                     _ if ascii => matches!(u, Ty::U8 | Ty::Char),
-                    Ty::Bool => false,
-                    Ty::Char => helper("__exr_char_"),
-                    u if u.is_float() => matches!(m, "abs" | "signum" | "rem_euclid" | "div_euclid" | "to_le_bytes" | "to_be_bytes" | "to_ne_bytes"),
+                    Ty::Bool => matches!(m, "then" | "then_some"),
+                    Ty::Char => CHAR.contains(&m) || helper("__exr_char_"),
+                    u if u.is_float() => FLOAT.contains(&m),
                     u => {
                         let signed_only = matches!(m, "abs" | "signum" | "is_positive" | "is_negative" | "checked_abs" | "wrapping_abs" | "saturating_abs" | "overflowing_abs" | "unsigned_abs" | "saturating_neg");
-                        let unsigned_only = matches!(m, "is_power_of_two" | "next_power_of_two" | "next_multiple_of" | "wrapping_add_signed");
-                        crate::ast_infer::is_builtin_scalar_method(m) && !NOT_NUM.contains(&m) && !(signed_only && !u.signed()) && !(unsigned_only && u.signed())
+                        let unsigned_only = matches!(m, "is_power_of_two" | "next_power_of_two" | "next_multiple_of" | "wrapping_add_signed" | "checked_next_power_of_two");
+                        (INT.contains(&m) || (crate::ast_infer::is_builtin_scalar_method(m) && !NOT_NUM.contains(&m))) && !(signed_only && !u.signed()) && !(unsigned_only && u.signed())
                     }
                 };
-                known.then(|| ascii.then(|| m.starts_with("make_ascii")))
+                known.then(|| (ascii || m == "total_cmp").then(|| m.starts_with("make_ascii")))
             }
             _ => None,
         }
