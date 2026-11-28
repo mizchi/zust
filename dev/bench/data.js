@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795865303187,
+  "lastUpdate": 1795865306163,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -97288,6 +97288,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 156.441,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b26511148a197e25abed7380f230c10cae93ce2f",
+          "message": "E0276 by the trait a bound names, std's renames in macro expansions: false E0276 in bitflags, writeable and nix (#348)\n\nFalse E0276 `impl has stricter requirements than trait` in bitflags, writeable and nix: zurgo expands a crate's macros before `std_renames` runs, so paths written by a macro with spaces (`core :: fmt :: Write`) kept std's name and the E0276 check, comparing bounds by their last segment, saw a bound the trait lacks. Bounds are now compared by the trait their path names, the spaced form is renamed too (never inside literals or comments), a trait's supertraits include its `where Self: ..` bounds, and an impl that leaves a parameter `Sized` where the trait's is `?Sized` is E0276 as in rustc.\n\nFixes #264\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-28T11:20:21Z",
+          "tree_id": "a05d31b7dbca16bf22c0f7019ba83dc1ae7bad4d",
+          "url": "https://github.com/mizchi/zust/commit/b26511148a197e25abed7380f230c10cae93ce2f"
+        },
+        "date": 1795865305572,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.003,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.81,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 2.118,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 14.833,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.283,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.198,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 6.408,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 353.731,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 158.293,
             "unit": "MiB"
           }
         ]
