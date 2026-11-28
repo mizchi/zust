@@ -3228,6 +3228,7 @@ compile-fail	generic-associated-types/gat-trait-path-parenthesised-args.rs
 compile-fail	generic-associated-types/generic_associated_type_undeclared_lifetimes.rs
 check-pass	generic-associated-types/higher-ranked-self-impl-requirement.rs
 check-pass	generic-associated-types/ice-add-outlives-bounds-unexpected-regions-113793.rs
+compile-fail	generic-associated-types/issue-101020.rs
 check-pass	generic-associated-types/issue-102333.rs
 compile-fail	generic-associated-types/issue-47206-where-clause.rs
 check-pass	generic-associated-types/issue-58694-parameter-out-of-range.rs
@@ -4507,6 +4508,7 @@ check-pass	lint/unused/unused-never-binding-issue-158783.rs
 compile-fail	lint/unused/unused-parens-assign-expr-in-ret-issue-131989.rs
 check-pass	lint/unused/unused-parens-issue-106413.rs
 check-pass	lint/unused/unused-results-unit-and-uninhabited.rs
+run-pass	lint/unused/unused-trait-fn.rs
 compile-fail	lint/unused/unused-var-in-match-arm.rs
 check-pass	lint/unused/unused-var-in-unreachable-code.rs
 check-pass	lint/unused/unused-variable-with-raw-identifier-in-struct-pattern.rs
@@ -7366,6 +7368,7 @@ compile-fail	span/impl-wrong-item-for-trait.rs
 compile-fail	span/issue-23338-locals-die-before-temps-of-body.rs
 check-pass	span/issue-24690.rs
 compile-fail	span/issue-24805-dropck-child-has-items-via-parent.rs
+compile-fail	span/issue-24805-dropck-trait-has-items.rs
 compile-fail	span/issue-24895-copy-clone-dropck.rs
 compile-fail	span/issue-25199.rs
 compile-fail	span/issue-29106.rs
