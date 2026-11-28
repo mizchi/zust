@@ -674,11 +674,11 @@ impl Cx<'_> {
                 if let Some(Ty::Ref(m, u)) = self.peek(inner) {
                     if matches!(*u, Ty::Str | Ty::Slice(_)) {
                         // (through a `&mut`, borrowed mutably only for a method that takes `&mut self`: `(*s).len()`
-                        // reads, so a shared loan of `*s` beside it stays fine)
-                        let mutates = || {
-                            MUT_SLICE_METHODS.contains(&method.as_str())
-                                || method.ends_with("_mut")
-                                || self.prog.traits.keys().any(|tr| self.prog.trait_recv_kind(tr, method) == Some(Some(true)))
+                        // reads, so a shared loan of `*s` beside it stays fine. A program's method is the one of its
+                        // impl for the str / slice (`impl Halve for [i32]`), not another trait's of the name)
+                        let mutates = || match self.prog.prim_method(*u, method) {
+                            Some(i) => matches!(self.prog.sigs[i as usize].params.first(), Some(Ty::Ref(true, _))),
+                            None => MUT_SLICE_METHODS.contains(&method.as_str()) || method.ends_with("_mut"),
                         };
                         let r = Expr::Ref(m && mutates(), Box::new(strip_paren(recv).clone()));
                         let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(r), method.clone(), gargs.clone(), margs.clone(), msp));

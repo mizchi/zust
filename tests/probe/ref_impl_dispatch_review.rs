@@ -1,7 +1,8 @@
 // The review's cases (#144): `Tr::me(&r)` infers Self = `&S` (its result `&S` flows into a closure), an inherent
 // method only where its receiver is the probe's try (`r.value()` of `S::value(self)` takes the impl for `&T`), an
 // impl for `&mut T` whose other bound (`Marker`) S lacks, `Tr::m(&mut *m)` / `Tr::m(m)` with Self the referent, and
-// `(*s).len()` through a `&mut [T]` beside a shared loan (a shared reborrow), `(*s).sort()` a mutable one
+// `(*s).len()` through a `&mut [T]` beside a shared loan (a shared reborrow, also beside another trait's `len(&mut self)`), and
+// `(*s).sort()` / `(*s).halve()` of an `impl Halve for [i32]` a mutable one
 trait Tr {
     fn name(&self) -> String;
     fn me(&self) -> Self where Self: Sized + Copy { *self }
@@ -27,6 +28,11 @@ impl Tm for S { fn get(&self) -> u32 { 5 } }
 impl<T: Tm + Marker> Tm for &mut T { fn get(&self) -> u32 { 50 } }
 impl<T: Tr + ?Sized> Tr for &mut T { fn name(&self) -> String { format!("&mut {}", (**self).name()) } }
 fn consume<T, F: FnOnce(T) -> String>(t: T, f: F) -> String { f(t) }
+// a trait whose `len` takes `&mut self`, which slices do not implement, and one they do
+#[allow(dead_code)]
+trait Other { fn len(&mut self) -> usize; }
+trait Halve { fn halve(&mut self); }
+impl Halve for [i32] { fn halve(&mut self) { for x in self.iter_mut() { *x /= 2; } } }
 fn main() {
     let s = S;
     let r = &s;
@@ -46,5 +52,6 @@ fn main() {
     let n = (*sl).len();
     println!("{} {}", n, a[0]);
     (*sl).sort();
+    (*sl).halve();
     println!("{:?}", sl);
 }
