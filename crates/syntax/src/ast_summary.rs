@@ -3151,11 +3151,10 @@ fn summarize_assoc_type(owner: Option<&Owner>, sm: &mut Summary, n: &String, g: 
 /// [`summarize`] of a fn with a body in a trait or an impl: its signature with the owner's generics, and the closures in it
 fn summarize_assoc_fn(owner: Option<&Owner>, sm: &mut Summary, fs: &PSig, body: &Block) -> R<()> {
     let ow = owner.unwrap();
-    // (a method of `impl<T> Tr for &T` / `&mut T`: noted for Program, which asks the impl to define each default
-    // method of the trait. Its methods are not called: where T is bounded by the trait itself, a call on `&X`
-    // reaches X's impl through the deref, which is what a method that forwards to T's does. One that does
-    // more is noted too: the driver reports it where the program calls a method of that name. (With another
-    // bound, thiserror's `impl<T: Display> AsDisplay for &T`, X has no impl of its own to reach)
+    // (a method of `impl<T> Tr for &T` / `&mut T`: noted for Program (ref_dispatch), which has a call on `&X` that
+    // rustc's probe takes the impl for run it (#144). Not one that only forwards to T's, where T is bounded by the
+    // trait itself: a call on `&X` that reaches X's impl through the deref runs the same code. (With another bound,
+    // thiserror's `impl<T: Display> AsDisplay for &T`, X has no impl of its own to reach: each method is run)
     if let (false, Some(trn), TySyn::Ref(_, inner)) = (ow.is_trait, ow.impl_trait.as_deref(), &ow.self_ty) {
         let trn = trn.split('<').next().unwrap_or(trn);
         if let TySyn::Named(param) = &**inner {
@@ -3163,16 +3162,14 @@ fn summarize_assoc_fn(owner: Option<&Owner>, sm: &mut Summary, fs: &PSig, body: 
                 sm.ref_impl_fns.push(fs.name.clone());
                 let bounded = ow.generics.iter().any(|g| g.0 == *param && g.1.iter().any(|b| b.split('<').next().unwrap_or(b).trim() == trn));
                 let mut_ref = matches!(&ow.self_ty, TySyn::Ref(true, _));
-                if bounded && fs.recv.is_some() {
-                    if !forwards_to_referent(fs, body, param, trn, mut_ref) {
-                        sm.ref_impl_bad.push(fs.name.clone());
-                    } else {
-                        // (a `_` parameter it gives the path of its type: a forward if that names a unit struct)
-                        for (p, t) in &fs.params {
-                            if let (Pat::Wild, PTy::Path(None, tp)) = (p, t) {
-                                if let Some(l) = tp.segs.last() {
-                                    sm.ref_impl_unit_args.push((fs.name.clone(), l.name.clone()));
-                                }
+                if fs.recv.is_some() && !(bounded && forwards_to_referent(fs, body, param, trn, mut_ref)) {
+                    sm.ref_impl_bad.push(fs.name.clone());
+                } else if fs.recv.is_some() {
+                    // (a `_` parameter it gives the path of its type: a forward if that names a unit struct)
+                    for (p, t) in &fs.params {
+                        if let (Pat::Wild, PTy::Path(None, tp)) = (p, t) {
+                            if let Some(l) = tp.segs.last() {
+                                sm.ref_impl_unit_args.push((fs.name.clone(), l.name.clone()));
                             }
                         }
                     }
