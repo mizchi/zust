@@ -3614,9 +3614,54 @@ impl Cx<'_> {
         let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
         self.rg.wf(prog, t, &tree, sp);
         if let Some((it, itr)) = init_tree {
+            if it != t {
+                self.rg_dyn_arg_lts(it, t, sp);
+            }
             self.rg.flow(prog, it, t, &itr, &tree, sp);
         }
         Some((t, tree))
+    }
+
+    /// A value whose type differs from the annotation's in the lifetimes the arguments of a trait object write
+    /// (`Box<dyn Foo<Bar = &'static u32>>` into `let _: Box<dyn Foo<Bar = &'a u32>>`): those arguments are invariant,
+    /// so a `'static` of the value's there makes the annotation's lifetime 'static. (The trees give an object one
+    /// region, its own; its arguments keep their lifetimes in its text. Only a `'static` of the value's is taken: a
+    /// named one of it may be a callee's)
+    fn rg_dyn_arg_lts(&mut self, from: Ty, to: Ty, sp: Sp) {
+        let (x, y) = (self.prog.tn(from), self.prog.tn(to));
+        if !x.contains("dyn") || !x.contains("'static") {
+            return;
+        }
+        let (a, b) = (dyn_arg_tokens(&x), dyn_arg_tokens(&y));
+        let (mut i, mut j) = (0, 0);
+        let mut pairs: Vec<&str> = vec![];
+        while i < a.len() || j < b.len() {
+            let (p, inside) = a.get(i).map(|(p, d)| (p.as_str(), *d)).unwrap_or(("", false));
+            let q = b.get(j).map(|(q, _)| q.as_str()).unwrap_or("");
+            match (p.starts_with('\''), q.starts_with('\'')) {
+                (true, true) => {
+                    if inside && p == "'static" && q != p && q != "'_" {
+                        pairs.push(q);
+                    }
+                    i += 1;
+                    j += 1;
+                }
+                // (elided on the other side: inferred)
+                (true, false) => i += 1,
+                (false, true) => j += 1,
+                _ if p == q && !p.is_empty() => {
+                    i += 1;
+                    j += 1;
+                }
+                _ => return,
+            }
+        }
+        for q in pairs {
+            if let Some(k) = self.rg.lt_names.iter().position(|n| n == q) {
+                let r = self.rg.lts[k];
+                self.rg.constrain(r, STATIC, Var::Co, sp);
+            }
+        }
     }
 
     /// The tree of a value of type t written as ann (the annotation of a `let`): the regions it writes, fresh ones for
@@ -5370,6 +5415,47 @@ pub fn impl_sig_mismatch(prog: &Program, decl: u32, imp: u32) -> bool {
 }
 
 /// t holds a fn pointer type (`Option<fn()>`, `&fn(&u8)`)
+/// The tokens of a type's text (lifetimes, names, punctuation; `->` one), each with whether it is inside the
+/// arguments of a trait object (`dyn Foo<..>`, `dyn Fn(..)`), not its own `+ 'a`
+fn dyn_arg_tokens(s: &str) -> Vec<(String, bool)> {
+    let cs: Vec<char> = s.chars().collect();
+    let mut out = vec![];
+    let mut depth = 0usize;
+    let mut dyn_at: Vec<usize> = vec![];
+    let mut i = 0;
+    while i < cs.len() {
+        let c = cs[i];
+        if c.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        i += 1;
+        if c == '\'' || c.is_alphanumeric() || c == '_' {
+            while i < cs.len() && (cs[i].is_alphanumeric() || cs[i] == '_') {
+                i += 1;
+            }
+        } else if c == '-' && cs.get(i) == Some(&'>') {
+            i += 1;
+        }
+        let tok: String = cs[start..i].iter().collect();
+        match tok.as_str() {
+            "<" | "(" | "[" => depth += 1,
+            ">" | ")" | "]" => {
+                depth = depth.saturating_sub(1);
+                while dyn_at.last().is_some_and(|&d| d > depth) {
+                    dyn_at.pop();
+                }
+            }
+            "dyn" => dyn_at.push(depth),
+            _ => {}
+        }
+        let inside = dyn_at.iter().any(|&d| depth > d);
+        out.push((tok, inside));
+    }
+    out
+}
+
 fn has_fn_ty(t: Ty, depth: u32) -> bool {
     if depth > 8 {
         return false;
