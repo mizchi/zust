@@ -271,6 +271,8 @@ struct Inf<'p> {
     /// a receiver ref_param_method inferred and then left to method_call's other paths: (its address, its type),
     /// which the next expr of it returns rather than infer it again
     pre_recv: Option<(usize, u32)>,
+    /// the trait a path call `Tr::m(..)` named, for the method call `m` it is rewritten as: (method, trait)
+    named_trait: Option<(String, String)>,
 }
 
 impl<'p> std::ops::Deref for Inf<'p> {
@@ -352,7 +354,7 @@ pub fn infer_ctx_margs(
     if let Some((r, _)) = root {
         as_targets(&prog.sigs[r as usize].generics);
     }
-    let mut s = Inf { s: Solver::new(prog, env), pending: vec![], keep: vec![], turbofish: None, clo_root, clo_keys: None, margs: Default::default(), exprs: vec![], mbase: Default::default(), asref, asmut, root_fn: root.map(|r| r.0), concrete_params: root.filter(|r| r.1 == 0).map(|r| concrete_params(prog, params, r.0)).unwrap_or_default(), pre_recv: None };
+    let mut s = Inf { s: Solver::new(prog, env), pending: vec![], keep: vec![], turbofish: None, clo_root, clo_keys: None, margs: Default::default(), exprs: vec![], mbase: Default::default(), asref, asmut, root_fn: root.map(|r| r.0), concrete_params: root.filter(|r| r.1 == 0).map(|r| concrete_params(prog, params, r.0)).unwrap_or_default(), pre_recv: None, named_trait: None };
     s.ret = match ret {
         Some(t) if prog.has_param(t) => s.known_g(t, &mut vec![]),
         Some(t) => s.known(t),
@@ -588,7 +590,7 @@ impl Inf<'_> {
     /// method_call's for a method of a trait with an impl for references to a type parameter (Program::ref_param_probe)
     #[cold]
     #[inline(never)]
-    fn ref_param_method(&mut self, recv: &Expr, n: &str, tf: &Vec<GArg>, args: &[Expr]) -> Option<u32> {
+    fn ref_param_method(&mut self, recv: &Expr, n: &str, tf: &Vec<GArg>, args: &[Expr], named: Option<&str>) -> Option<u32> {
         let prog = self.prog;
         if !prog.ref_param_impls.iter().any(|(tr, _)| prog.trait_recv_kind(tr, n).is_some()) {
             return None;
@@ -613,6 +615,10 @@ impl Inf<'_> {
             _ => false,
         };
         let (tr, st) = prog.ref_param_impls.iter().find_map(|(tr, _)| {
+            // (a call that named its trait (`A::get(&&s)`): that trait's)
+            if named.is_some_and(|t| t != tr) {
+                return None;
+            }
             let kind = prog.trait_recv_kind(tr, n)?;
             // (a bound naming another trait with the method decides, as the code generator's)
             if !concrete && prog.bound_picks_other(root, env, tr, n, t) {
@@ -2032,6 +2038,17 @@ impl Inf<'_> {
             }
         }
         if let Some(x) = self.prim_method_call(f, args) {
+            // (`A::get(&&s)` of a trait with an impl for references: the method call it becomes is A's, which
+            // ref_param_method keeps to (as the code generator's explicit_traits))
+            if !self.prog.ref_param_impls.is_empty() {
+                if let Expr::Path(None, p) = f {
+                    let pp = PPath::of(p);
+                    let q = self.prog.strip_mods_p(&pp).unwrap_or(pp);
+                    if q.segs.len() == 2 && self.prog.ref_param_impls.iter().any(|(t, _)| *t == q.segs[0].name) {
+                        self.named_trait = Some((q.segs[1].name.clone(), q.segs[0].name.clone()));
+                    }
+                }
+            }
             self.pos_record += 1;
             let v = self.expr_kept(x, false);
             self.pos_record -= 1;
@@ -2459,10 +2476,12 @@ impl Inf<'_> {
     }
 
     fn method_call(&mut self, recv: &Expr, n: &str, tf: &Vec<GArg>, args: &[Expr]) -> u32 {
+        // (this call's, not one in its receiver or arguments)
+        let named = self.named_trait.take().filter(|(m, _)| m == n).map(|(_, t)| t);
         // (a method whose Self rustc's probe makes a reference the program's `impl<T: Tr> Tr for &T` covers: that
         // impl's fn, or Tr's default with that Self, as the code generator's ref_param_method_call (#144))
         if !self.prog.ref_param_impls.is_empty() {
-            if let Some(r) = self.ref_param_method(recv, n, tf, args) {
+            if let Some(r) = self.ref_param_method(recv, n, tf, args, named.as_deref()) {
                 return r;
             }
             let r = self.method_call_rest(recv, n, tf, args);

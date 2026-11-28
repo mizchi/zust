@@ -5804,7 +5804,13 @@ impl Program {
     pub fn ref_param_implements(&self, tr: &str, u: Ty, depth: u32) -> bool {
         match u {
             Ty::Ref(m, i) if self.ref_param_impls.iter().any(|(t, rm)| t == tr && *rm == m) => {
-                let others = self.ref_param_bounds.get(&(tr.to_string(), m)).into_iter().flatten();
+                let bounds = self.ref_param_bounds.get(&(tr.to_string(), m));
+                // (T is Sized unless the impl writes `?Sized`: `impl<T: Tr> Tr for &T` is not for `&str`)
+                let sized_only = !bounds.is_some_and(|bs| bs.iter().any(|b| b.replace(char::is_whitespace, "") == "?Sized"));
+                if sized_only && i.is_unsized() {
+                    return false;
+                }
+                let others = bounds.into_iter().flatten();
                 depth < 16
                     && self.ref_param_implements(tr, *i, depth + 1)
                     && others.filter(|b| b.split('<').next().unwrap_or(b).trim() != tr).all(|b| relaxed_bound(b) || self.has_param(*i) || self.implements(*i, b))
