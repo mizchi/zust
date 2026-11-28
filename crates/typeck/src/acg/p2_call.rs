@@ -1511,8 +1511,12 @@ impl Cx<'_> {
         if let Some(Ty::Struct(sid)) = self.peek(recv).map(|t| self.strip_refs(t)) {
             if self.prog.self_method(sid, method).is_none() && self.prog.self_default_method(sid, method).is_none() {
                 if let Some(did) = self.prog.method(sid, "deref") {
-                    if matches!(self.prog.sigs[did as usize].ret, Ty::Ref(_, Ty::Str | Ty::Slice(_))) {
-                        let d = mcall(paren(recv.clone()), "deref", vec![]);
+                    // (or the receiver's instance gives it: `type Target = L::Target` of an `Either<String, &str>`)
+                    let d = mcall(paren(recv.clone()), "deref", vec![]);
+                    let unsized_target = |t: Option<Ty>| matches!(t, Some(Ty::Ref(_, Ty::Str | Ty::Slice(_))));
+                    if matches!(self.prog.sigs[did as usize].ret, Ty::Ref(_, Ty::Str | Ty::Slice(_)))
+                        || self.prog.has_param(self.prog.sigs[did as usize].ret) && unsized_target(self.peek(&d))
+                    {
                         let e = Expr::MethodCall(Box::new(d), method.to_string(), gargs.clone(), margs.clone(), crate::parse::Span::default());
                         return self.expr(&e, expected);
                     }
