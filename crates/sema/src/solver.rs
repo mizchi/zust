@@ -761,19 +761,38 @@ impl Solver<'_> {
     /// v's type is known in full, before any default: no variable is left in it, not even an integer literal's that
     /// resolve would make an i32 (depth stops a cycle of shapes)
     pub fn known_in_full(&mut self, v: u32, depth: u32) -> bool {
+        let mut memo = crate::fxhash::FxMap::default();
+        self.known_in_full_m(v, depth, &mut memo)
+    }
+
+    /// known_in_full, each type variable once per question: shapes share their parts (`pair(pair(..))` gives both
+    /// arguments one variable), which a walk without it would go through as a tree, in steps exponential in the
+    /// nesting. A part is kept known in full, or not, only where the depth cut off nothing below it: a true, or the
+    /// answer of its own shape
+    fn known_in_full_m(&mut self, v: u32, depth: u32, memo: &mut crate::fxhash::FxMap<u32, bool>) -> bool {
         if depth > 64 {
             return false;
         }
         let r = self.find(v);
-        match self.shape[r as usize] {
-            Some(Shape::Known(t)) => !self.prog.has_param(t),
-            Some(Shape::Ref(_, i) | Shape::Bx(i) | Shape::Arr(i, _) | Shape::Slc(i) | Shape::Ptr(_, i)) => self.known_in_full(i, depth + 1),
-            Some(Shape::Adt(_, st, l)) => (st..st + l).all(|k| {
-                let a = self.adt_args[k as usize];
-                self.known_in_full(a, depth + 1)
-            }),
-            _ => false,
+        if let Some(&k) = memo.get(&r) {
+            return k;
         }
+        let (k, own) = match self.shape[r as usize] {
+            Some(Shape::Known(t)) => (!self.prog.has_param(t), true),
+            Some(Shape::Ref(_, i) | Shape::Bx(i) | Shape::Arr(i, _) | Shape::Slc(i) | Shape::Ptr(_, i)) => (self.known_in_full_m(i, depth + 1, memo), false),
+            Some(Shape::Adt(_, st, l)) => (
+                (st..st + l).all(|k| {
+                    let a = self.adt_args[k as usize];
+                    self.known_in_full_m(a, depth + 1, memo)
+                }),
+                false,
+            ),
+            _ => (false, true),
+        };
+        if k || own {
+            memo.insert(r, k);
+        }
+        k
     }
     /// 型変数 v の型 (まだ分からなければ None)。形の循環 (無限の型) があっても止まるように、深さを数える
     pub fn resolve(&mut self, v: u32) -> Option<Ty> {
