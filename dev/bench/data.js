@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795852096324,
+  "lastUpdate": 1795852099411,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -129730,6 +129730,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/e73e31d76b64e0fd5cd06060c405f98638b9ebf3"
         },
         "date": 1795851112023,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 75,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.103,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 95.693,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ec7f25b4ad40b7f4be1c30b4cf2bab8a743c0703",
+          "message": "KPI ratchet: a ceiling per KPI that a pull request may not pass (#341)\n\nbench/kpi_ratchet.txt holds a ceiling, a tolerance (0.5% builds, 1% LSP,\n2% no-op builds) and the commit measured per KPI, with the environment\nthey hold in. bench/kpi_ratchet.py checks a pull request's head against\nthem (kpi_pr.py --ratchet: a ceiling column, the line that would raise\none, exit 1 past the tolerance) and lowers them on pushes to main past\ntheir tolerance (the `ratchet` job, a commit of its own), after warning\nwhen main is above one. Only an edit of the file raises a ceiling.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE",
+          "timestamp": "2026-11-28T16:40:17+09:00",
+          "tree_id": "e49d8ec4a1672b71afb8e521fe5ea8538e5416c4",
+          "url": "https://github.com/mizchi/zust/commit/ec7f25b4ad40b7f4be1c30b4cf2bab8a743c0703"
+        },
+        "date": 1795852098800,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
