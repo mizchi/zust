@@ -4303,3 +4303,16 @@ fn impl_in_generics_but_not_a_raw_identifier() {
     assert_eq!(first("fn f<T: Iterator<Item = impl Copy>>() {}\nfn main() {}\n").as_deref(), Some("`impl Trait` is not allowed in generics"));
     assert_eq!(first("trait r#impl {}\nfn f<T: Iterator<Item: r#impl>>() {}\nfn main() {}\n"), None);
 }
+
+/// `let _: Rc<dyn Tr> = ..` drops its annotation only for an Rc (an Arc for an Arc): another value is a mismatch, as
+/// rustc reports it (CodeRabbit on #224)
+#[test]
+fn a_wildcard_rc_of_dyn_annotation_checks_an_other_value() {
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    assert_eq!(first("use std::rc::Rc;\nfn main() {\n    let _: Rc<dyn Send> = 1u8;\n}\n"), Some((3, "mismatched types: expected `Rc<dyn Send>`, found `u8`".to_string())));
+    assert_eq!(first("use std::rc::Rc;\nuse std::fmt::Debug;\nfn main() {\n    let _: Rc<dyn Debug> = Rc::new(5u8);\n}\n"), None);
+    assert_eq!(first("use std::sync::Arc;\nuse std::fmt::Debug;\nfn main() {\n    let _: Arc<dyn Debug> = Arc::new(5u8);\n}\n"), None);
+}

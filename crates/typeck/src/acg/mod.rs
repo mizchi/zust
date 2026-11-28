@@ -1412,6 +1412,18 @@ pub fn assoc_constraint(b: &str) -> Option<(String, crate::types::TySyn)> {
     crate::ast_summary::assoc_bindings(b).into_iter().next()
 }
 
+/// Whether a and b are the same one of std's pointers (both an Rc, both an Arc), whatever they point to
+fn same_std_ptr(p: &crate::program::Program, a: Ty, b: Ty) -> bool {
+    let ptr = |t: Ty| match t {
+        Ty::Struct(s) => {
+            let n = p.structs[p.base_of(s) as usize].name.as_str();
+            matches!(n, "Rc" | "Arc").then_some(n)
+        }
+        _ => None,
+    };
+    ptr(a).is_some_and(|n| ptr(b) == Some(n))
+}
+
 pub fn strip_paren(e: &Expr) -> &Expr {
     match e {
         Expr::Paren(p) => strip_paren(p),
@@ -2611,8 +2623,9 @@ impl Cx<'_> {
                     // a name of none of the program's is an error)
                     let ann = match ann_ty.as_ref().map(|t| (t, self.parse_ty(t))) {
                         // (`let _: Rc<dyn Send> = Rc::new(x);`: the unsizing of a std pointer other than Box, which zustc
-                        // does not do; the value is dropped at once, the same with its own type)
-                        Some((_, Ok(a))) if self.prog.std_rc_of_dyn(a) => None,
+                        // does not do; the value is dropped at once, the same with its own type. Only of an Rc to an Rc
+                        // (an Arc to an Arc): `let _: Rc<dyn Send> = 1u8;` stays a mismatch)
+                        Some((_, Ok(a))) if self.prog.std_rc_of_dyn(a) && self.peek(init).is_none_or(|it| same_std_ptr(self.prog, it, a)) => None,
                         Some((_, Ok(a))) => Some(a),
                         Some((t, Err(e))) if e.contains("cannot find type") && !names_std_path(t) => return Err(e),
                         // (and a Sized error, whatever the initializer: `let _: Vec<str> = loop {};`)
