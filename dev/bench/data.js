@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795856634651,
+  "lastUpdate": 1795856636926,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -97060,6 +97060,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 160.312,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ef3469ee3df97c18d7ddc995b6f8bc4bff049f1b",
+          "message": "syntax, sema, typeck: `fmt::Result` and defaulted const parameters used without arguments (#346)\n\n`missing generics for Result` / `ObjectIdentifier` (bytes, const-oid, time-core): `fmt::Result` / `io::Result` / `thread::Result` imported by name now name std's aliases rather than the prelude's generic `Result`, and a type with defaulted const parameters (`struct B<const N: usize = 3>`) can be used without arguments, as rustc allows. Explicit arguments before `::default()` are kept, a const default may name an earlier parameter, and an import of `Result` stays in the type namespace.\n\nThe KPI ceilings of `edit one fn` and `traits edit` are raised to this head: main's base was already above them, and this change costs +0.40% / +0.14% against its base.\n\nFixes #260\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-28T08:57:52Z",
+          "tree_id": "3969f2411f4cf0f231890d92862e3c301a3e0303",
+          "url": "https://github.com/mizchi/zust/commit/ef3469ee3df97c18d7ddc995b6f8bc4bff049f1b"
+        },
+        "date": 1795856636628,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.027,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.798,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.992,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.157,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.988,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.722,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 2.878,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 365.767,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 156.441,
             "unit": "MiB"
           }
         ]
