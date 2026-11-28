@@ -4434,9 +4434,10 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             };
             // (the scope's own item, its import, or what its globs pass on, globs of globs too, all of them compared
             //  (two distinct is ambiguous): libc's unix sees `time_t` of linux_like/linux/gnu/b64; a definition is its own)
-            // (`::f` / `::E::V` whose first segment names no module: an item of the crate root, as in 2015)
+            // (`::f` / `::E::V` whose first segment names no module: an item of the crate root, as in 2015; in a crate
+            //  module (a dependency's), that crate's root, where its items are renamed `dep__E`)
             let nn = if leading {
-                names.lookup(usize::MAX, n, w)
+                names.lookup(crate_root(sc), n, w)
             } else {
                 in_block().or_else(|| if is_def { renamed_in(sc, n) } else if prim { names.lookup_type(sc, n) } else { names.lookup(sc, n, w) })
             };
