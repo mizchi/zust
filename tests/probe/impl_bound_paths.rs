@@ -1,7 +1,9 @@
 // An impl's method bounds are compared with its trait's by the trait each path names, not by the path's text (#264):
 // writeable 0.6.4's macro writes `core::fmt::Write + ?Sized` for the trait's `fmt::Write + ?Sized`, and bitflags
 // 2.13.2's `impl_bits!` writes `fmt::Write`; here also `std::fmt::Write`, an imported `Write`, `::core::fmt::Write`,
-// a `$crate::` path, and bounds in a where clause for the trait's inline ones (and the other way)
+// a `$crate::` path, and bounds in a where clause for the trait's inline ones (and the other way). And a parameter
+// that is `?Sized` in the trait and Sized in the impl, where the trait's bound is of a trait that is Sized by its where
+// clause's `Self: Sized`: no stricter (rustc 1.97)
 use core::fmt;
 use std::fmt::Write as FmtWrite;
 
@@ -28,6 +30,24 @@ pub trait WriteHex {
     fn write_hex<W: fmt::Write>(&self, writer: W) -> fmt::Result;
 }
 
+// (Sized as a supertrait by a where clause: `T: Plain + ?Sized` is Sized all the same)
+pub trait Plain: Send
+where
+    Self: Sized,
+{
+    fn weight(&self) -> u8;
+}
+
+impl Plain for u8 {
+    fn weight(&self) -> u8 {
+        *self
+    }
+}
+
+pub trait Count {
+    fn count<T: Plain + ?Sized>(&self, t: &T) -> u8;
+}
+
 macro_rules! impl_write_num {
     ($($u:ty),*) => {
         $(
@@ -48,6 +68,11 @@ macro_rules! impl_write_num {
             impl WriteHex for $u {
                 fn write_hex<W: fmt::Write>(&self, mut writer: W) -> fmt::Result {
                     write!(writer, "{:x}", self)
+                }
+            }
+            impl $crate::Count for $u {
+                fn count<T: $crate::Plain>(&self, t: &T) -> u8 {
+                    t.weight() + 2
                 }
             }
         )*
@@ -87,6 +112,12 @@ impl WriteHex for Name {
     }
 }
 
+impl Count for Name {
+    fn count<T: Plain>(&self, t: &T) -> u8 {
+        t.weight() + self.0.len() as u8
+    }
+}
+
 // (a writer by value: it prints what it is given)
 struct Out;
 
@@ -114,4 +145,5 @@ fn main() {
     print!(" ");
     Name("hi").write_hex(Out).unwrap();
     println!();
+    println!("{} {}", Name("xyz").count(&3u8), 9u32.count(&4u8));
 }

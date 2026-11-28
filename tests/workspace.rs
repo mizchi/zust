@@ -638,9 +638,9 @@ fn main() {
 /// it renames std's `fmt::Write` (`__FWr`), so a macro's `core :: fmt :: Write` kept its name where the trait's became
 /// `fmt::__FWr`: writeable 0.6.4's `core::fmt::Write + ?Sized` and bitflags 2.13.2's `impl_bits!` were "stricter".
 /// The probe tests/probe/impl_bound_paths.rs as a library (also `std::fmt::Write`, an imported `Write`, `$crate::`
-/// paths, where clauses for inline bounds), and its output is rustc's. A macro's bound of another trait of that name
-/// (`std::io::Write`), or a parameter it leaves Sized where the trait's is `?Sized`, is still E0276 (rustc 1.97: at
-/// 10:21 and 9:18, in the macro's body)
+/// paths, where clauses for inline bounds, a `?Sized` parameter whose trait is Sized by its `where Self: Sized`), and
+/// its output is rustc's. A macro's bound of another trait of that name (`std::io::Write`), or a parameter it leaves
+/// Sized where the trait's is `?Sized`, is still E0276 (rustc 1.97: at 10:21 and 9:18, in the macro's body)
 #[test]
 fn macro_written_impl_bounds_by_the_trait_they_name() {
     let lib = include_str!("probe/impl_bound_paths.rs").replace("fn main() {", "pub fn demo() {");
@@ -648,7 +648,7 @@ fn macro_written_impl_bounds_by_the_trait_they_name() {
         "impl_bounds",
         &[("wr.rs", &lib), ("app.rs", "fn main() {\n    wr::demo();\n}\n"), ("ws.txt", "lib wr wr.rs\nbin app app.rs wr\n")],
     );
-    assert_eq!(want, "7 <-3> ab[cd]n!\nff 1000 6869\n");
+    assert_eq!(want, "7 <-3> ab[cd]n!\nff 1000 6869\n6 6\n");
     assert_eq!(got, want);
     let dir = std::env::temp_dir().join(format!("zustc_ws_impl_bounds_e0276_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

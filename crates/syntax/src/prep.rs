@@ -1230,7 +1230,7 @@ pub fn std_rename_of(module: &str, name: &str) -> Option<&'static str> {
 }
 
 /// Rename them where they come from that module: `module::Name`, or `Name` imported by a `use` of that module (and
-/// neither imported from elsewhere nor defined in the file)
+/// neither imported from elsewhere nor defined in the file). In the code only: a literal's or a comment's text stays
 pub fn std_renames(src: &str) -> Option<String> {
     // (each module name is looked for once: this runs on every build)
     let has_atomic = src.contains("atomic");
@@ -1243,6 +1243,8 @@ pub fn std_renames(src: &str) -> Option<String> {
     let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
     let mut out = src.to_string();
     let mut changed = false;
+    // (src's tokens, when a name is to be renamed or a `use` is read)
+    let toks: std::cell::OnceCell<Vec<(u8, usize, usize)>> = std::cell::OnceCell::new();
     for &(m, name, to) in STD_RENAMES {
         if !(match m { "atomic" => has_atomic, "fmt" => has_fmt_write, _ => has_mpsc }) || !src.contains(name) {
             continue;
@@ -1280,7 +1282,7 @@ pub fn std_renames(src: &str) -> Option<String> {
         // `use std::fmt::Write;` is that fn's, and a module's are that module's (a crate's files, loaded as
         // `mod name { .. }`). The scan above is the answer only without one: it reads every statement that starts with
         // `use` alike, wherever it is, and misses one right after `mod name {`)
-        let scoped = (!defined && imports_from(src, m, name)).then(|| use_scopes(src, m, name));
+        let scoped = (!defined && imports_from(src, m, name)).then(|| use_scopes(src, toks.get_or_init(|| crate::lexer::tokenize(b)), m, name));
         let cur = std::mem::take(&mut out);
         let cb = cur.as_bytes();
         let mut i = 0;
@@ -1291,13 +1293,19 @@ pub fn std_renames(src: &str) -> Option<String> {
             let after_m = cur[..at].ends_with(&m_path) || cur[..at].ends_with(&m_spaced);
             let qualified = cur[..at].ends_with("::") || cur[..at].ends_with(":: ");
             out.push_str(&cur[i..at]);
-            // (not inside a string: `"Write"` is text)
             let bare = match &scoped {
-                Some(sc) => sc.bare_at(at) && !sc.in_lit(at),
+                Some(sc) => sc.bare_at(at),
                 None => bare,
             };
-            let after_m = after_m && scoped.as_ref().is_none_or(|sc| !sc.in_lit(at));
-            if word && (after_m || (bare && (!qualified || cur[..at].ends_with("mpsc::") || cur[..at].ends_with("atomic::") || cur[..at].ends_with("fmt::")))) {
+            // (only an identifier of the code: not text inside a literal (`"fmt :: Write"`, `r#"fmt::Write"#`,
+            // `b"Write"`) or a comment, which the lexer has no token in, with an import or without one. The source is
+            // tokenized once, for the first name to rename: a rename keeps every length, so src's tokens are cur's)
+            let code = || {
+                let t = toks.get_or_init(|| crate::lexer::tokenize(b));
+                let k = t.partition_point(|x| x.1 < at);
+                t.get(k).is_some_and(|x| x.0 == 0 && x.1 == at)
+            };
+            if word && (after_m || (bare && (!qualified || cur[..at].ends_with("mpsc::") || cur[..at].ends_with("atomic::") || cur[..at].ends_with("fmt::")))) && code() {
                 out.push_str(to);
                 changed = true;
             } else {
@@ -1319,8 +1327,6 @@ struct UseScopes {
     uses: Vec<(bool, bool)>,
     /// The blocks with a `use super::*;`: a module's body that has one sees its parent's imports
     super_globs: Vec<bool>,
-    /// The literals' byte ranges, in order: a name inside a string is text, not renamed
-    lits: Vec<(usize, usize)>,
 }
 
 impl UseScopes {
@@ -1351,12 +1357,6 @@ impl UseScopes {
         }
         let (from_m, other) = self.uses[0];
         from_m && !other
-    }
-
-    /// Byte i is inside a literal (`"Write"`)
-    fn in_lit(&self, i: usize) -> bool {
-        let k = self.lits.partition_point(|&(a, _)| a <= i);
-        k > 0 && i < self.lits[k - 1].1
     }
 }
 
@@ -1496,9 +1496,8 @@ fn imports_from(src: &str, m: &str, name: &str) -> bool {
 
 #[cold]
 #[inline(never)]
-fn use_scopes(src: &str, m: &str, name: &str) -> UseScopes {
+fn use_scopes(src: &str, toks: &[(u8, usize, usize)], m: &str, name: &str) -> UseScopes {
     let b = src.as_bytes();
-    let toks = crate::lexer::tokenize(b);
     let tk = |k: usize| &src[toks[k].1..toks[k].2];
     let sym = |k: usize, c: &str| toks[k].0 == 1 && tk(k) == c;
     // (every brace block, with whether it is a module's body: a `use` in a fn body is that body's)
@@ -1515,8 +1514,7 @@ fn use_scopes(src: &str, m: &str, name: &str) -> UseScopes {
             }
         }
     }
-    let lits: Vec<(usize, usize)> = toks.iter().filter(|t| t.0 == 2).map(|t| (t.1, t.2)).collect();
-    let mut sc = UseScopes { uses: vec![(false, false); blocks.len() + 1], super_globs: vec![false; blocks.len() + 1], blocks, lits };
+    let mut sc = UseScopes { uses: vec![(false, false); blocks.len() + 1], super_globs: vec![false; blocks.len() + 1], blocks };
     let mut k = 0;
     while k < toks.len() {
         if toks[k].0 == 0 && tk(k) == "use" {
@@ -1791,4 +1789,21 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
         }
     }
     Ok(Some((text, fx)))
+}
+
+#[cfg(test)]
+mod tests {
+    /// std_renames renames the code's paths, spaced or not, and no literal's or comment's text, with a `use` of the
+    /// module or without one (`println!("fmt :: Write")` printed `fmt :: __FWr`)
+    #[test]
+    fn std_renames_leave_text() {
+        let code = "impl core :: fmt :: Write for X {}\nfn f(_: std::sync::mpsc::Sender<u8>, _: std::sync::atomic::Ordering) {}\n";
+        let want = "impl core :: fmt :: __FWr for X {}\nfn f(_: std::sync::mpsc::__Sndr<u8>, _: std::sync::atomic::__AtOrd_) {}\n";
+        let text = "// fmt::Write, fmt :: Write\n/* mpsc::Sender */\nfn main() {\n    println!(\"fmt :: Write {} {}\", r#\"fmt::Write\"#, \"mpsc :: Sender\");\n    let _ = (b\"atomic::Ordering\", 'W', \"Write Sender\");\n}\n";
+        for (head, head_to) in [("", ""), ("use std::fmt::Write;\nuse std::sync::mpsc::Sender;\n", "use std::fmt::__FWr;\nuse std::sync::mpsc::__Sndr;\n")] {
+            let got = super::std_renames(&format!("{head}{code}{text}"));
+            assert_eq!(got.as_deref(), Some(format!("{head_to}{want}{text}").as_str()), "{head:?}");
+        }
+        assert_eq!(super::std_renames(text), None);
+    }
 }

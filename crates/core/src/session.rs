@@ -11482,8 +11482,10 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
     let text = |it: &SrcItem| src.get(it.start..it.end).unwrap_or("");
     let generic_fn = |t: &str| t.find('(').is_some_and(|p| t[..p].contains('<') && t[..p].contains("fn "));
     use crate::parse::{Bound, GParam, Ty as PTy};
-    // (a header's name after its keyword, and the names after a `:` before its `{` / `where`: `trait B: A + Sized {`)
+    // (a header's name after its keyword)
     let words = |t: &str| -> Vec<String> { crate::lexer::tokenize(t.as_bytes()).iter().filter(|x| x.0 == 0).map(|x| t[x.1..x.2].to_string()).collect() };
+    // (a type that is `Self`: a where clause's `Self: Sized`)
+    let is_self = |t: &PTy| matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "Self" && p.segs[0].args.is_empty());
     let mut supers: crate::fxhash::FxMap<String, Vec<String>> = Default::default();
     let mut trait_of: crate::fxhash::FxMap<u32, String> = Default::default();
     for (i, it) in items.iter().enumerate() {
@@ -11495,8 +11497,24 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
         let w = words(head);
         let Some(k) = w.iter().position(|x| x == "trait") else { continue };
         let Some(name) = w.get(k + 1) else { continue };
-        let sup: Vec<String> = match head.find(':') {
-            Some(c) => {
+        // (its supertraits: the bounds after its `:` and those of its where clause's `Self: ..`, which are supertraits
+        // too (`trait B: Send where Self: Sized`), by the trait each names (bound_trait_name); not its parameters'
+        // (`trait B<T: Clone>`, `where T: Clone`). From the header parsed alone; where that fails, the names after a
+        // `:` before its `where`)
+        let parsed = crate::parse::parse_file(&format!("{head}{{}}")).ok().and_then(|f| match f.items.into_iter().next()?.kind {
+            crate::parse::ItemKind::Trait(_, g, sup, _) => Some((g, sup)),
+            _ => None,
+        });
+        let sup: Vec<String> = match (parsed, head.find(':')) {
+            (Some((g, sup)), _) => sup
+                .iter()
+                .chain(g.preds.iter().filter(|(t, _)| is_self(t)).flat_map(|(_, bs)| bs))
+                .filter_map(|b| match b {
+                    Bound::Trait(false, p) => bound_trait_name(p),
+                    _ => None,
+                })
+                .collect(),
+            (None, Some(c)) => {
                 let r = &head[c + 1..];
                 let r = &r[..r.find("where").unwrap_or(r.len())];
                 // (by the trait each path names, as bound_trait_name: `fmt::__FWr` and a macro's `fmt :: Write`)
@@ -11509,7 +11527,7 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
                     })
                     .collect()
             }
-            None => vec![],
+            (None, None) => vec![],
         };
         supers.insert(name.clone(), sup);
         trait_of.insert(i as u32, name.clone());
@@ -11736,9 +11754,9 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
             }
             // (a type parameter the impl's method leaves Sized where the trait's is `?Sized` (`W: fmt::Write` for the
             // trait's `W: fmt::Write + ?Sized`): rustc's "extra requirement `W: Sized`", unless a bound of the trait's
-            // parameter has Sized for a supertrait (`W: Clone + ?Sized`; a trait of the program's `trait B: Sized`).
-            // After the other bounds, as rustc reports them: at the impl's `Sized` bound if it writes one, else at the
-            // parameter's name)
+            // parameter has Sized for a supertrait (`W: Clone + ?Sized`; a trait of the program's `trait B: Sized`, or
+            // `trait B: Send where Self: Sized`). After the other bounds, as rustc reports them: at the impl's `Sized`
+            // bound if it writes one, else at the parameter's name)
             const SIZED_BY: [&str; 12] = ["Sized", "Clone", "Copy", "Default", "From", "Into", "TryFrom", "TryInto", "FromStr", "FromIterator", "Sum", "Product"];
             let unsized_at = mp.iter().zip(&dp).position(|(mb, db)| {
                 db.relaxed && !mb.relaxed && !close(db.bounds.iter().map(|x| x.0.clone()).collect()).iter().any(|n| SIZED_BY.contains(&n.as_str()))
