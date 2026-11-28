@@ -851,9 +851,10 @@ fn lex_to(b: &[u8], k: &mut usize, st: &mut LexAt, i: usize) -> LexAt {
     *st
 }
 
-pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
-    // (one pass over the bytes: the name after `struct ` / `enum ` / `trait ` / `type ` / `union `. It replaces a
-    // search for each name: those were most of the cost of a no-op build of a large program)
+/// The prelude's type names (SHADOWABLE) the program defines for itself: one pass over the bytes, the name after
+/// `struct ` / `enum ` / `trait ` / `type ` / `union ` (it replaces a search for each name: those were most of the cost
+/// of a no-op build of a large program)
+pub fn shadowed_defs(user_src: &str) -> Vec<&str> {
     let mut defined: Vec<&str> = vec![];
     let b = user_src.as_bytes();
     let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
@@ -886,11 +887,17 @@ pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
         }
         i += 1;
     }
+    defined
+}
+
+/// `defined`: shadowed_defs of the program's source
+pub fn rename_shadowed(defined: &[&str], prelude: String) -> String {
+    let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
     if defined.is_empty() {
         return prelude;
     }
     let mut out = prelude;
-    for n in defined {
+    for &n in defined {
         if !out.contains(n) {
             continue;
         }
@@ -912,6 +919,104 @@ pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
         out = r;
     }
     out
+}
+
+/// The program's std paths to a prelude type it shadows (a type of its own of the name, rename_shadowed):
+/// `std::time::Duration` / `::core::time::Duration` / `use std::time::Duration as StdDuration;` name the prelude's,
+/// renamed `__p_Duration`. Such a path becomes the renamed name, padded with spaces in front to the path's length, so
+/// no column moves (`std::` alone is longer than `__p_`); in a `use`, and an item of a `use std::m::{..}` group, the
+/// name is renamed in place, which moves that line's later columns by 4. Comments and strings are left alone
+/// `defined`: shadowed_defs of the source (the caller's, which rename_shadowed takes as well: one scan)
+pub fn std_paths_to_shadowed(user_src: &str, defined: &[&str]) -> Option<String> {
+    if defined.is_empty() || !(user_src.contains("std::") || user_src.contains("core::") || user_src.contains("alloc::")) {
+        return None;
+    }
+    let b = user_src.as_bytes();
+    let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    // (an identifier at i: its end)
+    let ident_end = |i: usize| {
+        let mut e = i;
+        while e < b.len() && is_id(b[e]) {
+            e += 1;
+        }
+        e
+    };
+    let (mut lk, mut ls) = (0usize, LexAt::Code);
+    // (byte ranges and what replaces them, in order)
+    let mut reps: Vec<(usize, usize, String)> = vec![];
+    let mut i = 0;
+    while i < b.len() {
+        let at_root = matches!(b[i], b's' | b'c' | b'a') && (i == 0 || !is_id(b[i - 1]));
+        let root = if at_root { ["std::", "core::", "alloc::"].into_iter().find(|r| b[i..].starts_with(r.as_bytes())) } else { None };
+        let Some(root) = root else {
+            i += 1;
+            continue;
+        };
+        if lex_to(b, &mut lk, &mut ls, i) != LexAt::Code {
+            i += root.len();
+            continue;
+        }
+        // (a leading `::`, `::std::..`, is part of the path)
+        let start = if i >= 2 && &b[i - 2..i] == b"::" && (i == 2 || !is_id(b[i - 3])) { i - 2 } else { i };
+        // (the modules: lowercase segments, each followed by `::`)
+        let mut k = i + root.len();
+        loop {
+            let e = ident_end(k);
+            if e > k && b[k].is_ascii_lowercase() && b[e..].starts_with(b"::") {
+                k = e + 2;
+            } else {
+                break;
+            }
+        }
+        if k < b.len() && b[k] == b'{' {
+            // (a `use` group: its items that are such a name, `{Duration as StdDuration, Instant}`, one level deep)
+            let mut j = k + 1;
+            while j < b.len() && b[j] != b'}' && b[j] != b'{' && b[j] != b';' {
+                if is_id(b[j]) && !is_id(b[j - 1]) {
+                    let e = ident_end(j);
+                    let item_start = b[k + 1..j].iter().rev().find(|c| !c.is_ascii_whitespace()).is_none_or(|&c| c == b',' || c == b'{');
+                    if item_start && defined.contains(&&user_src[j..e]) && !b[e..].starts_with(b"::") {
+                        reps.push((j, e, format!("__p_{}", &user_src[j..e])));
+                    }
+                    j = e;
+                } else {
+                    j += 1;
+                }
+            }
+            i = j;
+            continue;
+        }
+        let e = ident_end(k);
+        if e > k && defined.contains(&&user_src[k..e]) {
+            let to = format!("__p_{}", &user_src[k..e]);
+            // (an import keeps its path, `use std::time::__p_Duration as StdDuration;`: an alias of a bare name would
+            // not be read as one of the prelude's. It moves the line's later columns by 4)
+            let mut w = start;
+            while w > 0 && b[w - 1].is_ascii_whitespace() {
+                w -= 1;
+            }
+            let in_use = w >= 3 && &b[w - 3..w] == b"use" && (w == 3 || !is_id(b[w - 4]));
+            if in_use {
+                reps.push((k, e, to));
+            } else {
+                let pad = (e - start).saturating_sub(to.len());
+                reps.push((start, e, format!("{}{to}", " ".repeat(pad))));
+            }
+        }
+        i = e.max(k).max(i + 1);
+    }
+    if reps.is_empty() {
+        return None;
+    }
+    let mut out = String::with_capacity(user_src.len() + 16);
+    let mut last = 0;
+    for (a, e, t) in reps {
+        out.push_str(&user_src[last..a]);
+        out.push_str(&t);
+        last = e;
+    }
+    out.push_str(&user_src[last..]);
+    Some(out)
 }
 
 /// Whether the source has a path `Box::from` in any spelling the parser takes: spaces around `::`, a turbofish
@@ -1006,6 +1111,9 @@ pub struct SelectCache {
     scan: crate::fxhash::FxMap<(crate::key::Key, u64), bool>,
     /// The number of user items in the last selection (the items after them are the prelude's)
     pub user_items: usize,
+    /// The source has std paths std_paths_to_shadowed rewrote to `__p_Name`: such identifiers are looked at (asked
+    /// of every identifier only then)
+    pub shadow_paths: bool,
 }
 
 /// Checks each item instead of the whole user source (`contains` and so on), keeping results by item hash.
@@ -1268,6 +1376,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     let mut need: crate::fxhash::FxSet<&str> = Default::default();
     let bytes = user_src.as_bytes();
     let mut chain = false;
+    let shadow_paths = cache.shadow_paths;
     let old = std::mem::take(&mut cache.map);
     for it in user_items {
         if let Some(r) = old.get(&it.hash) {
@@ -1277,6 +1386,17 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             continue;
         }
         let mut names: Vec<&'static str> = vec![];
+        // (`__p_Duration`, a std path to a prelude type the program shadows (std_paths_to_shadowed): the prelude's
+        // `Duration`, which the program's own name alone does not bring. A loop of its own, only for such a source)
+        if shadow_paths {
+            for &(a, b) in &it.idents {
+                if let Some(w) = user_src[a as usize..b as usize].strip_prefix("__p_").filter(|w| !w.is_empty()) {
+                    if let Some(n) = by_first[bucket(w.as_bytes()[0], w.len())].iter().find(|n| **n == w) {
+                        names.push(n);
+                    }
+                }
+            }
+        }
         for &(a, b) in &it.idents {
             let cands = &by_first[bucket(bytes[a as usize], (b - a) as usize)];
             if cands.is_empty() {
@@ -1337,14 +1457,16 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     // (Duration is not in std's prelude: without `time` written (`use std::time::Duration` / `time::Duration`),
     // `Duration` is the program's own or an error)
-    if need.contains("Duration") && !sc.has("time") {
+    // (a std path to it the program's own `Duration` shadows is `__p_Duration` by now (std_paths_to_shadowed): the
+    // prelude's, though `time` is gone from the text)
+    if need.contains("Duration") && !sc.has("time") && !sc.has("__p_Duration") {
         need.remove("Duration");
     }
     // (`iter::Empty` likewise: `Empty` alone is usually a variant of the program's own enum)
-    if need.contains("Empty") && !sc.has("iter::") {
+    if need.contains("Empty") && !sc.has("iter::") && !sc.has("__p_Empty") {
         need.remove("Empty");
     }
-    if need.contains("Repeat") && !sc.has("iter::") {
+    if need.contains("Repeat") && !sc.has("iter::") && !sc.has("__p_Repeat") {
         need.remove("Repeat");
     }
     // (`a.zip(&v)` / `a.chain([x])`: codegen makes Vec / array arguments `.iter()` / `.into_iter()`; `a.zip(dst)` with

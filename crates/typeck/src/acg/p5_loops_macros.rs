@@ -157,6 +157,23 @@ fn let_stmt(name: &str, init: Expr) -> Stmt {
     Stmt::Let(Pat::Ident(false, false, name.to_string(), None), None, Some(init), None, Default::default())
 }
 
+/// A value path no reading answers, named as written, as rustc's E0425 / E0433 name theirs: ``cannot find value
+/// `core::char::REPLACEMENT_CHARACTER` (unsupported path)`` (#265). `<T as Tr>::C` keeps its qualified self (the
+/// trait's path is the segments before the last). Made only here, on the error, so the readings above pay nothing
+#[cold]
+#[inline(never)]
+fn unsupported_path<T>(q: Option<&crate::parse::Ty>, p: &Path) -> R<T> {
+    let path = match (q, p.segs.split_last()) {
+        (Some(q), Some((last, []))) => format!("<{}>::{}", crate::parse::ty_text(q), last.name),
+        (Some(q), Some((last, tr))) => {
+            let tr = Path { global: p.global, segs: tr.to_vec(), pos: p.pos };
+            format!("<{} as {}>::{}", crate::parse::ty_text(q), crate::parse::path_text(&tr), last.name)
+        }
+        _ => crate::parse::path_text(p),
+    };
+    err(SP, format!("cannot find value `{path}` (unsupported path)"))
+}
+
 /// The walk of hoist_index_bases (outside the function: zustc's hoisting of nested items cannot handle an impl)
 struct HoistScan {
     /// Index chains seen: (root name, receiver expressions (`x`, `x[i]`, ..), whether on an assignment's left side)
@@ -2615,7 +2632,7 @@ impl Cx<'_> {
                 }
             }
         }
-        err(SP, "cannot find value (unsupported path)")
+        unsupported_path(q.as_deref(), p)
     }
 
     /// If `m::S` / `crate::m::S` is a static in a module, the path without the modules

@@ -86,6 +86,11 @@ pub(crate) fn const_expr_text(e: &Expr) -> Option<String> {
         Expr::Binary(op, l, r, _) => format!("({} {op} {})", const_expr_text(l)?, const_expr_text(r)?),
         Expr::Unary(op, x, _) if op == "-" => format!("(-{})", const_expr_text(x)?),
         Expr::Paren(x) => const_expr_text(x)?,
+        // (`u8::max_value()`: the type's constant, `u8::MAX` (#265))
+        Expr::Call(f, args) if crate::parse::int_bound_call(f, args).is_some() => {
+            let (Expr::Path(None, p), Some((_, k))) = (&**f, crate::parse::int_bound_call(f, args)) else { return None };
+            format!("{}::{k}", p.segs[0].name)
+        }
         // (`size_of::<c_long>()` / `mem::align_of::<T>()`: Program::eval_const knows primitives, pointers and aliases
         // of them; libc 0.2's `[u8; 128 - 2 * size_of::<c_int>()]`)
         Expr::Call(f, args)
