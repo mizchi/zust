@@ -13069,9 +13069,11 @@ fn macro_body_at(src: &str, line: usize, col: usize, t: &str) -> Option<(usize, 
         if !occurs(a + 1, ae).is_empty() {
             continue;
         }
-        let def = format!("macro_rules! {n}");
-        let Some(at) = src.match_indices(&def).map(|(k, _)| k).find(|&k| sb.get(k + def.len()).is_none_or(|&c| !id(c))) else { continue };
-        let open = skip_ws(at + def.len());
+        // (the definition by its tokens, `macro_rules ! n`: not one in a comment or a string)
+        let toks = crate::lexer::tokenize(sb);
+        let word = |t: &(u8, usize, usize), w: &str| t.0 == 0 && &src[t.1..t.2] == w;
+        let Some(after) = toks.windows(3).find(|w| word(&w[0], "macro_rules") && w[1].0 == 1 && sb[w[1].1] == b'!' && word(&w[2], n)).map(|w| w[2].2) else { continue };
+        let open = skip_ws(after);
         let end = close(open)?;
         // (the rules: a matcher, `=>`, a transcriber (its tokens and its closing delimiter), and `;` between them)
         let mut hits = vec![];
