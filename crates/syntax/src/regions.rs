@@ -948,6 +948,12 @@ fn static_dyn(t: &mut PTy, behind: bool) {
 /// The regions of a trait impl's head (RHeadSyn): None where it names no lifetime, binds none in a fn pointer type and
 /// declares no outlives, so that its regions are all its own
 pub fn impl_head(g: &Generics, self_ty: &PTy, tr: &Path) -> Option<Box<crate::types::RHeadSyn>> {
+    // (most headers name no lifetime and have no fn pointer type: nothing to make)
+    let fn_ref = |t: &PTy| fn_ptr_ref(t, false, 0);
+    let targs = || tr.segs.last().into_iter().flat_map(|s| s.args.iter()).any(|a| matches!(a, GArg::Ty(t) if fn_ref(t)));
+    if !generics_name_lt(g) && !names_lt(self_ty) && !path_names_lt(tr) && !fn_ref(self_ty) && !targs() {
+        return None;
+    }
     // (`impl Tr for S<'_>`: each `'_` of the self type is a lifetime parameter of the impl of its own)
     let mut anon = vec![];
     let named = has_anon(self_ty).then(|| {
@@ -985,6 +991,25 @@ pub fn impl_head(g: &Generics, self_ty: &PTy, tr: &Path) -> Option<Box<crate::ty
         return None;
     }
     Some(Box::new(crate::types::RHeadSyn { lts: s.lts, self_slots, trait_lts, trait_args, outlives }))
+}
+
+/// t has a reference (or a `'_`) inside a fn pointer type, whose region the fn pointer type binds; `inside`: within one
+fn fn_ptr_ref(t: &PTy, inside: bool, depth: u32) -> bool {
+    if depth > 24 {
+        return false;
+    }
+    match t {
+        PTy::Ref(..) if inside => true,
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => fn_ptr_ref(i, inside, depth + 1),
+        PTy::Tuple(ts) => ts.iter().any(|x| fn_ptr_ref(x, inside, depth + 1)),
+        PTy::Fn(ps, r) => ps.iter().any(|x| fn_ptr_ref(x, true, depth + 1)) || fn_ptr_ref(r, true, depth + 1),
+        PTy::Path(_, p) => p.segs.iter().any(|s| s.args.iter().any(|a| match a {
+            GArg::Ty(x) | GArg::Bind(_, x) => fn_ptr_ref(x, inside, depth + 1),
+            GArg::Lifetime(_) => inside,
+            GArg::Const(_) => false,
+        })),
+        _ => false,
+    }
 }
 
 /// The regions of an impl / trait header
