@@ -5754,12 +5754,30 @@ impl Program {
         let imp = |u: Ty| self.ref_param_implements(tr, u, 0);
         let covered = |st: Ty| matches!(st, Ty::Ref(m, _) if self.ref_param_impls.iter().any(|(t, rm)| t == tr && *rm == m));
         // (how an inherent method m of struct sid takes self, as trait_recv_kind says it)
-        let inherent = |sid: u32| -> Option<Option<bool>> {
+        let inherent_of = |sid: u32| -> Option<Option<bool>> {
             let i = self.method(sid, m).filter(|&i| self.sigs[i as usize].impl_trait.is_none() && self.sigs[i as usize].has_self)?;
             Some(match self.sigs[i as usize].params.first()? {
                 Ty::Ref(rm, _) => Some(*rm),
                 _ => None,
             })
+        };
+        // (and the compiler's own methods of a str, a slice or an array (`"abc".len()`), which take it by reference)
+        let builtin = |u: Ty| -> Option<Option<bool>> {
+            let pre = match u {
+                Ty::Str => "__exr_str_",
+                Ty::Slice(_) | Ty::Array(..) => "__exr_slice_",
+                _ => return None,
+            };
+            const SEQ: &[&str] = &["len", "is_empty", "as_bytes", "as_ptr", "as_mut_ptr", "iter", "iter_mut", "first", "last", "get", "get_mut", "contains", "to_vec", "to_owned", "starts_with", "ends_with", "split_at", "chunks", "windows", "join", "concat", "sort", "sort_unstable", "reverse", "swap", "fill", "first_mut", "last_mut", "binary_search", "to_string", "chars", "bytes", "lines", "trim", "split"];
+            (SEQ.contains(&m) || self.index.contains_key(&format!("{pre}{m}"))).then(|| {
+                Some(m.ends_with("_mut") || matches!(m, "sort" | "sort_unstable" | "reverse" | "swap" | "fill") || m.starts_with("sort_"))
+            })
+        };
+        let inherent = |u: Ty| -> Option<Option<bool>> {
+            match u {
+                Ty::Struct(sid) => inherent_of(sid),
+                u => builtin(u),
+            }
         };
         let (mut s, mut n) = (t, 0usize);
         loop {
@@ -5771,10 +5789,9 @@ impl Program {
                 // (an inherent method whose receiver this try makes: `x.m()` of `S::m(&self)` with x a `&S` by value,
                 // or an `S` borrowed)
                 let inh = match (adj, s) {
-                    (None, Ty::Struct(sid)) => inherent(sid) == Some(None),
-                    (None, Ty::Ref(rm, &Ty::Struct(sid))) => inherent(sid) == Some(Some(rm)),
-                    (Some(am), Ty::Struct(sid)) => inherent(sid) == Some(Some(am)),
-                    _ => false,
+                    (None, Ty::Ref(rm, u)) => inherent(*u) == Some(Some(rm)),
+                    (None, u) => inherent(u) == Some(None),
+                    (Some(am), u) => inherent(u) == Some(Some(am)),
                 };
                 if inh {
                     return None;
@@ -5800,7 +5817,8 @@ impl Program {
     }
 
     /// Whether u implements tr (one of ref_param_impls), through the program's impls for references to a type parameter
-    /// too: `&&S` of `impl<T: Tr> Tr for &T` with `S: Tr`, where the impl's other bounds hold of S too (`T: Tr + Marker`)
+    /// too: `&&S` of `impl<T: Tr> Tr for &T` with `S: Tr`, where the impl's bounds of T hold of S (`T: Tr + Marker`;
+    /// none, `impl<T: ?Sized> Tr for &T`, holds of every referent)
     pub fn ref_param_implements(&self, tr: &str, u: Ty, depth: u32) -> bool {
         match u {
             Ty::Ref(m, i) if self.ref_param_impls.iter().any(|(t, rm)| t == tr && *rm == m) => {
@@ -5810,10 +5828,15 @@ impl Program {
                 if sized_only && i.is_unsized() {
                     return false;
                 }
-                let others = bounds.into_iter().flatten();
+                // (the bounds the impl writes of T, Tr among them or not: `impl<T: ?Sized> Tr for &T` is for every `&X`)
                 depth < 16
-                    && self.ref_param_implements(tr, *i, depth + 1)
-                    && others.filter(|b| b.split('<').next().unwrap_or(b).trim() != tr).all(|b| relaxed_bound(b) || self.has_param(*i) || self.implements(*i, b))
+                    && bounds.into_iter().flatten().all(|b| {
+                        if b.split('<').next().unwrap_or(b).trim() == tr {
+                            self.ref_param_implements(tr, *i, depth + 1)
+                        } else {
+                            relaxed_bound(b) || self.has_param(*i) || self.implements(*i, b)
+                        }
+                    })
             }
             // (a reference of the other kind, `&mut &S` beside `impl<T: Tr> Tr for &T` alone: only an impl for it
             // (`impl Tr for &mut S`); the blanket impl for `&T` registered for tr is not one)
@@ -5827,6 +5850,12 @@ impl Program {
     /// whose self type is the reference to its parameter), or tr's default where the impl leaves it out
     pub fn ref_param_fn(&self, st: Ty, m: &str, tr: &str) -> Option<u32> {
         let suffix = format!("::__ref_{m}");
+        let of_tr = |i: u32| self.sigs[i as usize].impl_trait.as_deref().is_some_and(|it| it.split('<').next().unwrap_or(it).trim() == tr);
+        let named = |i: u32| self.names[i as usize].split('#').next().is_some_and(|b| b.ends_with(&suffix));
+        // (an impl for that reference itself first, `impl Tr for &str` beside `impl<T: Tr> Tr for &T` (whose T is Sized))
+        if let Some(c) = (0..self.names.len() as u32).find(|&i| named(i) && of_tr(i) && self.sigs[i as usize].self_ty == Some(st) && !self.sigs[i as usize].is_generic()) {
+            return Some(c);
+        }
         let own = (0..self.names.len() as u32).find(|&i| {
             let sig = &self.sigs[i as usize];
             matches!(sig.self_ty, Some(Ty::Ref(_, Ty::Param(_))))
