@@ -5004,7 +5004,13 @@ impl Cx<'_> {
                     let mut tmps = vec![];
                     for (i, a) in margs.iter().enumerate() {
                         let t = format!("__rp{tag}_{i}");
-                        stmts.push(Stmt::Let(Pat::Ident(false, false, t.clone(), None), None, Some(a.clone()), None, Default::default()));
+                        // (a `&mut` place reborrowed, as the call's argument is (`r.write(p, ..)`; p is used after),
+                        // not moved into the temporary)
+                        let a = match self.peek(a) {
+                            Some(Ty::Ref(true, _)) if is_place_expr(strip_paren(a)) => Expr::Ref(true, Box::new(Expr::Unary("*".to_string(), Box::new(paren(a.clone())), Default::default()))),
+                            _ => a.clone(),
+                        };
+                        stmts.push(Stmt::Let(Pat::Ident(false, false, t.clone(), None), None, Some(a), None, Default::default()));
                         tmps.push(path_expr(&t));
                     }
                     let call = Expr::MethodCall(Box::new(qrecv), method.to_string(), gargs.to_vec(), tmps, msp);

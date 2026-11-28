@@ -50,7 +50,7 @@ trait Mp { fn as_mut_ptr(self) -> *mut u8; }
 impl<T: ?Sized> Mp for &mut T { fn as_mut_ptr(self) -> *mut u8 { std::ptr::null_mut() } }
 // a `&mut self` default with Self = `&S` whose argument reads the receiver (`r.write(r.read())`, two-phase), and
 // the same through a bound (`b.advance(b.remaining())` of `B = &mut Bf`)
-trait Rw { fn read(&self) -> u32; fn write(&mut self, v: u32) -> u32 { v + 100 } }
+trait Rw { fn read(&self) -> u32; fn write(&mut self, v: u32) -> u32 { v + 100 } fn put(&mut self, p: &mut u32, v: u32) { *p += v } }
 struct Sr;
 impl Rw for Sr { fn read(&self) -> u32 { 7 } }
 impl<T: Rw> Rw for &T { fn read(&self) -> u32 { 70 } }
@@ -103,6 +103,11 @@ fn main() {
     println!("{} {} {}", r.write(r.read()), drain(&mut c), c.0);
     let mut a = [&sr, &sr];
     println!("{}", a[idx()].write(a[0].read()));
+    let mut acc = 0u32;
+    let p = &mut acc;
+    r.put(p, r.read());
+    *p += 1;
+    println!("{}", acc);
     let mut i = 0;
     println!("{}", a[i].write({ i = 1; a[i].read() }));
     println!("{}", f3::<u8>(&S3));
