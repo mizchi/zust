@@ -4153,6 +4153,9 @@ fn a_mut_accessor_through_a_shared_slice_and_a_macro_call_after_a_string_with_sl
     // (a parse error in a macro's expansion, at the rule's token: also when a string before the call has `//`)
     let src = "macro_rules! bad { () => { let x = ; } }\nfn main() { let _ = \"https://host\"; bad!{} }\n";
     assert_eq!(first(src).map(|x| (x.0, x.1)), Some((1, 36)));
+    // (the program's definition, not one in a comment before it (CodeRabbit on #224))
+    let src = "// macro_rules! bad { () => { let x = ; } }\nmacro_rules! bad { () => { let x = ; } }\nfn main() { bad!{} }\n";
+    assert_eq!(first(src).map(|x| (x.0, x.1)), Some((2, 36)));
 }
 
 /// unused_parens (#175), at rustc's places: denied by an item's own attribute (the issue's program, each of its five
@@ -4283,4 +4286,16 @@ fn derive_names_are_macros_not_glob_items() {
     // (an unknown derive beside a glob's alias of its name: by the name as written, at its line)
     let src = "mod a {\n    pub type Foo = u8;\n}\nmod b {\n    pub type Foo = u16;\n}\nuse a::*;\n#[derive(Debug, Foo)]\nstruct S;\nfn main() {\n    let _: Foo = 1;\n}\n";
     assert_eq!(first(src).map(|d| (d.0, d.2)), Some((8, "cannot find derive macro `Foo` in this scope".to_string())), "{src}");
+}
+
+/// `impl Trait` in a generic parameter's bound is rejected; an associated type bound naming the raw identifier
+/// `r#impl` is no `impl` (CodeRabbit on #224)
+#[test]
+fn impl_in_generics_but_not_a_raw_identifier() {
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| d.msg.clone())
+    };
+    assert_eq!(first("fn f<T: Iterator<Item = impl Copy>>() {}\nfn main() {}\n").as_deref(), Some("`impl Trait` is not allowed in generics"));
+    assert_eq!(first("trait r#impl {}\nfn f<T: Iterator<Item: r#impl>>() {}\nfn main() {}\n"), None);
 }
