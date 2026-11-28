@@ -948,8 +948,11 @@ fn static_dyn(t: &mut PTy, behind: bool) {
 /// The regions of a trait impl's head (RHeadSyn): None where it names no lifetime, binds none in a fn pointer type and
 /// declares no outlives, so that its regions are all its own
 pub fn impl_head(g: &Generics, self_ty: &PTy, tr: &Path) -> Option<Box<crate::types::RHeadSyn>> {
-    // (most headers name no lifetime and have no fn pointer type: nothing to make)
-    let fn_ref = |t: &PTy| fn_ptr_ref(t, false, 0);
+    // (most headers name no lifetime and have no fn pointer type: nothing to make. A fn pointer type with a reference
+    // in it binds its region; one with a type parameter of the impl in it (`impl<A> Foo for fn(A)`) may not be one
+    // that binds a region (`fn(&i32)`))
+    let tps: Vec<&str> = g.params.iter().filter_map(|p| if let GParam::Ty(n, ..) = p { Some(n.as_str()) } else { None }).collect();
+    let fn_ref = |t: &PTy| fn_ptr_ref(t, false, 0) || fn_ptr_param(t, false, &tps, 0);
     let targs = || tr.segs.last().into_iter().flat_map(|s| s.args.iter()).any(|a| matches!(a, GArg::Ty(t) if fn_ref(t)));
     if !generics_name_lt(g) && !names_lt(self_ty) && !path_names_lt(tr) && !fn_ref(self_ty) && !targs() {
         return None;
@@ -987,14 +990,30 @@ pub fn impl_head(g: &Generics, self_ty: &PTy, tr: &Path) -> Option<Box<crate::ty
     let (mut outlives, mut ty_outlives) = (vec![], vec![]);
     s.bounds(g, &mut outlives, &mut ty_outlives);
     let bound = self_slots.iter().chain(trait_args.iter().flatten()).any(|&c| c == R_BOUND);
-    if !s.any && !bound && outlives.is_empty() {
+    let fn_param = fn_ptr_param(self_ty, false, &tps, 0) || last.args.iter().any(|a| matches!(a, GArg::Ty(t) if fn_ptr_param(t, false, &tps, 0)));
+    if !s.any && !bound && !fn_param && outlives.is_empty() {
         return None;
     }
     Some(Box::new(crate::types::RHeadSyn { lts: s.lts, self_slots, trait_lts, trait_args, outlives }))
 }
 
+/// t has one of the type parameters tps inside a fn pointer type; `inside`: within one
+fn fn_ptr_param(t: &PTy, inside: bool, tps: &[&str], depth: u32) -> bool {
+    if depth > 24 || tps.is_empty() {
+        return false;
+    }
+    match t {
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => fn_ptr_param(i, inside, tps, depth + 1),
+        PTy::Tuple(ts) => ts.iter().any(|x| fn_ptr_param(x, inside, tps, depth + 1)),
+        PTy::Fn(ps, r) => ps.iter().any(|x| fn_ptr_param(x, true, tps, depth + 1)) || fn_ptr_param(r, true, tps, depth + 1),
+        PTy::Path(None, p) if inside && p.segs.len() == 1 && p.segs[0].args.is_empty() && tps.contains(&p.segs[0].name.as_str()) => true,
+        PTy::Path(_, p) => p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Ty(x) | GArg::Bind(_, x) if fn_ptr_param(x, inside, tps, depth + 1)))),
+        _ => false,
+    }
+}
+
 /// t has a reference (or a `'_`) inside a fn pointer type, whose region the fn pointer type binds; `inside`: within one
-fn fn_ptr_ref(t: &PTy, inside: bool, depth: u32) -> bool {
+pub fn fn_ptr_ref(t: &PTy, inside: bool, depth: u32) -> bool {
     if depth > 24 {
         return false;
     }

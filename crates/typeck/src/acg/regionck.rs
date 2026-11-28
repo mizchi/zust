@@ -219,6 +219,12 @@ pub struct RgSt {
     /// The regions a fn pointer's or fn item's type binds (its own lifetimes, those elided in it, those `for<..>`
     /// binds): a call through a local of that type takes them afresh (rg_fnptr_call)
     pub late_bound: Vec<u32>,
+    /// The placeholders of trait obligations' binders (rg_obligation): the variable, the last variable made before
+    /// the obligation (those up to it are of the outer universe: none may be the placeholder), where, and the trait
+    pub hr: Vec<(u32, u32, Sp, String)>,
+    /// Trait obligations whose impl is not general enough as their types show (a fn pointer type's binder against
+    /// a region of the impl's that is not bound there): where, and the message
+    pub hr_errs: Vec<(Sp, String)>,
     /// Rg::wf: imp's relations are required, at this span (not those of the fields: wf_declared)
     pub wf_sp: Option<Sp>,
     pub wf_no_fields: bool,
@@ -2044,7 +2050,7 @@ impl RgSt {
 
     /// The first universal region that must outlive another the function does not know it outlives
     pub fn check(&self) -> Option<(Sp, String)> {
-        if self.edges.is_empty() {
+        if self.edges.is_empty() && self.hr_errs.is_empty() {
             return None;
         }
         // (the universal regions and 'static, as indices; what each is known to outlive, closed)
@@ -2197,6 +2203,48 @@ impl RgSt {
                 _ => {}
             }
         }
+        // (a trait obligation's placeholder: it is none of the regions of the outer universe, made before the
+        // obligation (rustc's universes: `want_hrtb::<&u32>()` with `impl<'a> Foo<&'a isize> for &'a u32`), and it
+        // outlives no region but those it is (it contains no point of the body: rustc's check_bound_universal_region,
+        // `impl<'a, 'b: 'a> Foo<'b> for FooS<'a>` for `F: for<'b> Foo<'b>`). 'static and the universal regions are
+        // the check above's)
+        if !self.hr.is_empty() {
+            let mut radj: Vec<Vec<u32>> = vec![vec![]; n];
+            for (a, outs) in adj.iter().enumerate() {
+                for &(b, _) in outs {
+                    radj[b as usize].push(a as u32);
+                }
+            }
+            let reach = |from: u32, g: &dyn Fn(u32) -> Vec<u32>| {
+                let mut seen = vec![false; n];
+                let mut st = vec![from];
+                if (from as usize) < n {
+                    seen[from as usize] = true;
+                }
+                while let Some(x) = st.pop() {
+                    for y in g(x) {
+                        if (y as usize) < n && !seen[y as usize] {
+                            seen[y as usize] = true;
+                            st.push(y);
+                        }
+                    }
+                }
+                seen
+            };
+            let univ = |v: u32| v == STATIC || self.univ.iter().any(|u| u.0 == v);
+            for (p, v0, sp, tr) in &self.hr {
+                if (*p as usize) >= n {
+                    continue;
+                }
+                let fwd = reach(*p, &|x| adj[x as usize].iter().map(|e| e.0).collect());
+                let bwd = reach(*p, &|x| radj[x as usize].clone());
+                let bad = (1..n as u32).any(|y| y != *p && !univ(y) && fwd[y as usize] && (!bwd[y as usize] || y <= *v0));
+                if bad {
+                    errs.push((*sp, format!("implementation of `{tr}` is not general enough")));
+                }
+            }
+        }
+        errs.extend(self.hr_errs.iter().cloned());
         errs.sort_by_key(|e| (e.0.line, e.0.col));
         if debug() {
             for e in &errs {
@@ -3781,14 +3829,26 @@ impl Cx<'_> {
             return;
         }
         let rg = &mut self.rg;
+        let v0 = rg.n;
         let mut scope = scope.to_vec();
         for l in bound_names(b) {
             if !scope.iter().any(|x| x.0 == l) {
                 let v = rg.var();
                 rg.univ.push((v, format!("{l}{HR_MARK}{tr}")));
+                rg.hr.push((v, v0, sp, tr.to_string()));
                 scope.push((l, v));
             }
         }
+        // (a region a fn pointer type of the goal binds (`indirect::<fn(&())>()`, `T: Trait<for<'b> fn(&'b u32)>`) is
+        // none of the impl's but one its head binds there too: `impl<'a> X for fn(&'a ())`, `impl<A> Foo for fn(A)`
+        // are not general enough for it. Nor is a region the goal does not bind (a lifetime it names, 'static) one the
+        // head binds. A region of the goal that inference made is either)
+        let known: Vec<u32> = scope.iter().map(|x| x.1).collect();
+        let not_general = |rg: &RgSt, g: u32, h: u32| {
+            let (gb, hb) = (rg.late_bound.contains(&g), rg.late_bound.contains(&h));
+            (gb && !hb) || (hb && !gb && (g == STATIC || known.contains(&g) || rg.univ.iter().any(|u| u.0 == g)))
+        };
+        let msg = format!("implementation of `{tr}` is not general enough");
         let h = c.head.as_deref();
         let hl: Vec<u32> = h.map(|h| h.lts.iter().map(|_| rg.var()).collect()).unwrap_or_default();
         let ptrees: Vec<Option<RT>> = isol.iter().map(|x| x.and_then(|t| rg.fresh(prog, t))).collect();
@@ -3797,6 +3857,9 @@ impl Cx<'_> {
         if let Some(ht) = rg.instantiate(prog, st, h.map(|h| h.self_slots.as_slice()), &hl, &ptrees, &mut |me| me.var()) {
             if ht.len() == tree.len() {
                 for (&a, &x) in tree.iter().zip(&ht) {
+                    if not_general(rg, a, x) {
+                        rg.hr_errs.push((sp, msg.clone()));
+                    }
                     rg.constrain(a, x, Var::Inv, sp);
                 }
             }
@@ -3816,6 +3879,9 @@ impl Cx<'_> {
                         if let (Some(gt), Some(xt)) = (gt, xt) {
                             if gt.len() == xt.len() {
                                 for (&a, &x) in gt.iter().zip(&xt) {
+                                    if not_general(rg, a, x) {
+                                        rg.hr_errs.push((sp, msg.clone()));
+                                    }
                                     rg.constrain(a, x, Var::Inv, sp);
                                 }
                             }
@@ -4251,10 +4317,29 @@ impl Cx<'_> {
                 }
             }
         }
-        // (the trait obligations of the callee's bounds: the impls they select, with their regions)
+        // (the trait obligations of the callee's bounds: the impls they select, with their regions. A fn pointer type
+        // written as a type argument (`indirect::<fn(&())>()`) gives its regions there, which it binds)
         if !prog.tdb.lt_traits.is_empty() {
             let lts2 = lts.clone();
-            let targs2 = targs.clone();
+            let mut targs2 = targs.clone();
+            if let Some(tf) = turbofish {
+                let first = sig0.trait_of.is_some() as usize;
+                for (i, a) in tf.iter().enumerate() {
+                    let (GArg::Ty(pt), Some(Some(t))) = (a, sol.get(first + i)) else { continue };
+                    if crate::regions::names_lt(pt) || !crate::regions::fn_ptr_ref(pt, false, 0) {
+                        continue;
+                    }
+                    let mut s = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 0, derived: None };
+                    let mut codes = vec![];
+                    s.slots(pt, false, &mut codes);
+                    let flts = self.rg.lts.clone();
+                    if let Some(tr) = self.rg.instantiate(prog, *t, Some(&codes), &flts, &[], &mut |me| me.var()) {
+                        if let Some(slot) = targs2.get_mut(first + i) {
+                            *slot = Some(tr);
+                        }
+                    }
+                }
+            }
             self.rg_obligations(id, sol, &lts2, &targs2, sp);
         }
         let rg = &mut self.rg;
