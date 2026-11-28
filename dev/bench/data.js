@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795856641320,
+  "lastUpdate": 1795865303187,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -67733,6 +67733,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 37.987,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b26511148a197e25abed7380f230c10cae93ce2f",
+          "message": "E0276 by the trait a bound names, std's renames in macro expansions: false E0276 in bitflags, writeable and nix (#348)\n\nFalse E0276 `impl has stricter requirements than trait` in bitflags, writeable and nix: zurgo expands a crate's macros before `std_renames` runs, so paths written by a macro with spaces (`core :: fmt :: Write`) kept std's name and the E0276 check, comparing bounds by their last segment, saw a bound the trait lacks. Bounds are now compared by the trait their path names, the spaced form is renamed too (never inside literals or comments), a trait's supertraits include its `where Self: ..` bounds, and an impl that leaves a parameter `Sized` where the trait's is `?Sized` is E0276 as in rustc.\n\nFixes #264\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-28T11:20:21Z",
+          "tree_id": "a05d31b7dbca16bf22c0f7019ba83dc1ae7bad4d",
+          "url": "https://github.com/mizchi/zust/commit/b26511148a197e25abed7380f230c10cae93ce2f"
+        },
+        "date": 1795865302423,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 127.111,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.636,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 17.347,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 41.255,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.953,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 324.086,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.557,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 125.392,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 796.193,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 590.169,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.672,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 65.821,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 191.502,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.609,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.445,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1903.182,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 598.057,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3924.137,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 53.986,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 83.683,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 41.693,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 52.189,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 91.695,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 141.511,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 37.554,
             "unit": "ms"
           }
         ]
