@@ -17,34 +17,33 @@ needs one filed first (then add it to [cratebench/survey/issues.tsv](cratebench/
 
 <!-- crate-priorities -->
 
-Survey of 2026-11-28 09:07 UTC on `ef3469e`: 49 of 273 crates build (17.3% of their downloads); 1130 errors in 178 packages.
+Survey of 2026-11-28 11:28 UTC on `b265111`: 49 of 273 crates build (17.3% of their downloads); 1131 errors in 178 packages.
 
 | # | fix | issue | holds back | crates it alone unblocks |
 |---:|---|---|---:|---:|
-| 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | [#254](https://github.com/mizchi/zust/issues/254) | 11.2% | 13 |
+| 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's output) | [#254](https://github.com/mizchi/zust/issues/254) | 11.4% | 13 |
 | 2 | mismatched types (to sort by cause) | [#259](https://github.com/mizchi/zust/issues/259) | 7.2% | 3 |
 | 3 | methods zustc does not find (std methods the prelude lacks; lookup) | [#256](https://github.com/mizchi/zust/issues/256) | 3.6% | 2 |
-| 4 | cannot infer an `impl Trait` return type | [#262](https://github.com/mizchi/zust/issues/262) | 2.5% | 6 |
-| 5 | conflicting implementations of trait `…` for type `…` (E0119) | none yet | 2.5% | 4 |
-| 6 | false E0276 in bitflags' impls | [#264](https://github.com/mizchi/zust/issues/264) | 2.3% | 4 |
-| 7 | value paths zustc cannot resolve | [#265](https://github.com/mizchi/zust/issues/265) | 2.2% | 0 |
-| 8 | false E0277: a bound zustc does not see | [#261](https://github.com/mizchi/zust/issues/261) | 2.0% | 2 |
-| 9 | build: the trait bound `…` is not satisfied (for `…`) (E0277) | none yet | 1.9% | 5 |
-| 10 | std iterator adapters' arity (`Copied`, `Cloned`, `Map`) | [#266](https://github.com/mizchi/zust/issues/266) | 1.8% | 4 |
-| 11 | recursive type `…` has infinite size | none yet | 1.8% | 0 |
-| 12 | inherent impls cannot be unsafe (E0197) | none yet | 1.7% | 4 |
+| 4 | value paths zustc cannot resolve | [#265](https://github.com/mizchi/zust/issues/265) | 3.5% | 1 |
+| 5 | cannot infer an `impl Trait` return type | [#262](https://github.com/mizchi/zust/issues/262) | 2.5% | 6 |
+| 6 | conflicting implementations of trait `…` for type `…` (E0119) | none yet | 2.5% | 4 |
+| 7 | false E0277: a bound zustc does not see | [#261](https://github.com/mizchi/zust/issues/261) | 2.0% | 2 |
+| 8 | build: the trait bound `…` is not satisfied (for `…`) (E0277) | none yet | 1.9% | 5 |
+| 9 | std iterator adapters' arity (`Copied`, `Cloned`, `Map`) | [#266](https://github.com/mizchi/zust/issues/266) | 1.8% | 4 |
+| 10 | recursive type `…` has infinite size | none yet | 1.8% | 0 |
+| 11 | inherent impls cannot be unsafe (E0197) | none yet | 1.7% | 4 |
+| 12 | cannot evaluate `…` in a constant | none yet | 1.5% | 3 |
 
 By issue, with its tier (the issue's label: **T0** holds back 2% or more of the surveyed downloads with all its fixes, **T1** 1% or more, **T2** less; relabel an issue when its tier here changes):
 
 | tier | issue | holds back | fixes | the largest |
 |---|---|---:|---:|---|
-| T0 | [#254](https://github.com/mizchi/zust/issues/254) | 11.2% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
-| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 9.2% | 38 | prelude: type `Weak` |
+| T0 | [#254](https://github.com/mizchi/zust/issues/254) | 11.4% | 1 | a crate's own item zustc cannot find (resolution, cfg, a macro's outpu… |
+| T0 | [#250](https://github.com/mizchi/zust/issues/250) | 10.0% | 39 | prelude: trait `Sum` |
 | T0 | [#259](https://github.com/mizchi/zust/issues/259) | 7.2% | 1 | mismatched types (to sort by cause) |
 | T0 | [#256](https://github.com/mizchi/zust/issues/256) | 3.6% | 1 | methods zustc does not find (std methods the prelude lacks; lookup) |
+| T0 | [#265](https://github.com/mizchi/zust/issues/265) | 3.5% | 1 | value paths zustc cannot resolve |
 | T0 | [#262](https://github.com/mizchi/zust/issues/262) | 2.5% | 1 | cannot infer an `impl Trait` return type |
-| T0 | [#264](https://github.com/mizchi/zust/issues/264) | 2.3% | 1 | false E0276 in bitflags' impls |
-| T0 | [#265](https://github.com/mizchi/zust/issues/265) | 2.2% | 1 | value paths zustc cannot resolve |
 | T0 | [#261](https://github.com/mizchi/zust/issues/261) | 2.0% | 1 | false E0277: a bound zustc does not see |
 | T1 | [#266](https://github.com/mizchi/zust/issues/266) | 1.8% | 1 | std iterator adapters' arity (`Copied`, `Cloned`, `Map`) |
 | T2 | [#257](https://github.com/mizchi/zust/issues/257) | 0.7% | 1 | parser: syntax zustc does not parse |
