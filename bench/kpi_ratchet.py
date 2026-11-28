@@ -12,8 +12,9 @@ A KPI that grows by less than the noise passes a comparison with the base howeve
 steps below kpi_pr.py's threshold (+1%) is never seen. A ceiling does not move with the base: a pull request whose head
 is above a ceiling by more than the ceiling's tolerance fails the workflow (`check`), and nothing raises a ceiling but
 an edit of the file in a pull request, which its diff shows. Every push to main lowers each ceiling that main
-measures below by more than half its tolerance to what it measured (`tighten`, in a commit of its own), so a cost
-removed stays removed.
+measures below by more than its tolerance to what it measured (`tighten`, in a commit of its own), so a cost removed
+stays removed. (By more than the tolerance: a run that happens to count low does not move a ceiling, which every later
+run would then be measured against.)
 
 When main is above a ceiling already (two pull requests that each passed, merged one after the other), a head above it
 fails only if it is above its base by more than half the tolerance too: the pull request has not made it worse, and
@@ -27,11 +28,12 @@ import argparse, os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kpi_pr  # noqa: E402
 
-# (the tolerance of a new ceiling, in %: the builds' counts are the same to about 0.01% from run to run, the LSP
-# session's to about 0.1% (it moves with how often the client polls); the no-op builds are small counts, which a few
-# files more to look at move by tenths of a percent)
-TOLERANCE = {"no-op build": 1.0, "crates no-op": 1.0, "LSP session": 0.5}
-DEFAULT_TOLERANCE = 0.3
+# (the tolerance of a new ceiling, in %: two runs of one commit on the workflow's runners differ by up to about 0.2% in
+# a build (edit one fn +0.22% on #341, whose second push changed no code), the LSP session's more (it moves with how
+# often the client polls); the no-op builds are small counts, which a few files more to look at move by tenths of a
+# percent)
+TOLERANCE = {"no-op build": 2.0, "crates no-op": 2.0, "LSP session": 1.0}
+DEFAULT_TOLERANCE = 0.5
 
 
 def read(path):
@@ -98,7 +100,7 @@ def check(r, env, base, head):
 
 
 def tighten(r, env, head, sha):
-    """Lower the ceilings to what main measured (head), where it is below by more than half the tolerance; in another
+    """Lower the ceilings to what main measured (head), where it is below by more than the tolerance; in another
     environment, every ceiling becomes what main measured. Returns the lines that changed, as `old -> new`."""
     changed = []
     reset = r["env"] != env
@@ -109,7 +111,7 @@ def tighten(r, env, head, sha):
             continue
         tol = tolerance(r, k)
         old = r["ceil"].get(k)
-        if reset or old is None or h < old[0] * (1 - tol / 200):
+        if reset or old is None or h < old[0] * (1 - tol / 100):
             r["ceil"][k] = [h, tol, sha]
             changed.append(f"{k}: {'-' if old is None else repr(old[0])} -> {h!r}")
     return changed

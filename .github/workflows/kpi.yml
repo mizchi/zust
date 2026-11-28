@@ -301,8 +301,8 @@ jobs:
           cat "$RUNNER_TEMP/kpi.md" >> "$GITHUB_STEP_SUMMARY"
           exit $status
 
-  # (every push to main: the ceilings of bench/kpi_ratchet.txt that main measures below by more than half their
-  # tolerance become what it measured, and in another environment all of them do, in a commit on main that skips CI. The
+  # (every push to main: the ceilings of bench/kpi_ratchet.txt that main measures below by more than their tolerance
+  # become what it measured, and in another environment all of them do, in a commit on main that skips CI. The
   # only job that writes to the repository; it runs main's code. A ceiling changed on main since this commit is left as
   # it is: the next push's run lowers from there)
   ratchet:
