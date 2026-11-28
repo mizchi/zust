@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795854514052,
+  "lastUpdate": 1795854516534,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -130092,6 +130092,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 95.693,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2e69ffd1bb70e491228f87ccc2e1d6d688dab800",
+          "message": "acg: dispatch to impls for references to a type parameter (#328)\n\nCalls through a type parameter's bound now dispatch to a non-forwarding `impl<T: Tr> Tr for &T` (and `&mut T`) as rustc does, instead of the stopgap that refused such impls. Receivers zustc cannot trace to a type parameter or an opaque value (a closure's result, a pattern's binding, an index) whose two readings would call different methods are reported as unsupported rather than run as T's method.\n\nPart of #144\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz",
+          "timestamp": "2026-11-28T08:22:06Z",
+          "tree_id": "36b984fa392978da3c78df84db90ebc6f0905824",
+          "url": "https://github.com/mizchi/zust/commit/2e69ffd1bb70e491228f87ccc2e1d6d688dab800"
+        },
+        "date": 1795854516152,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 98.824,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.296,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 65,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 78.571,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 96.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 91.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 92.179,
             "unit": "%"
           }
         ]
