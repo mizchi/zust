@@ -378,6 +378,23 @@ pub struct RSigSyn {
     pub derived_ty: Vec<(String, String, u8)>,
 }
 
+/// The regions of an impl header of a trait, as a trait obligation selecting the impl relates them to its goal's
+/// (the head: its self type and its trait's arguments; the where clause's outlives). Codes are of `lts`; an elided
+/// region of the header is one of its own (a fresh one), a region a fn pointer type binds is R_BOUND
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub struct RHeadSyn {
+    /// The impl's lifetime parameters, then one `'_k` for each `'_` of its self type
+    pub lts: Vec<String>,
+    /// The region slots of the self type
+    pub self_slots: Vec<u8>,
+    /// The codes of the lifetimes the trait path writes as its arguments, in order
+    pub trait_lts: Vec<u8>,
+    /// The region slots of each type argument the trait path writes, in order
+    pub trait_args: Vec<Vec<u8>>,
+    /// Declared `'a: 'b`, inline or in the where clause
+    pub outlives: Vec<(u8, u8)>,
+}
+
 /// The regions of a struct / enum definition
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct RAdtSyn {
@@ -479,6 +496,9 @@ pub struct Summary {
     pub adt_defaults: Vec<Option<TySyn>>,
     /// The regions of an impl / trait header (None: it names no lifetime)
     pub hdr_regions: Option<Box<RImplSyn>>,
+    /// The regions of a trait impl's head, where it names a lifetime (`'static` too), binds one in a fn pointer type
+    /// or declares an outlives (None otherwise: its regions are all its own, any goal's)
+    pub impl_head: Option<Box<RHeadSyn>>,
     /// The regions of the struct / enum defined (None: it names no lifetime, so it has no region of its own)
     pub adt_regions: Option<Box<RAdtSyn>>,
     /// The type parameters and self type of an impl header (`impl<T> Option<T>`)
