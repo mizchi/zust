@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795832047915,
+  "lastUpdate": 1795832050852,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -94552,6 +94552,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 141.742,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "94a89b977bf365e088adfb60cb644d3599eac596",
+          "message": "sema, typeck: same-named associated items of two impls (#297) (#332)\n\nrustc lets two impl blocks define an associated item of one name when it\ncan tell them apart: impls of one trait with other arguments\n(typenum's `impl ToInt<i8> for Z0` and `impl ToInt<i16> for Z0`, time-core's\n`impl MultipleOf<Nanosecond, u8> for Nanosecond` and its other outputs), or\nother self types (der's `impl FixedTag for OctetStringRef` and `.. for\n&OctetStringRef`), or inherent impls for disjoint instances of one type\n(simdutf8's `impl SimdU8Value<__m256i>` and `impl SimdU8Value<__m128i>`, each\nwith `from_32_cut_off_leading`). zustc flattened each to `Type::ITEM` and\nreported the second as a duplicate definition.\n\nConsts: the later one of such a pair joins a group (Program::const_groups)\nunder a name of its own (`Z0::INT#1`), with its impl's self type and trait\narguments (ConstImpl). A use chooses among them (Program::pick_const): by the\nself type a path names, by the trait arguments of a qualified path\n(`<Z0 as ToInt<i16>>::INT`) or of a type parameter's bound (`T::VALUE` with\n`T: MultipleOf<U, Output>`), and else by the type the use expects\n(`let x: i16 = Z0::INT`). A const of an impl for a reference is found under\nits referent's name (`<&S>::C`, `T::C` with T = &S). Two inherent impls'\nconsts whose self types overlap stay E0592's duplicate, now at the first\none's line as rustc reports it.\n\nFns: an inherent function without `self` may stand beside one of an impl for\na disjoint instance, as one with `self` already could. A path's self type\n(an alias, `Self`, a turbofish) chooses among the functions of impls for\nother instances (Program::fn_of_path_self), trait impls' too (simdutf8's\n`Self::from(..)` of `From<__m128i>` beside `From<__m256i>`). A call without\narguments of impls of one trait with other arguments takes the one whose\nresult is the type expected (`let b: i16 = Z0::to_int()`), and a qualified\npath takes the one whose impl's trait arguments it writes\n(`<Z0 as ToInt<i16>>::to_int()`, Program::fn_targs).\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-28T11:08:01+09:00",
+          "tree_id": "097ca8fd998551fdf95159526e3c6d463b9c6f1c",
+          "url": "https://github.com/mizchi/zust/commit/94a89b977bf365e088adfb60cb644d3599eac596"
+        },
+        "date": 1795832050278,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.035,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.806,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 2.018,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 15.397,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.015,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.18,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 2.242,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 338.193,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 140.211,
             "unit": "MiB"
           }
         ]
