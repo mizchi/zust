@@ -229,6 +229,8 @@ struct Inf<'p> {
     asref: Vec<String>,
     /// the same of the `AsMut<X>` bounds
     asmut: Vec<String>,
+    /// the fn whose body (or whose closure's) this is: the generics a method call's ref_param_probe looks at
+    root_fn: Option<u32>,
 }
 
 impl<'p> std::ops::Deref for Inf<'p> {
@@ -310,7 +312,7 @@ pub fn infer_ctx_margs(
     if let Some((r, _)) = root {
         as_targets(&prog.sigs[r as usize].generics);
     }
-    let mut s = Inf { s: Solver::new(prog, env), pending: vec![], keep: vec![], turbofish: None, clo_root, clo_keys: None, margs: Default::default(), exprs: vec![], mbase: Default::default(), asref, asmut };
+    let mut s = Inf { s: Solver::new(prog, env), pending: vec![], keep: vec![], turbofish: None, clo_root, clo_keys: None, margs: Default::default(), exprs: vec![], mbase: Default::default(), asref, asmut, root_fn: root.map(|r| r.0) };
     s.ret = match ret {
         Some(t) if prog.has_param(t) => s.known_g(t, &mut vec![]),
         Some(t) => s.known(t),
@@ -541,6 +543,33 @@ impl Inf<'_> {
             return None;
         }
         self.elem_of(v)
+    }
+
+    /// method_call's for a method of a trait with an impl for references to a type parameter (Program::ref_param_probe)
+    #[cold]
+    #[inline(never)]
+    fn ref_param_method(&mut self, recv: &Expr, n: &str, tf: &Vec<GArg>, args: &[Expr]) -> Option<u32> {
+        let prog = self.prog;
+        if !prog.ref_param_impls.iter().any(|(tr, _)| prog.trait_recv_kind(tr, n).is_some()) {
+            return None;
+        }
+        let r = self.expr(recv);
+        let t = self.resolve(r).filter(|t| !prog.has_param(*t))?;
+        let root = self.root_fn?;
+        let env = self.s.env;
+        let (tr, st) = prog.ref_param_impls.iter().find_map(|(tr, _)| {
+            let kind = prog.trait_recv_kind(tr, n)?;
+            let opaque = |u: Ty| prog.param_bounded_by(root, env, tr, u);
+            let (st, _, _) = prog.ref_param_probe(tr, n, kind, t, &opaque)?;
+            Some((tr.clone(), st))
+        })?;
+        let id = prog.ref_param_fn(st, n, &tr)?;
+        let avs: Vec<u32> = args.iter().map(|a| self.expr(a)).collect();
+        let sv = self.known(st);
+        self.turbofish = if tf.is_empty() { None } else { Some(tf as *const Vec<GArg>) };
+        let r = self.apply_recv(Some(id), avs, sv);
+        self.turbofish = None;
+        Some(r)
     }
 
     fn apply_recv(&mut self, callee: Option<u32>, args: Vec<u32>, recv: u32) -> u32 {
@@ -2356,6 +2385,13 @@ impl Inf<'_> {
     }
 
     fn method_call(&mut self, recv: &Expr, n: &str, tf: &Vec<GArg>, args: &[Expr]) -> u32 {
+        // (a method whose Self rustc's probe makes a reference the program's `impl<T: Tr> Tr for &T` covers: that
+        // impl's fn, or Tr's default with that Self, as the code generator's ref_param_method_call (#144))
+        if !self.prog.ref_param_impls.is_empty() {
+            if let Some(r) = self.ref_param_method(recv, n, tf, args) {
+                return r;
+            }
+        }
         // (a Vec's `as_ref()` / `as_mut()`: `&[T]` / `&mut [T]` where the bounds in scope ask for slices alone, as the
         // code generator's (a Vec is AsRef<Vec<T>> / AsMut<Vec<T>> too))
         if matches!(n, "as_ref" | "as_mut") && args.is_empty() {

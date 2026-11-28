@@ -709,6 +709,10 @@ pub struct Program {
     /// generic impls for references: (self type with the impl's parameters, trait, number of parameters, each
     /// parameter's bounds)
     pub ref_impl_pats: Vec<(Ty, String, usize, Vec<Vec<String>>)>,
+    /// The impls for references to a type parameter, `impl<T: Tr> Tr for &T` / `for &mut T`: (trait, whether `&mut`).
+    /// A method call whose Self is such a reference takes the impl's method (or the trait's default with that Self),
+    /// not T's through the deref (Cx::ref_param_method_call, #144)
+    pub ref_param_impls: Vec<(String, bool)>,
     /// The program's generic impls for trait objects, `impl<R> WasmClosure for dyn Fn() -> R + '_`: (trait, the
     /// object's trait's name, `Fn`), which a `dyn Fn(..)` then implements
     pub dyn_impls: FxSet<(String, String)>,
@@ -1625,6 +1629,7 @@ impl Program {
             impl_targs_lts: HashSet::default(),
             ref_impls: Default::default(),
             ref_impl_pats: vec![],
+            ref_param_impls: vec![],
             dyn_impls: FxSet::default(),
             dyn_impls_exact: FxSet::default(),
             dyn_impls_lt: FxSet::default(),
@@ -2808,16 +2813,11 @@ impl Program {
                 continue;
             }
             // (`impl<T> Tr for T`, with or without members)
-            // (`impl<T: Tr> Tr for &T` / `&mut T` that defines each default method of the trait: a call on `&T` reaches
-            // T's method through the deref (its own methods forward to it, or are not called), so it counts as a
-            // blanket impl)
+            // (`impl<T: Tr> Tr for &T` / `&mut T`: a blanket impl for the references; a method call whose Self is such a
+            // reference takes its methods (or the trait's defaults it leaves out) by ref_param_impls (#144))
             let ref_of_param = matches!(&sm.impl_self_ty, Some(TySyn::Ref(_, i)) if matches!(&**i, TySyn::Named(n) if n == sn))
                 && sm.impl_generics.iter().any(|g| g.0 == *sn);
             if ref_of_param {
-                // (its methods are not called: a call on the reference reaches T's through the deref, which is what
-                // one that forwards to T's does. One that does more, and a default method it leaves out (which would run
-                // with Self = &T, not T's), the driver reports where the program may call it through a bound
-                // (first_called_ref_impl_fn))
                 // (`impl<T> Foo for T` covers `&U` too; `&T` and `&mut T` are two types)
                 let m = matches!(&sm.impl_self_ty, Some(TySyn::Ref(true, _)));
                 if bare_blankets.contains(tr) || !ref_blankets.insert((tr.clone(), m)) {
@@ -2825,6 +2825,9 @@ impl Program {
                 }
                 p.blanket_selfs.insert(sn.clone());
                 p.blanket_traits.insert(tr.clone());
+                if ii < user {
+                    p.ref_param_impls.push((tr.clone(), m));
+                }
                 continue;
             }
             if sm.impl_generics.iter().any(|g| g.0 == *sn) && matches!(sm.impl_self_ty, Some(TySyn::Named(_))) {
@@ -5717,6 +5720,97 @@ impl Program {
     /// For an instance, its base definition
     pub fn base_of(&self, sid: u32) -> u32 {
         self.structs[sid as usize].base.unwrap_or(sid)
+    }
+
+    /// rustc's method probe of a call `x.m(..)` of a method m of trait tr (one of ref_param_impls, `impl<T: Tr> Tr for
+    /// &T`), whose declaration takes self as `kind` (`&self`: Some(false), `&mut self`: Some(true), `self`: None), on an
+    /// x of type t: the Self it picks when that Self is a reference the impl covers, with the derefs of x and the
+    /// autoref (Some(mutable)) that make the method's receiver of it (#144). Each autoderef step of t is tried by value,
+    /// then borrowed (`&`, `&mut`), as rustc does; a step that `opaque` says is what a type parameter bounded by tr stands
+    /// for (or `Self` of tr's default) is that parameter, whose structure the generic code does not see: it is Self
+    /// itself. None where the Self found is not such a reference (the ordinary lookup's, through the deref), or where
+    /// a struct t reaches has an inherent method m (which the probe takes first)
+    pub fn ref_param_probe(&self, tr: &str, m: &str, kind: Option<bool>, t: Ty, opaque: &dyn Fn(Ty) -> bool) -> Option<(Ty, usize, Option<bool>)> {
+        let imp = |u: Ty| self.ref_param_implements(tr, u, 0);
+        let covered = |st: Ty| matches!(st, Ty::Ref(m, _) if self.ref_param_impls.iter().any(|(t, rm)| t == tr && *rm == m));
+        let (mut s, mut n) = (t, 0usize);
+        loop {
+            // (an inherent method of the struct the step is, or refers to, comes first)
+            if let Ty::Struct(sid) | Ty::Ref(_, &Ty::Struct(sid)) = s {
+                if self.method(sid, m).is_some_and(|i| self.sigs[i as usize].impl_trait.is_none()) {
+                    return None;
+                }
+            }
+            let found = if opaque(s) {
+                Some((s, kind))
+            } else {
+                match (kind, s) {
+                    (Some(km), Ty::Ref(xm, x)) if xm == km && imp(*x) => Some((*x, None)),
+                    (Some(km), s) if imp(s) => Some((s, Some(km))),
+                    (None, s) if imp(s) => Some((s, None)),
+                    _ => None,
+                }
+            };
+            if let Some((st, adj)) = found {
+                return covered(st).then_some((st, n, adj));
+            }
+            match s {
+                Ty::Ref(_, i) if n < 16 => {
+                    s = *i;
+                    n += 1;
+                }
+                _ => return None,
+            }
+        }
+    }
+
+    /// Whether u implements tr (one of ref_param_impls), through the program's impls for references to a type parameter
+    /// too: `&&S` of `impl<T: Tr> Tr for &T` with `S: Tr`
+    pub fn ref_param_implements(&self, tr: &str, u: Ty, depth: u32) -> bool {
+        match u {
+            Ty::Ref(m, i) if self.ref_param_impls.iter().any(|(t, rm)| t == tr && *rm == m) => depth < 16 && self.ref_param_implements(tr, *i, depth + 1),
+            // (a reference of the other kind, `&mut &S` beside `impl<T: Tr> Tr for &T` alone: only an impl for it
+            // (`impl Tr for &mut S`); the blanket impl for `&T` registered for tr is not one)
+            Ty::Ref(..) => self.ref_impls.contains(&(u, tr.to_string())) || self.ref_impl_pat_holds(u, tr),
+            Ty::Param(_) => false,
+            u => self.implements(u, tr),
+        }
+    }
+
+    /// The fn a call with Self st (a reference ref_param_probe found) of tr's method m runs: the impl's own (`T::__ref_m`,
+    /// whose self type is the reference to its parameter), or tr's default where the impl leaves it out
+    pub fn ref_param_fn(&self, st: Ty, m: &str, tr: &str) -> Option<u32> {
+        let suffix = format!("::__ref_{m}");
+        let own = (0..self.names.len() as u32).find(|&i| {
+            let sig = &self.sigs[i as usize];
+            matches!(sig.self_ty, Some(Ty::Ref(_, Ty::Param(_))))
+                && self.names[i as usize].split('#').next().is_some_and(|b| b.ends_with(&suffix))
+                && sig.impl_trait.as_deref().is_some_and(|it| it.split('<').next().unwrap_or(it).trim() == tr)
+                && sig.self_ty.is_some_and(|t| self.match_ty_exact(t, st, &mut vec![None; sig.generics.len()]))
+        });
+        own.or_else(|| self.traits.get(tr)?.iter().copied().find(|&d| self.sigs[d as usize].has_body && self.names[d as usize].rsplit("::").next() == Some(m)))
+    }
+
+    /// How trait tr declares its method m to take self (`&self`: Some(Some(false)), `&mut self`: Some(Some(true)),
+    /// `self`: Some(None)); None when tr declares no method m taking self
+    pub fn trait_recv_kind(&self, tr: &str, m: &str) -> Option<Option<bool>> {
+        let d = self.traits.get(tr)?.iter().copied().find(|&d| self.sigs[d as usize].has_self && self.names[d as usize].rsplit("::").next() == Some(m))?;
+        Some(match self.sigs[d as usize].params.first()? {
+            Ty::Ref(m, _) => Some(*m),
+            _ => None,
+        })
+    }
+
+    /// Whether a type parameter of fn root bounded by tr (or a supertrait of tr's) stands for t in an instance with
+    /// env, or t is Self of tr's default root: ref_param_probe's `opaque`
+    pub fn param_bounded_by(&self, root: u32, env: &TyEnv, tr: &str, t: Ty) -> bool {
+        fn names(prog: &Program, b: &str, tr: &str, depth: u32) -> bool {
+            let b = b.split('<').next().unwrap_or(b).trim();
+            b == tr || depth < 8 && prog.trait_supers.get(b).is_some_and(|ss| ss.iter().any(|s| names(prog, s, tr, depth + 1)))
+        }
+        let Some(sig) = self.sigs.get(root as usize) else { return false };
+        sig.generics.iter().any(|(g, bs)| bs.iter().any(|b| names(self, b, tr, 0)) && env.params.iter().any(|(n, it)| n == g && *it == t))
+            || sig.trait_of.as_deref().is_some_and(|o| names(self, o, tr, 0)) && env.self_ty == Some(t)
     }
 
     /// A generic impl for references is for t (`impl<T: Marker> Flag for &W<T>`): t is its self type as it is, not

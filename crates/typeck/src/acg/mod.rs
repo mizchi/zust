@@ -3385,6 +3385,7 @@ impl Cx<'_> {
                     base.and_then(|base| self.prog.index.get(&format!("{base}::{pre}{m}")).copied())
                         .or_else(|| self.prog.prim_method(t, m))
                         .or_else(|| self.ref_blanket_fn(t, m, None))
+                        .or_else(|| self.ref_param_default(t, m))
                 }
                 Ty::Struct(sid) => self.prog.method(sid, m).or_else(|| self.prog.default_method(sid, m)),
                 // (else a default fn of a trait t implements: a blanket `impl<T> Tr for T {}`)
@@ -3427,7 +3428,9 @@ impl Cx<'_> {
                             _ => true,
                         }
                 };
-                if let Some(i) = multi.then(|| self.trait_candidate_where(&key, tr, own)).flatten().or_else(|| self.trait_candidate(&key, tr)).or_else(|| self.trait_default(tr, &m, t)) {
+                // (`<&U as Tr>::m` of `impl<T: Tr> Tr for &T`: that impl's m before Tr's default (#144))
+                let ref_own = || matches!(t, Ty::Ref(..)).then(|| self.ref_blanket_fn(t, &m, Some(tr))).flatten();
+                if let Some(i) = multi.then(|| self.trait_candidate_where(&key, tr, own)).flatten().or_else(|| self.trait_candidate(&key, tr)).or_else(ref_own).or_else(|| self.trait_default(tr, &m, t)) {
                     return Some((i, &self.prog.sigs[i as usize]));
                 }
                 // (`<&J as Tr>::m`: the impl for the reference, whose functions are `J::__ref_m`)
@@ -3616,6 +3619,16 @@ impl Cx<'_> {
         // (the literal keeps its arguments too: struct_lit_inner checks them against the fields and an update's base,
         // also when the annotation, with a `_`, gives no type)
         Some(Box::leak(Box::new(Stmt::Let(pat, Some(crate::parse::Ty::Path(None, path.clone())), Some(init.clone()), None, lp))))
+    }
+
+    /// The default fn m of a trait with an impl for references to a type parameter (`impl<T: Tr> Tr for &T`) that leaves m
+    /// out, for a reference t that impl covers: `T::m(..)` with T = t, `<&U>::m(..)` (#144)
+    pub fn ref_param_default(&self, t: Ty, m: &str) -> Option<u32> {
+        let Ty::Ref(tm, _) = t else { return None };
+        self.prog.ref_param_impls.iter().filter(|(_, rm)| *rm == tm).find_map(|(tr, _)| {
+            let d = self.prog.traits.get(tr)?.iter().copied().find(|&d| self.prog.sigs[d as usize].has_body && self.prog.names[d as usize].rsplit("::").next() == Some(m))?;
+            self.prog.ref_param_implements(tr, t, 0).then_some(d)
+        })
     }
 
     /// Trait tr's default fn m (one with a body), when t implements tr

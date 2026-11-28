@@ -1,7 +1,7 @@
 // Impls of a trait for `&T` / `&mut T` that forward to T's (#144), in the forms crates write them: the qualified path
 // (futures-core, quote), a path call passing `self` (embedded-io, futures-task), an `unsafe` block (allocator-api2), a
 // receiver with a lifetime (bytes), `Pin` receivers (futures, tokio, http-body), and a unit struct for a `_`
-// parameter (tokio). Each is called through a bound, whose call reaches T's method through the deref
+// parameter (tokio). Each is called through a bound, whose call runs the impl's method, which reaches T's
 use std::pin::Pin;
 
 trait Fused {

@@ -666,6 +666,20 @@ impl Cx<'_> {
                 self.method_privacy(sid, method, msp.at)?;
             }
         }
+        // (`(*s).m()` / `(**self).m()` reaching a `str` or a slice: its method takes it by reference, so the receiver is
+        // the reference again, `(&*s).m()` (`&mut *s` through a `&mut`), not `*s` as a value (whose size is not known).
+        // A trait object's place has its own lowering (dyn_method_call_on))
+        if let Expr::Unary(op, inner, _) = strip_paren(recv) {
+            if op == "*" {
+                if let Some(Ty::Ref(m, u)) = self.peek(inner) {
+                    if matches!(*u, Ty::Str | Ty::Slice(_)) {
+                        let r = Expr::Ref(m, Box::new(strip_paren(recv).clone()));
+                        let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(r), method.clone(), gargs.clone(), margs.clone(), msp));
+                        return self.expr(ne, expected);
+                    }
+                }
+            }
+        }
         if method == "fmt" && margs.len() == 1 && gargs.is_empty() {
             if let Some(r) = self.fmt_method(recv, &margs[0], expected)? {
                 return Ok(r);
@@ -728,6 +742,13 @@ impl Cx<'_> {
                     Ok(Some((tr, _))) => self.explicit_trait = Some((method.clone(), tr.to_string())),
                     Ok(_) => {}
                 }
+            }
+        }
+        // (a method of a trait with an impl for references to a type parameter (`impl<T: Tr> Tr for &T`) whose Self is
+        // such a reference: that impl's method, or the trait's default with that Self, not T's through the deref)
+        if !self.prog.ref_param_impls.is_empty() {
+            if let Some(r) = self.ref_param_method_call(recv, method, gargs, margs, msp, expected)? {
+                return Ok(r);
             }
         }
         // (`x.m()` with x of a type parameter `T: Tr` in a generic fn, instantiated as a primitive: Tr's `m`, which a
@@ -3232,6 +3253,13 @@ impl Cx<'_> {
                         let it = self.prog.sigs[i as usize].impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
                         it == tr0
                     })
+                    // (or one of `impl<T: Tr> Tr for &T`, `T::__ref_m`, for a reference it covers (a `dyn Tr` made of a
+                    // `&S`, `Tr::m(&r)`): its method, not the trait's default unless it leaves m out (#144))
+                    .or_else(|| {
+                        let tr = tr0?;
+                        let Ty::Ref(tm, _) = t else { return None };
+                        self.prog.ref_param_impls.iter().any(|(x, rm)| x == tr && *rm == tm).then(|| self.ref_blanket_fn(t, &m, Some(tr))).flatten()
+                    })
                 }
                 _ => None,
             };
@@ -4895,6 +4923,43 @@ impl Cx<'_> {
         None
     }
 
+    /// `x.m(..)` where m is a method of a trait Tr of the program's with an impl for references to a type parameter
+    /// (`impl<T: Tr> Tr for &T`, Program::ref_param_impls), and rustc's method probe makes Self such a reference
+    /// (Program::ref_param_probe): the impl's method (`T::__ref_m`), or Tr's default when the impl leaves it out, run with
+    /// that Self (#144). Else None: the ordinary lookup, which reaches U's method through the deref (as rustc does for an
+    /// `x: &U` whose `&self` method is U's)
+    #[cold]
+    #[inline(never)]
+    fn ref_param_method_call(&mut self, recv: &Expr, method: &str, gargs: &[GArg], margs: &[Expr], msp: crate::parse::Span, expected: Option<Ty>) -> R<Option<V>> {
+        let Some(t) = self.peek(recv) else { return Ok(None) };
+        let Some((tr, st, derefs, adj)) = self.prog.ref_param_impls.iter().find_map(|(tr, _)| {
+            // (a call that named another trait (`Other::m(&x)`): that trait's)
+            if self.explicit_trait.as_ref().is_some_and(|(m, t)| m == method && t != tr) {
+                return None;
+            }
+            let kind = self.prog.trait_recv_kind(tr, method)?;
+            let opaque = |u: Ty| self.prog.param_bounded_by(self.root, &self.env, tr, u);
+            let (st, n, adj) = self.prog.ref_param_probe(tr, method, kind, t, &opaque)?;
+            Some((tr.clone(), st, n, adj))
+        }) else {
+            return Ok(None);
+        };
+        let Some(id) = self.prog.ref_param_fn(st, method, &tr) else { return Ok(None) };
+        self.check_unsafe_call(id, msp.start)?;
+        let mut r = paren(recv.clone());
+        for _ in 0..derefs {
+            r = Expr::Unary("*".to_string(), Box::new(paren(r)), Default::default());
+        }
+        if let Some(m) = adj {
+            r = Expr::Ref(m, Box::new(paren(r)));
+        }
+        let a0: &Expr = self.keep_expr(r);
+        let mut args: Vec<&Expr> = vec![a0];
+        args.extend(margs.iter());
+        let tf: Option<&[GArg]> = (!gargs.is_empty()).then_some(gargs);
+        self.call_fn(id, None, &args, tf, expected, SP).map(Some)
+    }
+
     pub(crate) fn prim_method_call(&self, e: &Expr) -> Option<Expr> {
         let Expr::Call(func, cargs) = e else { return None };
         let Expr::Path(qself, p) = &**func else { return None };
@@ -4930,8 +4995,12 @@ impl Cx<'_> {
                         // trait named (radix_fmt_method); its receiver keeps its `&`, as `Pointer::fmt(&rr, f)` of a `&&u8`
                         // writes rr itself, not *rr)
                         let std_fmt = ms == "fmt" && tr == if self.prog.traits.contains_key("__p_Pointer") { "__p_Pointer" } else { "Pointer" };
+                        // (and a trait with an impl for references to a type parameter keeps it too: `Tr::m(&x)` is
+                        // `(&x).m()`, whose probe makes Self x's type, as the path call's Self is, also when that is a
+                        // reference the impl covers (#144))
+                        let ref_tr = self.prog.ref_param_impls.iter().any(|(t, _)| *t == tr);
                         let recv = match a0 {
-                            Expr::Ref(_, e) if !std_fmt => paren((**e).clone()),
+                            Expr::Ref(_, e) if !std_fmt && !ref_tr => paren((**e).clone()),
                             _ => paren(a0.clone()),
                         };
                         // (a primitive receiver with an impl of this trait: `<u32 as Tr>::m(&x)`, which a builtin
