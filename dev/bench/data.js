@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795850684200,
+  "lastUpdate": 1795850687080,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -95920,6 +95920,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 113.316,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d5b174749f149b609904cad77f460efc6289f9f8",
+          "message": "Deref coercion through a program's Deref; std's Deref of String / Vec / references (either's deref test) (#334)\n\n* Deref coercion through a program's Deref; std's Deref of String / Vec / references\n\n- `&W` where a `&Target` is expected (an argument, a typed let, a return\n  value) goes through W's `deref` (`deref_mut` for a `&mut`), as many as\n  reach the type, and on to a String's str / a Vec's slice: either's\n  `is_str(&value)` of an `Either<String, &str>`. A program's types only:\n  the prelude's (PathBuf, Rc) are not coerced here, as rustc's E0277 of\n  `ToolA::from(&path_buf)` with two From impls has it\n- String / Vec / references implement Deref (Target str / [T] / T) for\n  bounds such as either's `L: Deref, R: Deref<Target = L::Target>`\n- `x.m()` through a Deref whose target is a str / slice by the receiver's\n  instance (`type Target = L::Target`) finds str's / the slice's methods\n- probes deref_coerce_user, deref_either; tests/ui\n  issue-56556.rs passes (baseline)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gioNHaJyvaYW2mEqC\n\n* bench: one ratchet line per kind after merging main\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gioNHaJyvaYW2mEqC\n\n* bench: one ratchet line per kind after merging main\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gioNHaJyvaYW2mEqC\n\n* bench: one ratchet line per kind after merging main\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9gioNHaJyvaYW2mEqC\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-28T16:18:50+09:00",
+          "tree_id": "d0c3c3762d4b19172f71f89b6bcaeeeeee64e7cb",
+          "url": "https://github.com/mizchi/zust/commit/d5b174749f149b609904cad77f460efc6289f9f8"
+        },
+        "date": 1795850686552,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.086,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.806,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.996,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 12.985,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.151,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.274,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 4.407,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 334.968,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 110.977,
             "unit": "MiB"
           }
         ]
